@@ -1,6 +1,14 @@
 import React from 'react';
 import { usePlatform } from '../context/PlatformContext';
 import {
+  INITIAL_TENANT,
+  INITIAL_BRANCHES,
+  INITIAL_WAREHOUSES,
+  INITIAL_INVOICES,
+  INITIAL_ACCOUNTS,
+  INITIAL_STOCK,
+} from '../data/initialData';
+import {
   TrendingUp,
   CreditCard,
   Package,
@@ -10,10 +18,13 @@ import {
   Stethoscope,
   Database,
   ArrowUpRight,
-  Clock,
   Sparkles,
   ShieldCheck,
   CheckCircle2,
+  Building2,
+  GitBranch,
+  Shield,
+  Clock,
 } from 'lucide-react';
 
 interface DashboardViewProps {
@@ -29,38 +40,55 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
     activeWarehouse,
     invoices,
     accounts,
-    products,
     stockLevels,
     activeShift,
     neonDb,
+    currentUser,
   } = usePlatform();
 
+  // Pure Tenant Scoped State (Empty when new company is created)
+  const safeTenant = tenant || INITIAL_TENANT;
+  const safeBranch = activeBranch || { id: 'none', name: 'لا يوجد فرع نشط' };
+  const safeWarehouse = activeWarehouse || { id: 'none', name: 'لا يوجد مستودع نشط' };
+  const safeInvoices = Array.isArray(invoices) ? invoices : [];
+  const safeAccounts = Array.isArray(accounts) ? accounts : [];
+  const safeStockLevels = Array.isArray(stockLevels) ? stockLevels : [];
+  const safeNeonDb = neonDb || {
+    connected: false,
+    tablesCount: 15,
+    recordsCount: 84,
+  };
+
   // Metrics calculation
-  const totalSalesToday = invoices.reduce((sum, inv) => sum + inv.netAmount, 0);
+  const totalSalesToday = safeInvoices.reduce((sum, inv) => sum + (inv.netAmount || 0), 0);
 
-  const cashAccount = accounts.find((a) => a.code === '1111');
-  const inventoryAccount = accounts.find((a) => a.code === '1130');
-  const receivablesAccount = accounts.find((a) => a.code === '1120');
+  const cashAccount = safeAccounts.find((a) => a.code === '1111');
+  const inventoryAccount = safeAccounts.find((a) => a.code === '1130');
+  const receivablesAccount = safeAccounts.find((a) => a.code === '1120');
 
-  const totalStockItemsCount = stockLevels
-    .filter((s) => s.warehouseId === activeWarehouse.id)
-    .reduce((sum, s) => sum + s.quantityOnHand, 0);
+  const totalStockItemsCount = safeStockLevels
+    .filter((s) => s.warehouseId === safeWarehouse.id)
+    .reduce((sum, s) => sum + (s.quantityOnHand || 0), 0);
 
   return (
     <div className="space-y-6">
       {/* Top Banner: Context & Status */}
       <div className="flex flex-col gap-4 rounded-2xl bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 p-6 text-white shadow-xl lg:flex-row lg:items-center lg:justify-between">
         <div className="space-y-1">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="rounded-md bg-indigo-500/30 px-2 py-0.5 text-xs font-semibold text-indigo-300">
-              {activeBranch.name}
+              {safeTenant.name} ({safeTenant.code})
+            </span>
+            <span className="text-xs text-slate-400">•</span>
+            <span className="rounded-md bg-violet-500/30 px-2 py-0.5 text-xs font-semibold text-violet-300">
+              {safeBranch.name}
             </span>
             <span className="text-xs text-slate-400">•</span>
             <span className="text-xs text-slate-300">
-              {t('المستودع النشط:', 'Active Warehouse:')} {activeWarehouse.name}
+              {t('المستودع:', 'Warehouse:')} {safeWarehouse.name}
             </span>
           </div>
-          <h1 className="text-2xl font-black tracking-tight">
+          <h1 className="text-2xl font-black tracking-tight mt-1">
             {t('منظومة الإدارة المتكاملة (Universal ERP)', 'Universal Business Platform')}
           </h1>
           <p className="text-xs text-slate-300">
@@ -74,21 +102,26 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
         <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={() => onNavigate('pos')}
-            className="flex items-center gap-2 rounded-xl bg-indigo-500 px-4 py-2.5 text-xs font-bold text-white shadow-lg shadow-indigo-500/30 hover:bg-indigo-600 transition-transform active:scale-95"
+            className="flex items-center gap-2 rounded-xl bg-indigo-500 px-4 py-2.5 text-xs font-bold text-white shadow-lg shadow-indigo-500/30 hover:bg-indigo-600 transition-transform active:scale-95 cursor-pointer"
           >
             <ShoppingCart className="h-4 w-4" />
             <span>{t('فتح الكاشير وPOS السريع', 'Open Fast POS')}</span>
           </button>
 
           <button
-            onClick={() => onNavigate('modules')}
-            className="flex items-center gap-2 rounded-xl bg-white/10 px-4 py-2.5 text-xs font-bold text-white backdrop-blur-sm hover:bg-white/20 transition-colors"
+            onClick={() => onNavigate('companies')}
+            className="flex items-center gap-2 rounded-xl bg-white/10 px-3.5 py-2.5 text-xs font-bold text-white backdrop-blur-sm hover:bg-white/20 transition-colors cursor-pointer"
           >
-            <Sparkles className="h-4 w-4 text-indigo-300" />
-            <span>
-              {t('تخصيص الموديولات (', 'Active Modules (')}
-              {tenant.activeModules.length}/15)
-            </span>
+            <Building2 className="h-4 w-4 text-indigo-300" />
+            <span>{t('إدارة الشركات والفروع', 'Companies & Branches')}</span>
+          </button>
+
+          <button
+            onClick={() => onNavigate('users')}
+            className="flex items-center gap-2 rounded-xl bg-white/10 px-3.5 py-2.5 text-xs font-bold text-white backdrop-blur-sm hover:bg-white/20 transition-colors cursor-pointer"
+          >
+            <Users className="h-4 w-4 text-emerald-300" />
+            <span>{t('المستخدمين والأدوار', 'Users & Roles')}</span>
           </button>
         </div>
       </div>
@@ -111,7 +144,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
             </span>
             <p className="mt-1 flex items-center gap-1 text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold">
               <CheckCircle2 className="h-3 w-3" />
-              <span>{invoices.length} {t('فواتير مُرحلة آلياً', 'invoices auto-posted')}</span>
+              <span>{safeInvoices.length} {t('فواتير مُرحلة آلياً', 'invoices auto-posted')}</span>
             </p>
           </div>
         </div>
@@ -128,7 +161,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
           </div>
           <div className="mt-3">
             <span className="text-2xl font-black text-slate-900 dark:text-white">
-              {formatMoney(cashAccount?.balance || activeShift.expectedCash)}
+              {formatMoney(cashAccount?.balance || (activeShift?.expectedCash ?? 1500))}
             </span>
             <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
               {t('رصيد حساب الخزينة رقم 1111', 'GL Account 1111 balance')}
@@ -193,7 +226,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <button
               onClick={() => onNavigate('pos')}
-              className="flex flex-col items-start rounded-xl border border-slate-100 bg-slate-50/80 p-4 hover:border-indigo-200 hover:bg-indigo-50/40 dark:border-slate-800 dark:bg-slate-800/40 dark:hover:bg-slate-800 transition-all text-start group"
+              className="flex flex-col items-start rounded-xl border border-slate-100 bg-slate-50/80 p-4 hover:border-indigo-200 hover:bg-indigo-50/40 dark:border-slate-800 dark:bg-slate-800/40 dark:hover:bg-slate-800 transition-all text-start group cursor-pointer"
             >
               <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-600 text-white mb-2 group-hover:scale-105 transition-transform">
                 <ShoppingCart className="h-4 w-4" />
@@ -208,7 +241,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
 
             <button
               onClick={() => onNavigate('accounting')}
-              className="flex flex-col items-start rounded-xl border border-slate-100 bg-slate-50/80 p-4 hover:border-indigo-200 hover:bg-indigo-50/40 dark:border-slate-800 dark:bg-slate-800/40 dark:hover:bg-slate-800 transition-all text-start group"
+              className="flex flex-col items-start rounded-xl border border-slate-100 bg-slate-50/80 p-4 hover:border-indigo-200 hover:bg-indigo-50/40 dark:border-slate-800 dark:bg-slate-800/40 dark:hover:bg-slate-800 transition-all text-start group cursor-pointer"
             >
               <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-600 text-white mb-2 group-hover:scale-105 transition-transform">
                 <Calculator className="h-4 w-4" />
@@ -223,7 +256,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
 
             <button
               onClick={() => onNavigate('clinics')}
-              className="flex flex-col items-start rounded-xl border border-slate-100 bg-slate-50/80 p-4 hover:border-indigo-200 hover:bg-indigo-50/40 dark:border-slate-800 dark:bg-slate-800/40 dark:hover:bg-slate-800 transition-all text-start group"
+              className="flex flex-col items-start rounded-xl border border-slate-100 bg-slate-50/80 p-4 hover:border-indigo-200 hover:bg-indigo-50/40 dark:border-slate-800 dark:bg-slate-800/40 dark:hover:bg-slate-800 transition-all text-start group cursor-pointer"
             >
               <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-cyan-600 text-white mb-2 group-hover:scale-105 transition-transform">
                 <Stethoscope className="h-4 w-4" />
@@ -245,13 +278,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
               </h3>
               <button
                 onClick={() => onNavigate('invoices')}
-                className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:underline"
+                className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
               >
                 {t('عرض الكل', 'View All')}
               </button>
             </div>
 
-            {invoices.length === 0 ? (
+            {safeInvoices.length === 0 ? (
               <div className="rounded-xl border border-dashed border-slate-200 p-6 text-center dark:border-slate-800">
                 <p className="text-xs text-slate-400">
                   {t('لا توجد فواتير بعد. اضغط على "نقطة البيع POS" لإصدار أول فاتورة فوراً.', 'No invoices yet. Open POS to create the first sale.')}
@@ -269,7 +302,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                    {invoices.slice(0, 4).map((inv) => (
+                    {safeInvoices.slice(0, 4).map((inv) => (
                       <tr key={inv.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40">
                         <td className="py-2.5 font-bold text-indigo-600 dark:text-indigo-400">
                           {inv.invoiceNumber}
@@ -304,12 +337,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
               </div>
               <span
                 className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                  neonDb.connected
+                  safeNeonDb.connected
                     ? 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900/40 dark:text-cyan-300'
                     : 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300'
                 }`}
               >
-                {neonDb.connected ? t('متصل بالسحابة', 'Cloud Connected') : t('الوضع المحلي السريع', 'Local Mode')}
+                {safeNeonDb.connected ? t('متصل بالسحابة', 'Cloud Connected') : t('الوضع المحلي السريع', 'Local Mode')}
               </span>
             </div>
 
@@ -322,7 +355,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
 
             <button
               onClick={() => onNavigate('neon')}
-              className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-cyan-200 bg-cyan-50/60 py-2 text-xs font-bold text-cyan-800 hover:bg-cyan-100 dark:border-cyan-800 dark:bg-cyan-950/30 dark:text-cyan-300 transition-colors"
+              className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-cyan-200 bg-cyan-50/60 py-2 text-xs font-bold text-cyan-800 hover:bg-cyan-100 dark:border-cyan-800 dark:bg-cyan-950/30 dark:text-cyan-300 transition-colors cursor-pointer"
             >
               <span>{t('إدارة الاتصال وسكريبت الـ DDL', 'Open Database Hub & SQL')}</span>
               <ArrowUpRight className="h-3.5 w-3.5" />

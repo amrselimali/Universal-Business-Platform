@@ -1,0 +1,512 @@
+import { ActionPermissionDef } from '../types';
+
+export interface SystemViewDef {
+  id: string;
+  nameAr: string;
+  nameEn: string;
+  descriptionAr: string;
+  descriptionEn: string;
+  iconName: string;
+  category: 'core' | 'operations' | 'admin';
+}
+
+export const SYSTEM_VIEWS: SystemViewDef[] = [
+  {
+    id: 'dashboard',
+    nameAr: 'لوحة التحكم والتحليلات',
+    nameEn: 'Dashboard & Analytics',
+    descriptionAr: 'مؤشرات الأداء الرئيسية والملخصات المالية والرسوم البيانية',
+    descriptionEn: 'KPI metrics, financial snapshots, and real-time overview',
+    iconName: 'LayoutDashboard',
+    category: 'core',
+  },
+  {
+    id: 'reception_ops',
+    nameAr: 'شاشة التشغيل (الريسيبشن)',
+    nameEn: 'Reception Operations',
+    descriptionAr: 'تسجيل حركات التشغيل اليومية، النبضات، المصروفات، وتسوية الشيفت وطباعة التقرير',
+    descriptionEn: 'Daily shift run-sheet, pulses counter, expenses, and shift balancing',
+    iconName: 'Activity',
+    category: 'operations',
+  },
+  {
+    id: 'bookings',
+    nameAr: 'الحجوزات والمتابعات',
+    nameEn: 'Bookings & Follow-ups',
+    descriptionAr: 'جدول مواعيد المرضى، حجوزات اليوم، اليوم التالي، وقائمة اتصالات المتابعة',
+    descriptionEn: 'Patient appointments, today/tomorrow schedule, and follow-up CRM',
+    iconName: 'CalendarCheck',
+    category: 'operations',
+  },
+  {
+    id: 'pos',
+    nameAr: 'نقطة البيع السريعة (POS)',
+    nameEn: 'Fast POS Terminal',
+    descriptionAr: 'شاشة الكاشير السريعة لإصدار فواتير المبيعات والباركود',
+    descriptionEn: 'Quick cashier register, barcode scan, and instant invoice checkout',
+    iconName: 'ShoppingCart',
+    category: 'operations',
+  },
+  {
+    id: 'invoices',
+    nameAr: 'سجل فواتير المبيعات',
+    nameEn: 'Sales Invoices Log',
+    descriptionAr: 'استعراض والبحث في الفواتير المكتملة والإيصالات وحالات الدفع',
+    descriptionEn: 'Browse completed sales invoices, receipts, and payment statuses',
+    iconName: 'Receipt',
+    category: 'operations',
+  },
+  {
+    id: 'parties',
+    nameAr: 'المرضى والعملاء 360',
+    nameEn: 'Patients & Customers Directory',
+    descriptionAr: 'دليل المرضى والعملاء، الأكواد الورقية، الملفات الطبية واستيراد إكسيل',
+    descriptionEn: 'Patients and customers master directory with codes, medical records and phone numbers',
+    iconName: 'Users',
+    category: 'operations',
+  },
+  {
+    id: 'suppliers',
+    nameAr: 'سجل وإدارة الموردين',
+    nameEn: 'Suppliers Directory',
+    descriptionAr: 'دليل الموردين، حسابات الموردين، الأرصدة المستحقة وكشوف الحسابات',
+    descriptionEn: 'Suppliers master directory with payable balances, tax IDs and statements',
+    iconName: 'Truck',
+    category: 'operations',
+  },
+  {
+    id: 'staff',
+    nameAr: 'الأطباء والتمريض وفريق العمل',
+    nameEn: 'Doctors & Staff Directory',
+    descriptionAr: 'إدارة الكادر الطبي، الأطباء والاستشاريين والتمريض والمهن',
+    descriptionEn: 'Doctors, specialists, nurses, and operational staff directory',
+    iconName: 'UserCheck',
+    category: 'operations',
+  },
+  {
+    id: 'inventory',
+    nameAr: 'المخازن والأصناف والخدمات',
+    nameEn: 'Inventory & Services Catalog',
+    descriptionAr: 'إدارة المنتجات والخدمات، متابعة الأرصدة، والتحويلات والتسويات المخزنية',
+    descriptionEn: 'Catalog, multi-warehouse stock levels, transfers & adjustments',
+    iconName: 'Package',
+    category: 'operations',
+  },
+  {
+    id: 'payment_methods',
+    nameAr: 'طرق الدفع والسداد',
+    nameEn: 'Payment Methods & Gateways',
+    descriptionAr: 'إدارة طرق التحصيل والصرف (كاش، فيزا، إنستاباي، فودافون كاش)',
+    descriptionEn: 'Manage payment methods (Cash, Visa, InstaPay, Mobile Wallets)',
+    iconName: 'CreditCard',
+    category: 'operations',
+  },
+  {
+    id: 'shift_reports',
+    nameAr: 'تقارير الشيفتات المقفلة',
+    nameEn: 'Shift Reports & History',
+    descriptionAr: 'أرشيف الشيفتات المقفلة مع حركات التشغيل والمصروفات وطباعة التقارير',
+    descriptionEn: 'Historical closed shifts archive, detailed run-sheet logs, and printing',
+    iconName: 'FileSpreadsheet',
+    category: 'operations',
+  },
+  {
+    id: 'accounting',
+    nameAr: 'الشجرة المحاسبية والقيود',
+    nameEn: 'Chart of Accounts & GL',
+    descriptionAr: 'دليل الحسابات التفاعلي والقيود المحاسبية الآلية واليدوية وميزان المراجعة',
+    descriptionEn: 'Interactive chart of accounts, manual journals, and trial balance',
+    iconName: 'Calculator',
+    category: 'core',
+  },
+  {
+    id: 'audit_trail',
+    nameAr: 'سجل التعديلات والمحذوفات',
+    nameEn: 'Audit Trail (Changes & Deletions)',
+    descriptionAr: 'التتبع الأمني الدقيق لكافة التعديلات وحذف السجلات وتعديل الأسماء مع التوقيت والمستخدم',
+    descriptionEn: 'Security audit trail tracking edits, cancellations, and deletions with timestamps',
+    iconName: 'History',
+    category: 'admin',
+  },
+  {
+    id: 'activity_logs',
+    nameAr: 'سجل نشاط المستخدمين',
+    nameEn: 'User Activity Logs',
+    descriptionAr: 'سجل التفاعلات اليومية للمستخدمين والتنقل بين الشاشات والعمليات',
+    descriptionEn: 'Comprehensive user interaction and operational event logs',
+    iconName: 'ScrollText',
+    category: 'admin',
+  },
+  {
+    id: 'clinics',
+    nameAr: 'العيادات والسجلات الطبية',
+    nameEn: 'Clinics & Patient Records',
+    descriptionAr: 'سجلات المرضى الإلكترونية، المتابعات الطبية والملفات',
+    descriptionEn: 'Patient EHR, clinical follow-ups, and history',
+    iconName: 'Stethoscope',
+    category: 'operations',
+  },
+  {
+    id: 'companies',
+    nameAr: 'إدارة الشركات والفروع والمخازن',
+    nameEn: 'Companies, Branches & Warehouses',
+    descriptionAr: 'هيكلة المؤسسة، إضافة الفروع والمستودعات والتحكم بموديولات كل شركة',
+    descriptionEn: 'Multi-tenant hierarchy, branch/warehouse routing and module toggles',
+    iconName: 'Building2',
+    category: 'admin',
+  },
+  {
+    id: 'users',
+    nameAr: 'المستخدمين والصلاحيات (RBAC)',
+    nameEn: 'Users & Permissions',
+    descriptionAr: 'تحديد صلاحيات الشاشات، الفروع والمخازن المسموحة، وأزرار التحكم لكل مستخدم',
+    descriptionEn: 'Configure user logins, scoped branches, warehouses & in-screen buttons',
+    iconName: 'ShieldCheck',
+    category: 'admin',
+  },
+  {
+    id: 'modules',
+    nameAr: 'تخصيص وتفعيل الموديولات',
+    nameEn: 'Modules Switcher',
+    descriptionAr: 'تفعيل أو تعطيل الـ 15 موديول للنظام بحسب نشاط الشركة',
+    descriptionEn: 'Enable or disable platform business modules per tenant',
+    iconName: 'SlidersHorizontal',
+    category: 'admin',
+  },
+  {
+    id: 'neon',
+    nameAr: 'قاعدة بيانات Neon PostgreSQL',
+    nameEn: 'Neon PostgreSQL Database Hub',
+    descriptionAr: 'لوحة التحكم والاتصال بالسيرفر السحابي ومزامنة الجداول',
+    descriptionEn: 'Cloud database connectivity, sync logs, and schema engine',
+    iconName: 'Database',
+    category: 'admin',
+  },
+];
+
+export const SYSTEM_ACTIONS: ActionPermissionDef[] = [
+  // Reception Operations
+  {
+    key: 'reception_ops.open_shift',
+    nameAr: 'افتتاح وبدء شيفت جديد',
+    nameEn: 'Open New Shift',
+    viewId: 'reception_ops',
+    descriptionAr: 'السماح للموظف بافتتاح وبدء شيفت تشغيل للفرع الحالي',
+  },
+  {
+    key: 'reception_ops.close_shift',
+    nameAr: 'تقفيل وإنهاء الشيفت',
+    nameEn: 'Close & Finalize Shift',
+    viewId: 'reception_ops',
+    descriptionAr: 'إغلاق الشيفت وترحيل إجمالي الإيرادات والمصروفات والأرصدة',
+  },
+  {
+    key: 'reception_ops.add_run_row',
+    nameAr: 'إضافة حركة تشغيل جديدة',
+    nameEn: 'Add Shift Run Row',
+    viewId: 'reception_ops',
+    descriptionAr: 'تسجيل مريض جديد في جدول التشغيل وحساب النبضات والقيمة المحصلة',
+  },
+  {
+    key: 'reception_ops.edit_row',
+    nameAr: 'تعديل حركات التشغيل واسم المريض',
+    nameEn: 'Edit Run Row & Patient Name',
+    viewId: 'reception_ops',
+    descriptionAr: 'تعديل اسم المريض، الخدمة، النبضات، أو طريقة الدفع في الشيفت النشط',
+  },
+  {
+    key: 'reception_ops.add_expense',
+    nameAr: 'تسجيل مصروفات الشيفت',
+    nameEn: 'Record Shift Expense',
+    viewId: 'reception_ops',
+    descriptionAr: 'إضافة مصروف نقدي أو بنكي مع توثيق وقت الصرف والبيان',
+  },
+  {
+    key: 'reception_ops.adjust_balance',
+    nameAr: 'تعديل تسوية طرق السداد وعدادات الأجهزة',
+    nameEn: 'Adjust Balancing & Device Counters',
+    viewId: 'reception_ops',
+    descriptionAr: 'تسجيل التعديلات والملاحظات على تسوية الخزينة وعدادات الليزر',
+  },
+  {
+    key: 'reception_ops.print_shift',
+    nameAr: 'طباعة تقرير الشيفت',
+    nameEn: 'Print Shift Report',
+    viewId: 'reception_ops',
+    descriptionAr: 'طباعة التقرير الشامل لحركات التشغيل والمصروفات وتسوية الخزائن',
+  },
+
+  // Bookings & Appointments
+  {
+    key: 'bookings.create_booking',
+    nameAr: 'حجز موعد جديد',
+    nameEn: 'Create New Appointment',
+    viewId: 'bookings',
+    descriptionAr: 'تسجيل حجز موعد جديد لمريض مع البحث والتسجيل الآلي للعميل',
+  },
+  {
+    key: 'bookings.edit_booking',
+    nameAr: 'تعديل بيانات الحجز',
+    nameEn: 'Edit Appointment',
+    viewId: 'bookings',
+    descriptionAr: 'تعديل وقت وتاريخ والطبيب المعالج للموعد',
+  },
+  {
+    key: 'bookings.cancel_booking',
+    nameAr: 'إلغاء الموعد وتوثيق السبب',
+    nameEn: 'Cancel Appointment',
+    viewId: 'bookings',
+    descriptionAr: 'إلغاء حجز الموعد مع تسجيل سبب الإلغاء في سجل التدقيق',
+  },
+  {
+    key: 'bookings.reschedule_booking',
+    nameAr: 'إعادة جدولة الموعد',
+    nameEn: 'Reschedule Appointment',
+    viewId: 'bookings',
+    descriptionAr: 'ترحيل الموعد إلى يوم أو وقت آخر',
+  },
+  {
+    key: 'bookings.mark_attendance',
+    nameAr: 'تأكيد الحضور أو عدم الحضور',
+    nameEn: 'Mark Attendance / No-show',
+    viewId: 'bookings',
+    descriptionAr: 'تحديث حالة حضور المريض في شيت اليوم',
+  },
+  {
+    key: 'bookings.add_followup',
+    nameAr: 'تسجيل متابعة مريض هاتفية',
+    nameEn: 'Add Follow-up Entry',
+    viewId: 'bookings',
+    descriptionAr: 'إضافة تذكير أو اتصال متابعة جديد مع المريض',
+  },
+
+  // POS
+  {
+    key: 'pos.checkout',
+    nameAr: 'إتمام البيع وإصدار الفاتورة',
+    nameEn: 'Checkout & Issue Invoices',
+    viewId: 'pos',
+    descriptionAr: 'إمكانية إتمام سلة المشتريات وإصدار الفواتير النقدية والآجلة',
+  },
+  {
+    key: 'pos.discount',
+    nameAr: 'منح خصومات على الفاتورة',
+    nameEn: 'Apply Cart Discounts',
+    viewId: 'pos',
+    descriptionAr: 'السماح بإدخال مبالغ خصم إضافية على الفاتورة',
+  },
+  {
+    key: 'pos.tax_edit',
+    nameAr: 'تعديل نسبة الضريبة بالفاتورة',
+    nameEn: 'Edit Invoice Tax Rate',
+    viewId: 'pos',
+    descriptionAr: 'إمكانية تغيير نسبة الضريبة عن القيمة الافتراضية (0% أو نسب مخصصة)',
+  },
+  {
+    key: 'pos.close_shift',
+    nameAr: 'تقفيل الشيفت والجرد الأعمى',
+    nameEn: 'Close Shift & Blind Reconcile',
+    viewId: 'pos',
+    descriptionAr: 'تقفيل درج النقدية وتسجيل الفروقات النقدية للشيفت',
+  },
+  {
+    key: 'pos.print',
+    nameAr: 'طباعة الإيصالات والفواتير',
+    nameEn: 'Print Sales Receipts',
+    viewId: 'pos',
+    descriptionAr: 'إرسال الفاتورة للطابعة الحرارية',
+  },
+
+  // Staff & Doctors
+  {
+    key: 'staff.add_staff',
+    nameAr: 'إضافة طبيب أو موظف جديد',
+    nameEn: 'Add Doctor / Staff Member',
+    viewId: 'staff',
+    descriptionAr: 'تسجيل بيانات طبيب أو ممرض أو موظف جديد في الفرع',
+  },
+  {
+    key: 'staff.edit_staff',
+    nameAr: 'تعديل بيانات الكادر الطبي والإداري',
+    nameEn: 'Edit Staff Member',
+    viewId: 'staff',
+    descriptionAr: 'تحديث بيانات التخصص والهاتف والراتب والنسبة',
+  },
+  {
+    key: 'staff.delete_staff',
+    nameAr: 'حذف أو أرشفة الموظف',
+    nameEn: 'Archive / Delete Staff Member',
+    viewId: 'staff',
+    descriptionAr: 'أرشفة الموظف أو إيقاف حسابه',
+  },
+
+  // Shift Reports
+  {
+    key: 'shift_reports.print',
+    nameAr: 'طباعة تقرير الشيفت المؤرشف',
+    nameEn: 'Print Archived Shift Report',
+    viewId: 'shift_reports',
+    descriptionAr: 'طباعة تقرير تفصيلي لأي شيفت تاريخي مقفل',
+  },
+  {
+    key: 'shift_reports.export',
+    nameAr: 'تصدير تقارير الشيفتات إلى إكسيل',
+    nameEn: 'Export Shift Reports to Excel',
+    viewId: 'shift_reports',
+    descriptionAr: 'تصدير جدول الشيفتات وحركات التشغيل لملف Excel',
+  },
+
+  // Inventory
+  {
+    key: 'inventory.add_item',
+    nameAr: 'إضافة أصناف وخدمات جديدة',
+    nameEn: 'Add New Products / Services',
+    viewId: 'inventory',
+    descriptionAr: 'تسجيل بطاقة صنف جديدة بالباركود وأسعار الشراء والبيع',
+  },
+  {
+    key: 'inventory.delete_item',
+    nameAr: 'حذف الأصناف من النظام',
+    nameEn: 'Delete Products',
+    viewId: 'inventory',
+    descriptionAr: 'حذف المنتج نهائياً من قاعدة البيانات',
+  },
+  {
+    key: 'inventory.adjust_stock',
+    nameAr: 'تسوية الجرد المخزني',
+    nameEn: 'Adjust Stock Quantities',
+    viewId: 'inventory',
+    descriptionAr: 'تعديل الكميات بالزيادة أو النقصان عند الجرد الفعلي',
+  },
+  {
+    key: 'inventory.transfer',
+    nameAr: 'التحويل بين المخازن',
+    nameEn: 'Inter-Warehouse Transfers',
+    viewId: 'inventory',
+    descriptionAr: 'نقل كميات من مخزن إلى مخزن آخر',
+  },
+
+  // Parties (Customers & Suppliers)
+  {
+    key: 'parties.add',
+    nameAr: 'إضافة عميل أو مريض جديد',
+    nameEn: 'Add Customer / Patient',
+    viewId: 'parties',
+    descriptionAr: 'تسجيل بيانات مريض أو جهة تعامل ورصيدها الافتتاحي',
+  },
+  {
+    key: 'parties.edit',
+    nameAr: 'تعديل بيانات العملاء والمرضى',
+    nameEn: 'Edit Customer / Patient',
+    viewId: 'parties',
+    descriptionAr: 'تعديل الهاتف أو الكود الورقي أو الاسم وبيانات الملف',
+  },
+  {
+    key: 'parties.delete',
+    nameAr: 'حذف العملاء والمرضى والموردين',
+    nameEn: 'Delete Party Record',
+    viewId: 'parties',
+    descriptionAr: 'أرشفة أو حذف طرف التعامل من السجل',
+  },
+  {
+    key: 'parties.import',
+    nameAr: 'استيراد العملاء من ملف Excel',
+    nameEn: 'Import Parties from Excel',
+    viewId: 'parties',
+    descriptionAr: 'استيراد وتحديث آلاف العملاء والمرضى دفعة واحدة من ملف إكسيل',
+  },
+
+  // Payment Methods
+  {
+    key: 'payment_methods.manage',
+    nameAr: 'إضافة وتعديل طرق السداد والحسابات المرتبطة',
+    nameEn: 'Manage Payment Methods & Accounts',
+    viewId: 'payment_methods',
+    descriptionAr: 'إضافة خزائن أو محافظ إلكترونية وربطها بالشجرة المحاسبية',
+  },
+
+  // Accounting
+  {
+    key: 'accounting.add_entry',
+    nameAr: 'إنشاء قيود يومية يدوية',
+    nameEn: 'Create Manual Journal Entries',
+    viewId: 'accounting',
+    descriptionAr: 'تسجيل قيود محاسبية مركبة بين الحسابات',
+  },
+  {
+    key: 'accounting.add_account',
+    nameAr: 'إضافة وتعديل شجرة الحسابات',
+    nameEn: 'Add / Edit Accounts',
+    viewId: 'accounting',
+    descriptionAr: 'إضافة حساب فرعي أو رئيسي في دليل الحسابات',
+  },
+
+  // Clinics
+  {
+    key: 'clinics.add_patient',
+    nameAr: 'إنشاء وتعديل ملف مريض طبي',
+    nameEn: 'Create & Edit Patient EHR',
+    viewId: 'clinics',
+    descriptionAr: 'تسجيل ملف طبي ورقم قومي وأمراض مزمنة لمريض',
+  },
+  {
+    key: 'clinics.book_appointment',
+    nameAr: 'حجز المواعيد والكشوفات الطبية',
+    nameEn: 'Book Clinic Appointments',
+    viewId: 'clinics',
+    descriptionAr: 'إدراج موعد كشف في جدول الأطباء',
+  },
+
+  // Companies & Branches
+  {
+    key: 'companies.create',
+    nameAr: 'إضافة شركات ومؤسسات جديدة',
+    nameEn: 'Create New Companies',
+    viewId: 'companies',
+    descriptionAr: 'إنشاء شركة جديدة وتحديد موديولاتها ونسبة ضريبتها',
+  },
+  {
+    key: 'companies.edit',
+    nameAr: 'تعديل موديولات وبيانات الشركات',
+    nameEn: 'Edit Company & Modules',
+    viewId: 'companies',
+    descriptionAr: 'تعديل الاسم والبطاقة الضريبية والموديولات المصاحبة',
+  },
+  {
+    key: 'branches.manage',
+    nameAr: 'إضافة وإدارة الفروع',
+    nameEn: 'Create & Manage Branches',
+    viewId: 'companies',
+    descriptionAr: 'إضافة فرع جديد للشركة وتحديد مكانه وهاتفه',
+  },
+  {
+    key: 'warehouses.manage',
+    nameAr: 'إضافة وإدارة المستودعات',
+    nameEn: 'Create & Manage Warehouses',
+    viewId: 'companies',
+    descriptionAr: 'إضافة مستودع تخزين جديد وربطه بالفرع المناسب',
+  },
+
+  // Users & RBAC
+  {
+    key: 'users.create',
+    nameAr: 'إنشاء مستخدمين جدد وتخصيص صلاحياتهم',
+    nameEn: 'Create Users & Set Scopes',
+    viewId: 'users',
+    descriptionAr: 'إضافة مستخدم جديد وتحديد الشركات والفروع والمخازن والأزرار المتاحة له',
+  },
+  {
+    key: 'users.edit',
+    nameAr: 'تعديل صلاحيات وحسابات المستخدمين',
+    nameEn: 'Edit User Permissions & Scope',
+    viewId: 'users',
+    descriptionAr: 'تعديل الشركات أو الفروع أو الأزرار المتاحة لمستخدم حالي',
+  },
+  {
+    key: 'users.delete',
+    nameAr: 'حذف وإلغاء تفعيل المستخدمين',
+    nameEn: 'Delete or Deactivate Users',
+    viewId: 'users',
+    descriptionAr: 'إيقاف حساب موظف أو حذفه نهائياً من النظام',
+  },
+];

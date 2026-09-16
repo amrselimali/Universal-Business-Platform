@@ -1,6 +1,6 @@
 {
   "name": "Universal Business Platform",
-  "description": "منصة إدارة أعمال شمولية وتفاعلية (ERP / Business Management Platform) تدعم فروع ومخازن متعددة، نظام نقاط بيع POS سريع، شجرة محاسبية وقيود آلية، عزل الشركات، مع دعم كامل للغتين العربية والإنجليزية وقاعدة بيانات Neon PostgreSQL.",
+  "description": "منصة إدارة أعمال ومراكز طبية وتجميل شاملة مع فصل كامل بين شاشة إدارة المنتجات والخدمات البيعية وشاشة إدارة المخازن والأصناف المخزنية مع ربط تكلفة البيع والاستهلاك والتوقعات المستقبلية والجرد والتسويات المرتبطة بالمرتبات.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

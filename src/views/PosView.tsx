@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { usePlatform } from '../context/PlatformContext';
-import { Product, SalesInvoice } from '../types';
+import { Product, SalesInvoice, PaymentSplit } from '../types';
 import {
   Search,
   Barcode,
@@ -18,6 +18,11 @@ import {
   QrCode,
   Layers,
   X,
+  Percent,
+  RotateCcw,
+  Wallet,
+  History,
+  Coins,
 } from 'lucide-react';
 
 export const PosView: React.FC = () => {
@@ -29,18 +34,25 @@ export const PosView: React.FC = () => {
     activeWarehouse,
     products,
     parties,
+    paymentMethods,
     getProductStock,
     processCheckout,
+    refundInvoice,
+    invoices,
     activeShift,
     closeShift,
     openShift,
     language,
+    setCurrentView,
+    canPerformAction,
   } = usePlatform();
 
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>(parties[0]?.id || '');
   const [discountAmount, setDiscountAmount] = useState<number>(0);
+  const [taxPercent, setTaxPercent] = useState<number>(0);
+  const [isCollectionOnly, setIsCollectionOnly] = useState<boolean>(false);
 
   // Cart state
   interface CartItem {
@@ -51,15 +63,24 @@ export const PosView: React.FC = () => {
   }
   const [cart, setCart] = useState<CartItem[]>([]);
 
-  // Checkout & Receipt Modals
-  const [paymentMethod, setPaymentMethod] = useState<'Cash' | 'Card' | 'Credit'>('Cash');
-  const [isCheckingOut, setIsCheckingOut] = useState<boolean>(false);
+  // Payment state - dynamic from system payment methods
+  const [selectedMethodId, setSelectedMethodId] = useState<string>(
+    paymentMethods[0]?.id || 'pm-cash-1'
+  );
+  const [useSplitPayment, setUseSplitPayment] = useState<boolean>(false);
+  const [splits, setSplits] = useState<Array<{ methodId: string; methodName: string; amount: number }>>([
+    { methodId: paymentMethods[0]?.id || 'pm-cash-1', methodName: paymentMethods[0]?.nameAr || 'نقداً', amount: 0 },
+  ]);
+
+  // Modals
   const [completedInvoice, setCompletedInvoice] = useState<SalesInvoice | null>(null);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
-
-  // Shift Modal
   const [showShiftModal, setShowShiftModal] = useState<boolean>(false);
-  const [actualCashInput, setActualCashInput] = useState<number>(activeShift.expectedCash);
+  const [actualCashInput, setActualCashInput] = useState<number>(activeShift?.expectedCash || 0);
+  const [showInvoicesHistory, setShowInvoicesHistory] = useState<boolean>(false);
+  const [refundModalInvoice, setRefundModalInvoice] = useState<SalesInvoice | null>(null);
+  const [refundReason, setRefundReason] = useState<string>('');
+  const [restockOnRefund, setRestockOnRefund] = useState<boolean>(true);
 
   // Categories list
   const categories = ['ALL', ...Array.from(new Set(products.map((p) => p.category)))];
@@ -78,6 +99,10 @@ export const PosView: React.FC = () => {
   });
 
   const addToCart = (product: Product) => {
+    if (!activeWarehouse) {
+      alert(t('يرجى أولاً تعيين أو إضافة مستودع للشركة الحالية!', 'Please assign or create a warehouse first!'));
+      return;
+    }
     const available = getProductStock(product.id, activeWarehouse.id);
     if (!product.isService && available <= 0) {
       alert(t('عفواً، الصنف نفد من المستودع الحالي!', 'Sorry, item is out of stock in current warehouse!'));
@@ -105,7 +130,7 @@ export const PosView: React.FC = () => {
         .map((item) => {
           if (item.product.id === productId) {
             const nextQty = item.quantity + delta;
-            const available = getProductStock(item.product.id, activeWarehouse.id);
+            const available = activeWarehouse ? getProductStock(item.product.id, activeWarehouse.id) : 0;
             if (!item.product.isService && delta > 0 && nextQty > available) {
               alert(t('لا يمكن تجاوز الرصيد المتاح بالمخزن!', 'Cannot exceed available stock!'));
               return item;
@@ -125,31 +150,98 @@ export const PosView: React.FC = () => {
   const clearCart = () => {
     setCart([]);
     setDiscountAmount(0);
+    setIsCollectionOnly(false);
+    setUseSplitPayment(false);
   };
 
   // Cart calculations
   const cartSubtotal = cart.reduce((sum, i) => sum + i.quantity * i.unitPrice, 0);
   const taxableAmount = Math.max(0, cartSubtotal - discountAmount);
-  const cartTax = Number((taxableAmount * tenant.taxRate).toFixed(2));
+  const cartTax = Number(((taxableAmount * taxPercent) / 100).toFixed(2));
   const cartNetTotal = Number((taxableAmount + cartTax).toFixed(2));
+
+  const activePaymentMethod = paymentMethods.find((pm) => pm.id === selectedMethodId) || paymentMethods[0];
 
   const handleExecuteCheckout = () => {
     setCheckoutError(null);
+
+    let splitPayload: PaymentSplit[] | undefined = undefined;
+    if (useSplitPayment) {
+      const totalSplit = splits.reduce((s, item) => s + (Number(item.amount) || 0), 0);
+      if (Math.abs(totalSplit - cartNetTotal) > 0.01) {
+        setCheckoutError(
+          `${t('مجموع مبالغ التقسيم لا يساوي إجمالي الفاتورة!', 'Split sum does not equal net total!')} (${formatMoney(
+            totalSplit
+          )} ≠ ${formatMoney(cartNetTotal)})`
+        );
+        return;
+      }
+      splitPayload = splits.map((s) => ({
+        methodId: s.methodId,
+        methodName: s.methodName,
+        amount: Number(s.amount) || 0,
+      }));
+    }
+
     const result = processCheckout({
       customerId: selectedCustomerId,
       items: cart,
       discountAmount,
-      paymentMethod,
+      paymentMethod: activePaymentMethod ? activePaymentMethod.nameAr : 'نقداً',
+      paymentMethodId: activePaymentMethod?.id,
+      taxRate: taxPercent / 100,
+      isCollectionOnly,
+      splitPayments: splitPayload,
     });
 
     if (result.success && result.invoice) {
       setCompletedInvoice(result.invoice);
       clearCart();
-      setIsCheckingOut(false);
     } else {
       setCheckoutError(result.error || t('حدث خطأ أثناء إتمام العملية', 'Error completing checkout'));
     }
   };
+
+  const handleRefund = (invoice: SalesInvoice) => {
+    if (!refundReason.trim()) {
+      alert(t('يرجى كتابة سبب الإلغاء/الارتجاع', 'Please enter refund reason'));
+      return;
+    }
+    const res = refundInvoice(invoice.id, refundReason, restockOnRefund);
+    if (res.success) {
+      alert(t('تم ارتجاع وإلغاء الفاتورة بنجاح!', 'Invoice refunded successfully!'));
+      setRefundModalInvoice(null);
+      setRefundReason('');
+    } else {
+      alert(res.error || 'حدث خطأ أثناء الإلغاء');
+    }
+  };
+
+  // Guard if company has no branch or warehouse yet
+  if (!activeBranch || !activeWarehouse) {
+    return (
+      <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-amber-300 bg-amber-50/50 p-12 text-center dark:border-amber-800/60 dark:bg-amber-950/20">
+        <div className="rounded-2xl bg-amber-100 p-4 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300 mb-3">
+          <AlertCircle className="h-10 w-10" />
+        </div>
+        <h3 className="text-base font-bold text-slate-900 dark:text-white mb-2">
+          {t('هذه الشركة لا تحتوي على فرع أو مستودع بعد', 'This company has no branch or warehouse configured')}
+        </h3>
+        <p className="text-xs text-slate-600 dark:text-slate-400 max-w-md mb-5 leading-relaxed">
+          {t(
+            'لإصدار فواتير المبيعات ونقاط البيع، يرجى الانتقال إلى شاشة الشركات والفروع وإضافة فرع ومستودع لهذه الشركة أولاً.',
+            'To issue sales invoices and operate POS, please go to Companies & Branches to add a branch and warehouse for this company.'
+          )}
+        </p>
+        <button
+          onClick={() => setCurrentView('companies')}
+          className="rounded-xl bg-indigo-600 px-5 py-2.5 text-xs font-bold text-white shadow-md hover:bg-indigo-700 cursor-pointer"
+        >
+          {t('الانتقال لإدارة الشركات والفروع والمستودعات', 'Go to Companies, Branches & Warehouses')}
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-[calc(100vh-6.5rem)] flex-col lg:flex-row gap-4">
@@ -160,7 +252,7 @@ export const PosView: React.FC = () => {
           <div className="flex items-center gap-2">
             <span className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
             <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
-              {t('شيفت الكاشير الحالي:', 'Current Shift:')} {activeShift.cashierName}
+              {t('شيفت الكاشير:', 'Current Shift:')} {activeShift.cashierName}
             </span>
             <span className="text-xs text-slate-400">|</span>
             <span className="text-xs text-slate-500">
@@ -168,15 +260,27 @@ export const PosView: React.FC = () => {
             </span>
           </div>
 
-          <button
-            onClick={() => {
-              setActualCashInput(activeShift.expectedCash);
-              setShowShiftModal(true);
-            }}
-            className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 transition-colors"
-          >
-            {t('تقفيل الشيفت (الجرد الأعمى)', 'Close Shift / Reconcile')}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowInvoicesHistory(true)}
+              className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 transition-colors cursor-pointer"
+            >
+              <History className="h-3.5 w-3.5 text-indigo-500" />
+              <span>{t('سجل الفواتير والارتجاع', 'Invoices & Refunds')}</span>
+            </button>
+
+            {canPerformAction('pos.close_shift') && (
+              <button
+                onClick={() => {
+                  setActualCashInput(activeShift.expectedCash);
+                  setShowShiftModal(true);
+                }}
+                className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 transition-colors cursor-pointer"
+              >
+                {t('تقفيل الشيفت', 'Close Shift')}
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Search Bar & Barcode Input */}
@@ -218,7 +322,7 @@ export const PosView: React.FC = () => {
         <div className="flex-1 overflow-y-auto pr-1">
           <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3">
             {filteredProducts.map((prod) => {
-              const stock = getProductStock(prod.id, activeWarehouse.id);
+              const stock = activeWarehouse ? getProductStock(prod.id, activeWarehouse.id) : 0;
               const isOutOfStock = !prod.isService && stock <= 0;
 
               return (
@@ -278,7 +382,7 @@ export const PosView: React.FC = () => {
           <div className="flex items-center gap-2">
             <Receipt className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
             <h2 className="text-sm font-bold text-slate-900 dark:text-white">
-              {t('سلة المبيعات الحالية', 'Current Cart')}
+              {t('سلة المبيعات والتحصيل', 'Sales Cart')}
             </h2>
             <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-bold text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300">
               {cart.reduce((sum, i) => sum + i.quantity, 0)}
@@ -304,24 +408,45 @@ export const PosView: React.FC = () => {
             className="w-full bg-transparent text-xs font-semibold text-slate-800 outline-none dark:text-slate-200 cursor-pointer"
           >
             {parties
-              .filter((p) => p.type === 'Customer' || p.type === 'Both')
+              .filter((p) => p.type === 'Customer' || p.type === 'Both' || !p.type)
               .map((c) => (
                 <option key={c.id} value={c.id} className="dark:bg-slate-900">
-                  {c.name} {c.balance !== 0 && `(رصيد: ${c.balance})`}
+                  {c.name} {c.systemCode ? `(${c.systemCode})` : ''} {c.balance !== 0 && `| رصيد: ${c.balance}`}
                 </option>
               ))}
           </select>
         </div>
 
+        {/* Collection Only Switch (User Requested Feature) */}
+        <div className="mt-2 flex items-center justify-between rounded-xl bg-amber-50/80 border border-amber-200/80 p-2.5 dark:bg-amber-950/20 dark:border-amber-800/50">
+          <div className="flex items-center gap-2">
+            <Coins className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
+            <div>
+              <p className="text-xs font-bold text-amber-950 dark:text-amber-200">
+                {t('تحصيل فقط (ليس إيراد)', 'Collection Only (No Revenue)')}
+              </p>
+              <p className="text-[10px] text-amber-700 dark:text-amber-400">
+                {t('تسجل بالمحصل في الشيفت بدون كميات/إيراد', 'Recorded as collection in shift only')}
+              </p>
+            </div>
+          </div>
+          <input
+            type="checkbox"
+            checked={isCollectionOnly}
+            onChange={(e) => setIsCollectionOnly(e.target.checked)}
+            className="h-4 w-4 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+          />
+        </div>
+
         {/* Cart Items List */}
-        <div className="flex-1 overflow-y-auto py-3 space-y-2">
+        <div className="flex-1 overflow-y-auto py-3 space-y-2 max-h-48">
           {cart.length === 0 ? (
-            <div className="flex h-full flex-col items-center justify-center text-center p-6 text-slate-400">
-              <Receipt className="h-10 w-10 text-slate-300 dark:text-slate-600 mb-2 stroke-1" />
+            <div className="flex h-full min-h-28 flex-col items-center justify-center text-center p-4 text-slate-400">
+              <Receipt className="h-8 w-8 text-slate-300 dark:text-slate-600 mb-1 stroke-1" />
               <p className="text-xs font-semibold">
                 {t('السلة فارغة حالياً', 'Cart is currently empty')}
               </p>
-              <p className="text-[11px] mt-1">
+              <p className="text-[10px] mt-0.5">
                 {t('انقر على أي صنف من اليسار لإضافته للفاتورة', 'Click any product from the left to add')}
               </p>
             </div>
@@ -376,34 +501,46 @@ export const PosView: React.FC = () => {
         </div>
 
         {/* Totals & Calculations */}
-        <div className="border-t border-slate-100 pt-3 dark:border-slate-800 space-y-1.5 text-xs">
+        <div className="border-t border-slate-100 pt-2 dark:border-slate-800 space-y-1.5 text-xs">
           <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
-            <span>{t('المجموع الفرعي (قبل الضريبة):', 'Subtotal:')}</span>
+            <span>{t('المجموع الفرعي:', 'Subtotal:')}</span>
             <span className="font-semibold text-slate-800 dark:text-slate-200">{formatMoney(cartSubtotal)}</span>
           </div>
 
           <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
-            <span className="flex items-center gap-1">
-              <span>{t('خصم إضافي:', 'Discount:')}</span>
-            </span>
+            <span>{t('خصم إضافي:', 'Discount:')}</span>
             <input
               type="number"
               min="0"
+              disabled={!canPerformAction('pos.discount')}
               value={discountAmount || ''}
               onChange={(e) => setDiscountAmount(Number(e.target.value) || 0)}
               placeholder="0"
-              className="w-20 rounded border border-slate-200 px-1.5 py-0.5 text-end text-xs font-bold text-slate-800 outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+              className="w-20 rounded border border-slate-200 px-1.5 py-0.5 text-end text-xs font-bold outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
             />
           </div>
 
-          <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
-            <span>{t('ضريبة القيمة المضافة (14%):', 'VAT (14%):')}</span>
-            <span className="font-semibold text-slate-800 dark:text-slate-200">{formatMoney(cartTax)}</span>
+          <div className="flex items-center justify-between text-slate-700 dark:text-slate-300">
+            <span className="font-bold flex items-center gap-1">
+              <Percent className="h-3 w-3 text-indigo-500" />
+              <span>{t('ضريبة (VAT %):', 'Tax (%):')}</span>
+            </span>
+            <div className="flex items-center gap-1">
+              <input
+                type="number"
+                min="0"
+                max="100"
+                value={taxPercent}
+                onChange={(e) => setTaxPercent(Math.max(0, Number(e.target.value) || 0))}
+                className="w-10 rounded border border-slate-200 px-1 py-0.5 text-center text-xs font-bold dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+              />
+              <span className="font-bold text-slate-900 dark:text-white">{formatMoney(cartTax)}</span>
+            </div>
           </div>
 
           <div className="flex items-center justify-between border-t border-slate-200 pt-2 dark:border-slate-700">
             <span className="text-sm font-extrabold text-slate-900 dark:text-white">
-              {t('الإجمالي النهائي الصافي:', 'Net Total:')}
+              {t('الإجمالي النهائي المطلوب:', 'Net Total:')}
             </span>
             <span className="text-base font-black text-indigo-600 dark:text-indigo-400">
               {formatMoney(cartNetTotal)}
@@ -411,60 +548,132 @@ export const PosView: React.FC = () => {
           </div>
         </div>
 
-        {/* Payment & Checkout Buttons */}
-        <div className="mt-4 space-y-2">
-          {/* Payment Method Selector */}
-          <div className="grid grid-cols-3 gap-1.5">
+        {/* Dynamic Payment Methods (Under receipt - User Requested) */}
+        <div className="mt-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300">
+              {t('طريقة السداد والتحصيل:', 'Payment Method:')}
+            </label>
             <button
-              onClick={() => setPaymentMethod('Cash')}
-              className={`flex items-center justify-center gap-1 rounded-xl border p-2 text-xs font-bold transition-all ${
-                paymentMethod === 'Cash'
-                  ? 'border-indigo-600 bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300 dark:border-indigo-500'
-                  : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300'
-              }`}
+              type="button"
+              onClick={() => {
+                setUseSplitPayment(!useSplitPayment);
+                if (!useSplitPayment) {
+                  setSplits([
+                    {
+                      methodId: paymentMethods[0]?.id || '',
+                      methodName: paymentMethods[0]?.nameAr || 'نقداً',
+                      amount: cartNetTotal,
+                    },
+                  ]);
+                }
+              }}
+              className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 underline"
             >
-              <Banknote className="h-3.5 w-3.5" />
-              <span>{t('نقدي', 'Cash')}</span>
-            </button>
-
-            <button
-              onClick={() => setPaymentMethod('Card')}
-              className={`flex items-center justify-center gap-1 rounded-xl border p-2 text-xs font-bold transition-all ${
-                paymentMethod === 'Card'
-                  ? 'border-indigo-600 bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300 dark:border-indigo-500'
-                  : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300'
-              }`}
-            >
-              <CreditCard className="h-3.5 w-3.5" />
-              <span>{t('فيزا/بطاقة', 'Card')}</span>
-            </button>
-
-            <button
-              onClick={() => setPaymentMethod('Credit')}
-              className={`flex items-center justify-center gap-1 rounded-xl border p-2 text-xs font-bold transition-all ${
-                paymentMethod === 'Credit'
-                  ? 'border-indigo-600 bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300 dark:border-indigo-500'
-                  : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300'
-              }`}
-            >
-              <User className="h-3.5 w-3.5" />
-              <span>{t('آجل (AR)', 'Credit')}</span>
+              {useSplitPayment ? t('سداد بطريقة واحدة', 'Single Method') : t('سداد متعدد (Split)', 'Split Payment')}
             </button>
           </div>
 
+          {!useSplitPayment ? (
+            /* Registered Payment Methods Grid */
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 max-h-24 overflow-y-auto pr-0.5">
+              {paymentMethods.map((pm) => {
+                const isSelected = selectedMethodId === pm.id;
+                return (
+                  <button
+                    key={pm.id}
+                    type="button"
+                    onClick={() => setSelectedMethodId(pm.id)}
+                    className={`flex items-center justify-center gap-1 rounded-xl border p-2 text-xs font-bold transition-all text-center ${
+                      isSelected
+                        ? 'border-indigo-600 bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300 dark:border-indigo-500 shadow-xs ring-1 ring-indigo-500'
+                        : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                    }`}
+                  >
+                    <Wallet className="h-3 w-3 shrink-0" />
+                    <span className="truncate">{pm.nameAr}</span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            /* Split Payment Multi-Selector */
+            <div className="space-y-1.5 rounded-xl border border-indigo-100 bg-indigo-50/40 p-2 dark:border-indigo-900/50 dark:bg-indigo-950/20 max-h-32 overflow-y-auto">
+              {splits.map((split, idx) => (
+                <div key={idx} className="flex items-center gap-1.5">
+                  <select
+                    value={split.methodId}
+                    onChange={(e) => {
+                      const pm = paymentMethods.find((p) => p.id === e.target.value);
+                      setSplits((prev) =>
+                        prev.map((s, i) =>
+                          i === idx ? { ...s, methodId: e.target.value, methodName: pm?.nameAr || '' } : s
+                        )
+                      );
+                    }}
+                    className="flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-800 outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                  >
+                    {paymentMethods.map((pm) => (
+                      <option key={pm.id} value={pm.id}>
+                        {pm.nameAr}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    type="number"
+                    value={split.amount || ''}
+                    onChange={(e) => {
+                      const val = Number(e.target.value) || 0;
+                      setSplits((prev) => prev.map((s, i) => (i === idx ? { ...s, amount: val } : s)));
+                    }}
+                    placeholder="0"
+                    className="w-20 rounded-lg border border-slate-200 bg-white px-2 py-1 text-end text-xs font-bold text-slate-800 outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                  />
+                  {splits.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => setSplits((prev) => prev.filter((_, i) => i !== idx))}
+                      className="text-rose-500 hover:text-rose-700 p-1"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  )}
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={() =>
+                  setSplits((prev) => [
+                    ...prev,
+                    {
+                      methodId: paymentMethods[0]?.id || '',
+                      methodName: paymentMethods[0]?.nameAr || '',
+                      amount: 0,
+                    },
+                  ])
+                }
+                className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 dark:text-indigo-400"
+              >
+                + {t('إضافة طريقة سداد أخرى', 'Add Another Method')}
+              </button>
+            </div>
+          )}
+
           {/* Big Checkout Button */}
           <button
-            disabled={cart.length === 0}
+            disabled={cart.length === 0 || !canPerformAction('pos.checkout')}
             onClick={handleExecuteCheckout}
             className={`flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-extrabold text-white shadow-lg transition-transform active:scale-98 ${
-              cart.length === 0
+              cart.length === 0 || !canPerformAction('pos.checkout')
                 ? 'bg-slate-300 dark:bg-slate-800 cursor-not-allowed text-slate-500'
                 : 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/30'
             }`}
           >
             <CheckCircle2 className="h-5 w-5" />
             <span>
-              {t('حفظ وإصدار الفاتورة فوراً (F9)', 'Complete Sale & Post')} • {formatMoney(cartNetTotal)}
+              {isCollectionOnly
+                ? t('حفظ كإيصال تحصيل فقط', 'Post as Collection Only')
+                : t('حفظ وإصدار الفاتورة فوراً (F9)', 'Complete Sale & Post')} • {formatMoney(cartNetTotal)}
             </span>
           </button>
         </div>
@@ -477,14 +686,160 @@ export const PosView: React.FC = () => {
         )}
       </div>
 
-      {/* RECEIPT / INVOICE MODAL (Tax Compliant Printable Preview) */}
+      {/* INVOICES HISTORY & REFUND DRAWER */}
+      {showInvoicesHistory && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-2xl rounded-2xl bg-white p-6 shadow-2xl dark:bg-slate-900 border border-slate-100 dark:border-slate-800 max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-2">
+                <History className="h-5 w-5 text-indigo-600" />
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                  {t('سجل فواتير وإيصالات المبيعات', 'Sales & Invoices History')}
+                </h3>
+              </div>
+              <button
+                onClick={() => setShowInvoicesHistory(false)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-white"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto py-3 space-y-2">
+              {invoices.length === 0 ? (
+                <div className="text-center py-8 text-slate-400 text-xs">
+                  {t('لا توجد فواتير سابقة', 'No invoices found')}
+                </div>
+              ) : (
+                invoices.map((inv) => (
+                  <div
+                    key={inv.id}
+                    className={`flex items-center justify-between rounded-xl border p-3 ${
+                      inv.status === 'Refunded'
+                        ? 'border-rose-200 bg-rose-50/50 dark:border-rose-900/40 dark:bg-rose-950/20'
+                        : 'border-slate-200 bg-slate-50/50 dark:border-slate-800 dark:bg-slate-800/40'
+                    }`}
+                  >
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-xs font-bold text-slate-900 dark:text-white">
+                          {inv.invoiceNumber}
+                        </span>
+                        {inv.isCollectionOnly && (
+                          <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+                            {t('تحصيل فقط', 'Collection Only')}
+                          </span>
+                        )}
+                        {inv.status === 'Refunded' && (
+                          <span className="rounded bg-rose-100 px-1.5 py-0.5 text-[9px] font-bold text-rose-800 dark:bg-rose-900/40 dark:text-rose-300">
+                            {t('مرتجعة / ملغاة', 'Refunded')}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-slate-600 dark:text-slate-300 mt-0.5">
+                        {inv.customerName} • {inv.paymentMethod}
+                      </p>
+                      <p className="text-[10px] text-slate-400">
+                        {new Date(inv.createdAt).toLocaleString(language === 'ar' ? 'ar-EG' : 'en-US')}
+                      </p>
+                      {inv.refundReason && (
+                        <p className="text-[10px] text-rose-600 mt-1">سبب الإلغاء: {inv.refundReason}</p>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      <span className="font-black text-sm text-slate-900 dark:text-white">
+                        {formatMoney(inv.netAmount)}
+                      </span>
+                      {inv.status !== 'Refunded' && (
+                        <button
+                          onClick={() => setRefundModalInvoice(inv)}
+                          className="flex items-center gap-1 rounded-lg border border-rose-200 bg-white px-2.5 py-1.5 text-xs font-bold text-rose-600 hover:bg-rose-50 transition-colors dark:border-rose-900 dark:bg-slate-800 dark:text-rose-400"
+                        >
+                          <RotateCcw className="h-3.5 w-3.5" />
+                          <span>{t('إلغاء / ارتجاع', 'Refund')}</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* REFUND CONFIRMATION MODAL */}
+      {refundModalInvoice && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl dark:bg-slate-900 border border-slate-100 dark:border-slate-800">
+            <div className="flex items-center gap-2 text-rose-600 mb-3">
+              <RotateCcw className="h-5 w-5" />
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                {t('تأكيد ارتجاع وإلغاء الفاتورة', 'Confirm Invoice Refund')}
+              </h3>
+            </div>
+
+            <p className="text-xs text-slate-600 dark:text-slate-300 mb-3">
+              {t('هل أنت متأكد من ارتجاع الفاتورة رقم', 'Are you sure you want to refund invoice')}{' '}
+              <span className="font-bold text-slate-900 dark:text-white">{refundModalInvoice.invoiceNumber}</span>{' '}
+              {t('بمبلغ', 'for amount')}{' '}
+              <span className="font-bold text-rose-600">{formatMoney(refundModalInvoice.netAmount)}</span>؟
+            </p>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  {t('سبب الارتجاع / الإلغاء (إلزامي):', 'Refund Reason (Required):')}
+                </label>
+                <input
+                  type="text"
+                  value={refundReason}
+                  onChange={(e) => setRefundReason(e.target.value)}
+                  placeholder={t('مثال: طلب العميل، خطأ بالصنف...', 'e.g. Customer request, error in item...')}
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2 text-xs font-medium text-slate-900 outline-none focus:border-rose-500 focus:bg-white dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                />
+              </div>
+
+              {!refundModalInvoice.isCollectionOnly && (
+                <label className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={restockOnRefund}
+                    onChange={(e) => setRestockOnRefund(e.target.checked)}
+                    className="h-4 w-4 rounded text-rose-600"
+                  />
+                  <span>{t('إعادة الكميات للمخزن تلقائياً', 'Restock items back to warehouse')}</span>
+                </label>
+              )}
+
+              <div className="flex items-center gap-2 pt-3">
+                <button
+                  onClick={() => handleRefund(refundModalInvoice)}
+                  className="flex-1 rounded-xl bg-rose-600 py-2.5 text-xs font-bold text-white hover:bg-rose-700 transition-colors"
+                >
+                  {t('تأكيد الإلغاء والارتجاع', 'Confirm Refund')}
+                </button>
+                <button
+                  onClick={() => setRefundModalInvoice(null)}
+                  className="rounded-xl border border-slate-200 px-4 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300"
+                >
+                  {t('تراجع', 'Cancel')}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* RECEIPT / INVOICE MODAL */}
       {completedInvoice && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-xs">
           <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl dark:bg-slate-900 border border-slate-100 dark:border-slate-800">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
               <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400">
                 <CheckCircle2 className="h-5 w-5" />
-                <span className="text-sm font-extrabold">{t('تم حفظ الفاتورة والترحيل المحاسبي!', 'Invoice Posted Successfully!')}</span>
+                <span className="text-sm font-extrabold">{t('تم حفظ الفاتورة والإيصال بنجاح!', 'Posted Successfully!')}</span>
               </div>
               <button
                 onClick={() => setCompletedInvoice(null)}
@@ -498,9 +853,12 @@ export const PosView: React.FC = () => {
             <div className="my-4 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 font-mono text-xs dark:border-slate-700 dark:bg-slate-800/60">
               <div className="text-center space-y-1 mb-3">
                 <h3 className="font-extrabold text-sm text-slate-900 dark:text-white">{tenant.name}</h3>
-                <p className="text-[11px] text-slate-500">{activeBranch.name}</p>
+                <p className="text-[11px] text-slate-500">{activeBranch?.name || tenant.name}</p>
                 <p className="text-[10px] text-slate-400">
-                  {t('فاتورة ضريبية مبسطة', 'Simplified Tax Invoice')} | {completedInvoice.invoiceNumber}
+                  {completedInvoice.isCollectionOnly
+                    ? t('إيصال تحصيل نقدية / سداد', 'Cash Collection Receipt')
+                    : t('فاتورة ضريبية مبسطة', 'Simplified Tax Invoice')}{' '}
+                  | {completedInvoice.invoiceNumber}
                 </p>
                 <p className="text-[10px] text-slate-400">
                   {new Date(completedInvoice.createdAt).toLocaleString(language === 'ar' ? 'ar-EG' : 'en-US')}
@@ -524,20 +882,26 @@ export const PosView: React.FC = () => {
                   <span>{formatMoney(completedInvoice.subtotal - completedInvoice.discountAmount)}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span>{t('ضريبة ق.م (14%):', 'VAT (14%):')}</span>
+                  <span>
+                    {t('الضريبة (VAT)', 'Tax (VAT)')}:
+                  </span>
                   <span>{formatMoney(completedInvoice.taxAmount)}</span>
                 </div>
                 <div className="flex justify-between font-extrabold text-sm border-t border-slate-300 pt-1 dark:border-slate-700 text-slate-900 dark:text-white">
-                  <span>{t('الصافي المدفوع:', 'Net Paid:')}</span>
+                  <span>{t('الصافي المحصل:', 'Net Collected:')}</span>
                   <span>{formatMoney(completedInvoice.netAmount)}</span>
+                </div>
+                <div className="flex justify-between text-[10px] text-slate-500 pt-1">
+                  <span>{t('طريقة السداد:', 'Payment Method:')}</span>
+                  <span className="font-bold text-slate-700 dark:text-slate-300">{completedInvoice.paymentMethod}</span>
                 </div>
               </div>
 
               <div className="mt-4 flex items-center justify-center gap-3 pt-3 border-t border-dashed border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-400">
                 <QrCode className="h-10 w-10 text-slate-800 dark:text-slate-200" />
                 <div className="text-[10px]">
-                  <p className="font-bold">{t('الفاتورة الإلكترونية المصرية (ETA)', 'Egyptian Tax Authority')}</p>
-                  <p>{t('تم توليد القيد المحاسبي آلياً بنجاح', 'Auto-Posting Verified')}</p>
+                  <p className="font-bold">{t('الفاتورة والإيصال الإلكتروني', 'E-Receipt & Invoice Verified')}</p>
+                  <p>{t('تم الترحيل إلى الشيفت والحسابات', 'Shift & Ledger Synchronized')}</p>
                 </div>
               </div>
             </div>

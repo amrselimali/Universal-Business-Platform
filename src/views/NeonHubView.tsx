@@ -20,7 +20,11 @@ export const NeonHubView: React.FC = () => {
     neonDb,
     updateNeonConnectionString,
     testNeonConnection,
+    syncAllToNeon,
+    fixNeonSchema,
+    fetchRemoteCounts,
     getPostgresSchemaSql,
+    pullLatestFromNeon,
     products,
     accounts,
     invoices,
@@ -30,6 +34,11 @@ export const NeonHubView: React.FC = () => {
   const [copied, setCopied] = useState<boolean>(false);
   const [inputConn, setInputConn] = useState<string>(neonDb.connectionString);
   const [testResult, setTestResult] = useState<string | null>(null);
+  const [syncStatus, setSyncStatus] = useState<{ loading: boolean; message?: string; success?: boolean }>({
+    loading: false,
+  });
+  const [remoteCounts, setRemoteCounts] = useState<{ [key: string]: number } | null>(null);
+  const [checkingCounts, setCheckingCounts] = useState<boolean>(false);
 
   const handleCopySql = () => {
     navigator.clipboard.writeText(getPostgresSchemaSql());
@@ -40,11 +49,40 @@ export const NeonHubView: React.FC = () => {
   const handleTest = async () => {
     setTestResult(null);
     updateNeonConnectionString(inputConn);
-    const ok = await testNeonConnection();
+    const ok = await testNeonConnection(inputConn);
     if (ok) {
-      setTestResult(t('تم اختبار الرابط والاتصال السحابي بنجاح 100%!', 'Connection verified successfully!'));
+      setTestResult(t('تم التحقق والاتصال بقاعدة بيانات Neon السحابية بنجاح 100%! 🚀', 'Connected to Neon Cloud PostgreSQL successfully! 🚀'));
+      handleCheckRemoteCounts();
     } else {
-      setTestResult(t('فشل الاتصال: تأكد من رابط Neon السحابي (يبدأ بـ postgres://)', 'Failed: Ensure a valid postgres:// Neon URL'));
+      setTestResult(t('فشل الاتصال: تأكد من رابط Neon السحابي (يبدأ بـ postgresql:// أو postgres://)', 'Failed: Ensure a valid postgresql:// or postgres:// Neon URL'));
+    }
+  };
+
+  const handleCheckRemoteCounts = async () => {
+    setCheckingCounts(true);
+    const counts = await fetchRemoteCounts();
+    setRemoteCounts(counts);
+    setCheckingCounts(false);
+  };
+
+  const handleFixSchema = async () => {
+    if (window.confirm(t('هل تريد تهيئة وتنظيف الجداول في Neon وإزالة أي تعارضات سابقة مع الـ UUID؟', 'Do you want to reset and prepare clean Neon tables without UUID conflicts?'))) {
+      setSyncStatus({ loading: true });
+      const res = await fixNeonSchema();
+      setSyncStatus({ loading: false, message: res.message, success: res.success });
+      if (res.success) {
+        // Automatically run sync after fix
+        setTimeout(() => handleSyncAll(), 500);
+      }
+    }
+  };
+
+  const handleSyncAll = async () => {
+    setSyncStatus({ loading: true });
+    const res = await syncAllToNeon();
+    setSyncStatus({ loading: false, message: res.message, success: res.success });
+    if (res.success) {
+      handleCheckRemoteCounts();
     }
   };
 
@@ -155,6 +193,111 @@ export const NeonHubView: React.FC = () => {
             )}
           </p>
         </div>
+      </div>
+
+      {/* Real Live Database Push & Sync Action Card */}
+      <div className="rounded-2xl border border-cyan-200 bg-gradient-to-r from-cyan-50 to-blue-50 p-5 shadow-xs dark:border-cyan-900/50 dark:from-cyan-950/20 dark:to-blue-950/20">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div className="space-y-1">
+            <h3 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-cyan-600" />
+              <span>{t('مزامنة ورفع البيانات الحالية إلى Neon فوراً', 'Sync & Push Live Data to Neon Cloud')}</span>
+            </h3>
+            <p className="text-xs text-slate-600 dark:text-slate-400 max-w-xl">
+              {t(
+                'اضغط هنا لرفع كافة الأصناف، شجرة الحسابات، فواتير المبيعات، وبيانات المرضى الحالية مباشرة إلى جداول Neon السحابية. بعد الضغط، ستجد الجداول في موقع Neon ممتلئة بالبيانات فوراً!',
+                'Click here to upload all current products, accounts, invoices, and patients to your Neon PostgreSQL tables. They will immediately show up in Neon Tables!'
+              )}
+            </p>
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 shrink-0">
+            <button
+              disabled={syncStatus.loading || !neonDb.connectionString}
+              onClick={handleSyncAll}
+              className="flex items-center justify-center gap-2 rounded-xl bg-cyan-600 px-5 py-3 text-xs font-bold text-white shadow-sm hover:bg-cyan-700 transition-all disabled:opacity-50 cursor-pointer"
+            >
+              <RefreshCw className={`h-4 w-4 ${syncStatus.loading ? 'animate-spin' : ''}`} />
+              <span>
+                {syncStatus.loading
+                  ? t('جاري رفع السجلات إلى السحاب...', 'Uploading to Neon...')
+                  : t('🚀 رفع ومزامنة كافة البيانات إلى Neon الآن', 'Push All Records to Neon Now')}
+              </span>
+            </button>
+
+            <button
+              disabled={checkingCounts || !neonDb.connectionString}
+              onClick={handleCheckRemoteCounts}
+              className="flex items-center justify-center gap-1.5 rounded-xl border border-cyan-300 bg-white px-3.5 py-3 text-xs font-bold text-cyan-800 shadow-xs hover:bg-cyan-50 dark:border-cyan-800 dark:bg-slate-900 dark:text-cyan-300 cursor-pointer transition-colors"
+              title="فحص السجلات الموجودة في Neon مباشرة"
+            >
+              <Database className={`h-3.5 w-3.5 ${checkingCounts ? 'animate-spin' : ''}`} />
+              <span>{checkingCounts ? '...' : t('فحص السحاب', 'Check Neon Cloud')}</span>
+            </button>
+
+            <button
+              disabled={syncStatus.loading || !neonDb.connectionString}
+              onClick={async () => {
+                setSyncStatus({ loading: true });
+                const ok = await pullLatestFromNeon();
+                setSyncStatus({
+                  loading: false,
+                  success: ok,
+                  message: ok
+                    ? t('تم تنزيل وتحديث أحدث البيانات بنجاح من قاعدة بيانات Neon!', 'Data refreshed successfully from Neon!')
+                    : t('تعذر جلب البيانات من Neon', 'Failed to pull data'),
+                });
+                if (ok) handleCheckRemoteCounts();
+              }}
+              className="flex items-center justify-center gap-1.5 rounded-xl border border-sky-300 bg-sky-50 px-3.5 py-3 text-xs font-bold text-sky-800 shadow-xs hover:bg-sky-100 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-300 cursor-pointer transition-colors"
+              title="تنزيل أحدث البيانات من سحابة Neon إلى شاشات البرنامج"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${syncStatus.loading ? 'animate-spin' : ''}`} />
+              <span>{t('جلب من Neon', 'Pull from Neon')}</span>
+            </button>
+
+            <button
+              disabled={syncStatus.loading || !neonDb.connectionString}
+              onClick={handleFixSchema}
+              className="flex items-center justify-center gap-1.5 rounded-xl border border-amber-300 bg-amber-50 px-3.5 py-3 text-xs font-bold text-amber-800 shadow-xs hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300 cursor-pointer transition-colors"
+              title="اضغط هنا إذا كانت الجداول في Neon فارغة أو تعطي أخطاء UUID سابقة"
+            >
+              <Sparkles className="h-3.5 w-3.5 text-amber-600" />
+              <span>{t('تنظيف وتهيئة الجداول (Fix Schema)', 'Fix Schema')}</span>
+            </button>
+          </div>
+        </div>
+
+        {remoteCounts && (
+          <div className="mt-3 flex flex-wrap items-center gap-3 rounded-xl bg-white/80 p-3 text-xs dark:bg-slate-900/80 border border-cyan-100 dark:border-cyan-900/50">
+            <span className="font-bold text-slate-700 dark:text-slate-200">{t('السجلات الحقيقية في سحابة Neon الآن:', 'Real Records in Neon Cloud Right Now:')}</span>
+            <span className="rounded-md bg-cyan-100 px-2 py-0.5 font-black text-cyan-800 dark:bg-cyan-900/50 dark:text-cyan-300">
+              {t('المنتجات:', 'Products:')} {remoteCounts['products'] ?? 0}
+            </span>
+            <span className="rounded-md bg-blue-100 px-2 py-0.5 font-black text-blue-800 dark:bg-blue-900/50 dark:text-blue-300">
+              {t('الحسابات:', 'Accounts:')} {remoteCounts['accounts'] ?? 0}
+            </span>
+            <span className="rounded-md bg-indigo-100 px-2 py-0.5 font-black text-indigo-800 dark:bg-indigo-900/50 dark:text-indigo-300">
+              {t('الفواتير:', 'Invoices:')} {remoteCounts['sales_invoices'] ?? 0}
+            </span>
+            <span className="rounded-md bg-purple-100 px-2 py-0.5 font-black text-purple-800 dark:bg-purple-900/50 dark:text-purple-300">
+              {t('المرضى:', 'Patients:')} {remoteCounts['patients'] ?? 0}
+            </span>
+          </div>
+        )}
+
+        {syncStatus.message && (
+          <div
+            className={`mt-4 flex items-center gap-2 rounded-xl p-3 text-xs font-semibold ${
+              syncStatus.success
+                ? 'bg-emerald-100/80 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300'
+                : 'bg-rose-100/80 text-rose-800 dark:bg-rose-950/50 dark:text-rose-300'
+            }`}
+          >
+            {syncStatus.success ? <CheckCircle2 className="h-4 w-4 shrink-0" /> : <AlertCircle className="h-4 w-4 shrink-0" />}
+            <span>{syncStatus.message}</span>
+          </div>
+        )}
       </div>
 
       {/* Tables & Schema Section */}
