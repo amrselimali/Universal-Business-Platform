@@ -22,6 +22,7 @@ export const NeonHubView: React.FC = () => {
     testNeonConnection,
     syncAllToNeon,
     fixNeonSchema,
+    runNeonMigrations,
     fetchRemoteCounts,
     getPostgresSchemaSql,
     pullLatestFromNeon,
@@ -89,7 +90,7 @@ export const NeonHubView: React.FC = () => {
   const tables = [
     { name: 'tenants', descAr: 'عزل بيانات الشركات والاشتراكات والضرائب', count: 1 },
     { name: 'branches', descAr: 'الفروع ومواقع العمل الإدارية', count: 2 },
-    { name: 'warehouses', descAr: 'المستودعات ومخازن البضائع', count: 2 },
+    { name: 'warehouses', descAr: 'مخازن البضائع والمستلزمات', count: 2 },
     { name: 'products', descAr: 'دليل الأصناف والخدمات الطبية والتسعير', count: products.length },
     { name: 'stock_levels', descAr: 'أرصدة الأصناف بكل مخزن بدقة', count: products.length * 2 },
     { name: 'accounts', descAr: 'شجرة الحسابات العامة (Chart of Accounts)', count: accounts.length },
@@ -254,6 +255,21 @@ export const NeonHubView: React.FC = () => {
             >
               <RefreshCw className={`h-3.5 w-3.5 ${syncStatus.loading ? 'animate-spin' : ''}`} />
               <span>{t('جلب من Neon', 'Pull from Neon')}</span>
+            </button>
+
+            <button
+              disabled={syncStatus.loading || !neonDb.connectionString}
+              onClick={async () => {
+                setSyncStatus({ loading: true });
+                const res = await runNeonMigrations();
+                setSyncStatus({ loading: false, message: res.message, success: res.success });
+                if (res.success) handleCheckRemoteCounts();
+              }}
+              className="flex items-center justify-center gap-1.5 rounded-xl border border-emerald-300 bg-emerald-50 px-3.5 py-3 text-xs font-bold text-emerald-800 shadow-xs hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 cursor-pointer transition-colors"
+              title="تحديث وترحيل هيكل الجداول في Neon لإضافة الأعمدة الجديدة دون مساس بالبيانات"
+            >
+              <Database className="h-3.5 w-3.5 text-emerald-600" />
+              <span>{t('ترحيل وتحديث الهيكل (Safe Migration)', 'Run Safe Migration')}</span>
             </button>
 
             <button

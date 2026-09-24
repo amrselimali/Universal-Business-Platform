@@ -20,21 +20,38 @@ import {
   Printer,
   RotateCcw,
   X,
+  Building2,
 } from 'lucide-react';
 
 export const ActivityLogsView: React.FC = () => {
-  const { language, t, activityLogs, userActivityLogs, users } = usePlatform();
+  const {
+    language,
+    t,
+    activityLogs,
+    userActivityLogs,
+    allUserActivityLogs,
+    allTenants,
+    tenant,
+    users,
+  } = usePlatform();
   const isRtl = language === 'ar';
 
-  const logsList = (userActivityLogs && userActivityLogs.length > 0) ? userActivityLogs : (activityLogs || []);
+  const logsList =
+    allUserActivityLogs && allUserActivityLogs.length > 0
+      ? allUserActivityLogs
+      : (userActivityLogs && userActivityLogs.length > 0)
+      ? userActivityLogs
+      : activityLogs || [];
 
   const [searchQuery, setSearchQuery] = useState('');
+  const [tenantFilter, setTenantFilter] = useState<string>('All');
   const [userFilter, setUserFilter] = useState<string>('All');
   const [screenFilter, setScreenFilter] = useState<string>('All');
   const [actionFilter, setActionFilter] = useState<string>('All');
 
   const handleClearFilters = () => {
     setSearchQuery('');
+    setTenantFilter('All');
     setUserFilter('All');
     setScreenFilter('All');
     setActionFilter('All');
@@ -49,6 +66,7 @@ export const ActivityLogsView: React.FC = () => {
       (log.actionNameAr || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
       (log.actionNameEn || '').toLowerCase().includes(searchQuery.toLowerCase());
 
+    const matchesTenant = tenantFilter === 'All' || log.tenantId === tenantFilter;
     const matchesUser = userFilter === 'All' || log.userId === userFilter;
     const matchesScreen =
       screenFilter === 'All' ||
@@ -60,7 +78,7 @@ export const ActivityLogsView: React.FC = () => {
       (log.actionNameEn && log.actionNameEn.toLowerCase().includes(actionFilter.toLowerCase())) ||
       (log.actionNameAr && log.actionNameAr.includes(actionFilter));
 
-    return matchesSearch && matchesUser && matchesScreen && matchesAction;
+    return matchesSearch && matchesTenant && matchesUser && matchesScreen && matchesAction;
   });
 
   const getActionBadge = (actionName: string) => {
@@ -148,7 +166,7 @@ export const ActivityLogsView: React.FC = () => {
       </div>
 
       {/* Filter Bar */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 bg-white dark:bg-slate-900 p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 bg-white dark:bg-slate-900 p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
         {/* Search */}
         <div className="relative flex items-center gap-2 bg-slate-50 dark:bg-slate-800 px-3 py-2 rounded-xl">
           <Search className="h-4 w-4 text-slate-400 shrink-0" />
@@ -168,6 +186,23 @@ export const ActivityLogsView: React.FC = () => {
               <X className="h-3.5 w-3.5" />
             </button>
           )}
+        </div>
+
+        {/* Company / Entity Filter */}
+        <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-800 px-3 py-2 rounded-xl">
+          <Building2 className="h-4 w-4 text-slate-400 shrink-0" />
+          <select
+            value={tenantFilter}
+            onChange={(e) => setTenantFilter(e.target.value)}
+            className="w-full bg-transparent text-xs text-slate-900 dark:text-white focus:outline-hidden font-medium"
+          >
+            <option value="All">{t('كافة الشركات والمؤسسات', 'All Companies')}</option>
+            {(allTenants && allTenants.length > 0 ? allTenants : tenant ? [tenant] : []).map((tn) => (
+              <option key={tn.id} value={tn.id}>
+                {tn.name}
+              </option>
+            ))}
+          </select>
         </div>
 
         {/* User Filter */}
@@ -213,6 +248,9 @@ export const ActivityLogsView: React.FC = () => {
             className="w-full bg-transparent text-xs text-slate-900 dark:text-white focus:outline-hidden font-medium"
           >
             <option value="All">{t('كافة الشاشات', 'All Screens')}</option>
+            <option value="companies">{t('إدارة الشركات والفروع والمخازن', 'Companies & Branches')}</option>
+            <option value="users">{t('المستخدمين والصلاحيات', 'Users & Roles')}</option>
+            <option value="products">{t('إدارة المنتجات والخدمات', 'Products & Services')}</option>
             <option value="reception_ops">{t('شاشة التشغيل', 'Operations')}</option>
             <option value="bookings">{t('الحجوزات والمتابعة', 'Bookings')}</option>
             <option value="pos">{t('نقطة البيع السريعة', 'POS')}</option>
@@ -278,7 +316,15 @@ export const ActivityLogsView: React.FC = () => {
                       </td>
 
                       <td className="p-3.5 font-bold text-slate-800 dark:text-slate-200">
-                        {language === 'ar' ? log.screenNameAr : log.screenNameEn}
+                        <div>{language === 'ar' ? log.screenNameAr : log.screenNameEn}</div>
+                        {log.tenantId && (
+                          <div className="text-[10px] text-indigo-600 dark:text-indigo-400 font-medium flex items-center gap-1 mt-0.5">
+                            <Building2 className="h-3 w-3" />
+                            <span>
+                              {allTenants?.find((t) => t.id === log.tenantId)?.name || (log.tenantId === 'tenant-barbie' ? 'شركة باربي' : log.tenantId)}
+                            </span>
+                          </div>
+                        )}
                       </td>
 
                       <td className="p-3.5 text-slate-700 dark:text-slate-300">

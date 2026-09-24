@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { usePlatform } from '../context/PlatformContext';
 import { Appointment, TreatmentPlan, Party, PatientFollowUp } from '../types';
 import { autoTranslateArabic } from '../utils/translator';
+import { shareViaWhatsApp, generateBookingWhatsAppText } from '../utils/exportUtils';
 import {
   Calendar,
   Clock,
@@ -815,6 +816,25 @@ export const BookingsFollowUpView: React.FC = () => {
                               <Phone className="h-3 w-3" />
                               {apt.patientPhone || '-'}
                             </span>
+                            {apt.patientPhone && (
+                              <button
+                                onClick={() => {
+                                  const text = generateBookingWhatsAppText({
+                                    patientName: apt.patientName,
+                                    date: apt.date,
+                                    time: apt.time,
+                                    serviceName: language === 'ar' ? apt.serviceNameAr : apt.serviceNameEn || apt.serviceNameAr,
+                                    clinicName: tenant?.name || 'المركز الطبي',
+                                    phone: tenant?.phone,
+                                  });
+                                  shareViaWhatsApp(apt.patientPhone, text);
+                                }}
+                                title="تذكير الموعد عبر واتساب"
+                                className="p-0.5 text-emerald-600 hover:text-emerald-700 cursor-pointer"
+                              >
+                                <MessageSquare className="h-3 w-3" />
+                              </button>
+                            )}
                           </div>
                         </td>
 
@@ -1077,6 +1097,25 @@ export const BookingsFollowUpView: React.FC = () => {
                               {apt.systemCode || party?.systemCode || `CUST-${1000 + idx}`}
                             </span>
                             <span>{apt.patientPhone || '-'}</span>
+                            {apt.patientPhone && (
+                              <button
+                                onClick={() => {
+                                  const text = generateBookingWhatsAppText({
+                                    patientName: apt.patientName,
+                                    date: apt.date,
+                                    time: apt.time,
+                                    serviceName: language === 'ar' ? apt.serviceNameAr : apt.serviceNameEn || apt.serviceNameAr,
+                                    clinicName: tenant?.name || 'المركز الطبي',
+                                    phone: tenant?.phone,
+                                  });
+                                  shareViaWhatsApp(apt.patientPhone, text);
+                                }}
+                                title="تأكيد وتذكير موعد الغد عبر واتساب"
+                                className="p-0.5 text-emerald-600 hover:text-emerald-700 cursor-pointer"
+                              >
+                                <MessageSquare className="h-3 w-3" />
+                              </button>
+                            )}
                           </div>
                         </td>
 
@@ -1234,6 +1273,20 @@ export const BookingsFollowUpView: React.FC = () => {
                               {fup.systemCode || party?.systemCode || `CUST-${1000 + idx}`}
                             </span>
                             <span>{fup.patientPhone}</span>
+                            {fup.patientPhone && (
+                              <button
+                                onClick={() => {
+                                  shareViaWhatsApp(
+                                    fup.patientPhone,
+                                    `مرحباً ${fup.patientName}، نتواصل معك من ${tenant?.name || 'المركز الطبي'} بخصوص: ${fup.reason}...`
+                                  );
+                                }}
+                                title="مراسلة المتابعة عبر واتساب"
+                                className="p-0.5 text-emerald-600 hover:text-emerald-700 cursor-pointer"
+                              >
+                                <MessageSquare className="h-3 w-3" />
+                              </button>
+                            )}
                           </div>
                         </td>
 

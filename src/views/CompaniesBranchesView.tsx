@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { usePlatform } from '../context/PlatformContext';
 import { INITIAL_TENANT, INITIAL_BRANCHES, INITIAL_MODULES } from '../data/initialData';
 import { Tenant, Branch, Warehouse } from '../types';
+import { CleanCompanySetupModal } from '../components/CleanCompanySetupModal';
 import {
   Building2,
   GitBranch,
@@ -36,14 +37,17 @@ export const CompaniesBranchesView: React.FC = () => {
     language,
     tenant,
     tenants,
+    allTenants,
     addTenant,
     updateTenant,
     updateTenantModules,
     deleteTenant,
     restoreTenant,
+    purgeTenant,
     allModules,
     switchTenant,
     branches,
+    allBranches,
     activeBranch,
     setActiveBranch,
     addBranch,
@@ -51,6 +55,7 @@ export const CompaniesBranchesView: React.FC = () => {
     deleteBranch,
     restoreBranch,
     warehouses,
+    allWarehouses,
     addWarehouse,
     updateWarehouse,
     deleteWarehouse,
@@ -63,6 +68,7 @@ export const CompaniesBranchesView: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'companies' | 'branches' | 'archive'>('companies');
   const [archiveSubTab, setArchiveSubTab] = useState<'all' | 'branches' | 'warehouses' | 'companies'>('all');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [showCleanWizard, setShowCleanWizard] = useState<boolean>(false);
 
   const isAdmin =
     currentUser?.isAdmin ||
@@ -70,18 +76,18 @@ export const CompaniesBranchesView: React.FC = () => {
     currentUser?.role === 'SuperAdmin';
 
   // Defensive fallbacks - excluding archived items from active views
-  const currentTenant = tenant || tenants.find((t) => !t.isArchived) || INITIAL_TENANT;
-  const currentTenantBranches = (branches || []).filter((b) => !b.isArchived && b.tenantId === currentTenant.id);
-  const currentTenantWarehouses = (warehouses || []).filter((w) => !w.isArchived && w.tenantId === currentTenant.id);
+  const currentTenant = tenant || (allTenants || tenants).find((t) => !t.isArchived) || INITIAL_TENANT;
+  const currentTenantBranches = (allBranches || branches || []).filter((b) => !b.isArchived && b.tenantId === currentTenant.id);
+  const currentTenantWarehouses = (allWarehouses || warehouses || []).filter((w) => !w.isArchived && w.tenantId === currentTenant.id);
   const currentActiveBranch =
     activeBranch && !activeBranch.isArchived
       ? activeBranch
       : currentTenantBranches[0] || null;
 
-  // Archived items
-  const archivedBranches = (branches || []).filter((b) => b.isArchived);
-  const archivedWarehouses = (warehouses || []).filter((w) => w.isArchived);
-  const archivedTenants = (tenants || []).filter((t) => t.isArchived);
+  // Archived items across all companies in the platform
+  const archivedBranches = (allBranches || branches || []).filter((b) => b.isArchived);
+  const archivedWarehouses = (allWarehouses || warehouses || []).filter((w) => w.isArchived);
+  const archivedTenants = (allTenants || tenants || []).filter((t) => t.isArchived);
   const totalArchivedCount = archivedBranches.length + archivedWarehouses.length + archivedTenants.length;
 
   // Default modules list for selection
@@ -95,6 +101,7 @@ export const CompaniesBranchesView: React.FC = () => {
   const [newCompanyPlan, setNewCompanyPlan] = useState<'Starter' | 'Professional' | 'Enterprise'>('Enterprise');
   const [newCompanyCurrency, setNewCompanyCurrency] = useState('EGP');
   const [newCompanyTaxRate, setNewCompanyTaxRate] = useState<number>(0); // Default 0 as requested!
+  const [newCompanyDefaultPosCollectionOnly, setNewCompanyDefaultPosCollectionOnly] = useState<boolean>(false);
   const [newCompanyModules, setNewCompanyModules] = useState<string[]>([
     'identity',
     'parties',
@@ -112,6 +119,7 @@ export const CompaniesBranchesView: React.FC = () => {
   const [editPlan, setEditPlan] = useState<'Starter' | 'Professional' | 'Enterprise'>('Enterprise');
   const [editCurrency, setEditCurrency] = useState('EGP');
   const [editTaxRate, setEditTaxRate] = useState<number>(0);
+  const [editDefaultPosCollectionOnly, setEditDefaultPosCollectionOnly] = useState<boolean>(false);
   const [editModules, setEditModules] = useState<string[]>([]);
 
   const openEditTenant = (tItem: Tenant) => {
@@ -122,6 +130,7 @@ export const CompaniesBranchesView: React.FC = () => {
     setEditPlan(tItem.plan);
     setEditCurrency(tItem.currency || 'EGP');
     setEditTaxRate(tItem.taxRate !== undefined ? tItem.taxRate : 0);
+    setEditDefaultPosCollectionOnly(Boolean(tItem.defaultPosCollectionOnly));
     setEditModules(tItem.activeModules || []);
   };
 
@@ -135,6 +144,7 @@ export const CompaniesBranchesView: React.FC = () => {
       plan: editPlan,
       currency: editCurrency,
       taxRate: Number(editTaxRate) || 0,
+      defaultPosCollectionOnly: editDefaultPosCollectionOnly,
       activeModules: editModules,
     });
     setEditingTenant(null);
@@ -184,6 +194,7 @@ export const CompaniesBranchesView: React.FC = () => {
       currency: newCompanyCurrency,
       currencySymbol: newCompanyCurrency === 'EGP' ? 'ج.م' : '$',
       taxRate: Number(newCompanyTaxRate) || 0, // default 0 per user requirement
+      defaultPosCollectionOnly: newCompanyDefaultPosCollectionOnly,
       activeModules:
         newCompanyModules.length > 0
           ? newCompanyModules
@@ -195,6 +206,7 @@ export const CompaniesBranchesView: React.FC = () => {
     setNewCompanyNameEn('');
     setNewCompanyCode('');
     setNewCompanyTaxRate(0);
+    setNewCompanyDefaultPosCollectionOnly(false);
     setNewCompanyModules(['identity', 'parties', 'inventory', 'pos_sales', 'accounting', 'reporting_bi']);
   };
 
@@ -300,7 +312,7 @@ export const CompaniesBranchesView: React.FC = () => {
       location: editWhLocation.trim(),
     });
     setEditingWarehouse(null);
-    setToastMessage(language === 'ar' ? 'تم تحديث بيانات المستودع بنجاح' : 'Warehouse updated successfully');
+    setToastMessage(language === 'ar' ? 'تم تحديث بيانات المخزن بنجاح' : 'Warehouse updated successfully');
   };
 
   // Safe Delete & Archive Prompt State
@@ -313,6 +325,14 @@ export const CompaniesBranchesView: React.FC = () => {
     hasData: boolean;
   }
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
+  const [purgeTenantTarget, setPurgeTenantTarget] = useState<Tenant | null>(null);
+
+  const handlePurgeTenant = () => {
+    if (!purgeTenantTarget) return;
+    const res = purgeTenant(purgeTenantTarget.id);
+    setToastMessage(res.message);
+    setPurgeTenantTarget(null);
+  };
 
   const promptDeleteBranch = (br: Branch) => {
     const attachedWh = warehouses.filter((w) => w.branchId === br.id);
@@ -320,7 +340,7 @@ export const CompaniesBranchesView: React.FC = () => {
     const attachedUsers = (users || []).filter((u) => u.branchId === br.id || u.allowedBranchIds?.includes(br.id));
 
     const details: string[] = [];
-    if (attachedWh.length > 0) details.push(`${attachedWh.length} مستودع تابعة للفرع`);
+    if (attachedWh.length > 0) details.push(`${attachedWh.length} مخزن تابع للفرع`);
     if (attachedInvoices.length > 0) details.push(`${attachedInvoices.length} فاتورة مبيعات مسجلة`);
     if (attachedUsers.length > 0) details.push(`${attachedUsers.length} مستخدمين مرتبطين بالفرع`);
 
@@ -393,7 +413,7 @@ export const CompaniesBranchesView: React.FC = () => {
   const handleRestoreWarehouse = (whId: string) => {
     const ok = restoreWarehouse(whId);
     if (ok) {
-      setToastMessage(language === 'ar' ? 'تم اعتماد استعادة المستودع بنجاح ونقله إلى المستودعات النشطة' : 'Warehouse restored successfully');
+      setToastMessage(language === 'ar' ? 'تم اعتماد استعادة المخزن بنجاح ونقله إلى المخازن النشطة' : 'Warehouse restored successfully');
     }
   };
 
@@ -419,7 +439,7 @@ export const CompaniesBranchesView: React.FC = () => {
           </div>
           <p className="text-xs text-slate-500 dark:text-slate-400">
             {t(
-              'إضافة وتخصيص شركات متعددة، إدارة الفروع الجغرافية، والمستودعات المركزية والفرعية مع عزل البيانات التام.',
+              'إضافة وتخصيص شركات متعددة، إدارة الفروع الجغرافية، والمخازن المركزية والفرعية مع عزل البيانات التام.',
               'Add and manage multiple business entities, geographical branches, and warehouses.'
             )}
           </p>
@@ -450,7 +470,7 @@ export const CompaniesBranchesView: React.FC = () => {
             className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 transition-colors cursor-pointer"
           >
             <WarehouseIcon className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-            <span>{t('إضافة مستودع', 'New Warehouse')}</span>
+            <span>{t('إضافة مخزن', 'New Store / Warehouse')}</span>
           </button>
         </div>
       </div>
@@ -492,7 +512,7 @@ export const CompaniesBranchesView: React.FC = () => {
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs dark:border-slate-800 dark:bg-slate-900">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
-              {t('المستودعات والمخازن', 'Warehouses')}
+              {t('المخازن', 'Stores / Warehouses')}
             </span>
             <div className="rounded-xl bg-emerald-50 p-2 text-emerald-600 dark:bg-emerald-950/50 dark:text-emerald-400">
               <WarehouseIcon className="h-4 w-4" />
@@ -504,6 +524,43 @@ export const CompaniesBranchesView: React.FC = () => {
           </span>
         </div>
       </div>
+
+      {/* Prominent Quick-Access Banner to Secure Archive */}
+      {totalArchivedCount > 0 && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/80 shadow-xs">
+          <div className="flex items-start sm:items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-amber-100 dark:bg-amber-900/60 text-amber-700 dark:text-amber-300 shrink-0">
+              <Archive className="h-5 w-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-amber-950 dark:text-amber-200">
+                  {t(
+                    `مستودع الأرشيف الآمن يحتوي على (${totalArchivedCount}) عناصر محفوظة (فروع / مخازن / شركات).`,
+                    `Secure Archive Vault contains (${totalArchivedCount}) archived records (branches / warehouses / companies).`
+                  )}
+                </span>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-200 dark:bg-amber-900 text-amber-900 dark:text-amber-200">
+                  {t('حماية السجلات المالية', 'Audit Protected')}
+                </span>
+              </div>
+              <p className="text-[11px] text-amber-800/80 dark:text-amber-300/80 mt-0.5">
+                {t(
+                  'عند حذف أي فرع أو مخزن يتم حفظه هنا تلقائياً لضمان سلامة الفواتير وحركات المخزون، ويمكنك استعادتها بضغطة زر في أي وقت.',
+                  'Deleted branches and warehouses are safely preserved here to protect transactional history, and can be restored anytime.'
+                )}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setActiveTab('archive')}
+            className="flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition-all shadow-xs shrink-0 cursor-pointer self-start sm:self-auto"
+          >
+            <Archive className="h-3.5 w-3.5" />
+            <span>{t('فتح الأرشيف الآمن الآن', 'Open Secure Archive Now')}</span>
+          </button>
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex border-b border-slate-200 dark:border-slate-800">
@@ -531,7 +588,7 @@ export const CompaniesBranchesView: React.FC = () => {
           }`}
         >
           <GitBranch className="h-4 w-4" />
-          <span>{t('فروع ومستودعات الشركة النشطة', 'Branches & Warehouses')}</span>
+          <span>{t('فروع ومخازن الشركة النشطة', 'Branches & Stores')}</span>
           <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] dark:bg-slate-800">
             {currentTenantBranches.length} {t('فروع', 'Branches')}
           </span>
@@ -625,7 +682,7 @@ export const CompaniesBranchesView: React.FC = () => {
                     <p className="font-bold text-slate-700 dark:text-slate-200">{bCount} {t('فروع', 'branches')}</p>
                   </div>
                   <div className="rounded-xl bg-slate-50 p-2 text-center dark:bg-slate-800/50">
-                    <span className="text-[10px] text-slate-400">{t('المستودعات', 'Warehouses')}</span>
+                    <span className="text-[10px] text-slate-400">{t('المخازن', 'Stores / Warehouses')}</span>
                     <p className="font-bold text-slate-700 dark:text-slate-200">{wCount} {t('مخازن', 'stores')}</p>
                   </div>
                 </div>
@@ -642,13 +699,33 @@ export const CompaniesBranchesView: React.FC = () => {
                 </div>
 
                 <div className="mt-3 flex items-center justify-between gap-2 flex-wrap pt-2 border-t border-slate-100 dark:border-slate-800/60">
-                  <button
-                    onClick={() => openEditTenant(item)}
-                    className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 transition-colors cursor-pointer"
-                  >
-                    <Sliders className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />
-                    <span>{t('تعديل الموديولات والبيانات', 'Edit Modules & Details')}</span>
-                  </button>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                      onClick={() => openEditTenant(item)}
+                      className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 transition-colors cursor-pointer"
+                    >
+                      <Sliders className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />
+                      <span>{t('تعديل الموديولات والبيانات', 'Edit Modules & Details')}</span>
+                    </button>
+
+                    <button
+                      onClick={() => promptDeleteTenant(item)}
+                      className="flex items-center gap-1.5 rounded-xl border border-amber-200 bg-amber-50/50 px-2.5 py-1.5 text-xs font-bold text-amber-700 hover:bg-amber-100 dark:border-amber-800/50 dark:bg-amber-950/30 dark:text-amber-300 transition-colors cursor-pointer"
+                      title={t('أرشفة الشركة في الأرشيف الآمن', 'Archive Company')}
+                    >
+                      <Archive className="h-3.5 w-3.5 text-amber-600" />
+                      <span>{t('أرشفة', 'Archive')}</span>
+                    </button>
+
+                    <button
+                      onClick={() => setPurgeTenantTarget(item)}
+                      className="flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50/60 px-2.5 py-1.5 text-xs font-bold text-rose-700 hover:bg-rose-100 dark:border-rose-800/50 dark:bg-rose-950/30 dark:text-rose-300 transition-colors cursor-pointer"
+                      title={t('مسح نهائي للشركة وكافة سجلاتها', 'Purge Company')}
+                    >
+                      <Trash2 className="h-3.5 w-3.5 text-rose-600" />
+                      <span>{t('مسح نهائي', 'Purge')}</span>
+                    </button>
+                  </div>
 
                   <button
                     onClick={() => {
@@ -657,7 +734,7 @@ export const CompaniesBranchesView: React.FC = () => {
                     }}
                     className="text-xs font-bold text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 flex items-center gap-1 cursor-pointer"
                   >
-                    <span>{t('إدارة فروع ومستودعات هذه الشركة', 'Manage branches & warehouses')}</span>
+                    <span>{t('إدارة فروع ومخازن هذه الشركة', 'Manage branches & stores')}</span>
                     <ArrowRight className="h-3.5 w-3.5 rtl:rotate-180" />
                   </button>
                 </div>
@@ -672,7 +749,7 @@ export const CompaniesBranchesView: React.FC = () => {
         <div className="space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 rounded-2xl border border-indigo-100 bg-indigo-50/40 p-3.5 text-xs text-indigo-900 dark:border-indigo-900/40 dark:bg-indigo-950/20 dark:text-indigo-200">
             <div>
-              <span className="font-bold">{t('الشركة الحالية المعروض فروعها ومستودعاتها:', 'Current Active Entity:')}</span>{' '}
+              <span className="font-bold">{t('الشركة الحالية المعروض فروعها ومخازنها:', 'Current Active Entity:')}</span>{' '}
               <strong className="underline">{currentTenant.name}</strong> ({currentTenant.code})
             </div>
             <div className="flex items-center gap-2">
@@ -794,7 +871,7 @@ export const CompaniesBranchesView: React.FC = () => {
                     <div className="mt-4 border-t border-slate-100 pt-3 dark:border-slate-800/60">
                       <div className="flex items-center justify-between mb-2">
                         <span className="text-[11px] font-bold text-slate-600 dark:text-slate-300">
-                          {t('المستودعات والمخازن التابعة لهذا الفرع:', 'Warehouses in this branch:')}
+                          {t('المخازن التابعة لهذا الفرع:', 'Stores/Warehouses in this branch:')}
                         </span>
                         <button
                           onClick={() => {
@@ -810,7 +887,7 @@ export const CompaniesBranchesView: React.FC = () => {
 
                       {branchWhs.length === 0 ? (
                         <div className="rounded-xl bg-slate-50 p-2.5 text-center text-xs text-slate-400 dark:bg-slate-800/40">
-                          {t('لا توجد مستودعات مسجلة لهذا الفرع بعد.', 'No warehouses in this branch yet.')}
+                          {t('لا توجد مخازن مسجلة لهذا الفرع بعد.', 'No stores/warehouses in this branch yet.')}
                         </div>
                       ) : (
                         <div className="space-y-1.5">
@@ -832,14 +909,14 @@ export const CompaniesBranchesView: React.FC = () => {
                                 <button
                                   onClick={() => openEditWarehouse(wh)}
                                   className="rounded-lg p-1 text-slate-400 hover:text-indigo-600 hover:bg-white dark:hover:bg-slate-700 transition-colors cursor-pointer"
-                                  title={t('تعديل المستودع', 'Edit warehouse')}
+                                  title={t('تعديل المخزن', 'Edit store')}
                                 >
                                   <Edit3 className="h-3.5 w-3.5" />
                                 </button>
                                 <button
                                   onClick={() => promptDeleteWarehouse(wh)}
                                   className="rounded-lg p-1 text-slate-400 hover:text-rose-600 hover:bg-white dark:hover:bg-slate-700 transition-colors cursor-pointer"
-                                  title={t('حذف أو أرشفة المستودع', 'Delete or archive warehouse')}
+                                  title={t('حذف أو أرشفة المخزن', 'Delete or archive store')}
                                 >
                                   <Trash2 className="h-3.5 w-3.5" />
                                 </button>
@@ -872,7 +949,7 @@ export const CompaniesBranchesView: React.FC = () => {
                 </h4>
                 <p className="text-amber-800/90 dark:text-amber-300/90 leading-relaxed">
                   {t(
-                    'تطبيقاً لقواعد النزاهة المحاسبية وحماية البيانات: أي فرع، مستودع، أو شركة مرتبط به فواتير أو مستخدمين أو حركات مخزنية يتم تحويله تلقائياً إلى هذا الأرشيف الآمن لمنع تلف الحركات السابقة بدلاً من الحذف النهائي. ولا يمكن استعادة أي سجل إلى الخدمة النشطة إلا باعتماد رسمي من مدير عام النظام (Admin Approval Required).',
+                    'تطبيقاً لقواعد النزاهة المحاسبية وحماية البيانات: أي فرع، مخزن، أو شركة مرتبط به فواتير أو مستخدمين أو حركات مخزنية يتم تحويله تلقائياً إلى هذا الأرشيف الآمن لمنع تلف الحركات السابقة بدلاً من الحذف النهائي. ولا يمكن استعادة أي سجل إلى الخدمة النشطة إلا باعتماد رسمي من مدير عام النظام (Admin Approval Required).',
                     'To protect accounting integrity and historical transactions: any entity with linked invoices, warehouses, or users is safeguarded here rather than hard-deleted. Restoration requires explicit Admin approval.'
                   )}
                 </p>
@@ -926,7 +1003,7 @@ export const CompaniesBranchesView: React.FC = () => {
                   : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300'
               }`}
             >
-              {t('المستودعات المؤرشفة', 'Archived Warehouses')} ({archivedWarehouses.length})
+              {t('المخازن المؤرشفة', 'Archived Stores')} ({archivedWarehouses.length})
             </button>
             <button
               onClick={() => setArchiveSubTab('companies')}
@@ -951,7 +1028,7 @@ export const CompaniesBranchesView: React.FC = () => {
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 max-w-sm">
                 {t(
-                  'كافة الفروع والمستودعات والشركات تعمل بالحالة النشطة دون أي أرشفة.',
+                  'كافة الفروع والمخازن والشركات تعمل بالحالة النشطة دون أي أرشفة.',
                   'All branches, warehouses, and companies are active and operating normally.'
                 )}
               </p>
@@ -961,7 +1038,7 @@ export const CompaniesBranchesView: React.FC = () => {
               {/* Render Archived Branches */}
               {(archiveSubTab === 'all' || archiveSubTab === 'branches') &&
                 archivedBranches.map((br) => {
-                  const parentTenant = tenants.find((t) => t.id === br.tenantId);
+                  const parentTenant = (allTenants || tenants).find((t) => t.id === br.tenantId);
                   return (
                     <div
                       key={br.id}
@@ -982,7 +1059,7 @@ export const CompaniesBranchesView: React.FC = () => {
                               </span>
                             </div>
                             <p className="text-xs text-slate-500 font-mono mt-0.5">
-                              [{br.code}] • {parentTenant?.name || t('شركة عامة', 'Company')}
+                              [{br.code}] • {parentTenant?.name || (br.tenantId === 'tenant-barbie' ? 'شركة باربي' : t('شركة عامة', 'Company'))}
                             </p>
                           </div>
                         </div>
@@ -1033,8 +1110,8 @@ export const CompaniesBranchesView: React.FC = () => {
               {/* Render Archived Warehouses */}
               {(archiveSubTab === 'all' || archiveSubTab === 'warehouses') &&
                 archivedWarehouses.map((wh) => {
-                  const parentBranch = branches.find((b) => b.id === wh.branchId);
-                  const parentTenant = tenants.find((t) => t.id === wh.tenantId);
+                  const parentBranch = (allBranches || branches).find((b) => b.id === wh.branchId);
+                  const parentTenant = (allTenants || tenants).find((t) => t.id === wh.tenantId);
                   return (
                     <div
                       key={wh.id}
@@ -1051,11 +1128,11 @@ export const CompaniesBranchesView: React.FC = () => {
                                 {language === 'ar' ? wh.name : wh.nameEn || wh.name}
                               </span>
                               <span className="rounded-md bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300">
-                                {t('مستودع مؤرشف', 'Archived Warehouse')}
+                                {t('مخزن مؤرشف', 'Archived Store')}
                               </span>
                             </div>
                             <p className="text-xs text-slate-500 font-mono mt-0.5">
-                              [{wh.code}] • {parentBranch?.name || t('فرع عام', 'Branch')} ({parentTenant?.name || ''})
+                              [{wh.code}] • {parentBranch?.name || t('فرع عام', 'Branch')} ({parentTenant?.name || (wh.tenantId === 'tenant-barbie' ? 'شركة باربي' : '')})
                             </p>
                           </div>
                         </div>
@@ -1090,7 +1167,7 @@ export const CompaniesBranchesView: React.FC = () => {
                             className="flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 py-2 text-xs font-bold text-white shadow-md hover:bg-emerald-700 transition-all cursor-pointer"
                           >
                             <RotateCcw className="h-3.5 w-3.5" />
-                            <span>{t('اعتماد واستعادة المستودع (Admin Approve)', 'Approve & Restore Warehouse')}</span>
+                            <span>{t('اعتماد واستعادة المخزن (Admin Approve)', 'Approve & Restore Store')}</span>
                           </button>
                         ) : (
                           <div className="flex items-center gap-1.5 rounded-xl bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-500 dark:bg-slate-800">
@@ -1152,8 +1229,17 @@ export const CompaniesBranchesView: React.FC = () => {
                       )}
                     </div>
 
-                    {/* Restore Action */}
-                    <div className="mt-4 flex items-center justify-end border-t border-slate-100 pt-3 dark:border-slate-800">
+                    {/* Restore & Purge Actions */}
+                    <div className="mt-4 flex items-center justify-end gap-2 border-t border-slate-100 pt-3 dark:border-slate-800 flex-wrap">
+                      <button
+                        onClick={() => setPurgeTenantTarget(tItem)}
+                        className="flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50/70 px-3.5 py-2 text-xs font-bold text-rose-700 hover:bg-rose-100 dark:border-rose-900/50 dark:bg-rose-950/40 dark:text-rose-300 transition-all cursor-pointer"
+                        title={t('مسح نهائي للشركة من قاعدة البيانات', 'Purge permanently from DB')}
+                      >
+                        <Trash2 className="h-3.5 w-3.5 text-rose-600" />
+                        <span>{t('مسح نهائي من السيستم', 'Purge from System')}</span>
+                      </button>
+
                       {isAdmin ? (
                         <button
                           onClick={() => handleRestoreTenant(tItem.id)}
@@ -1318,6 +1404,24 @@ export const CompaniesBranchesView: React.FC = () => {
                 </p>
               </div>
 
+              {/* Default POS Collection Only Setting (User Requested) */}
+              <div className="flex items-center justify-between rounded-xl border border-amber-200 bg-amber-50/70 p-3 dark:border-amber-800/60 dark:bg-amber-950/20">
+                <div>
+                  <span className="block text-xs font-bold text-amber-950 dark:text-amber-200">
+                    {t('الوضع الافتراضي في نقطة البيع: تسجيل تحصيل فقط (ليس إيراد)', 'Default in POS: Collection Only (No Revenue)')}
+                  </span>
+                  <span className="text-[11px] text-amber-700 dark:text-amber-400">
+                    {t('تحديد ما إذا كان خيار (تحصيل فقط) مفعلاً افتراضياً في شاشة نقطة البيع لهذه الشركة', 'Specify whether (Collection Only) is enabled by default in POS for this company')}
+                  </span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={newCompanyDefaultPosCollectionOnly}
+                  onChange={(e) => setNewCompanyDefaultPosCollectionOnly(e.target.checked)}
+                  className="h-5 w-5 rounded text-amber-600 focus:ring-amber-500 cursor-pointer"
+                />
+              </div>
+
               {/* Accompanying Modules Chooser */}
               <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3.5 dark:border-slate-700 dark:bg-slate-800/50 space-y-2.5">
                 <div className="flex items-center justify-between">
@@ -1383,10 +1487,10 @@ export const CompaniesBranchesView: React.FC = () => {
               <div className="rounded-xl bg-amber-50/90 p-3 text-[11px] text-amber-900 dark:bg-amber-950/40 dark:text-amber-200 border border-amber-200 dark:border-amber-900/60 flex items-start gap-2.5">
                 <span className="text-base">🛡️</span>
                 <div>
-                  <p className="font-bold">{t('عدم إنشاء فروع أو مستودعات آلياً:', 'Manual Branch & Warehouse Management:')}</p>
+                  <p className="font-bold">{t('عدم إنشاء فروع أو مخازن آلياً:', 'Manual Branch & Store Management:')}</p>
                   <p className="mt-0.5 text-slate-600 dark:text-slate-300">
                     {t(
-                      'لن يتم توليد فرع أو مستودع بشكل آلي عند حفظ الشركة. يمكنك إضافة الفروع والمستودعات حسب رغبتك وتوزيعك الجغرافي لاحقاً من تبويب الفروع.',
+                      'لن يتم توليد فرع أو مخزن بشكل آلي عند حفظ الشركة. يمكنك إضافة الفروع والمخازن حسب رغبتك وتوزيعك الجغرافي لاحقاً من تبويب الفروع.',
                       'No branches or warehouses will be created automatically. You can manually add branches and warehouses as required from the branches tab.'
                     )}
                   </p>
@@ -1549,6 +1653,24 @@ export const CompaniesBranchesView: React.FC = () => {
                     ))}
                   </div>
                 </div>
+              </div>
+
+              {/* Default POS Collection Only Setting (User Requested) */}
+              <div className="flex items-center justify-between rounded-xl border border-amber-200 bg-amber-50/70 p-3 dark:border-amber-800/60 dark:bg-amber-950/20">
+                <div>
+                  <span className="block text-xs font-bold text-amber-950 dark:text-amber-200">
+                    {t('الوضع الافتراضي في نقطة البيع: تسجيل تحصيل فقط (ليس إيراد)', 'Default in POS: Collection Only (No Revenue)')}
+                  </span>
+                  <span className="text-[11px] text-amber-700 dark:text-amber-400">
+                    {t('تحديد ما إذا كان خيار (تحصيل فقط) مفعلاً افتراضياً في شاشة نقطة البيع لهذه الشركة', 'Specify whether (Collection Only) is enabled by default in POS for this company')}
+                  </span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={editDefaultPosCollectionOnly}
+                  onChange={(e) => setEditDefaultPosCollectionOnly(e.target.checked)}
+                  className="h-5 w-5 rounded text-amber-600 focus:ring-amber-500 cursor-pointer"
+                />
               </div>
 
               {/* Accompanying Modules Modification */}
@@ -1747,13 +1869,13 @@ export const CompaniesBranchesView: React.FC = () => {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-xs">
           <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl dark:bg-slate-900 border border-slate-100 dark:border-slate-800">
             <h3 className="text-sm font-extrabold text-slate-900 dark:text-white mb-3">
-              {t('إضافة مستودع / مخزن جديد', 'Add New Warehouse')}
+              {t('إضافة مخزن جديد', 'Add New Store / Warehouse')}
             </h3>
 
             <form onSubmit={handleCreateWarehouse} className="space-y-3 text-xs">
               <div>
                 <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  {t('الفرع التابع له المستودع *:', 'Assigned Branch *:')}
+                  {t('الفرع التابع له المخزن *:', 'Assigned Branch *:')}
                 </label>
                 <select
                   value={selectedBranchForWh}
@@ -1770,7 +1892,7 @@ export const CompaniesBranchesView: React.FC = () => {
 
               <div>
                 <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  {t('اسم المستودع (بالعربية) *:', 'Warehouse Name (Arabic) *:')}
+                  {t('اسم المخزن (بالعربية) *:', 'Store Name (Arabic) *:')}
                 </label>
                 <input
                   type="text"
@@ -1785,7 +1907,7 @@ export const CompaniesBranchesView: React.FC = () => {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    {t('كود المستودع:', 'Warehouse Code:')}
+                    {t('كود المخزن:', 'Store Code:')}
                   </label>
                   <input
                     type="text"
@@ -1821,7 +1943,7 @@ export const CompaniesBranchesView: React.FC = () => {
                   type="submit"
                   className="rounded-xl bg-indigo-600 px-4 py-2 text-xs font-bold text-white shadow-md hover:bg-indigo-700 cursor-pointer"
                 >
-                  {t('حفظ المستودع', 'Save Warehouse')}
+                  {t('حفظ المخزن', 'Save Store')}
                 </button>
               </div>
             </form>
@@ -1953,7 +2075,7 @@ export const CompaniesBranchesView: React.FC = () => {
               <div className="flex items-center gap-2">
                 <WarehouseIcon className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
                 <h3 className="text-sm font-extrabold text-slate-900 dark:text-white">
-                  {t('تعديل بيانات المستودع', 'Edit Warehouse Details')}
+                  {t('تعديل بيانات المخزن', 'Edit Store Details')}
                 </h3>
               </div>
               <button
@@ -1968,7 +2090,7 @@ export const CompaniesBranchesView: React.FC = () => {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    {t('اسم المستودع (بالعربية) *:', 'Warehouse Name (Arabic) *:')}
+                    {t('اسم المخزن (بالعربية) *:', 'Store Name (Arabic) *:')}
                   </label>
                   <input
                     type="text"
@@ -1980,7 +2102,7 @@ export const CompaniesBranchesView: React.FC = () => {
                 </div>
                 <div>
                   <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    {t('اسم المستودع (بالإنجليزية):', 'Warehouse Name (English):')}
+                    {t('اسم المخزن (بالإنجليزية):', 'Store Name (English):')}
                   </label>
                   <input
                     type="text"
@@ -1994,7 +2116,7 @@ export const CompaniesBranchesView: React.FC = () => {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    {t('كود المستودع:', 'Warehouse Code:')}
+                    {t('كود المخزن:', 'Store Code:')}
                   </label>
                   <input
                     type="text"
@@ -2093,7 +2215,7 @@ export const CompaniesBranchesView: React.FC = () => {
             ) : (
               <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
                 {t(
-                  'هذا السجل غير مرتبط بأي فواتير أو مستودعات أو حركات سابقة. هل ترغب بالتأكيد في حذفه نهائياً؟',
+                  'هذا السجل غير مرتبط بأي فواتير أو مخازن أو حركات سابقة. هل ترغب بالتأكيد في حذفه نهائياً؟',
                   'This record has no associated data or invoices. Are you sure you want to permanently delete it?'
                 )}
               </p>
@@ -2107,6 +2229,20 @@ export const CompaniesBranchesView: React.FC = () => {
               >
                 {t('إلغاء', 'Cancel')}
               </button>
+              {deleteTarget.type === 'tenant' && deleteTarget.hasData && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const tObj = allTenants.find((t) => t.id === deleteTarget.id);
+                    setDeleteTarget(null);
+                    if (tObj) setPurgeTenantTarget(tObj);
+                  }}
+                  className="flex items-center gap-1.5 rounded-xl border border-rose-300 bg-rose-50 px-3.5 py-2 text-xs font-bold text-rose-700 hover:bg-rose-100 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300 cursor-pointer"
+                >
+                  <Trash2 className="h-4 w-4 text-rose-600" />
+                  <span>{t('مسح نهائي بدلاً من الأرشفة', 'Purge Instead')}</span>
+                </button>
+              )}
               <button
                 type="button"
                 onClick={executeDelete}
@@ -2127,6 +2263,69 @@ export const CompaniesBranchesView: React.FC = () => {
                     <span>{t('تأكيد الحذف النهائي', 'Confirm Delete')}</span>
                   </>
                 )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PURGE COMPANY PERMANENTLY MODAL */}
+      {purgeTenantTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 backdrop-blur-xs p-4 animate-in fade-in">
+          <div className="w-full max-w-md rounded-3xl border border-rose-200 bg-white p-6 shadow-2xl dark:border-rose-900/50 dark:bg-slate-900">
+            <div className="flex items-center gap-3 text-rose-600 dark:text-rose-400">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-rose-100 dark:bg-rose-950/60">
+                <Trash2 className="h-6 w-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900 dark:text-white">
+                  {t('تأكيد مسح الشركة نهائياً من السيستم', 'Confirm Permanent Company Purge')}
+                </h3>
+                <p className="text-xs text-rose-600 dark:text-rose-400 font-mono mt-0.5">
+                  [{purgeTenantTarget.code}] {purgeTenantTarget.name}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50/70 p-4 text-xs dark:border-rose-900/50 dark:bg-rose-950/30">
+              <div className="flex items-start gap-2.5">
+                <AlertTriangle className="h-5 w-5 text-rose-600 shrink-0 mt-0.5" />
+                <div className="space-y-1 text-rose-900 dark:text-rose-200">
+                  <p className="font-bold">
+                    {t('تحذير لا رجعة فيه (Irreversible Action):', 'Permanent Deletion Warning:')}
+                  </p>
+                  <p className="leading-relaxed text-[11px]">
+                    {t(
+                      'سيؤدي هذا الإجراء إلى مسح الشركة المحددة نهائياً من النظام، بالإضافة إلى شطب كافة الفروع والمخازن التابعة لها، وكافة القيود المحاسبية، والحسابات المالية، وفواتير المبيعات، وبيانات المنتجات والمخزون المرتبطة بها حصراً.',
+                      'This action will permanently purge this company and cascade-delete all its branches, warehouses, journal entries, accounts, invoices, and product stock.'
+                    )}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <p className="mt-3 text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+              {t(
+                'يرجى التأكد من عدم الحاجة لأي بيانات من هذه الشركة قبل المتابعة.',
+                'Please verify that no required records or reports remain inside this company before proceeding.'
+              )}
+            </p>
+
+            <div className="mt-6 flex items-center justify-end gap-2 border-t border-slate-100 pt-4 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setPurgeTenantTarget(null)}
+                className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 cursor-pointer"
+              >
+                {t('إلغاء والتراجع', 'Cancel')}
+              </button>
+              <button
+                type="button"
+                onClick={handlePurgeTenant}
+                className="flex items-center gap-1.5 rounded-xl bg-rose-600 px-4 py-2 text-xs font-bold text-white shadow-lg shadow-rose-600/30 hover:bg-rose-700 cursor-pointer transition-colors"
+              >
+                <Trash2 className="h-4 w-4" />
+                <span>{t('تأكيد مسح الشركة نهائياً', 'Permanently Purge Company')}</span>
               </button>
             </div>
           </div>

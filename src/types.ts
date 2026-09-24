@@ -1,5 +1,20 @@
 export type Language = 'ar' | 'en';
 
+export interface CleanCompanySetupParams {
+  name: string;
+  nameEn?: string;
+  code: string;
+  currency: string;
+  currencySymbol: string;
+  taxRate: number;
+  activityType: 'retail_pos' | 'clinic_medical' | 'trading_services' | 'general';
+  mainBranchName?: string;
+  mainWarehouseName?: string;
+  city?: string;
+  phone?: string;
+  wipeDemoData?: boolean;
+}
+
 export interface Tenant {
   id: string;
   name: string;
@@ -14,6 +29,7 @@ export interface Tenant {
   customerStartNumber?: number; // Starting serial number (e.g. 1000)
   supplierNumberingMode?: 'per_company' | 'per_branch';
   supplierStartNumber?: number;
+  defaultPosCollectionOnly?: boolean; // الوضع الافتراضي لخيار تحصيل فقط في نقطة البيع
   isArchived?: boolean;
   archivedAt?: string;
   archivedBy?: string;
@@ -92,9 +108,15 @@ export interface Product {
   minStockLevel: number;
   unit: string; // وحدة التعريف اليدوية (قطعة، علبة، طقم، أنبوبة، شريط، الخ)
   isService?: boolean;
-  itemType?: 'product' | 'service' | 'stock_raw' | 'consumable' | 'sales_product' | 'sales_service' | 'medical_supply'; // تمييز الصنف المخزني أو الصنف البيعي
+  isPackage?: boolean; // هل هو باقة / عرض جلسات متعددة
+  totalSessions?: number; // عدد الجلسات المضمنة في الباقة
+  validityDays?: number; // صلاحية الباقة بالأيام (مثلاً 90 أو 180 يوم)
+  linkedServiceId?: string; // معرف الخدمة/الجلسة الطبية المندرجة في الباقة
+  linkedServiceNameAr?: string; // اسم الخدمة الطبية المندرجة
+  itemType?: 'product' | 'service' | 'stock_raw' | 'consumable' | 'sales_product' | 'sales_service' | 'sales_package' | 'medical_supply'; // تمييز الصنف المخزني أو الصنف البيعي أو الباقة
   isSalesItem?: boolean; // هل هو صنف بيعي (للعملاء)
   isStockItem?: boolean; // هل هو صنف مخزني (خامات ومستهلكات)
+  defaultCollectionOnly?: boolean; // الوضع الافتراضي عند إضافة هذا المنتج/الخدمة في نقطة البيع: تحصيل فقط
   isActive?: boolean;
 
   // ربط الصنف المخزني بالمنتجات البيعية ومقاييس الاستهلاك وتكلفة البيع
@@ -102,6 +124,13 @@ export interface Product {
   consumptionBasis?: 'revenue_ratio' | 'units_sold' | 'clients_served' | 'fixed_monthly'; // أساس الربط
   consumptionRate?: number; // معدل الاستهلاك لكل وحدة مبيعة أو 1000 ج.م إيراد
   monthlyQuota?: number; // الحصة الاستهلاكية الشهرية المحددة
+  etaCode?: string; // كود الفاتورة الإلكترونية الموحد (EGS أو GS1) المعتمد من مصلحة الضرائب المصرية
+  etaCodeType?: 'EGS' | 'GS1';
+  egsCode?: string;
+  gs1Code?: string;
+  itemCodingType?: 'EGS' | 'GS1';
+  branchId?: string;
+  branchIds?: string[];
   notes?: string;
 }
 
@@ -207,7 +236,7 @@ export interface JournalLine {
 export interface JournalEntry {
   id: string;
   tenantId: string;
-  branchId: string;
+  branchId?: string;
   entryNumber: string;
   date: string;
   description: string;
@@ -243,16 +272,19 @@ export interface PaymentMethod {
 // Client Offers / Packages (عروض وباقات العميل)
 export interface ClientOffer {
   id: string;
+  packageProductId?: string; // معرّف الصنف البيعي للباقة
   offerNameAr: string;
   offerNameEn: string;
   totalQuantity: number; // إجمالي الجلسات / البلسات
   consumedQuantity: number; // المستهلك
   remainingQuantity: number; // المتبقي
-  unitPrice: number;
+  unitPrice?: number;
   totalPrice: number;
   purchaseDate: string;
   expiryDate?: string;
   status: 'Active' | 'Consumed' | 'Expired';
+  serviceType?: string;
+  notes?: string;
 }
 
 // Unified Parties (Customers/Patients & Suppliers)
@@ -260,6 +292,7 @@ export interface Party {
   id: string;
   tenantId: string;
   branchId?: string; // التابع له
+  branchIds?: string[]; // الفروع المصرح بها
   paperCode?: string; // كود ورقي
   systemCode?: string; // كود السيستم
   fileNumber?: string; // رقم الملف
@@ -400,8 +433,8 @@ export interface PaymentSplit {
 export interface SalesInvoice {
   id: string;
   tenantId: string;
-  branchId: string;
-  warehouseId: string;
+  branchId?: string;
+  warehouseId?: string;
   invoiceNumber: string;
   customerId: string;
   customerName: string;
@@ -412,6 +445,9 @@ export interface SalesInvoice {
   netAmount: number;
   paymentMethod: string; // Dynamic payment method name/code
   paymentMethodId?: string;
+  paymentFeePercentage?: number;
+  paymentFeeAmount?: number;
+  totalWithFee?: number;
   cashPaid?: number;
   cardPaid?: number;
   splitPayments?: PaymentSplit[];
@@ -647,6 +683,13 @@ export interface ReceptionShift {
   closedAt?: string;
   status: 'Open' | 'Closed';
   notes?: string;
+  closingNotes?: string;
+  manualNotesHistory?: {
+    id: string;
+    timestamp: string;
+    author: string;
+    note: string;
+  }[];
 
   // Run rows & Financials
   runRows: ShiftRunRow[];
@@ -659,6 +702,18 @@ export interface ReceptionShift {
   totalCollected: number;
   totalExpenses: number;
   netShiftCash: number;
+
+  // Cash Drawer Reconciliation & Z-Report
+  openingFloat?: number;
+  initialBalance?: number;
+  cashCollected?: number;
+  cashExpenses?: number;
+  expectedCashInDrawer?: number;
+  actualCashCount?: number;
+  cashDiscrepancy?: number;
+  transferredToMainTreasury?: boolean;
+  mainTreasuryReceiptNumber?: string;
+  zReportNumber?: string;
 
   // Accountant Overrides / Adjustments (تعديلات المحاسب)
   accountantAdjustments?: {
@@ -674,7 +729,7 @@ export interface ReceptionShift {
 export interface PosShift {
   id: string;
   tenantId: string;
-  branchId: string;
+  branchId?: string;
   cashierName: string;
   openingFloat: number;
   openedAt: string;
@@ -699,7 +754,7 @@ export interface AuditRecord {
   id: string;
   tenantId: string;
   branchId?: string;
-  entityType: 'Party' | 'Appointment' | 'TreatmentPlan' | 'Staff' | 'PaymentMethod' | 'Product' | 'Invoice' | 'Shift' | 'Tenant' | 'Branch' | 'User' | 'Account';
+  entityType: 'Party' | 'Appointment' | 'TreatmentPlan' | 'Staff' | 'PaymentMethod' | 'Product' | 'Invoice' | 'Shift' | 'Tenant' | 'Branch' | 'Warehouse' | 'User' | 'Account';
   entityId: string;
   entityName: string;
   actionType: 'CREATE' | 'UPDATE' | 'DELETE' | 'ARCHIVE' | 'RESTORE' | 'CANCEL';
@@ -783,3 +838,195 @@ export interface AppUser {
   allowedViews: string[];
   allowedActions: string[];
 }
+
+// ==========================================
+// سندات ومستندات محاسبية ومخزنية متخصصة
+// ==========================================
+
+export interface CashReceiptVoucher {
+  id: string;
+  voucherNumber: string;
+  date: string;
+  time: string;
+  tenantId: string;
+  branchId: string;
+  partyId?: string;
+  receivedFrom: string;
+  amount: number;
+  currency: string;
+  paymentMethod: 'Cash' | 'Card' | 'Transfer' | 'Check';
+  bankOrSafeAccountId?: string;
+  bankName?: string;
+  checkNumber?: string;
+  checkDate?: string;
+  referenceInvoiceNo?: string;
+  description: string;
+  costCenter?: string;
+  receiverName: string;
+  clientSignature?: string;
+  status: 'active' | 'cancelled';
+  createdAt: string;
+}
+
+export interface CashPaymentVoucher {
+  id: string;
+  voucherNumber: string;
+  date: string;
+  time: string;
+  tenantId: string;
+  branchId: string;
+  paidTo: string;
+  partyId?: string;
+  expenseAccountId?: string;
+  expenseCategory?: string;
+  amount: number;
+  currency: string;
+  paymentMethod: 'Cash' | 'Card' | 'Transfer' | 'Check';
+  paidFromAccount: string;
+  checkNumber?: string;
+  invoiceReference?: string;
+  description: string;
+  costCenter?: string;
+  preparedBy: string;
+  approvedBy?: string;
+  receiverName?: string;
+  status: 'active' | 'cancelled';
+  createdAt: string;
+}
+
+export interface TaxInvoiceItem {
+  id: string;
+  productId?: string;
+  name: string;
+  sku?: string;
+  quantity: number;
+  unit: string;
+  unitPrice: number; // Excl. VAT
+  discount: number;
+  taxableAmount: number;
+  vatRate: number; // e.g. 14%
+  vatAmount: number;
+  subtotalWithVat: number;
+}
+
+export interface SpecializedTaxInvoice {
+  id: string;
+  invoiceNumber: string;
+  invoiceType: 'tax_invoice' | 'simplified_tax_invoice';
+  tenantId: string;
+  branchId: string;
+  date: string;
+  time: string;
+  supplyDate: string;
+  dueDate: string;
+  partyId?: string;
+  customerName: string;
+  customerVatNumber?: string;
+  customerCrNumber?: string;
+  customerAddress?: string;
+  customerPhone?: string;
+  nationalId?: string; // الرقم القومي للعميل (لمنظومة الفاتورة والإيصال الإلكتروني ETA)
+  sellerVatNumber: string;
+  sellerCrNumber: string;
+  sellerAddress: string;
+  sellerPhone: string;
+  items: TaxInvoiceItem[];
+  subtotalExclVat: number;
+  totalDiscount: number;
+  totalTaxable: number;
+  totalVat: number;
+  grandTotal: number;
+  currency: string;
+  paymentMethod: string;
+  splitPayments?: PaymentSplit[]; // السداد المتعدد (كاش + فيزا + إنستاباي)
+  bankName?: string;
+  iban?: string;
+  notes?: string;
+  termsAndConditions?: string;
+  status: 'issued' | 'paid' | 'cancelled';
+  cancellationReason?: string;
+  cancelledAt?: string;
+  cancelledBy?: string;
+  qrCodeDataUrl?: string;
+  createdAt: string;
+}
+
+export interface GoodsReceiptItem {
+  productId: string;
+  productName: string;
+  sku: string;
+  unit: string;
+  batchNo?: string;
+  batchNumber?: string;
+  expiryDate?: string;
+  quantityOrdered?: number;
+  quantityReceived: number;
+  unitCost: number;
+  totalCost: number;
+  notes?: string;
+}
+
+export interface GoodsReceiptVoucher {
+  id: string;
+  grnNumber: string;
+  date: string;
+  time: string;
+  tenantId: string;
+  branchId: string;
+  warehouseId: string;
+  warehouseName?: string;
+  supplierId?: string;
+  supplierName: string;
+  supplierInvoiceNo?: string;
+  purchaseOrderNo?: string;
+  items: GoodsReceiptItem[];
+  totalItemsCount?: number;
+  totalValue?: number;
+  totalCostValue?: number;
+  receiverStaffName?: string;
+  receiverName?: string;
+  inspectedBy?: string;
+  inspectorName?: string;
+  notes?: string;
+  status: 'received' | 'cancelled';
+  createdAt: string;
+}
+
+export interface GoodsIssueItem {
+  productId: string;
+  productName: string;
+  sku: string;
+  unit: string;
+  quantityIssued: number;
+  unitCost: number;
+  totalCost: number;
+}
+
+export interface GoodsIssueVoucher {
+  id: string;
+  ginNumber: string;
+  date: string;
+  time: string;
+  tenantId: string;
+  branchId: string;
+  warehouseId: string;
+  warehouseName?: string;
+  department?: string;
+  recipientName: string;
+  reason?: 'treatment_consumption' | 'clinic_requisition' | 'damaged_write_off' | 'internal_use';
+  purpose?: string;
+  referenceOrderNo?: string;
+  costCenter?: string;
+  items: GoodsIssueItem[];
+  totalQuantity?: number;
+  totalCost?: number;
+  totalCostValue?: number;
+  authorizedBy?: string;
+  approvedBy?: string;
+  dispensedBy?: string;
+  issuedBy?: string;
+  notes?: string;
+  status: 'issued' | 'cancelled';
+  createdAt: string;
+}
+

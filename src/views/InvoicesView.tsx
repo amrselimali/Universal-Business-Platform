@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { usePlatform } from '../context/PlatformContext';
 import { SalesInvoice } from '../types';
 import {
@@ -16,6 +16,7 @@ import {
   Filter,
   Building2,
   Lock,
+  GitBranch,
 } from 'lucide-react';
 
 export const InvoicesView: React.FC = () => {
@@ -25,6 +26,7 @@ export const InvoicesView: React.FC = () => {
     invoices,
     tenant,
     activeBranch,
+    setActiveBranch,
     branches,
     currentUser,
     users,
@@ -33,8 +35,19 @@ export const InvoicesView: React.FC = () => {
 
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedInvoice, setSelectedInvoice] = useState<SalesInvoice | null>(null);
-  const [selectedBranchFilter, setSelectedBranchFilter] = useState<string>('all');
+
+  // Initialize selectedBranchFilter with activeBranch id
+  const [selectedBranchFilter, setSelectedBranchFilter] = useState<string>(
+    activeBranch?.id || (branches.length > 0 ? branches[0].id : 'all')
+  );
   const [selectedCashierFilter, setSelectedCashierFilter] = useState<string>('all');
+
+  // Keep branch filter in sync with activeBranch whenever activeBranch changes anywhere in the platform
+  useEffect(() => {
+    if (activeBranch?.id) {
+      setSelectedBranchFilter(activeBranch.id);
+    }
+  }, [activeBranch?.id]);
 
   // Check if current user is an Admin/Manager who can see all invoices of this tenant, or a restricted user
   const isSuperOrAdmin =
@@ -42,68 +55,88 @@ export const InvoicesView: React.FC = () => {
     currentUser?.role === 'Admin' ||
     currentUser?.permissions?.includes('all');
 
-  // Scoped invoices based on User Scope and Role
-  const scopedInvoices = invoices.filter((inv) => {
-    // 1. Strict Tenant Isolation (Already scoped from PlatformContext, but double check)
-    if (inv.tenantId !== tenant?.id) return false;
+  // Scoped invoices based on User Scope, Role, and Selected Branch
+  const scopedInvoices = useMemo(() => {
+    return invoices.filter((inv) => {
+      // 1. Strict Tenant Isolation (Already scoped from PlatformContext, but double check)
+      if (inv.tenantId !== tenant?.id) return false;
 
-    // 2. User Scoping:
-    // If not Admin/SuperAdmin, only show invoices created by or linked to this cashier/user
-    if (!isSuperOrAdmin) {
-      const matchId =
-        inv.cashierId === currentUser?.id ||
-        inv.createdById === currentUser?.id ||
-        (currentUser?.name && inv.cashierName?.includes(currentUser.name));
-      if (!matchId) return false;
-    }
+      // 2. Strict Branch Isolation (Only show invoices belonging to selected branch)
+      if (selectedBranchFilter !== 'all') {
+        if (inv.branchId !== selectedBranchFilter) return false;
+      } else if (!isSuperOrAdmin && activeBranch?.id) {
+        if (inv.branchId !== activeBranch.id) return false;
+      }
 
-    return true;
-  });
+      // 3. User Scoping:
+      // If not Admin/SuperAdmin, only show invoices created by or linked to this cashier/user
+      if (!isSuperOrAdmin) {
+        const matchId =
+          inv.cashierId === currentUser?.id ||
+          inv.createdById === currentUser?.id ||
+          (currentUser?.name && inv.cashierName?.includes(currentUser.name));
+        if (!matchId) return false;
+      }
 
-  const filteredInvoices = scopedInvoices.filter((inv) => {
-    const q = searchQuery.toLowerCase().trim();
-    const matchQuery =
-      !q ||
-      inv.invoiceNumber.toLowerCase().includes(q) ||
-      inv.customerName.toLowerCase().includes(q) ||
-      inv.paymentMethod.toLowerCase().includes(q) ||
-      inv.cashierName?.toLowerCase().includes(q);
+      return true;
+    });
+  }, [invoices, tenant?.id, selectedBranchFilter, isSuperOrAdmin, activeBranch?.id, currentUser]);
 
-    const matchBranch =
-      selectedBranchFilter === 'all' || inv.branchId === selectedBranchFilter;
+  const filteredInvoices = useMemo(() => {
+    return scopedInvoices.filter((inv) => {
+      const q = searchQuery.toLowerCase().trim();
+      const matchQuery =
+        !q ||
+        inv.invoiceNumber.toLowerCase().includes(q) ||
+        inv.customerName.toLowerCase().includes(q) ||
+        inv.paymentMethod.toLowerCase().includes(q) ||
+        inv.cashierName?.toLowerCase().includes(q);
 
-    const matchCashier =
-      selectedCashierFilter === 'all' ||
-      inv.cashierId === selectedCashierFilter ||
-      inv.cashierName === selectedCashierFilter;
+      const matchCashier =
+        selectedCashierFilter === 'all' ||
+        inv.cashierId === selectedCashierFilter ||
+        inv.cashierName === selectedCashierFilter;
 
-    return matchQuery && matchBranch && matchCashier;
-  });
+      return matchQuery && matchCashier;
+    });
+  }, [scopedInvoices, searchQuery, selectedCashierFilter]);
 
-  // Calculate stats for the scoped invoices
+  // Calculate stats strictly for the branch-scoped invoices
   const totalRevenue = scopedInvoices.reduce((sum, i) => sum + i.netAmount, 0);
   const totalVat = scopedInvoices.reduce((sum, i) => sum + i.taxAmount, 0);
 
+  const selectedBranchObj = branches.find((b) => b.id === selectedBranchFilter) || activeBranch;
+
   return (
     <div className="space-y-6">
-      {/* Company & User Scoping Badge */}
+      {/* Company & Branch Scoping Badge */}
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-xs dark:border-slate-800 dark:bg-slate-900">
         <div className="flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-400">
             <Building2 className="h-5 w-5" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
                 {t('فواتير شركة:', 'Company Invoices:')}
               </span>
               <span className="rounded-md bg-indigo-600 px-2 py-0.5 text-xs font-extrabold text-white">
                 {tenant?.name}
               </span>
+
+              <span className="text-xs text-slate-400">•</span>
+              <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                {t('الفرع:', 'Branch:')}
+              </span>
+              <span className="rounded-md bg-violet-600 px-2 py-0.5 text-xs font-extrabold text-white inline-flex items-center gap-1">
+                <GitBranch className="h-3 w-3" />
+                {selectedBranchFilter === 'all' ? t('كافة الفروع', 'All Branches') : (selectedBranchObj?.name || selectedBranchFilter)}
+              </span>
+
               {isSuperOrAdmin ? (
                 <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
                   <Shield className="h-3 w-3" />
-                  {t('صلاحية شاملة للشركة', 'Full Tenant Scope')}
+                  {t('صلاحية إدارة الفرع', 'Branch Admin Scope')}
                 </span>
               ) : (
                 <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700 dark:bg-amber-950/40 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
@@ -112,31 +145,39 @@ export const InvoicesView: React.FC = () => {
                 </span>
               )}
             </div>
-            <p className="text-[11px] text-slate-500 mt-0.5">
-              {isSuperOrAdmin
+            <p className="text-[11px] text-slate-500 mt-1">
+              {selectedBranchFilter === 'all'
                 ? t(
                     'تظهر هنا كافة الفواتير الصادرة عبر فروع هذه الشركة فقط دون تداخل مع أي شركة أخرى.',
                     'Displaying all invoices across branches for this company with complete tenant isolation.'
                   )
                 : t(
-                    `تظهر هنا الفواتير الصادرة المرتبطة بحسابك (${currentUser?.name || 'المستخدم'}) في هذه الشركة.`,
-                    `Displaying only invoices associated with your account (${currentUser?.name}) in this company.`
+                    `تظهر هنا الفواتير الصادرة والمسجلة على فرع (${selectedBranchObj?.name || 'المحدد'}) فقط دون تداخل مع الفروع الأخرى.`,
+                    `Displaying invoices strictly issued for (${selectedBranchObj?.name || 'Selected'}) branch.`
                   )}
             </p>
           </div>
         </div>
 
-        {/* Summary Mini Cards */}
+        {/* Summary Mini Cards for current branch */}
         <div className="flex items-center gap-4 text-xs font-medium">
           <div className="text-end">
-            <span className="text-slate-400 text-[10px] block">{t('إجمالي الفواتير الصادرة', 'Total Invoices')}</span>
+            <span className="text-slate-400 text-[10px] block">
+              {selectedBranchFilter === 'all'
+                ? t('إجمالي فواتير الشركة', 'Total Company Invoices')
+                : t('إجمالي فواتير الفرع', 'Branch Invoices')}
+            </span>
             <span className="font-mono font-extrabold text-slate-900 dark:text-white text-sm">
               {scopedInvoices.length} {t('فاتورة', 'invoices')}
             </span>
           </div>
           <div className="h-8 w-px bg-slate-200 dark:bg-slate-700"></div>
           <div className="text-end">
-            <span className="text-slate-400 text-[10px] block">{t('إجمالي المبيعات المحصلة', 'Net Revenue')}</span>
+            <span className="text-slate-400 text-[10px] block">
+              {selectedBranchFilter === 'all'
+                ? t('إجمالي مبيعات الشركة', 'Total Company Sales')
+                : t('مبيعات الفرع الصافية', 'Branch Net Sales')}
+            </span>
             <span className="font-mono font-extrabold text-indigo-600 dark:text-indigo-400 text-sm">
               {formatMoney(totalRevenue)}
             </span>
@@ -152,27 +193,37 @@ export const InvoicesView: React.FC = () => {
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400">
             {t(
-              'أرشيف الفواتير المكتملة مع إمكانية إعادة الطباعة، تدقيق الضريبة، ومراجعة القيد المحاسبي المرتبط.',
-              'Completed invoices log with reprint capabilities and accounting audit verification.'
+              'أرشيف الفواتير المكتملة للفرع مع إمكانية إعادة الطباعة، تدقيق الضريبة، ومراجعة القيد المحاسبي المرتبط.',
+              'Completed invoices log for this branch with reprint capabilities and accounting audit verification.'
             )}
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {/* Branch Filter for Admins */}
+          {/* Branch Switcher for Admins */}
           {isSuperOrAdmin && branches.length > 1 && (
-            <select
-              value={selectedBranchFilter}
-              onChange={(e) => setSelectedBranchFilter(e.target.value)}
-              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
-            >
-              <option value="all">{t('كافة فروع الشركة', 'All Branches')}</option>
-              {branches.map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.name}
-                </option>
-              ))}
-            </select>
+            <div className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 dark:border-slate-700 dark:bg-slate-900">
+              <GitBranch className="h-3.5 w-3.5 text-violet-600 dark:text-violet-400" />
+              <select
+                value={selectedBranchFilter}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setSelectedBranchFilter(val);
+                  if (val !== 'all') {
+                    const targetBr = branches.find((b) => b.id === val);
+                    if (targetBr) setActiveBranch(targetBr);
+                  }
+                }}
+                className="bg-transparent text-xs font-semibold text-slate-700 outline-none dark:text-slate-200 cursor-pointer"
+              >
+                {branches.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}
+                  </option>
+                ))}
+                <option value="all">{t('كافة فروع الشركة (عرض شامل)', 'All Branches (Overview)')}</option>
+              </select>
+            </div>
           )}
 
           {/* Cashier Filter for Admins */}
@@ -220,12 +271,15 @@ export const InvoicesView: React.FC = () => {
           <div className="text-center py-12 text-slate-400">
             <Receipt className="h-12 w-12 mx-auto mb-2 text-slate-300 dark:text-slate-600 stroke-1" />
             <p className="text-xs font-bold text-slate-700 dark:text-slate-300">
-              {t('لا توجد فواتير مطابقة في نطاق الصلاحيات المحدد', 'No invoices found in current scope')}
+              {t('لا توجد فواتير مطابقة في نطاق الفرع المحدد', 'No invoices found in current branch scope')}
             </p>
             <p className="text-[11px] text-slate-400 mt-1">
-              {!isSuperOrAdmin
-                ? t('لم تقم بإصدار أي فواتير بيع في هذه الشركة بعد.', 'You have not issued any invoices under this company yet.')
-                : t('جرّب تغيير فلاتر البحث أو التأكد من الفرع المختار.', 'Try modifying search filters or checking branch selection.')}
+              {selectedBranchObj
+                ? t(
+                    `لم يتم إصدار أي فواتير بيع في فرع (${selectedBranchObj.name}) بعد. عند إصدار فواتير من هذا الفرع ستظهر هنا فوراً.`,
+                    `No sales invoices have been issued in (${selectedBranchObj.name}) branch yet.`
+                  )
+                : t('لم تقم بإصدار أي فواتير بيع في هذا النطاق بعد.', 'No sales invoices issued in this scope yet.')}
             </p>
           </div>
         ) : (

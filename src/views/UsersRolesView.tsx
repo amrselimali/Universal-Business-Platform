@@ -42,9 +42,13 @@ export const UsersRolesView: React.FC = () => {
     language,
     tenant,
     tenants,
+    allTenants,
     branches,
+    allBranches,
     warehouses,
+    allWarehouses,
     users,
+    allUsers,
     addUser,
     updateUser,
     deleteUser,
@@ -58,6 +62,8 @@ export const UsersRolesView: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'users' | 'matrix'>('users');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedRoleFilter, setSelectedRoleFilter] = useState<string>('ALL');
+  const [toastFeedback, setToastFeedback] = useState<string | null>(null);
+  const [userToDelete, setUserToDelete] = useState<AppUser | null>(null);
 
   // Modal State for Create / Edit User
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -86,11 +92,19 @@ export const UsersRolesView: React.FC = () => {
   >('basic');
 
   const safeTenant = tenant || INITIAL_TENANT;
-  const safeTenants = (tenants && tenants.length > 0 ? tenants : [INITIAL_TENANT]).filter((t) => !t.isArchived);
-  const safeBranches = (branches && branches.length > 0 ? branches : INITIAL_BRANCHES).filter((b) => !b.isArchived);
-  const safeWarehouses = (warehouses && warehouses.length > 0 ? warehouses : []).filter((w) => !w.isArchived);
-  const safeUsers = users && users.length > 0 ? users : INITIAL_USERS;
+  const safeTenants = (allTenants && allTenants.length > 0 ? allTenants : tenants || [INITIAL_TENANT]).filter((t) => !t.isArchived);
+  const safeBranches = (allBranches && allBranches.length > 0 ? allBranches : branches || INITIAL_BRANCHES).filter((b) => !b.isArchived);
+  const safeWarehouses = (allWarehouses && allWarehouses.length > 0 ? allWarehouses : warehouses || []).filter((w) => !w.isArchived);
+  const safeUsers = allUsers && allUsers.length > 0 ? allUsers : users || INITIAL_USERS;
   const safeCurrentUser = currentUser || safeUsers[0];
+
+  // Dynamically compute branches and warehouses matching selected company scope in modal
+  const scopedBranchesForModal = safeBranches.filter(
+    (b) => allowedTenantIds.length === 0 || allowedTenantIds.includes(b.tenantId)
+  );
+  const scopedWarehousesForModal = safeWarehouses.filter(
+    (w) => allowedTenantIds.length === 0 || allowedTenantIds.includes(w.tenantId)
+  );
 
   const getRoleDefaults = (selectedRole: UserRole) => {
     switch (selectedRole) {
@@ -184,6 +198,34 @@ export const UsersRolesView: React.FC = () => {
     e.preventDefault();
     if (!name.trim() || !username.trim()) return;
 
+    const finalTenantIds = isAdmin
+      ? safeTenants.map((t) => t.id)
+      : allowedTenantIds.length > 0
+      ? allowedTenantIds
+      : [safeTenant.id];
+
+    // Restrict branches strictly to selected tenant scope if not admin
+    const candidateBranchIds = allowedBranchIds.filter((bid) => {
+      const br = safeBranches.find((b) => b.id === bid);
+      return br && finalTenantIds.includes(br.tenantId);
+    });
+    const finalBranchIds = isAdmin
+      ? safeBranches.map((b) => b.id)
+      : candidateBranchIds.length > 0
+      ? candidateBranchIds
+      : safeBranches.filter((b) => finalTenantIds.includes(b.tenantId)).slice(0, 1).map((b) => b.id);
+
+    // Restrict warehouses strictly to selected tenant scope if not admin
+    const finalWarehouseIds = isAdmin
+      ? safeWarehouses.map((w) => w.id)
+      : allowedWarehouseIds.filter((wid) => {
+          const wh = safeWarehouses.find((w) => w.id === wid);
+          return wh && finalTenantIds.includes(wh.tenantId);
+        });
+
+    const primaryTenantId = finalTenantIds[0] || safeTenant.id;
+    const primaryBranchId = finalBranchIds[0] || undefined;
+
     if (editingUserId) {
       // Update existing user
       updateUser(editingUserId, {
@@ -195,12 +237,20 @@ export const UsersRolesView: React.FC = () => {
         role,
         isActive,
         isAdmin,
-        allowedTenantIds: isAdmin ? safeTenants.map((t) => t.id) : allowedTenantIds,
-        allowedBranchIds: isAdmin ? safeBranches.map((b) => b.id) : allowedBranchIds,
-        allowedWarehouseIds: isAdmin ? safeWarehouses.map((w) => w.id) : allowedWarehouseIds,
+        tenantId: primaryTenantId,
+        branchId: primaryBranchId,
+        allowedTenantIds: finalTenantIds,
+        allowedBranchIds: finalBranchIds,
+        allowedWarehouseIds: finalWarehouseIds,
         allowedViews: isAdmin ? SYSTEM_VIEWS.map((v) => v.id) : allowedViews,
         allowedActions: isAdmin ? SYSTEM_ACTIONS.map((a) => a.key) : allowedActions,
       });
+      setToastFeedback(
+        t(
+          `تم حفظ وتحديث صلاحيات المستخدم (${name}) وربطه بالشركة والفروع المحددة بنجاح.`,
+          `Updated user (${name}) and successfully linked to selected company and branches.`
+        )
+      );
     } else {
       // Create new user
       addUser({
@@ -212,14 +262,23 @@ export const UsersRolesView: React.FC = () => {
         role,
         isActive,
         isAdmin,
-        allowedTenantIds: isAdmin ? safeTenants.map((t) => t.id) : allowedTenantIds,
-        allowedBranchIds: isAdmin ? safeBranches.map((b) => b.id) : allowedBranchIds,
-        allowedWarehouseIds: isAdmin ? safeWarehouses.map((w) => w.id) : allowedWarehouseIds,
+        tenantId: primaryTenantId,
+        branchId: primaryBranchId,
+        allowedTenantIds: finalTenantIds,
+        allowedBranchIds: finalBranchIds,
+        allowedWarehouseIds: finalWarehouseIds,
         allowedViews: isAdmin ? SYSTEM_VIEWS.map((v) => v.id) : allowedViews,
         allowedActions: isAdmin ? SYSTEM_ACTIONS.map((a) => a.key) : allowedActions,
       });
+      setToastFeedback(
+        t(
+          `تم إنشاء المستخدم (${name}) وربطه بالشركة (${safeTenants.find((t) => t.id === primaryTenantId)?.name || ''}) بنجاح.`,
+          `Created user (${name}) and successfully restricted to assigned company.`
+        )
+      );
     }
 
+    setTimeout(() => setToastFeedback(null), 4500);
     setIsModalOpen(false);
   };
 
@@ -284,6 +343,20 @@ export const UsersRolesView: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* Toast Feedback Banner */}
+      {toastFeedback && (
+        <div className="flex items-center gap-3 p-3.5 rounded-xl border border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-200 text-xs font-semibold shadow-xs transition-all">
+          <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+          <p className="flex-1">{toastFeedback}</p>
+          <button
+            onClick={() => setToastFeedback(null)}
+            className="text-emerald-700 hover:text-emerald-900 dark:text-emerald-400 cursor-pointer"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
@@ -527,7 +600,7 @@ export const UsersRolesView: React.FC = () => {
                           <td className="py-3.5 px-3 text-center">
                             {userIsSuperAdmin ? (
                               <span className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400">
-                                {t('كافة الفروع والمستودعات', 'All Branches & Warehouses')}
+                                {t('كافة الفروع والمخازن', 'All Branches & Stores')}
                               </span>
                             ) : (
                               <div className="flex items-center justify-center gap-1.5 text-[11px]">
@@ -577,6 +650,29 @@ export const UsersRolesView: React.FC = () => {
                           {/* Actions */}
                           <td className="py-3.5 px-4 text-center">
                             <div className="flex items-center justify-center gap-1.5">
+                              {/* Quick Switch / Test User View Button */}
+                              <button
+                                onClick={() => {
+                                  setCurrentUser(u);
+                                  setToastFeedback(
+                                    t(
+                                      `تم تفعيل حساب (${u.name}). تم تقييد عرض المنصة حالياً على الشركة والفروع والمخازن المصرحة له فقط.`,
+                                      `Switched to (${u.name}). The platform is now strictly scoped to their assigned company, branches, and stores.`
+                                    )
+                                  );
+                                  setTimeout(() => setToastFeedback(null), 5000);
+                                }}
+                                title={t('تسجيل دخول فوري بحساب هذا المستخدم للتحقق من العزل والربط', 'Test login as this user to verify scoping')}
+                                className={`flex items-center gap-1 rounded-lg border px-2 py-1 text-xs font-bold transition-colors cursor-pointer ${
+                                  u.id === safeCurrentUser?.id
+                                    ? 'border-emerald-500 bg-emerald-50 text-emerald-800 dark:border-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-300'
+                                    : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-800 dark:text-slate-300'
+                                }`}
+                              >
+                                <UserCheck className="h-3.5 w-3.5 text-emerald-600" />
+                                <span>{u.id === safeCurrentUser?.id ? t('أنت الآن', 'Current') : t('تجربة', 'Test')}</span>
+                              </button>
+
                               {/* Edit Permissions Button */}
                               <button
                                 onClick={() => handleOpenEditModal(u)}
@@ -590,18 +686,8 @@ export const UsersRolesView: React.FC = () => {
                               {/* Delete User Button (not allowed on self or admin) */}
                               {u.id !== safeCurrentUser?.id && u.username !== 'admin' && (
                                 <button
-                                  onClick={() => {
-                                    if (
-                                      window.confirm(
-                                        t(
-                                          `هل تريد بالتأكيد حذف المستخدم (${u.name})؟`,
-                                          `Are you sure you want to delete user (${u.name})?`
-                                        )
-                                      )
-                                    ) {
-                                      deleteUser(u.id);
-                                    }
-                                  }}
+                                  type="button"
+                                  onClick={() => setUserToDelete(u)}
                                   className="rounded-lg p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/50 transition-colors cursor-pointer"
                                   title={t('حذف المستخدم', 'Delete User')}
                                 >
@@ -794,7 +880,7 @@ export const UsersRolesView: React.FC = () => {
                 }`}
               >
                 <WarehouseIcon className="h-3.5 w-3.5" />
-                <span>{t('المستودعات / المخازن', 'Warehouses')}</span>
+                <span>{t('المخازن المصرحة', 'Stores / Warehouses')}</span>
                 {!isAdmin && (
                   <span className="rounded-full bg-slate-200 px-1.5 py-0.2 text-[9px] dark:bg-slate-700">
                     {allowedWarehouseIds.length}
@@ -1086,12 +1172,12 @@ export const UsersRolesView: React.FC = () => {
                 <div className="space-y-3 max-h-[60vh] overflow-y-auto px-1">
                   <div className="flex items-center justify-between pb-2">
                     <span className="text-xs font-bold text-slate-600 dark:text-slate-300">
-                      {t('حدد الفروع المسموح للمستخدم بالعمل عليها:', 'Select allowed branches:')}
+                      {t('حدد الفروع المسموح للمستخدم بالعمل عليها (مطابقة للشركات المحددة):', 'Select allowed branches for assigned company:')}
                     </span>
                     <div className="flex gap-2">
                       <button
                         type="button"
-                        onClick={() => setAllowedBranchIds(safeBranches.map((b) => b.id))}
+                        onClick={() => setAllowedBranchIds(scopedBranchesForModal.map((b) => b.id))}
                         className="text-[11px] font-bold text-indigo-600 hover:underline cursor-pointer"
                       >
                         {t('تحديد الكل', 'Select All')}
@@ -1107,45 +1193,51 @@ export const UsersRolesView: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="space-y-2">
-                    {safeBranches.map((b) => {
-                      const isChecked = allowedBranchIds.includes(b.id);
-                      const branchTenant = safeTenants.find((t) => t.id === b.tenantId);
+                  {scopedBranchesForModal.length === 0 ? (
+                    <div className="p-6 text-center text-xs text-slate-500 rounded-xl border border-dashed border-slate-200 dark:border-slate-800">
+                      {t('لا توجد فروع مطابقة للشركات المحددة. يرجى مراجعة تبويب الشركات أولاً.', 'No branches found for the selected company. Check the Companies tab.')}
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {scopedBranchesForModal.map((b) => {
+                        const isChecked = allowedBranchIds.includes(b.id);
+                        const branchTenant = safeTenants.find((t) => t.id === b.tenantId);
 
-                      return (
-                        <div
-                          key={b.id}
-                          onClick={() => toggleItem(allowedBranchIds, b.id, setAllowedBranchIds)}
-                          className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-colors ${
-                            isChecked
-                              ? 'border-indigo-500 bg-indigo-50/60 dark:border-indigo-500 dark:bg-indigo-950/40'
-                              : 'border-slate-200 bg-white hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900'
-                          }`}
-                        >
-                          <div className="flex items-center gap-3">
-                            <div className="flex h-5 w-5 items-center justify-center">
-                              {isChecked ? (
-                                <CheckSquare className="h-5 w-5 text-indigo-600" />
-                              ) : (
-                                <Square className="h-5 w-5 text-slate-300 dark:text-slate-600" />
-                              )}
+                        return (
+                          <div
+                            key={b.id}
+                            onClick={() => toggleItem(allowedBranchIds, b.id, setAllowedBranchIds)}
+                            className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-colors ${
+                              isChecked
+                                ? 'border-indigo-500 bg-indigo-50/60 dark:border-indigo-500 dark:bg-indigo-950/40'
+                                : 'border-slate-200 bg-white hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900'
+                            }`}
+                          >
+                            <div className="flex items-center gap-3">
+                              <div className="flex h-5 w-5 items-center justify-center">
+                                {isChecked ? (
+                                  <CheckSquare className="h-5 w-5 text-indigo-600" />
+                                ) : (
+                                  <Square className="h-5 w-5 text-slate-300 dark:text-slate-600" />
+                                )}
+                              </div>
+                              <div>
+                                <p className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                                  {isRtl ? b.name : b.nameEn}
+                                </p>
+                                <p className="text-[10px] text-slate-400">
+                                  {b.city} • {branchTenant ? (isRtl ? branchTenant.name : branchTenant.nameEn) : ''}
+                                </p>
+                              </div>
                             </div>
-                            <div>
-                              <p className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                                {isRtl ? b.name : b.nameEn}
-                              </p>
-                              <p className="text-[10px] text-slate-400">
-                                {b.city} • {branchTenant ? (isRtl ? branchTenant.name : branchTenant.nameEn) : ''}
-                              </p>
-                            </div>
+                            <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                              {b.isHeadquarters ? t('فرع رئيسي', 'HQ') : t('فرع إقليمي', 'Branch')}
+                            </span>
                           </div>
-                          <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                            {b.isHeadquarters ? t('فرع رئيسي', 'HQ') : t('فرع إقليمي', 'Branch')}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1154,12 +1246,12 @@ export const UsersRolesView: React.FC = () => {
                 <div className="space-y-3 max-h-[60vh] overflow-y-auto px-1">
                   <div className="flex items-center justify-between pb-2">
                     <span className="text-xs font-bold text-slate-600 dark:text-slate-300">
-                      {t('حدد المستودعات والمخازن المسموح بالصرف منها أو الجرد عليها:', 'Select allowed warehouses:')}
+                      {t('حدد المخازن المسموح بالصرف منها أو الجرد عليها:', 'Select allowed stores:')}
                     </span>
                     <div className="flex gap-2">
                       <button
                         type="button"
-                        onClick={() => setAllowedWarehouseIds(safeWarehouses.map((w) => w.id))}
+                        onClick={() => setAllowedWarehouseIds(scopedWarehousesForModal.map((w) => w.id))}
                         className="text-[11px] font-bold text-indigo-600 hover:underline cursor-pointer"
                       >
                         {t('تحديد الكل', 'Select All')}
@@ -1175,13 +1267,13 @@ export const UsersRolesView: React.FC = () => {
                     </div>
                   </div>
 
-                  {safeWarehouses.length === 0 ? (
-                    <div className="p-4 text-center text-xs text-slate-400">
-                      {t('لا توجد مستودعات مضافة بعد لهذه الشركة', 'No warehouses found for this tenant')}
+                  {scopedWarehousesForModal.length === 0 ? (
+                    <div className="p-6 text-center text-xs text-slate-500 rounded-xl border border-dashed border-slate-200 dark:border-slate-800">
+                      {t('لا توجد مخازن مطابقة للشركات المحددة للمستخدم', 'No stores found for the selected company')}
                     </div>
                   ) : (
                     <div className="space-y-2">
-                      {safeWarehouses.map((w) => {
+                      {scopedWarehousesForModal.map((w) => {
                         const isChecked = allowedWarehouseIds.includes(w.id);
                         const whBranch = safeBranches.find((b) => b.id === w.branchId);
 
@@ -1213,7 +1305,7 @@ export const UsersRolesView: React.FC = () => {
                               </div>
                             </div>
                             <span className="rounded-md bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700 dark:bg-amber-950/50 dark:text-amber-300">
-                              {w.isDefault ? t('مستودع افتراضي', 'Default') : t('مستودع فرعي', 'Sub')}
+                              {w.isDefault ? t('مخزن افتراضي', 'Default') : t('مخزن فرعي', 'Sub')}
                             </span>
                           </div>
                         );
@@ -1394,6 +1486,69 @@ export const UsersRolesView: React.FC = () => {
                 </div>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {/* Delete User Confirmation Modal */}
+      {userToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
+          <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 p-6 space-y-4">
+            <div className="flex items-center gap-3 text-rose-600 dark:text-rose-400">
+              <div className="p-3 bg-rose-100 dark:bg-rose-950/60 rounded-xl">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                  {t('تأكيد حذف المستخدم', 'Confirm User Deletion')}
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  {t('هذا الإجراء سيقوم بحذف الحساب نهائياً وإلغاء صلاحيات الدخول.', 'This action permanently removes the user account.')}
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-100 dark:border-slate-700/60 space-y-2 text-xs">
+              <div className="flex justify-between items-center">
+                <span className="text-slate-500 dark:text-slate-400">{t('اسم المستخدم:', 'Name:')}</span>
+                <span className="font-bold text-slate-900 dark:text-white">{userToDelete.name}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-500 dark:text-slate-400">{t('اسم الدخول:', 'Username:')}</span>
+                <span className="font-mono font-semibold text-slate-700 dark:text-slate-300">{userToDelete.username}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-500 dark:text-slate-400">{t('الدور والصلاحية:', 'Role:')}</span>
+                <span className="font-semibold text-indigo-600 dark:text-indigo-400">{userToDelete.role}</span>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setUserToDelete(null)}
+                className="px-4 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition cursor-pointer"
+              >
+                {t('إلغاء', 'Cancel')}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const u = userToDelete;
+                  deleteUser(u.id);
+                  setUserToDelete(null);
+                  setToastFeedback(
+                    t(
+                      `تم حذف المستخدم (${u.name}) بنجاح وإلغاء حسابه وصلاحياته من النظام.`,
+                      `User (${u.name}) deleted successfully.`
+                    )
+                  );
+                  setTimeout(() => setToastFeedback(null), 4500);
+                }}
+                className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-md shadow-rose-600/20 transition cursor-pointer"
+              >
+                {t('تأكيد الحذف النهائي', 'Confirm Delete')}
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -26,12 +26,19 @@ import { ActivityLogsView } from './views/ActivityLogsView';
 import { ShiftReportsView } from './views/ShiftReportsView';
 import { PayrollView } from './views/PayrollView';
 import { LaserDevicesView } from './views/LaserDevicesView';
+import { FiscalDocumentsView } from './views/FiscalDocumentsView';
+import { CashReceiptsView } from './views/CashReceiptsView';
+import { CashPaymentsView } from './views/CashPaymentsView';
+import { SpecializedTaxInvoicesView } from './views/SpecializedTaxInvoicesView';
+import { GoodsReceiptsView } from './views/GoodsReceiptsView';
+import { GoodsIssuesView } from './views/GoodsIssuesView';
+import { SystemManualView } from './views/SystemManualView';
 import { ShieldAlert, ArrowRight, ArrowLeft } from 'lucide-react';
 
 const MainLayout: React.FC = () => {
   const [currentView, setCurrentView] = useState<string>('dashboard');
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState<boolean>(false);
-  const { language, t, canAccessView, currentUser } = usePlatform();
+  const { language, t, canAccessView, currentUser, activeBranch } = usePlatform();
 
   // If currentUser doesn't have access to the default dashboard, redirect to first allowed view
   useEffect(() => {
@@ -50,6 +57,13 @@ const MainLayout: React.FC = () => {
         'products',
         'inventory_mgmt',
         'inventory',
+        'cash_receipts',
+        'cash_payments',
+        'tax_invoices',
+        'goods_receipts',
+        'goods_issues',
+        'goods_vouchers',
+        'fiscal_documents',
         'payment_methods',
         'accounting',
         'shift_reports',
@@ -59,6 +73,7 @@ const MainLayout: React.FC = () => {
         'users',
         'modules',
         'neon',
+        'system_manual',
       ];
       const firstAllowed = candidateViews.find((v) => canAccessView(v));
       if (firstAllowed) {
@@ -141,6 +156,20 @@ const MainLayout: React.FC = () => {
         return <ProductManagementView />;
       case 'payment_methods':
         return <PaymentMethodsView />;
+      case 'cash_receipts':
+        return <CashReceiptsView />;
+      case 'cash_payments':
+        return <CashPaymentsView />;
+      case 'tax_invoices':
+        return <SpecializedTaxInvoicesView />;
+      case 'goods_receipts':
+        return <GoodsReceiptsView />;
+      case 'goods_issues':
+        return <GoodsIssuesView />;
+      case 'fiscal_documents':
+        return <FiscalDocumentsView initialTab="receipts" />;
+      case 'goods_vouchers':
+        return <GoodsReceiptsView />;
       case 'accounting':
         return <AccountingView />;
       case 'shift_reports':
@@ -159,6 +188,8 @@ const MainLayout: React.FC = () => {
         return <UsersRolesView />;
       case 'neon':
         return <NeonHubView />;
+      case 'system_manual':
+        return <SystemManualView />;
       default:
         return <DashboardView onNavigate={(view) => setCurrentView(view)} />;
     }
@@ -200,7 +231,7 @@ const MainLayout: React.FC = () => {
 
         {/* Dynamic Content Main Stage */}
         <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
-          <div className="mx-auto max-w-7xl">
+          <div key={`${currentView}-${activeBranch?.id || 'none'}`} className="mx-auto max-w-7xl">
             {renderActiveView()}
           </div>
         </main>

@@ -52,11 +52,17 @@ export const InventoryManagementView: React.FC = () => {
     invoices,
   } = usePlatform();
 
-  // Active Tab: Stock items control, Consumption & Forecasting reports, Audits & Settlements
-  const [activeTab, setActiveTab] = useState<'stock_items' | 'consumption_forecast' | 'audits'>('stock_items');
+  // Active Tab: Stock items control, Cost mapping (BOM), Consumption & Forecasting reports, Audits & Settlements
+  const [activeTab, setActiveTab] = useState<'stock_items' | 'cost_mapping' | 'consumption_forecast' | 'audits'>('stock_items');
   const [selectedWarehouseId, setSelectedWarehouseId] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [filterLinkedOnly, setFilterLinkedOnly] = useState<'all' | 'linked' | 'unlinked'>('all');
+
+  // Sales Cost Mapping Tab state
+  const [salesSearchQuery, setSalesSearchQuery] = useState<string>('');
+  const [salesCategoryFilter, setSalesCategoryFilter] = useState<string>('all');
+  const [showRecipeModal, setShowRecipeModal] = useState<boolean>(false);
+  const [selectedSalesForRecipe, setSelectedSalesForRecipe] = useState<Product | null>(null);
 
   // --- Modals State ---
   // 1. Add Stock Item Modal
@@ -239,6 +245,61 @@ export const InventoryManagementView: React.FC = () => {
   const linkedStockItemsCount = stockItems.filter(
     (p) => p.linkedSalesProductIds && p.linkedSalesProductIds.length > 0
   ).length;
+
+  // Helper: Get recipe ingredients & calculated cost of sale for any sales product
+  const getSalesProductRecipe = (salesProd: Product) => {
+    let totalCost = 0;
+    const ingredients: { item: Product; qty: number; cost: number }[] = [];
+
+    stockItems.forEach((stk) => {
+      if (stk.linkedSalesProductIds && stk.linkedSalesProductIds.includes(salesProd.id)) {
+        const qty = stk.consumptionRate || 1;
+        let itemCost = 0;
+        if (stk.consumptionBasis === 'revenue_ratio') {
+          itemCost = (salesProd.sellingPrice * ((stk.consumptionRate || 0) / 100));
+        } else {
+          itemCost = qty * (stk.purchasePrice || 0);
+        }
+        totalCost += itemCost;
+        ingredients.push({ item: stk, qty, cost: itemCost });
+      }
+    });
+
+    const finalCost = totalCost > 0 ? totalCost : (salesProd.purchasePrice || 0);
+    const profitMargin = salesProd.sellingPrice - finalCost;
+    const marginPercentage = salesProd.sellingPrice > 0 ? Math.round((profitMargin / salesProd.sellingPrice) * 100) : 0;
+
+    return {
+      totalCost: finalCost,
+      isCalculatedFromStock: totalCost > 0,
+      ingredients,
+      profitMargin,
+      marginPercentage,
+    };
+  };
+
+  // Filtered sales items for the Cost Mapping tab
+  const filteredSalesForMapping = useMemo(() => {
+    return salesItems.filter((sp) => {
+      const matchesSearch =
+        sp.nameAr.toLowerCase().includes(salesSearchQuery.toLowerCase()) ||
+        sp.nameEn.toLowerCase().includes(salesSearchQuery.toLowerCase()) ||
+        sp.sku.toLowerCase().includes(salesSearchQuery.toLowerCase()) ||
+        (sp.category && sp.category.toLowerCase().includes(salesSearchQuery.toLowerCase()));
+
+      const matchesCat = salesCategoryFilter === 'all' || sp.category === salesCategoryFilter || sp.categoryId === salesCategoryFilter;
+      return matchesSearch && matchesCat;
+    });
+  }, [salesItems, salesSearchQuery, salesCategoryFilter]);
+
+  // Unique categories of sales items
+  const salesCategories = useMemo(() => {
+    const set = new Set<string>();
+    salesItems.forEach((s) => {
+      if (s.category) set.add(s.category);
+    });
+    return Array.from(set);
+  }, [salesItems]);
 
   // --- Sales-Driven Consumption & Future Forecasting Calculation ---
   const consumptionForecastReport = useMemo(() => {
@@ -430,6 +491,71 @@ export const InventoryManagementView: React.FC = () => {
 
     setShowLinkModal(false);
     setSelectedStockItemForLink(null);
+  };
+
+  // --- Recipe (BOM) Editor for Sales Items ---
+  interface RecipeDraftItem {
+    isLinked: boolean;
+    rate: number;
+    basis: string;
+  }
+
+  const [recipeSearch, setRecipeSearch] = useState<string>('');
+  const [recipeDraft, setRecipeDraft] = useState<Record<string, RecipeDraftItem>>({});
+
+  const handleOpenRecipeModal = (salesProd: Product) => {
+    setSelectedSalesForRecipe(salesProd);
+    const draft: Record<string, RecipeDraftItem> = {};
+    stockItems.forEach((stk) => {
+      const isLinked = !!(stk.linkedSalesProductIds && stk.linkedSalesProductIds.includes(salesProd.id));
+      draft[stk.id] = {
+        isLinked,
+        rate: stk.consumptionRate || 1,
+        basis: stk.consumptionBasis || 'units_sold',
+      };
+    });
+    setRecipeDraft(draft);
+    setRecipeSearch('');
+    setShowRecipeModal(true);
+  };
+
+  const handleSaveRecipeDraft = () => {
+    if (!selectedSalesForRecipe) return;
+    const salesId = selectedSalesForRecipe.id;
+
+    let totalCalculatedCost = 0;
+
+    Object.entries(recipeDraft).forEach(([stockId, itemDraft]: [string, RecipeDraftItem]) => {
+      const stk = stockItems.find((s) => s.id === stockId);
+      if (!stk) return;
+      const currentLinks = stk.linkedSalesProductIds || [];
+      let updatedLinks: string[];
+
+      if (itemDraft.isLinked) {
+        if (!currentLinks.includes(salesId)) {
+          updatedLinks = [...currentLinks, salesId];
+        } else {
+          updatedLinks = currentLinks;
+        }
+        totalCalculatedCost += (itemDraft.rate || 1) * (stk.purchasePrice || 0);
+      } else {
+        updatedLinks = currentLinks.filter((id) => id !== salesId);
+      }
+
+      updateProduct(stockId, {
+        linkedSalesProductIds: updatedLinks,
+        consumptionRate: itemDraft.rate,
+        consumptionBasis: itemDraft.basis as any,
+      });
+    });
+
+    // Update sales product purchasePrice to reflect calculated cost of sale
+    if (totalCalculatedCost > 0) {
+      updateProduct(salesId, { purchasePrice: totalCalculatedCost });
+    }
+
+    setShowRecipeModal(false);
+    setSelectedSalesForRecipe(null);
   };
 
   // --- Handlers: Stock Transfer ---
@@ -746,7 +872,7 @@ export const InventoryManagementView: React.FC = () => {
 
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
           <div>
-            <p className="text-xs font-medium text-slate-500">{t('المستودعات النشطة', 'Active Warehouses')}</p>
+            <p className="text-xs font-medium text-slate-500">{t('المخازن النشطة', 'Active Stores')}</p>
             <h3 className="text-2xl font-bold text-slate-800 mt-1">{warehouses.length}</h3>
             <span className="text-xs text-indigo-600 mt-0.5 inline-block">{branches.length} {t('فروع مشغلة', 'branches')}</span>
           </div>
@@ -769,9 +895,25 @@ export const InventoryManagementView: React.FC = () => {
             }`}
           >
             <Layers className="w-4 h-4" />
-            <span>{t('الأصناف المخزنية والتحكم (+ / -) والربط', 'Stock Items Control & Links')}</span>
+            <span>{t('الأصناف المخزنية والتحكم (+ / -)', 'Stock Items Control (+ / -)')}</span>
             <span className="px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-600 font-bold">
               {stockItems.length}
+            </span>
+          </button>
+
+          <button
+            id="tab-cost-mapping"
+            onClick={() => setActiveTab('cost_mapping')}
+            className={`pb-4 text-sm font-semibold flex items-center gap-2 border-b-2 whitespace-nowrap transition ${
+              activeTab === 'cost_mapping'
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            <Link className="w-4 h-4 text-emerald-600" />
+            <span>{t('ربط الأصناف المخزنية بالأصناف البيعية وتحديد تكلفة البيع', 'Link Stock to Sales & COGS')}</span>
+            <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-100 text-emerald-700 font-bold">
+              {t('تحديد التكلفة', 'BOM')}
             </span>
           </button>
 
@@ -808,7 +950,215 @@ export const InventoryManagementView: React.FC = () => {
           </button>
         </div>
 
-        {/* TAB 1: Stock Items Control & Linking */}
+        {/* TAB 2: Cost Mapping (BOM - ربط الأصناف المخزنية بالأصناف البيعية وتحديد تكلفة البيع) */}
+        {activeTab === 'cost_mapping' && (
+          <div className="p-6 space-y-6">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-emerald-50/60 dark:bg-emerald-950/20 p-5 rounded-2xl border border-emerald-100 dark:border-emerald-900/30">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 rounded-xl">
+                    <Link className="w-5 h-5" />
+                  </div>
+                  <h3 className="text-base font-bold text-emerald-950 dark:text-emerald-300">
+                    {t('ربط الأصناف المخزنية بالأصناف البيعية لتحديد تكلفة البيع', 'Link Stock Items to Sales & Determine Cost of Sale')}
+                  </h3>
+                </div>
+                <p className="text-xs text-emerald-800/80 dark:text-emerald-400 leading-relaxed">
+                  {t(
+                    'قم بربط الخامات والمستهلكات المخزنية بكل صنف أو خدمة بيعية وتحديد كمية الاستهلاك. يتم حساب تكلفة البيع وهامش الربح تلقائياً وتنعكس فوراً في شاشة المنتجات والخدمات وتقارير المبيعات.',
+                    'Map raw stock consumables to sales services/products to calculate Cost of Goods Sold (COGS) and profit margins automatically.'
+                  )}
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="px-3 py-1.5 bg-white dark:bg-slate-800 text-emerald-700 dark:text-emerald-300 text-xs font-bold rounded-xl border border-emerald-200 dark:border-emerald-800 shadow-xs">
+                  {stockItems.filter(s => s.linkedSalesProductIds && s.linkedSalesProductIds.length > 0).length} {t('خامة مخزنية مربوطة حالياً', 'stock items mapped')}
+                </span>
+              </div>
+            </div>
+
+            {/* Cost Mapping Stats */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
+                <span className="text-xs text-slate-500 font-medium block">{t('إجمالي الأصناف والخدمات البيعية:', 'Total Sales Items:')}</span>
+                <span className="text-xl font-bold text-slate-800 dark:text-white mt-1 block">
+                  {salesItems.length}
+                </span>
+                <span className="text-[11px] text-blue-600 mt-0.5 block">
+                  {salesItems.filter(s => s.isService || s.itemType === 'sales_service').length} {t('خدمة طبية', 'services')} • {salesItems.filter(s => !s.isService && s.itemType !== 'sales_service').length} {t('منتج تجاري', 'products')}
+                </span>
+              </div>
+
+              <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
+                <span className="text-xs text-slate-500 font-medium block">{t('أصناف بيعية محددة التكلفة بمخزون:', 'Items with Stock Recipe:')}</span>
+                <span className="text-xl font-bold text-emerald-600 mt-1 block">
+                  {salesItems.filter(sp => getSalesProductRecipe(sp).isCalculatedFromStock).length} {t('صنف بيعي', 'items')}
+                </span>
+                <span className="text-[11px] text-emerald-700 mt-0.5 block">
+                  {Math.round((salesItems.filter(sp => getSalesProductRecipe(sp).isCalculatedFromStock).length / (salesItems.length || 1)) * 100)}% {t('نسبة التغطية بالوصفات', 'coverage ratio')}
+                </span>
+              </div>
+
+              <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
+                <span className="text-xs text-slate-500 font-medium block">{t('متوسط هامش الربح المحقق:', 'Average Profit Margin:')}</span>
+                <span className="text-xl font-bold text-indigo-600 mt-1 block">
+                  {Math.round(
+                    salesItems.reduce((sum, sp) => sum + getSalesProductRecipe(sp).marginPercentage, 0) / (salesItems.length || 1)
+                  )}%
+                </span>
+                <span className="text-[11px] text-slate-400 mt-0.5 block">
+                  {t('محسوب على أساس أسعار البيع وتكلفة الخامات', 'Based on sales prices vs recipe costs')}
+                </span>
+              </div>
+            </div>
+
+            {/* Search and Filters */}
+            <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
+              <div className="relative flex-1 w-full">
+                <Search className="w-4 h-4 text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder={t('بحث بالاسم أو الكود أو المجموعة البيعية...', 'Search sales product or service...')}
+                  value={salesSearchQuery}
+                  onChange={(e) => setSalesSearchQuery(e.target.value)}
+                  className="w-full pr-10 pl-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs">
+                  <span className="text-slate-500 font-medium">{t('المجموعة:', 'Category:')}</span>
+                  <select
+                    value={salesCategoryFilter}
+                    onChange={(e) => setSalesCategoryFilter(e.target.value)}
+                    className="bg-transparent font-bold text-slate-700 dark:text-slate-300 focus:outline-none cursor-pointer"
+                  >
+                    <option value="all">{t('جميع المجموعات', 'All Categories')}</option>
+                    {salesCategories.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Sales Items Cost & Recipe Table */}
+            <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
+              <table className="w-full text-right text-sm">
+                <thead className="bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-semibold border-b border-slate-200 dark:border-slate-700">
+                  <tr>
+                    <th className="py-3.5 px-4">{t('الصنف البيعي (خدمة / منتج)', 'Sales Item / Service')}</th>
+                    <th className="py-3.5 px-4">{t('المجموعة البيعية', 'Sales Category')}</th>
+                    <th className="py-3.5 px-4">{t('سعر البيع للعميل', 'Selling Price')}</th>
+                    <th className="py-3.5 px-4">{t('المكونات المخزنية المستهلكة (الخامات)', 'Linked Stock Recipe')}</th>
+                    <th className="py-3.5 px-4 font-bold text-indigo-700 dark:text-indigo-400">{t('تكلفة البيع المحسوبة', 'Cost of Sale (COGS)')}</th>
+                    <th className="py-3.5 px-4 text-emerald-700 dark:text-emerald-400 font-bold">{t('هامش الربح', 'Gross Margin')}</th>
+                    <th className="py-3.5 px-4 text-center">{t('إدارة المكونات', 'Recipe Control')}</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {filteredSalesForMapping.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="py-10 text-center text-slate-400">
+                        {t('لا توجد أصناف بيعية مطابقة لبحثك', 'No matching sales items found')}
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredSalesForMapping.map((sp) => {
+                      const recipe = getSalesProductRecipe(sp);
+                      const isService = sp.isService || sp.itemType === 'sales_service';
+
+                      return (
+                        <tr key={sp.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition">
+                          <td className="py-3 px-4">
+                            <div className="flex items-center gap-3">
+                              <span className={`w-2 h-2 rounded-full shrink-0 ${isService ? 'bg-indigo-500' : 'bg-emerald-500'}`} />
+                              <div>
+                                <h4 className="font-bold text-slate-800 dark:text-slate-100">{sp.nameAr}</h4>
+                                <div className="flex items-center gap-2 text-xs text-slate-400 font-mono">
+                                  <span>{sp.sku}</span>
+                                  <span>•</span>
+                                  <span>{sp.unit || (isService ? 'جلسة' : 'قطعة')}</span>
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+
+                          <td className="py-3 px-4">
+                            <span className="px-2.5 py-1 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-lg text-xs font-medium">
+                              {sp.category || '-'}
+                            </span>
+                          </td>
+
+                          <td className="py-3 px-4 font-bold text-slate-800 dark:text-white">
+                            {formatMoney(sp.sellingPrice)}
+                          </td>
+
+                          <td className="py-3 px-4">
+                            {recipe.ingredients.length > 0 ? (
+                              <div className="flex flex-wrap gap-1.5 max-w-xs">
+                                {recipe.ingredients.map((ing) => (
+                                  <span
+                                    key={ing.item.id}
+                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-950/60 text-blue-800 dark:text-blue-300 text-[11px] font-semibold border border-blue-100 dark:border-blue-900/50"
+                                    title={`${ing.item.nameAr}: ${ing.qty} ${ing.item.unit} (${formatMoney(ing.cost)})`}
+                                  >
+                                    <span>{ing.item.nameAr}</span>
+                                    <span className="font-mono text-[10px] text-blue-600 dark:text-blue-400">
+                                      ({ing.qty} {ing.item.unit})
+                                    </span>
+                                  </span>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="text-xs text-slate-400 italic">
+                                {t('لم يتم ربط خامات مخزنية بعد', 'No stock ingredients linked')}
+                              </span>
+                            )}
+                          </td>
+
+                          <td className="py-3 px-4 font-bold text-indigo-700 dark:text-indigo-400">
+                            {formatMoney(recipe.totalCost)}
+                            {recipe.isCalculatedFromStock && (
+                              <span className="text-[10px] block font-normal text-slate-400">
+                                {t('محسوبة من الخامات', 'Calculated from stock')}
+                              </span>
+                            )}
+                          </td>
+
+                          <td className="py-3 px-4">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-bold text-emerald-700 dark:text-emerald-400">
+                                {formatMoney(recipe.profitMargin)}
+                              </span>
+                              <span className="text-xs px-1.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 font-bold font-mono">
+                                {recipe.marginPercentage}%
+                              </span>
+                            </div>
+                          </td>
+
+                          <td className="py-3 px-4 text-center">
+                            <button
+                              onClick={() => handleOpenRecipeModal(sp)}
+                              className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300 dark:hover:bg-emerald-900/60 rounded-xl text-xs font-bold border border-emerald-200 dark:border-emerald-800 transition cursor-pointer"
+                            >
+                              <Link className="w-3.5 h-3.5" />
+                              <span>{t('تعديل المكونات والتكلفة', 'Edit Recipe / COGS')}</span>
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
         {activeTab === 'stock_items' && (
           <div className="p-6 space-y-5">
             {/* Filter Controls */}
@@ -831,13 +1181,13 @@ export const InventoryManagementView: React.FC = () => {
                 {/* Warehouse Selector */}
                 <div className="flex items-center gap-1.5 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200 text-xs">
                   <Building2 className="w-3.5 h-3.5 text-slate-400" />
-                  <span className="text-slate-500 font-medium">{t('المستودع:', 'Warehouse:')}</span>
+                  <span className="text-slate-500 font-medium">{t('المخزن:', 'Store / Warehouse:')}</span>
                   <select
                     value={selectedWarehouseId}
                     onChange={(e) => setSelectedWarehouseId(e.target.value)}
                     className="bg-transparent font-bold text-slate-700 focus:outline-none cursor-pointer"
                   >
-                    <option value="all">{t('جميع المستودعات (الإجمالي)', 'All Warehouses')}</option>
+                    <option value="all">{t('جميع المخازن (الإجمالي)', 'All Stores')}</option>
                     {warehouses.map((wh) => (
                       <option key={wh.id} value={wh.id}>
                         {wh.nameAr}
@@ -1244,7 +1594,7 @@ export const InventoryManagementView: React.FC = () => {
                 <thead className="bg-slate-50 text-slate-600 text-xs font-semibold border-b border-slate-200">
                   <tr>
                     <th className="py-3 px-4">{t('رقم الجرد', 'Audit #')}</th>
-                    <th className="py-3 px-4">{t('المستودع والفرع', 'Warehouse & Branch')}</th>
+                    <th className="py-3 px-4">{t('المخزن والفرع', 'Store & Branch')}</th>
                     <th className="py-3 px-4">{t('تاريخ الجرد', 'Audit Date')}</th>
                     <th className="py-3 px-4">{t('القيمة الدفترية', 'Expected Value')}</th>
                     <th className="py-3 px-4">{t('القيمة الفعلية', 'Actual Value')}</th>
@@ -1580,7 +1930,7 @@ export const InventoryManagementView: React.FC = () => {
             <form onSubmit={handleSaveAdjust} className="p-6 space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  {t('المستودع المستهدف *', 'Target Warehouse *')}
+                  {t('المخزن المستهدف *', 'Target Store *')}
                 </label>
                 <select
                   required
@@ -1665,14 +2015,14 @@ export const InventoryManagementView: React.FC = () => {
       {/* 3. Modal: Link Stock Item to Sales Products */}
       {showLinkModal && selectedStockItemForLink && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 overflow-y-auto">
-          <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl border border-slate-200 overflow-hidden my-8">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden my-8">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/60">
               <div className="flex items-center gap-3">
-                <div className="p-2 bg-blue-50 text-blue-600 rounded-xl">
+                <div className="p-2 bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 rounded-xl">
                   <Link className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="font-bold text-slate-800 text-base">
+                  <h3 className="font-bold text-slate-800 dark:text-white text-base">
                     {t('ربط الصنف المخزني بأصناف بيعية', 'Link Stock Item to Sales')}
                   </h3>
                   <p className="text-xs text-slate-500 font-semibold">{selectedStockItemForLink.nameAr}</p>
@@ -1680,7 +2030,7 @@ export const InventoryManagementView: React.FC = () => {
               </div>
               <button
                 onClick={() => setShowLinkModal(false)}
-                className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-xl transition"
+                className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-xl transition"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -1688,40 +2038,81 @@ export const InventoryManagementView: React.FC = () => {
 
             <form onSubmit={handleSaveLink} className="p-6 space-y-4">
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  {t('الأصناف البيعية المرتبطة (اضغط مع Ctrl للاختيار المتعدد):', 'Linked Sales Items:')}
-                </label>
-                <select
-                  multiple
-                  value={linkForm.linkedSalesProductIds}
-                  onChange={(e) => {
-                    const selected = Array.from(e.target.selectedOptions, (option: HTMLOptionElement) => option.value);
-                    setLinkForm({ ...linkForm, linkedSalesProductIds: selected });
-                  }}
-                  className="w-full h-36 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  {salesItems.map((sp) => (
-                    <option key={sp.id} value={sp.id} className="p-1.5">
-                      {sp.nameAr} - ({formatMoney(sp.sellingPrice)})
-                    </option>
-                  ))}
-                </select>
-                <p className="text-[11px] text-slate-400 mt-1">
-                  {t('تم تحديد', 'Selected')}: {linkForm.linkedSalesProductIds.length} {t('صنف بيعي', 'items')}
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    {t('حدد الأصناف أو الخدمات البيعية المرتبطة:', 'Select Linked Sales Items:')}
+                  </label>
+                  <div className="flex items-center gap-2 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => setLinkForm({ ...linkForm, linkedSalesProductIds: salesItems.map((s) => s.id) })}
+                      className="text-blue-600 hover:underline cursor-pointer"
+                    >
+                      {t('تحديد الكل', 'All')}
+                    </button>
+                    <span className="text-slate-300">|</span>
+                    <button
+                      type="button"
+                      onClick={() => setLinkForm({ ...linkForm, linkedSalesProductIds: [] })}
+                      className="text-slate-500 hover:underline cursor-pointer"
+                    >
+                      {t('إلغاء التحديد', 'Clear')}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="max-h-48 overflow-y-auto border border-slate-200 dark:border-slate-700 rounded-xl divide-y divide-slate-100 dark:divide-slate-800 bg-slate-50/50 dark:bg-slate-800/40 p-1">
+                  {salesItems.map((sp) => {
+                    const isChecked = linkForm.linkedSalesProductIds.includes(sp.id);
+                    return (
+                      <label
+                        key={sp.id}
+                        className={`flex items-center justify-between p-2 rounded-lg cursor-pointer transition text-xs ${
+                          isChecked ? 'bg-blue-50/80 dark:bg-blue-950/40 font-semibold text-blue-900 dark:text-blue-200' : 'hover:bg-slate-100/70 dark:hover:bg-slate-700/50 text-slate-700 dark:text-slate-300'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setLinkForm({
+                                  ...linkForm,
+                                  linkedSalesProductIds: [...linkForm.linkedSalesProductIds, sp.id],
+                                });
+                              } else {
+                                setLinkForm({
+                                  ...linkForm,
+                                  linkedSalesProductIds: linkForm.linkedSalesProductIds.filter((id) => id !== sp.id),
+                                });
+                              }
+                            }}
+                            className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500"
+                          />
+                          <span>{sp.nameAr}</span>
+                        </div>
+                        <span className="font-mono text-slate-400 text-[11px]">{formatMoney(sp.sellingPrice)}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                  {t('تم تحديد', 'Selected')}: <span className="font-bold text-blue-600 dark:text-blue-400">{linkForm.linkedSalesProductIds.length}</span> {t('صنف بيعي', 'items')}
                 </p>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                     {t('آلية الاستهلاك *', 'Consumption Basis *')}
                   </label>
                   <select
                     value={linkForm.consumptionBasis}
                     onChange={(e) => setLinkForm({ ...linkForm, consumptionBasis: e.target.value as any })}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
-                    <option value="units_sold">{t('بعد الوحدات / الجلسات المباعة', 'Per Unit / Session')}</option>
+                    <option value="units_sold">{t('بعدد الوحدات / الجلسات المباعة', 'Per Unit / Session')}</option>
                     <option value="revenue_ratio">{t('بنسبة من قيمة الإيراد (%)', 'Revenue Ratio (%)')}</option>
                     <option value="monthly_period">{t('استهلاك دوري شهرياً', 'Monthly Period')}</option>
                     <option value="client_count">{t('بعدد العملاء والزيارات', 'Per Client Visit')}</option>
@@ -1729,7 +2120,7 @@ export const InventoryManagementView: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                     {t('معدل الاستهلاك *', 'Consumption Rate *')}
                   </label>
                   <div className="flex items-center gap-2">
@@ -1740,7 +2131,7 @@ export const InventoryManagementView: React.FC = () => {
                       required
                       value={linkForm.consumptionRate}
                       onChange={(e) => setLinkForm({ ...linkForm, consumptionRate: parseFloat(e.target.value) || 1 })}
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-bold text-blue-700 dark:text-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
                     <span className="text-xs text-slate-500 font-medium shrink-0">
                       {selectedStockItemForLink.unit}
@@ -1750,24 +2141,24 @@ export const InventoryManagementView: React.FC = () => {
               </div>
 
               {/* Calculated Cost preview */}
-              <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-100 text-xs text-emerald-900 flex items-center justify-between">
+              <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 rounded-xl border border-emerald-100 dark:border-emerald-900/40 text-xs text-emerald-900 dark:text-emerald-300 flex items-center justify-between">
                 <span>{t('مساهمة هذا الصنف في تكلفة بيع الوحدة:', 'Unit cost contribution:')}</span>
                 <span className="font-bold text-sm">
                   {formatMoney((linkForm.consumptionRate || 1) * (selectedStockItemForLink.purchasePrice || 0))}
                 </span>
               </div>
 
-              <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100 dark:border-slate-800">
                 <button
                   type="button"
                   onClick={() => setShowLinkModal(false)}
-                  className="px-4 py-2 text-slate-600 hover:bg-slate-100 text-sm font-medium rounded-xl transition"
+                  className="px-4 py-2 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-sm font-medium rounded-xl transition cursor-pointer"
                 >
                   {t('إلغاء', 'Cancel')}
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl shadow-sm transition"
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl shadow-sm transition cursor-pointer"
                 >
                   {t('حفظ وتحديث التكلفة', 'Save & Update Cost')}
                 </button>
@@ -1776,6 +2167,187 @@ export const InventoryManagementView: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* 3.1 Modal: Manage Recipe / COGS for a Sales Item */}
+      {showRecipeModal && selectedSalesForRecipe && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 overflow-y-auto">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-3xl rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden my-8 max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/60">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 rounded-xl">
+                  <Link className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-800 dark:text-white text-base">
+                    {t('إدارة وتعديل المكونات المخزنية وتكلفة البيع', 'Manage Stock Recipe & COGS')}
+                  </h3>
+                  <div className="flex items-center gap-2 text-xs text-slate-500">
+                    <span className="font-bold text-slate-700 dark:text-slate-300">{selectedSalesForRecipe.nameAr}</span>
+                    <span>•</span>
+                    <span>{t('سعر البيع:', 'Selling Price:')} {formatMoney(selectedSalesForRecipe.sellingPrice)}</span>
+                  </div>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowRecipeModal(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-xl transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4 overflow-y-auto flex-1">
+              <div className="flex items-center justify-between gap-3">
+                <div className="relative flex-1">
+                  <Search className="w-4 h-4 text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    placeholder={t('بحث في الخامات والأصناف المخزنية المتاحة...', 'Search available stock items...')}
+                    value={recipeSearch}
+                    onChange={(e) => setRecipeSearch(e.target.value)}
+                    className="w-full pr-10 pl-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+              </div>
+
+              {/* Stock Items Selection List */}
+              <div className="border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden divide-y divide-slate-100 dark:divide-slate-800">
+                <div className="bg-slate-50 dark:bg-slate-800 px-4 py-2.5 text-xs font-semibold text-slate-600 dark:text-slate-300 grid grid-cols-12 gap-2">
+                  <div className="col-span-1 text-center">{t('تفعيل', 'Link')}</div>
+                  <div className="col-span-5">{t('الصنف المخزني (الخامة / المستهلك)', 'Stock Consumable')}</div>
+                  <div className="col-span-3">{t('الكمية المستهلكة', 'Consumed Qty')}</div>
+                  <div className="col-span-3 text-left">{t('التكلفة المحسوبة', 'Calculated Cost')}</div>
+                </div>
+
+                <div className="max-h-72 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
+                  {stockItems
+                    .filter((s) => s.nameAr.toLowerCase().includes(recipeSearch.toLowerCase()) || s.sku.toLowerCase().includes(recipeSearch.toLowerCase()))
+                    .map((stk) => {
+                      const itemState = recipeDraft[stk.id] || { isLinked: false, rate: 1, basis: 'units_sold' };
+                      const itemCost = itemState.isLinked ? (itemState.rate || 1) * (stk.purchasePrice || 0) : 0;
+
+                      return (
+                        <div
+                          key={stk.id}
+                          className={`px-4 py-3 grid grid-cols-12 gap-2 items-center text-xs transition ${
+                            itemState.isLinked ? 'bg-emerald-50/40 dark:bg-emerald-950/20' : 'hover:bg-slate-50/50 dark:hover:bg-slate-800/30'
+                          }`}
+                        >
+                          <div className="col-span-1 flex justify-center">
+                            <input
+                              type="checkbox"
+                              checked={itemState.isLinked}
+                              onChange={(e) => {
+                                setRecipeDraft({
+                                  ...recipeDraft,
+                                  [stk.id]: {
+                                    ...itemState,
+                                    isLinked: e.target.checked,
+                                  },
+                                });
+                              }}
+                              className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                            />
+                          </div>
+
+                          <div className="col-span-5">
+                            <span className="font-bold text-slate-800 dark:text-slate-200 block">{stk.nameAr}</span>
+                            <div className="flex items-center gap-2 text-[11px] text-slate-400">
+                              <span>{formatMoney(stk.purchasePrice || 0)} / {stk.unit}</span>
+                              <span>•</span>
+                              <span>{t('رصيد:', 'Stock:')} {getItemCurrentStock(stk.id)} {stk.unit}</span>
+                            </div>
+                          </div>
+
+                          <div className="col-span-3">
+                            {itemState.isLinked ? (
+                              <div className="flex items-center gap-1.5">
+                                <input
+                                  type="number"
+                                  min={0.01}
+                                  step="any"
+                                  value={itemState.rate}
+                                  onChange={(e) => {
+                                    setRecipeDraft({
+                                      ...recipeDraft,
+                                      [stk.id]: {
+                                        ...itemState,
+                                        rate: parseFloat(e.target.value) || 0,
+                                      },
+                                    });
+                                  }}
+                                  className="w-20 px-2 py-1 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-bold text-emerald-700 dark:text-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                                />
+                                <span className="text-slate-500 font-medium text-[11px]">{stk.unit}</span>
+                              </div>
+                            ) : (
+                              <span className="text-slate-400 italic text-[11px]">-</span>
+                            )}
+                          </div>
+
+                          <div className="col-span-3 text-left font-bold text-slate-800 dark:text-slate-200">
+                            {itemState.isLinked ? formatMoney(itemCost) : '-'}
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+
+              {/* Recipe Summary & Margin Calculation */}
+              {(() => {
+                let totalCost = 0;
+                Object.entries(recipeDraft).forEach(([stockId, draft]: [string, RecipeDraftItem]) => {
+                  if (draft.isLinked) {
+                    const stk = stockItems.find((s) => s.id === stockId);
+                    if (stk) totalCost += (draft.rate || 1) * (stk.purchasePrice || 0);
+                  }
+                });
+                const profit = selectedSalesForRecipe.sellingPrice - totalCost;
+                const margin = selectedSalesForRecipe.sellingPrice > 0 ? Math.round((profit / selectedSalesForRecipe.sellingPrice) * 100) : 0;
+
+                return (
+                  <div className="p-4 bg-slate-50 dark:bg-slate-800/80 rounded-xl border border-slate-200 dark:border-slate-700 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <span className="text-xs text-slate-500 block">{t('إجمالي تكلفة المكونات (COGS):', 'Total Stock COGS:')}</span>
+                      <span className="text-lg font-bold text-indigo-700 dark:text-indigo-400 mt-0.5 block">{formatMoney(totalCost)}</span>
+                    </div>
+                    <div>
+                      <span className="text-xs text-slate-500 block">{t('سعر البيع الحالي:', 'Current Selling Price:')}</span>
+                      <span className="text-lg font-bold text-slate-800 dark:text-white mt-0.5 block">{formatMoney(selectedSalesForRecipe.sellingPrice)}</span>
+                    </div>
+                    <div>
+                      <span className="text-xs text-slate-500 block">{t('هامش الربح المتوقع:', 'Projected Margin:')}</span>
+                      <span className="text-lg font-bold text-emerald-600 dark:text-emerald-400 mt-0.5 flex items-center gap-1.5">
+                        {formatMoney(profit)} <span className="text-xs px-1.5 py-0.5 bg-emerald-100 dark:bg-emerald-950/60 rounded-full font-mono font-bold">({margin}%)</span>
+                      </span>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50">
+              <button
+                type="button"
+                onClick={() => setShowRecipeModal(false)}
+                className="px-4 py-2 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-sm font-medium rounded-xl transition cursor-pointer"
+              >
+                {t('إلغاء', 'Cancel')}
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveRecipeDraft}
+                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold rounded-xl shadow-sm transition cursor-pointer flex items-center gap-2"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                <span>{t('حفظ وتحديث تكلفة البيع', 'Save & Update COGS')}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
 
       {/* 4. Modal: Stock Transfer */}
       {showTransferModal && (
@@ -1788,10 +2360,10 @@ export const InventoryManagementView: React.FC = () => {
                 </div>
                 <div>
                   <h3 className="font-bold text-slate-800 text-base">
-                    {t('تحويل مخزني بين المستودعات', 'Warehouse Stock Transfer')}
+                    {t('تحويل مخزني بين المخازن', 'Stock Transfer Between Stores')}
                   </h3>
                   <p className="text-xs text-slate-500">
-                    {t('نقل خامات أو مستلزمات بين فروع ومستودعات الشركة', 'Move items between branches and warehouses')}
+                    {t('نقل خامات أو مستلزمات بين فروع ومخازن الشركة', 'Move items between branches and stores')}
                   </p>
                 </div>
               </div>
@@ -1824,7 +2396,7 @@ export const InventoryManagementView: React.FC = () => {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    {t('من مستودع (المصدر) *', 'From Warehouse *')}
+                    {t('من مخزن (المصدر) *', 'From Store (Source) *')}
                   </label>
                   <select
                     value={transferData.fromWarehouseId}
@@ -1841,7 +2413,7 @@ export const InventoryManagementView: React.FC = () => {
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    {t('إلى مستودع (الوجهة) *', 'To Warehouse *')}
+                    {t('إلى مخزن (الوجهة) *', 'To Store (Destination) *')}
                   </label>
                   <select
                     value={transferData.toWarehouseId}
@@ -1921,7 +2493,7 @@ export const InventoryManagementView: React.FC = () => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    {t('المستودع المراد جرده *', 'Warehouse to Audit *')}
+                    {t('المخزن المراد جرده *', 'Store to Audit *')}
                   </label>
                   <select
                     value={newAuditWarehouseId}
@@ -2098,7 +2670,7 @@ export const InventoryManagementView: React.FC = () => {
                   <option value="staff_liability">{t('تحميل العجز على الموظف / الموظفين (استقطاع من المرتب)', 'Deduct Shortage from Staff Payroll')}</option>
                   <option value="write_off">{t('ترحيل كخسائر عجز مخزني للشركة (دون تحميل موظفين)', 'Company Write-Off Loss')}</option>
                   <option value="mixed">{t('تسوية مختلطة (نسبة على الموظف ونسبة على الشركة)', 'Mixed (Split between Staff & Company)')}</option>
-                  <option value="inventory_adjustment_only">{t('تعديل كميات المستودع فقط (للفروق الطبيعية والزيادة)', 'Adjust Stock Quantities Only')}</option>
+                  <option value="inventory_adjustment_only">{t('تعديل كميات المخزن فقط (للفروق الطبيعية والزيادة)', 'Adjust Store Quantities Only')}</option>
                 </select>
               </div>
 

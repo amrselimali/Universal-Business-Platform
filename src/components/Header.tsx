@@ -15,6 +15,7 @@ import {
   Menu,
   LogOut,
   Shield,
+  BookOpen,
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -194,6 +195,20 @@ export const Header: React.FC<HeaderProps> = ({ onNavigate, currentView, onToggl
             </span>
           </button>
         )}
+
+        {/* User Manual & Technical Specs Shortcut */}
+        <button
+          onClick={() => onNavigate('system_manual')}
+          title={t('دليل المستخدم الشامل والتوثيق المعماري', 'Comprehensive User Manual & Tech Specs')}
+          className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold border transition-all cursor-pointer ${
+            currentView === 'system_manual'
+              ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+              : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-indigo-50 hover:text-indigo-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
+          }`}
+        >
+          <BookOpen className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />
+          <span className="hidden lg:inline">{t('المانيوال والتوثيق', 'Manual')}</span>
+        </button>
 
         {/* Fast POS Button */}
         {canAccessView('pos') && (

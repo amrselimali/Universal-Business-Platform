@@ -1,6 +1,7 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
 import {
   Tenant,
+  CleanCompanySetupParams,
   Branch,
   Warehouse,
   ItemCategory,
@@ -29,6 +30,7 @@ import {
   AuditRecord,
   UserActivityLog,
   PaymentSplit,
+  ClientOffer,
   StaffPayrollItem,
   PayrollRun,
   LaserDevice,
@@ -36,7 +38,20 @@ import {
   DeviceMaintenancePart,
   InventoryAudit,
   InventoryStaffLiability,
+  CashReceiptVoucher,
+  CashPaymentVoucher,
+  SpecializedTaxInvoice,
+  GoodsReceiptVoucher,
+  GoodsIssueVoucher,
 } from '../types';
+import {
+  INITIAL_CASH_RECEIPTS,
+  INITIAL_CASH_PAYMENTS,
+  INITIAL_TAX_INVOICES,
+  INITIAL_GOODS_RECEIPTS,
+  INITIAL_GOODS_ISSUES,
+} from '../data/fiscalData';
+import { generateZatcaTlvBase64, generateQrDataUrl } from '../utils/fiscalUtils';
 import {
   INITIAL_MODULES,
   INITIAL_TENANT,
@@ -82,6 +97,8 @@ interface CheckoutPayload {
   cardPaid?: number;
   taxRate?: number;
   isCollectionOnly?: boolean;
+  paymentFeePercentage?: number;
+  paymentFeeAmount?: number;
   splitPayments?: PaymentSplit[];
 }
 
@@ -94,12 +111,17 @@ interface PlatformContextType {
   tenant: Tenant;
   setTenant: React.Dispatch<React.SetStateAction<Tenant>>;
   tenants: Tenant[];
+  allTenants: Tenant[];
   addTenant: (tenantData: Omit<Tenant, 'id'>) => Tenant;
   updateTenant: (tenantId: string, updatedData: Partial<Tenant>) => void;
   updateTenantModules: (tenantId: string, moduleIds: string[]) => void;
   switchTenant: (tenantId: string) => void;
   deleteTenant: (tenantId: string) => { status: 'archived' | 'deleted'; message: string };
   restoreTenant: (tenantId: string) => boolean;
+  purgeTenant: (tenantId: string) => { success: boolean; message: string };
+  initializeCleanProductionCompany: (
+    params: CleanCompanySetupParams
+  ) => Promise<{ success: boolean; tenantId: string; message: string }>;
 
   // Branches & Warehouses
   branches: Branch[];
@@ -227,6 +249,8 @@ interface PlatformContextType {
   }>) => { imported: number; updated: number; errors: string[] };
   importCustomersFromExcel: (rows: any[]) => void;
   getNextCustomerSystemCode: (branchId?: string) => string;
+  addClientOffer: (partyId: string, offer: Omit<ClientOffer, 'id' | 'purchaseDate' | 'status'>) => ClientOffer;
+  consumeClientOfferSession: (partyId: string, offerId: string, count?: number) => { success: boolean; remaining: number; message?: string };
 
   // Bookings & Follow-ups (شاشة الحجز والمتابعة)
   appointments: Appointment[];
@@ -251,8 +275,22 @@ interface PlatformContextType {
   receptionShifts: ReceptionShift[];
   allReceptionShifts: ReceptionShift[];
   activeReceptionShift: ReceptionShift | null;
-  openReceptionShift: (receptionistName?: string, notes?: string) => ReceptionShift;
-  closeReceptionShift: (shiftId: string, notes?: string) => void;
+  openReceptionShift: (
+    receptionistName?: string,
+    notes?: string,
+    branchIdParam?: string,
+    openingFloatParam?: number
+  ) => ReceptionShift;
+  closeReceptionShift: (
+    shiftId: string,
+    notesOrOptions?: string | {
+      notes?: string;
+      actualCashCount?: number;
+      openingFloat?: number;
+      expectedCash?: number;
+      transferredToMainTreasury?: boolean;
+    }
+  ) => void;
   addShiftRunRow: (shiftId: string, row: Omit<ShiftRunRow, 'id'>) => void;
   updateShiftRunRow: (shiftId: string, rowId: string, data: Partial<ShiftRunRow>) => void;
   removeShiftRunRow: (shiftId: string, rowId: string) => void;
@@ -265,7 +303,7 @@ interface PlatformContextType {
     dataOrConsumed: Partial<ShiftDeviceCounter> | number,
     adjustmentsVal?: number
   ) => void;
-  updateShiftNotes: (shiftId: string, notes: string) => void;
+  updateShiftNotes: (shiftId: string, notes: string, author?: string) => void;
   addAccountantAdjustment: (shiftId: string, adjustmentAmount: number, reason: string) => void;
 
   // Laser Devices (أجهزة ومعدات الليزر)
@@ -288,13 +326,14 @@ interface PlatformContextType {
   deleteDeviceMaintenance: (maintenanceId: string) => { success: boolean; error?: string };
 
   // POS & Legacy Shift
-  activeShift: PosShift;
+  activeShift: PosShift | null;
+  allPosShifts: PosShift[];
   invoices: SalesInvoice[];
   allInvoices: SalesInvoice[];
   processCheckout: (payload: CheckoutPayload) => { success: boolean; invoice?: SalesInvoice; error?: string };
   refundInvoice: (invoiceId: string, reason: string, restockItems?: boolean) => { success: boolean; error?: string };
-  closeShift: (actualCash: number, notes?: string) => void;
-  openShift: (openingFloat: number) => void;
+  closeShift: (actualCash: number, notes?: string, shiftIdParam?: string) => void;
+  openShift: (openingFloat: number, branchIdParam?: string) => { success: boolean; message?: string } | void;
 
   // Accounting & Journal
   accounts: Account[];
@@ -316,12 +355,40 @@ interface PlatformContextType {
   recordAudit: (audit: Omit<AuditRecord, 'id' | 'tenantId' | 'performedById' | 'performedByName' | 'timestamp'>) => void;
   logUserActivity: (screenId: string, screenNameAr: string, screenNameEn: string, actionNameAr: string, actionNameEn: string, details: string) => void;
 
+  // Vouchers, Tax Invoices & Stock Notes (السندات والفواتير الضريبية وأذون المخزن)
+  cashReceipts: CashReceiptVoucher[];
+  allCashReceipts: CashReceiptVoucher[];
+  addCashReceipt: (data: Omit<CashReceiptVoucher, 'id' | 'voucherNumber' | 'createdAt'>) => CashReceiptVoucher;
+  deleteCashReceipt: (id: string) => void;
+
+  cashPayments: CashPaymentVoucher[];
+  allCashPayments: CashPaymentVoucher[];
+  addCashPayment: (data: Omit<CashPaymentVoucher, 'id' | 'voucherNumber' | 'createdAt'>) => CashPaymentVoucher;
+  deleteCashPayment: (id: string) => void;
+
+  specializedTaxInvoices: SpecializedTaxInvoice[];
+  allSpecializedTaxInvoices: SpecializedTaxInvoice[];
+  addSpecializedTaxInvoice: (data: Omit<SpecializedTaxInvoice, 'id' | 'invoiceNumber' | 'createdAt'>) => Promise<SpecializedTaxInvoice>;
+  cancelSpecializedTaxInvoice: (id: string, reason: string) => void;
+  deleteSpecializedTaxInvoice: (id: string) => void;
+
+  goodsReceipts: GoodsReceiptVoucher[];
+  allGoodsReceipts: GoodsReceiptVoucher[];
+  addGoodsReceipt: (data: Omit<GoodsReceiptVoucher, 'id' | 'grnNumber' | 'createdAt'>) => GoodsReceiptVoucher;
+  deleteGoodsReceipt: (id: string) => void;
+
+  goodsIssues: GoodsIssueVoucher[];
+  allGoodsIssues: GoodsIssueVoucher[];
+  addGoodsIssue: (data: Omit<GoodsIssueVoucher, 'id' | 'ginNumber' | 'createdAt'>) => GoodsIssueVoucher;
+  deleteGoodsIssue: (id: string) => void;
+
   // Neon PostgreSQL
   neonDb: NeonDbState;
   updateNeonConnectionString: (conn: string) => void;
   testNeonConnection: (connOverride?: string) => Promise<boolean>;
   syncAllToNeon: () => Promise<{ success: boolean; message: string; count: number }>;
   fixNeonSchema: () => Promise<{ success: boolean; message: string }>;
+  runNeonMigrations: () => Promise<{ success: boolean; message: string }>;
   fetchRemoteCounts: () => Promise<{ [key: string]: number }>;
   getPostgresSchemaSql: () => string;
   resetToDefaults: () => void;
@@ -349,105 +416,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const t = (ar: string, en: string) => (language === 'ar' ? ar : en);
 
-  // 2. Tenants & Companies Management
-  const [tenants, setTenants] = useState<Tenant[]>(() => {
-    try {
-      const saved = localStorage.getItem('erp_tenants');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed.map((t: Tenant) => ({
-            ...t,
-            activeModules: Array.isArray(t.activeModules) ? t.activeModules : INITIAL_TENANT.activeModules,
-          }));
-        }
-      }
-    } catch (e) {
-      console.error('Failed to load tenants:', e);
-    }
-    return INITIAL_TENANTS;
-  });
-
-  const [tenant, setTenant] = useState<Tenant>(() => {
-    try {
-      const savedId = localStorage.getItem('erp_active_tenant_id');
-      if (savedId) {
-        const found = tenants.find((t) => t.id === savedId);
-        if (found) return found;
-      }
-    } catch (e) {
-      console.error('Failed to load active tenant:', e);
-    }
-    return tenants[0] || INITIAL_TENANT;
-  });
-
-  useEffect(() => {
-    localStorage.setItem('erp_tenants', JSON.stringify(tenants));
-  }, [tenants]);
-
-  useEffect(() => {
-    if (tenant?.id) {
-      localStorage.setItem('erp_active_tenant_id', tenant.id);
-    }
-  }, [tenant]);
-
-  const formatMoney = (amount: number) => {
-    const num = typeof amount === 'number' && !isNaN(amount) ? amount : 0;
-    const formatted = new Intl.NumberFormat(language === 'ar' ? 'ar-EG' : 'en-US', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(num);
-    const symbol = language === 'ar' ? (tenant?.currencySymbol || 'ج.م') : (tenant?.currency || 'EGP');
-    return `${formatted} ${symbol}`;
-  };
-
-  // 3. Branches & Warehouses
-  const [allBranches, setAllBranches] = useState<Branch[]>(() => {
-    try {
-      const saved = localStorage.getItem('erp_branches');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch (e) {
-      console.error('Failed to load branches:', e);
-    }
-    return INITIAL_BRANCHES;
-  });
-
-  const [activeBranch, setActiveBranch] = useState<Branch | null>(() => {
-    return allBranches.find((b) => b.tenantId === tenant.id) || allBranches[0] || null;
-  });
-
-  const [allWarehouses, setAllWarehouses] = useState<Warehouse[]>(() => {
-    try {
-      const saved = localStorage.getItem('erp_warehouses');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch (e) {
-      console.error('Failed to load warehouses:', e);
-    }
-    return INITIAL_WAREHOUSES;
-  });
-
-  const [activeWarehouse, setActiveWarehouse] = useState<Warehouse | null>(() => {
-    return allWarehouses.find((w) => w.tenantId === tenant.id) || allWarehouses[0] || null;
-  });
-
-  useEffect(() => {
-    localStorage.setItem('erp_branches', JSON.stringify(allBranches));
-  }, [allBranches]);
-
-  useEffect(() => {
-    localStorage.setItem('erp_warehouses', JSON.stringify(allWarehouses));
-  }, [allWarehouses]);
-
-  const branches = allBranches.filter((b) => b.tenantId === tenant?.id);
-  const warehouses = allWarehouses.filter((w) => w.tenantId === tenant?.id);
-
-  // 4. Users & Authentication
+  // 2. Users & Authentication (Declared first so currentUser is always available)
   const [allUsers, setAllUsers] = useState<AppUser[]>(() => {
     try {
       const saved = localStorage.getItem('erp_users');
@@ -471,7 +440,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     } catch (e) {
       console.error('Failed to load current user:', e);
     }
-    return allUsers[0] || INITIAL_USERS[0];
+    return INITIAL_USERS[0];
   });
 
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => {
@@ -490,7 +459,203 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     localStorage.setItem('erp_is_logged_in', isLoggedIn ? 'true' : 'false');
   }, [isLoggedIn]);
 
-  const users = allUsers.filter((u) => u.isAdmin || u.allowedTenantIds?.includes('*') || u.allowedTenantIds?.includes(tenant?.id));
+  // 3. Tenants & Companies Management
+  const [allTenants, setAllTenants] = useState<Tenant[]>(() => {
+    try {
+      const saved = localStorage.getItem('erp_tenants');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.map((t: Tenant) => ({
+            ...t,
+            currency: t.currency === 'SAR' ? 'EGP' : (t.currency || 'EGP'),
+            currencySymbol: t.currency === 'SAR' || !t.currencySymbol ? 'ج.م' : t.currencySymbol,
+            activeModules: Array.isArray(t.activeModules) ? t.activeModules : INITIAL_TENANT.activeModules,
+          }));
+        }
+      }
+    } catch (e) {
+      console.error('Failed to load tenants:', e);
+    }
+    return INITIAL_TENANTS;
+  });
+
+  // Filtered tenants: strictly enforces RBAC so an employee ONLY sees companies they are linked to!
+  const tenants = useMemo(() => {
+    if (!currentUser) return allTenants.filter((t) => !t.isArchived);
+    if (currentUser.isAdmin || currentUser.role === 'SuperAdmin') {
+      return allTenants.filter((t) => !t.isArchived);
+    }
+    const allowed = currentUser.allowedTenantIds || [];
+    if (allowed.includes('*')) {
+      return allTenants.filter((t) => !t.isArchived);
+    }
+    return allTenants.filter((t) => !t.isArchived && allowed.includes(t.id));
+  }, [allTenants, currentUser]);
+
+  const [tenant, setTenant] = useState<Tenant>(() => {
+    try {
+      const savedId = localStorage.getItem('erp_active_tenant_id');
+      if (savedId) {
+        const found = allTenants.find((t) => t.id === savedId);
+        if (found) {
+          return {
+            ...found,
+            currency: found.currency === 'SAR' ? 'EGP' : (found.currency || 'EGP'),
+            currencySymbol: found.currency === 'SAR' || !found.currencySymbol ? 'ج.م' : found.currencySymbol,
+          };
+        }
+      }
+    } catch (e) {
+      console.error('Failed to load active tenant:', e);
+    }
+    const initial = allTenants[0] || INITIAL_TENANT;
+    return {
+      ...initial,
+      currency: initial.currency === 'SAR' ? 'EGP' : (initial.currency || 'EGP'),
+      currencySymbol: initial.currency === 'SAR' || !initial.currencySymbol ? 'ج.م' : initial.currencySymbol,
+    };
+  });
+
+  useEffect(() => {
+    localStorage.setItem('erp_tenants', JSON.stringify(allTenants));
+  }, [allTenants]);
+
+  useEffect(() => {
+    if (tenant?.id) {
+      localStorage.setItem('erp_active_tenant_id', tenant.id);
+    }
+  }, [tenant]);
+
+  // Synchronize active tenant when currentUser changes or if tenant is outside user's allowed scope
+  useEffect(() => {
+    if (!currentUser) return;
+    const isSuper = currentUser.isAdmin || currentUser.role === 'SuperAdmin';
+    if (!isSuper) {
+      const userTenants = allTenants.filter(
+        (t) => !t.isArchived && (currentUser.allowedTenantIds?.includes('*') || currentUser.allowedTenantIds?.includes(t.id))
+      );
+      if (userTenants.length > 0 && !userTenants.some((t) => t.id === tenant?.id)) {
+        setTenant(userTenants[0]);
+      }
+    }
+  }, [currentUser, allTenants, tenant?.id]);
+
+  const formatMoney = (amount: number) => {
+    const num = typeof amount === 'number' && !isNaN(amount) ? amount : 0;
+    const formatted = new Intl.NumberFormat(language === 'ar' ? 'ar-EG' : 'en-US', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(num);
+    const symbol = language === 'ar' ? (tenant?.currencySymbol || 'ج.م') : (tenant?.currency || 'EGP');
+    return `${formatted} ${symbol}`;
+  };
+
+  // 4. Branches & Warehouses
+  const [allBranches, setAllBranches] = useState<Branch[]>(() => {
+    try {
+      const saved = localStorage.getItem('erp_branches');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {
+      console.error('Failed to load branches:', e);
+    }
+    return INITIAL_BRANCHES;
+  });
+
+  const [activeBranch, setActiveBranch] = useState<Branch | null>(() => {
+    return allBranches.find((b) => b.tenantId === tenant?.id && !b.isArchived) || allBranches[0] || null;
+  });
+
+  const [allWarehouses, setAllWarehouses] = useState<Warehouse[]>(() => {
+    try {
+      const saved = localStorage.getItem('erp_warehouses');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {
+      console.error('Failed to load warehouses:', e);
+    }
+    return INITIAL_WAREHOUSES;
+  });
+
+  const [activeWarehouse, setActiveWarehouse] = useState<Warehouse | null>(() => {
+    return allWarehouses.find((w) => w.tenantId === tenant?.id && !w.isArchived) || allWarehouses[0] || null;
+  });
+
+  useEffect(() => {
+    localStorage.setItem('erp_branches', JSON.stringify(allBranches));
+  }, [allBranches]);
+
+  useEffect(() => {
+    localStorage.setItem('erp_warehouses', JSON.stringify(allWarehouses));
+  }, [allWarehouses]);
+
+  // Derived branches: strictly filtered by active tenant AND user permissions!
+  const branches = useMemo(() => {
+    return allBranches.filter((b) => {
+      if (b.tenantId !== tenant?.id) return false;
+      if (b.isArchived) return false;
+      if (currentUser?.isAdmin || currentUser?.role === 'SuperAdmin') return true;
+      const allowed = currentUser?.allowedBranchIds || [];
+      return allowed.includes('*') || allowed.includes(b.id);
+    });
+  }, [allBranches, tenant?.id, currentUser]);
+
+  // Derived warehouses: strictly filtered by active tenant AND user permissions!
+  const warehouses = useMemo(() => {
+    return allWarehouses.filter((w) => {
+      if (w.tenantId !== tenant?.id) return false;
+      if (w.isArchived) return false;
+      if (currentUser?.isAdmin || currentUser?.role === 'SuperAdmin') return true;
+      const allowed = currentUser?.allowedWarehouseIds || [];
+      return allowed.includes('*') || allowed.includes(w.id);
+    });
+  }, [allWarehouses, tenant?.id, currentUser]);
+
+  // Ensure activeBranch is valid for current tenant and user permissions
+  useEffect(() => {
+    if (branches.length > 0) {
+      if (!activeBranch || !branches.some((b) => b.id === activeBranch.id)) {
+        setActiveBranch(branches[0]);
+      }
+    } else {
+      setActiveBranch(null);
+    }
+  }, [branches, activeBranch?.id]);
+
+  // Ensure activeWarehouse is valid for current tenant and user permissions AND tracks activeBranch
+  useEffect(() => {
+    if (activeBranch && warehouses.length > 0) {
+      const branchWarehouses = warehouses.filter((w) => w.branchId === activeBranch.id);
+      if (branchWarehouses.length > 0) {
+        if (!activeWarehouse || activeWarehouse.branchId !== activeBranch.id) {
+          const defaultWh = branchWarehouses.find((w) => w.isDefault) || branchWarehouses[0];
+          setActiveWarehouse(defaultWh);
+        }
+      } else {
+        if (!activeWarehouse || !warehouses.some((w) => w.id === activeWarehouse.id)) {
+          setActiveWarehouse(warehouses[0]);
+        }
+      }
+    } else if (warehouses.length > 0) {
+      if (!activeWarehouse || !warehouses.some((w) => w.id === activeWarehouse.id)) {
+        setActiveWarehouse(warehouses[0]);
+      }
+    } else {
+      setActiveWarehouse(null);
+    }
+  }, [warehouses, activeBranch?.id]);
+
+  const users = useMemo(() => {
+    return allUsers.filter((u) => {
+      if (u.isAdmin || u.role === 'SuperAdmin') return true;
+      return u.allowedTenantIds?.includes('*') || u.allowedTenantIds?.includes(tenant?.id);
+    });
+  }, [allUsers, tenant?.id]);
 
   // 5. Activity Logs & Audit Trail (سجل النشاطات والتعديلات)
   const [allAuditRecords, setAllAuditRecords] = useState<AuditRecord[]>(() => {
@@ -996,6 +1161,82 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         `تم حذف العميل/المورد نهائياً: ${p.name}`
       );
     }
+  };
+
+  const addClientOffer = (partyId: string, offer: Omit<ClientOffer, 'id' | 'purchaseDate' | 'status'>): ClientOffer => {
+    const newOffer: ClientOffer = {
+      ...offer,
+      id: `off-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+      purchaseDate: new Date().toISOString().split('T')[0],
+      status: 'Active',
+      consumedQuantity: offer.consumedQuantity || 0,
+      remainingQuantity: offer.totalQuantity - (offer.consumedQuantity || 0),
+    };
+    setAllParties((prev) =>
+      prev.map((p) => {
+        if (p.id === partyId) {
+          const existingOffers = p.offers || [];
+          return {
+            ...p,
+            offers: [newOffer, ...existingOffers],
+          };
+        }
+        return p;
+      })
+    );
+    logUserActivity(
+      'parties',
+      'باقات وعروض العملاء',
+      'Client Packages',
+      'إضافة باقة جديدة للعميل',
+      'Add Client Package',
+      `تم شحن باقة (${newOffer.offerNameAr}) بإجمالي ${newOffer.totalQuantity} جلسات بقيمة ${newOffer.totalPrice} ج.م`
+    );
+    return newOffer;
+  };
+
+  const consumeClientOfferSession = (
+    partyId: string,
+    offerId: string,
+    count: number = 1
+  ): { success: boolean; remaining: number; message?: string } => {
+    let result = { success: false, remaining: 0, message: '' };
+    setAllParties((prev) =>
+      prev.map((p) => {
+        if (p.id === partyId) {
+          const offers = (p.offers || []).map((off) => {
+            if (off.id === offerId) {
+              if (off.remainingQuantity < count) {
+                result = {
+                  success: false,
+                  remaining: off.remainingQuantity,
+                  message: 'الرصيد المتبقي في الباقة لا يكفي لاستهلاك الجلسة المطلوبة!',
+                };
+                return off;
+              }
+              const newConsumed = off.consumedQuantity + count;
+              const newRemaining = off.remainingQuantity - count;
+              const newStatus = newRemaining <= 0 ? 'Consumed' : 'Active';
+              result = {
+                success: true,
+                remaining: newRemaining,
+                message: `تم خصم ${count} جلسة بنجاح، المتبقي في باقة (${off.offerNameAr}): ${newRemaining} جلسة`,
+              };
+              return {
+                ...off,
+                consumedQuantity: newConsumed,
+                remainingQuantity: newRemaining,
+                status: newStatus as any,
+              };
+            }
+            return off;
+          });
+          return { ...p, offers };
+        }
+        return p;
+      })
+    );
+    return result;
   };
 
   const deleteStaffMember = (id: string) => {
@@ -1823,12 +2064,73 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, [allReceptionShifts]);
 
   const receptionShifts = allReceptionShifts.filter((s) => s.tenantId === tenant?.id);
-  const activeReceptionShift = receptionShifts.find((s) => s.status === 'Open' && (!activeBranch || s.branchId === activeBranch.id)) || null;
+  const activeReceptionShift = useMemo(() => {
+    const rawShift = receptionShifts.find((s) => s.status === 'Open' && (!activeBranch || s.branchId === activeBranch.id)) || null;
+    if (!rawShift) return null;
 
-  const openReceptionShift = (receptionistName?: string, notes?: string): ReceptionShift => {
+    // Dynamically calculate accurate cash breakdown for the active shift
+    const cashBal = rawShift.balancing?.find(
+      (b) =>
+        b.paymentMethodName.includes('نقد') ||
+        b.paymentMethodName.toLowerCase().includes('cash') ||
+        b.paymentMethodId.toLowerCase().includes('cash') ||
+        b.paymentMethodId === 'pm-01' ||
+        b.paymentMethodId === 'pm-cash-1'
+    ) || rawShift.balancing?.[0];
+
+    const initialBal = rawShift.openingFloat ?? rawShift.initialBalance ?? (cashBal?.openingBalance || 0);
+
+    const cashColl = cashBal?.totalCollected !== undefined
+      ? cashBal.totalCollected
+      : rawShift.runRows
+          .filter((r) => (r.paymentMethod || '').includes('نقد') || (r.paymentMethod || '').toLowerCase().includes('cash'))
+          .reduce((sum, r) => sum + (r.collectedAmount || 0), 0);
+
+    const cashExp = cashBal?.totalDisbursed !== undefined
+      ? cashBal.totalDisbursed
+      : rawShift.expenses
+          .filter((e) => (e.disbursementMethod || '').includes('نقد') || (e.disbursementMethod || '').toLowerCase().includes('cash'))
+          .reduce((sum, e) => sum + (e.amount || 0), 0);
+
+    const adjustments = cashBal?.adjustments || 0;
+
+    const expectedCashInDrawer = cashBal?.closingBalance !== undefined
+      ? cashBal.closingBalance
+      : initialBal + cashColl - cashExp + adjustments;
+
+    return {
+      ...rawShift,
+      initialBalance: initialBal,
+      openingFloat: initialBal,
+      cashCollected: cashColl,
+      cashExpenses: cashExp,
+      expectedCashInDrawer,
+    };
+  }, [receptionShifts, activeBranch?.id]);
+
+  const openReceptionShift = (
+    receptionistName?: string,
+    notes?: string,
+    branchIdParam?: string,
+    openingFloatParam?: number
+  ): ReceptionShift => {
     const today = new Date().toISOString().split('T')[0];
     const shiftNum = `SH-${new Date().getFullYear()}-${(receptionShifts.length + 1).toString().padStart(4, '0')}`;
-    const targetBranchId = activeBranch?.id || branches[0]?.id || 'branch-cairo';
+    const targetBranchId = branchIdParam || activeBranch?.id || branches[0]?.id || 'branch-cairo';
+
+    // Enforce branch-level isolation and prevent opening more than one shift for the SAME branch:
+    const existingOpenShift = receptionShifts.find(
+      (s) => s.status === 'Open' && s.branchId === targetBranchId
+    );
+    if (existingOpenShift) {
+      const branchObj = branches.find((b) => b.id === targetBranchId);
+      const branchName = branchObj ? branchObj.name : 'هذا الفرع';
+      const msg = language === 'ar'
+        ? `يوجد شيفت تشغيل مفتوح بالفعل لـ (${branchName}) برقم [${existingOpenShift.shiftNumber}]. لا يمكن فتح أكثر من شيفت لنفس الفرع في نفس الوقت. يرجى إغلاق الشيفت المفتوح أولاً!`
+        : `An open shift already exists for (${branchName}) [#${existingOpenShift.shiftNumber}]. Cannot open multiple shifts for the same branch simultaneously!`;
+      alert(msg);
+      return existingOpenShift;
+    }
 
     // Find the last closed shift for this branch to carry forward opening balances
     const lastClosedShift = receptionShifts.find(
@@ -1878,10 +2180,13 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const initialBalancing: ShiftBalancingRow[] = paymentMethods
       .filter((pm) => !pm.isArchived)
       .map((pm) => {
+        const isCashMethod = pm.id === 'pm-01' || pm.id === 'pm-cash-1' || pm.nameAr.includes('نقد');
         const prevBal = lastClosedShift?.balancing.find(
           (b) => b.paymentMethodId === pm.id || b.paymentMethodName === pm.nameAr
         );
-        const openingBal = prevBal ? prevBal.closingBalance : 0;
+        const openingBal = (isCashMethod && openingFloatParam !== undefined)
+          ? openingFloatParam
+          : (prevBal ? prevBal.closingBalance : (isCashMethod && lastClosedShift?.openingFloat ? lastClosedShift.openingFloat : 0));
         const methodRows = initialRunRows.filter(
           (r) => r.paymentMethod.includes(pm.nameAr) || pm.nameAr.includes(r.paymentMethod)
         );
@@ -1918,6 +2223,9 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       };
     });
 
+    const cashBalInitial = initialBalancing.find((b) => b.paymentMethodName.includes('نقد')) || initialBalancing[0];
+    const initialCashVal = cashBalInitial ? cashBalInitial.openingBalance : (openingFloatParam || 0);
+
     const newShift: ReceptionShift = {
       id: `shift-rec-${Date.now()}`,
       shiftNumber: shiftNum,
@@ -1937,6 +2245,11 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       totalCollected: initTotalColl,
       totalExpenses: 0,
       netShiftCash: initTotalColl,
+      openingFloat: initialCashVal,
+      initialBalance: initialCashVal,
+      cashCollected: cashBalInitial ? cashBalInitial.totalCollected : 0,
+      cashExpenses: 0,
+      expectedCashInDrawer: initialCashVal + (cashBalInitial ? cashBalInitial.totalCollected : 0),
     };
 
     setAllReceptionShifts((prev) => [newShift, ...prev]);
@@ -1959,15 +2272,107 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return newShift;
   };
 
-  const closeReceptionShift = (shiftId: string, notes?: string) => {
+  const closeReceptionShift = (
+    shiftId: string,
+    notesOrOptions?: string | {
+      notes?: string;
+      actualCashCount?: number;
+      openingFloat?: number;
+      expectedCash?: number;
+      transferredToMainTreasury?: boolean;
+    }
+  ) => {
+    const opts = typeof notesOrOptions === 'object' ? notesOrOptions : { notes: notesOrOptions };
+    const closeNote = opts.notes || '';
+    const actualCash = opts.actualCashCount;
+    const isTransferred = Boolean(opts.transferredToMainTreasury);
+
+    let createdReceiptNumber: string | undefined = undefined;
+    const targetShift = allReceptionShifts.find((s) => s.id === shiftId);
+
+    // If transfer to main treasury was selected and actual cash > 0, generate automated cash receipt voucher
+    if (isTransferred && actualCash && actualCash > 0 && targetShift) {
+      try {
+        const rcpt = addCashReceipt({
+          tenantId: tenant?.id || INITIAL_TENANT.id,
+          branchId: targetShift.branchId || activeBranch?.id || '',
+          date: new Date().toISOString().split('T')[0],
+          time: new Date().toTimeString().split(' ')[0] || '12:00:00',
+          amount: actualCash,
+          currency: 'EGP',
+          receivedFrom: `كاشير وردية (${targetShift.receptionistName})`,
+          paymentMethod: 'Cash',
+          description: `توريد إيراد وردية وشيفت رقم ${targetShift.shiftNumber} - مطابقة وتقفيل درج النقدية (تقرير Z)`,
+          receiverName: currentUser?.name || 'أمين الخزينة الرئيسية',
+          costCenter: activeBranch?.name || 'الفرع الرئيسي',
+          status: 'active',
+        });
+        createdReceiptNumber = rcpt.voucherNumber;
+      } catch (e) {
+        console.error('Failed to create treasury receipt on shift close:', e);
+      }
+    }
+
     setAllReceptionShifts((prev) =>
       prev.map((s) => {
         if (s.id === shiftId) {
+          const existingNotes = s.notes || '';
+          const combinedNotes = closeNote
+            ? (existingNotes ? `${existingNotes}\n[ملاحظات الإغلاق]: ${closeNote}` : `[ملاحظات الإغلاق]: ${closeNote}`)
+            : existingNotes;
+
+          const cashBal = s.balancing?.find(
+            (b) =>
+              b.paymentMethodName.includes('نقد') ||
+              b.paymentMethodName.toLowerCase().includes('cash') ||
+              b.paymentMethodId.toLowerCase().includes('cash') ||
+              b.paymentMethodId === 'pm-01' ||
+              b.paymentMethodId === 'pm-cash-1'
+          ) || s.balancing?.[0];
+
+          const openFloat = opts.openingFloat ?? s.openingFloat ?? s.initialBalance ?? (cashBal?.openingBalance || 0);
+
+          const cashColl = s.cashCollected !== undefined
+            ? s.cashCollected
+            : cashBal?.totalCollected !== undefined
+            ? cashBal.totalCollected
+            : s.runRows
+                .filter((r) => (r.paymentMethod || '').includes('نقد') || (r.paymentMethod || '').toLowerCase().includes('cash'))
+                .reduce((sum, r) => sum + (r.collectedAmount || 0), 0);
+
+          const cashExp = s.cashExpenses !== undefined
+            ? s.cashExpenses
+            : cashBal?.totalDisbursed !== undefined
+            ? cashBal.totalDisbursed
+            : s.expenses
+                .filter((e) => (e.disbursementMethod || '').includes('نقد') || (e.disbursementMethod || '').toLowerCase().includes('cash'))
+                .reduce((sum, e) => sum + (e.amount || 0), 0);
+
+          const adjustments = cashBal?.adjustments || 0;
+
+          const expCash = opts.expectedCash !== undefined 
+            ? opts.expectedCash 
+            : cashBal?.closingBalance !== undefined
+            ? cashBal.closingBalance
+            : Number((openFloat + cashColl - cashExp + adjustments).toFixed(2));
+          const diff = actualCash !== undefined ? Number((actualCash - expCash).toFixed(2)) : undefined;
+
           return {
             ...s,
             status: 'Closed',
             closedAt: new Date().toISOString(),
-            notes: notes !== undefined ? notes : s.notes,
+            notes: combinedNotes,
+            closingNotes: closeNote || s.closingNotes,
+            openingFloat: openFloat,
+            initialBalance: openFloat,
+            cashCollected: cashColl,
+            cashExpenses: cashExp,
+            expectedCashInDrawer: expCash,
+            actualCashCount: actualCash,
+            cashDiscrepancy: diff,
+            transferredToMainTreasury: isTransferred,
+            mainTreasuryReceiptNumber: createdReceiptNumber,
+            zReportNumber: `Z-REP-${s.shiftNumber}`,
           };
         }
         return s;
@@ -1979,15 +2384,15 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       entityId: shiftId,
       entityName: closed?.shiftNumber || 'Shift',
       actionType: 'UPDATE',
-      diffSummary: `إغلاق شيفت التشغيل (${closed?.shiftNumber}) بإجمالي إيراد ${closed?.totalRevenue} ج.م ومصروفات ${closed?.totalExpenses} ج.م`,
+      diffSummary: `إغلاق شيفت التشغيل (${closed?.shiftNumber}) بإجمالي إيراد ${closed?.totalRevenue} ج.م ومصروفات ${closed?.totalExpenses} ج.م مع مطابقة الدرج (الفعلي: ${actualCash || 0} ج.م)`,
     });
     logUserActivity(
       'reception_ops',
       'شاشة التشغيل (الريسيبشن)',
       'Reception Run-sheet',
-      'إغلاق الشيفت',
-      'Close Shift',
-      `تم تقفيل الشيفت رقم ${closed?.shiftNumber}`
+      'إغلاق الشيفت ومطابقة الخزينة',
+      'Close Shift & Reconcile',
+      `تم تقفيل الشيفت رقم ${closed?.shiftNumber} مع إصدار تقرير Z ${createdReceiptNumber ? `وترحيل سند توريد ${createdReceiptNumber}` : ''}`
     );
   };
 
@@ -2281,7 +2686,13 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           const nextBalancing = shift.balancing.map((b) => {
             if (b.paymentMethodId === methodId) {
               const updated = { ...b, ...data };
-              updated.closingBalance = updated.openingBalance + updated.totalCollected - updated.totalDisbursed + updated.adjustments;
+              if (data.closingBalance !== undefined && data.adjustments === undefined) {
+                // عند تعديل الرصيد الختامي مباشرة، الفرق يسجل تلقائياً في عمود التسويات
+                const expected = updated.openingBalance + updated.totalCollected - updated.totalDisbursed;
+                updated.adjustments = Number((updated.closingBalance - expected).toFixed(2));
+              } else if (data.adjustments !== undefined && data.closingBalance === undefined) {
+                updated.closingBalance = Number((updated.openingBalance + updated.totalCollected - updated.totalDisbursed + updated.adjustments).toFixed(2));
+              }
               return updated;
             }
             return b;
@@ -2310,10 +2721,16 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           const nextCounters = shift.deviceCounters.map((d) => {
             if (d.deviceId === deviceId) {
               const updated = { ...d, ...data };
-              updated.closingCounter =
-                (updated.openingCounter ?? d.openingCounter) +
-                (updated.consumedCounter ?? d.consumedCounter) +
-                (updated.adjustments ?? d.adjustments ?? 0);
+              if (data.closingCounter !== undefined && data.adjustments === undefined) {
+                // عند تعديل الرصيد الختامي للعداد مباشرة، الفرق يسجل تلقائياً في عمود التسويات
+                const expected = (updated.openingCounter ?? d.openingCounter) + (updated.consumedCounter ?? d.consumedCounter);
+                updated.adjustments = updated.closingCounter - expected;
+              } else {
+                updated.closingCounter =
+                  (updated.openingCounter ?? d.openingCounter) +
+                  (updated.consumedCounter ?? d.consumedCounter) +
+                  (updated.adjustments ?? d.adjustments ?? 0);
+              }
               return updated;
             }
             return d;
@@ -2325,9 +2742,25 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     );
   };
 
-  const updateShiftNotes = (shiftId: string, notes: string) => {
+  const updateShiftNotes = (shiftId: string, notes: string, author?: string) => {
     setAllReceptionShifts((prev) =>
-      prev.map((s) => (s.id === shiftId ? { ...s, notes } : s))
+      prev.map((s) => {
+        if (s.id === shiftId) {
+          const newEntry = {
+            id: `note-${Date.now()}`,
+            timestamp: new Date().toISOString(),
+            author: author || currentUser?.name || s.receptionistName || 'الاستقبال',
+            note: notes,
+          };
+          const existingHistory = s.manualNotesHistory || [];
+          return {
+            ...s,
+            notes,
+            manualNotesHistory: [...existingHistory, newEntry],
+          };
+        }
+        return s;
+      })
     );
   };
 
@@ -2535,6 +2968,14 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         diffSummary: `حذف الصنف/الخدمة (${prevProd.nameAr}) من النظام`,
         previousState: prevProd,
       });
+      logUserActivity(
+        'products',
+        'إدارة المنتجات والخدمات',
+        'Products & Services',
+        'حذف صنف / خدمة',
+        'Delete Product/Service',
+        `تم حذف الصنف (${prevProd.nameAr}) كود SKU (${prevProd.sku || ''}) نوع (${prevProd.itemType || 'product'}) من النظام.`
+      );
     }
   };
 
@@ -2739,7 +3180,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         branchId: targetAudit.branchId || 'branch-1',
         entryNumber: journalNumber,
         date: new Date().toISOString().split('T')[0],
-        description: `تسوية جرد ${targetAudit.auditNumber} لمستودع ${targetAudit.warehouseName}`,
+        description: `تسوية جرد ${targetAudit.auditNumber} لمخزن ${targetAudit.warehouseName}`,
         sourceDocument: targetAudit.auditNumber,
         isPosted: true,
         lines,
@@ -3212,36 +3653,51 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     });
   };
 
-  // 14. POS & Invoices
-  const [activeShift, setActiveShift] = useState<PosShift>(() => {
+  // 14. POS & Invoices with Multi-Branch Shift Isolation
+  const [allPosShifts, setAllPosShifts] = useState<PosShift[]>(() => {
     try {
-      const saved = localStorage.getItem('erp_active_shift');
+      const saved = localStorage.getItem('erp_pos_shifts');
       if (saved) {
         const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+      const oldSingle = localStorage.getItem('erp_active_shift');
+      if (oldSingle) {
+        const parsed = JSON.parse(oldSingle);
         if (parsed && typeof parsed === 'object' && parsed.status) {
-          return parsed;
+          return [parsed];
         }
       }
     } catch (e) {
       console.error('Failed to load active shift:', e);
     }
-    return {
-      id: 'shift-01',
+    return INITIAL_BRANCHES.map((b, idx) => ({
+      id: `pos-shift-${b.id}`,
       tenantId: INITIAL_TENANT.id,
-      branchId: INITIAL_BRANCHES[0].id,
-      cashierName: 'كاشير رئيسي',
+      branchId: b.id,
+      cashierName: `كاشير ${b.name}`,
       openingFloat: 1500,
       openedAt: new Date().toISOString(),
-      status: 'Open',
+      status: 'Open' as const,
       totalCashSales: 0,
       totalCardSales: 0,
       expectedCash: 1500,
-    };
+    }));
   });
 
   useEffect(() => {
-    localStorage.setItem('erp_active_shift', JSON.stringify(activeShift));
-  }, [activeShift]);
+    localStorage.setItem('erp_pos_shifts', JSON.stringify(allPosShifts));
+  }, [allPosShifts]);
+
+  // Derived active POS shift strictly for current active branch
+  const activeShift = useMemo(() => {
+    const targetBranchId = activeBranch?.id;
+    return (
+      allPosShifts.find(
+        (s) => s.status === 'Open' && s.tenantId === tenant?.id && (!targetBranchId || s.branchId === targetBranchId)
+      ) || null
+    );
+  }, [allPosShifts, tenant?.id, activeBranch?.id]);
 
   const [allInvoices, setAllInvoices] = useState<SalesInvoice[]>(() => {
     try {
@@ -3262,12 +3718,28 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const invoices = allInvoices.filter((i) => i.tenantId === tenant?.id);
 
-  const openShift = (openingFloat: number) => {
+  const openShift = (openingFloat: number, branchIdParam?: string): { success: boolean; message?: string } => {
+    const targetBranchId = branchIdParam || activeBranch?.id || branches[0]?.id || '';
+
+    // Check if an open shift already exists for this branch!
+    const existing = allPosShifts.find(
+      (s) => s.status === 'Open' && s.tenantId === tenant?.id && s.branchId === targetBranchId
+    );
+    if (existing) {
+      const branchName = branches.find((b) => b.id === targetBranchId)?.name || 'هذا الفرع';
+      const msg = language === 'ar'
+        ? `يوجد شيفت كاشير مفتوح بالفعل لـ (${branchName}). لا يمكن فتح أكثر من شيفت لنفس الفرع في نفس الوقت!`
+        : `A cashier shift is already open for this branch. Cannot open multiple shifts for the same branch simultaneously!`;
+      alert(msg);
+      return { success: false, message: msg };
+    }
+
+    const branchObj = branches.find((b) => b.id === targetBranchId);
     const newShift: PosShift = {
       id: `shift-${Date.now()}`,
       tenantId: tenant?.id || INITIAL_TENANT.id,
-      branchId: activeBranch?.id || '',
-      cashierName: currentUser?.name || 'كاشير اليوم',
+      branchId: targetBranchId,
+      cashierName: currentUser?.name || (branchObj ? `كاشير ${branchObj.name}` : 'كاشير الفرع'),
       openingFloat,
       openedAt: new Date().toISOString(),
       status: 'Open',
@@ -3275,50 +3747,57 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       totalCardSales: 0,
       expectedCash: openingFloat,
     };
-    setActiveShift(newShift);
+    setAllPosShifts((prev) => [newShift, ...prev]);
+    recordAudit({
+      branchId: targetBranchId,
+      entityType: 'Shift' as any,
+      entityId: newShift.id,
+      entityName: `شيفت كاشير ${branchObj?.name || targetBranchId}`,
+      actionType: 'CREATE',
+      details: `فتح شيفت كاشير جديد للفرع برصيد افتتاحي ${openingFloat} ج.م`,
+    });
+    return { success: true };
   };
 
-  const closeShift = (actualCash: number, notes?: string) => {
-    setActiveShift((prev) => ({
-      ...prev,
-      status: 'Closed',
-      closedAt: new Date().toISOString(),
-      actualCashCount: actualCash,
-      difference: actualCash - prev.expectedCash,
-      notes,
-    }));
+  const closeShift = (actualCash: number, notes?: string, shiftIdParam?: string) => {
+    const targetShiftId = shiftIdParam || activeShift?.id;
+    if (!targetShiftId) return;
+
+    setAllPosShifts((prev) =>
+      prev.map((s) => {
+        if (s.id === targetShiftId) {
+          return {
+            ...s,
+            status: 'Closed',
+            closedAt: new Date().toISOString(),
+            actualCashCount: actualCash,
+            difference: actualCash - s.expectedCash,
+            notes,
+          };
+        }
+        return s;
+      })
+    );
   };
 
   const processCheckout = (payload: CheckoutPayload): { success: boolean; invoice?: SalesInvoice; error?: string } => {
-    if (!activeBranch) {
-      return {
-        success: false,
-        error: t('لا يوجد فرع نشط لهذه الشركة.', 'No active branch for this company.'),
-      };
-    }
-    if (!activeWarehouse) {
-      return {
-        success: false,
-        error: t('لا يوجد مستودع نشط لهذه الشركة.', 'No active warehouse for this company.'),
-      };
-    }
     if (payload.items.length === 0) {
       return { success: false, error: t('سلة المشتريات فارغة!', 'Cart is empty!') };
     }
 
-    // Check stock for physical items
-    for (const item of payload.items) {
-      if (!item.product.isService) {
-        const available = getProductStock(item.product.id, activeWarehouse.id);
-        if (available < item.quantity) {
-          return {
-            success: false,
-            error: `${t('الرصيد غير كافٍ للصنف:', 'Insufficient stock for:')} ${
-              language === 'ar' ? item.product.nameAr : item.product.nameEn
-            } (${t('المتاح:', 'Available:')} ${available})`,
-          };
-        }
-      }
+    // 1. Verify active reception shift is open for the active branch
+    const currentBranchShift = activeReceptionShift && activeReceptionShift.status === 'Open'
+      ? activeReceptionShift
+      : allReceptionShifts.find((s) => s.status === 'Open' && s.tenantId === tenant?.id && (!activeBranch || s.branchId === activeBranch.id));
+
+    if (!currentBranchShift) {
+      return {
+        success: false,
+        error: t(
+          'لا يوجد شيفت تشغيل مفتوح للفرع الحالي! يرجى فتح شيفت تشغيل أولاً لمباشرة عمليات البيع والتحصيل.',
+          'No open reception operating shift for current branch! Please open a shift first.'
+        ),
+      };
     }
 
     const effectiveTaxRate = payload.taxRate !== undefined ? payload.taxRate : 0;
@@ -3326,6 +3805,16 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const afterDiscount = Math.max(0, subtotal - payload.discountAmount);
     const taxAmount = Number((afterDiscount * effectiveTaxRate).toFixed(2));
     const netAmount = Number((afterDiscount + taxAmount).toFixed(2));
+
+    // Calculate Payment Method Surcharge / Fee
+    const pm = paymentMethods.find(
+      (p) => p.id === payload.paymentMethodId || p.nameAr === payload.paymentMethod || p.code === payload.paymentMethod
+    );
+    const feePct = payload.paymentFeePercentage !== undefined ? payload.paymentFeePercentage : (pm?.feePercentage || 0);
+    const feeAmt = payload.paymentFeeAmount !== undefined
+      ? payload.paymentFeeAmount
+      : (feePct > 0 ? Number(((netAmount * feePct) / 100).toFixed(2)) : 0);
+    const totalWithFee = Number((netAmount + feeAmt).toFixed(2));
 
     const customer = parties.find((p) => p.id === payload.customerId) || parties[0] || {
       id: 'customer-cash',
@@ -3354,8 +3843,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const newInvoice: SalesInvoice = {
       id: `inv-${Date.now()}`,
       tenantId: tenant?.id || INITIAL_TENANT.id,
-      branchId: activeBranch.id,
-      warehouseId: activeWarehouse.id,
+      branchId: activeBranch?.id,
+      warehouseId: activeWarehouse?.id,
       invoiceNumber: invoiceNum,
       customerId: customer.id,
       customerName: customer.name,
@@ -3366,45 +3855,60 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       netAmount,
       paymentMethod: payload.paymentMethod,
       paymentMethodId: payload.paymentMethodId,
-      cashPaid: payload.paymentMethod.includes('Cash') || payload.paymentMethod.includes('نقداً') ? netAmount : payload.cashPaid || 0,
-      cardPaid: payload.paymentMethod.includes('Card') || payload.paymentMethod.includes('فيزا') ? netAmount : payload.cardPaid || 0,
+      paymentFeePercentage: feePct,
+      paymentFeeAmount: feeAmt,
+      totalWithFee,
+      cashPaid: payload.paymentMethod.includes('Cash') || payload.paymentMethod.includes('نقداً') ? totalWithFee : payload.cashPaid || 0,
+      cardPaid: payload.paymentMethod.includes('Card') || payload.paymentMethod.includes('فيزا') ? totalWithFee : payload.cardPaid || 0,
       splitPayments: payload.splitPayments,
       isCollectionOnly: isCollOnly,
       status: 'Posted',
       createdAt: nowIso,
-      cashierName: activeShift?.cashierName || currentUser?.name || 'الكاشير',
+      cashierName: currentBranchShift.receptionistName || currentUser?.name || 'الاستقبال',
       cashierId: currentUser?.id,
       createdById: currentUser?.id,
     };
 
-    // Deduct stock only if not collection only
-    if (!isCollOnly) {
-      setStockLevels((prev) => {
-        const next = [...prev];
-        for (const item of payload.items) {
-          if (!item.product.isService) {
-            const idx = next.findIndex((s) => s.productId === item.product.id && s.warehouseId === activeWarehouse.id);
-            if (idx >= 0) {
-              next[idx] = {
-                ...next[idx],
-                quantityOnHand: Math.max(0, next[idx].quantityOnHand - item.quantity),
-              };
-            }
-          }
-        }
-        return next;
-      });
-    }
-
     setAllInvoices((prev) => [newInvoice, ...prev]);
 
-    // Auto-sync POS invoice into active reception shift run-sheet if open for this branch
-    if (activeReceptionShift && activeReceptionShift.status === 'Open') {
-      const dayNames = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
-      const dayName = dayNames[new Date().getDay()] || 'اليوم';
-      const totalQty = payload.items.reduce((s, i) => s + i.quantity, 0);
-      const posRunRow: ShiftRunRow = {
-        id: `run-row-pos-${Date.now()}`,
+    // Exclusively transfer POS transaction to active reception shift run-sheet
+    const dayNames = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+    const dayName = dayNames[new Date().getDay()] || 'اليوم';
+    const totalQty = payload.items.reduce((s, i) => s + i.quantity, 0);
+
+    const posRunRow: ShiftRunRow = {
+      id: `run-row-pos-${Date.now()}-1`,
+      date: new Date().toISOString().split('T')[0],
+      dayName,
+      customerId: customer.id,
+      patientId: customer.id,
+      systemCode: (customer as Party).systemCode || `CUST-${customer.id.slice(-4)}`,
+      customerName: customer.name,
+      patientName: customer.name,
+      patientPhone: (customer as Party).phone,
+      roomNumber: 'نقطة البيع (POS)',
+      serviceName: isCollOnly
+        ? `تحصيل فقط (${payload.items.map((i) => i.product.nameAr).join(' + ') || 'مبلغ مقبوض'})`
+        : payload.items.map((i) => i.product.nameAr).join(' + ') || 'فاتورة نقطة بيع',
+      pulsesCount: 0,
+      consumedQuantity: isCollOnly ? 0 : totalQty,
+      unitPrice: isCollOnly ? 0 : (totalQty > 0 ? netAmount / totalQty : 0),
+      totalRevenue: isCollOnly ? 0 : netAmount,
+      paymentMethod: payload.paymentMethod || paymentMethods[0]?.nameAr || 'نقداً (كاش)',
+      collectedAmount: netAmount,
+      laserDevice: 'نقطة البيع (POS)',
+      doctorName: 'الكاشير / نقطة البيع',
+      description: isCollOnly
+        ? `تحصيل فقط - فاتورة ${invoiceNum}`
+        : `فاتورة نقطة بيع رقم ${invoiceNum}`,
+    };
+
+    const runRowsToAdd: ShiftRunRow[] = [posRunRow];
+
+    // Add payment fee in a separate line if feeAmt > 0
+    if (feeAmt > 0) {
+      const feeRunRow: ShiftRunRow = {
+        id: `run-row-pos-fee-${Date.now()}-2`,
         date: new Date().toISOString().split('T')[0],
         dayName,
         customerId: customer.id,
@@ -3413,27 +3917,152 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         customerName: customer.name,
         patientName: customer.name,
         patientPhone: (customer as Party).phone,
-        roomNumber: 'الاستقبال / POS',
-        serviceName: isCollOnly
-          ? `تحصيل دفعة/مقدم فقط (${payload.items.map((i) => i.product.nameAr).join(' + ') || 'دفعة نقدية'})`
-          : payload.items.map((i) => i.product.nameAr).join(' + ') || 'فاتورة نقطة بيع',
+        roomNumber: 'نقطة البيع (POS)',
+        serviceName: `رسوم وسيلة سداد (${payload.paymentMethod} ${feePct}%)`,
         pulsesCount: 0,
-        consumedQuantity: isCollOnly ? 0 : totalQty,
-        unitPrice: isCollOnly ? 0 : (totalQty > 0 ? netAmount / totalQty : 0),
-        totalRevenue: isCollOnly ? 0 : netAmount,
+        consumedQuantity: 1,
+        unitPrice: feeAmt,
+        totalRevenue: feeAmt,
         paymentMethod: payload.paymentMethod || paymentMethods[0]?.nameAr || 'نقداً (كاش)',
-        collectedAmount: netAmount,
+        collectedAmount: feeAmt,
         laserDevice: 'نقطة البيع (POS)',
-        doctorName: 'إدارة العيادة / كاشير',
-        description: isCollOnly
-          ? `تحصيل دفعة/مقدم فقط - فاتورة ${invoiceNum}`
-          : `فاتورة نقطة بيع رقم ${invoiceNum}`,
+        doctorName: 'الكاشير / نقطة البيع',
+        description: `رسوم وسيلة سداد الفاتورة رقم ${invoiceNum}`,
       };
+      runRowsToAdd.push(feeRunRow);
+    }
+
+    setAllReceptionShifts((prevShifts) =>
+      prevShifts.map((s) => {
+        if (s.id === currentBranchShift.id) {
+          const nextRows = [...s.runRows, ...runRowsToAdd];
+          const totalRev = nextRows.reduce((sum, r) => sum + r.totalRevenue, 0);
+          const totalColl = nextRows.reduce((sum, r) => sum + (r.collectedAmount || 0), 0);
+          const nextBalancing = s.balancing.map((b) => {
+            const methodRows = nextRows.filter(
+              (r) => r.paymentMethod.includes(b.paymentMethodName) || b.paymentMethodName.includes(r.paymentMethod)
+            );
+            const methodColl = methodRows.reduce((sum, r) => sum + (r.collectedAmount || 0), 0);
+            return {
+              ...b,
+              totalCollected: methodColl,
+              closingBalance: b.openingBalance + methodColl - b.totalDisbursed + b.adjustments,
+            };
+          });
+          return {
+            ...s,
+            runRows: nextRows,
+            totalRevenue: totalRev,
+            totalCollected: totalColl,
+            balancing: nextBalancing,
+            netShiftCash: totalColl - s.totalExpenses,
+          };
+        }
+        return s;
+      })
+    );
+
+    logUserActivity(
+      'pos',
+      'نقطة البيع السريعة',
+      'POS Terminal',
+      'إصدار فاتورة بيع',
+      'Create Invoice',
+      `إصدار الفاتورة رقم ${invoiceNum} بقيمة ${totalWithFee} ج.م للعميل ${customer.name}${isCollOnly ? ' (تحصيل فقط)' : ''}`
+    );
+
+    return { success: true, invoice: newInvoice };
+  };
+
+  // Refund & Void Invoice - Exclusively reflected into reception shift with reversed signs
+  const refundInvoice = (invoiceId: string, reason: string, _restockItems: boolean = true): { success: boolean; error?: string } => {
+    const inv = allInvoices.find((i) => i.id === invoiceId);
+    if (!inv) return { success: false, error: 'الفاتورة غير موجودة' };
+    if (inv.status === 'Refunded' || inv.status === 'Cancelled') {
+      return { success: false, error: 'تم ارتجاع أو إلغاء هذه الفاتورة مسبقاً!' };
+    }
+
+    const refundIso = new Date().toISOString();
+    setAllInvoices((prev) =>
+      prev.map((i) => {
+        if (i.id === invoiceId) {
+          return {
+            ...i,
+            status: 'Refunded',
+            isRefunded: true,
+            refundReason: reason || 'طلب العميل / إلغاء',
+            refundedAt: refundIso,
+            refundedBy: currentUser?.name || 'المشرف',
+            refundedAmount: i.totalWithFee || i.netAmount,
+          };
+        }
+        return i;
+      })
+    );
+
+    // Reflect refund directly into the active reception shift run-sheet with reversed sign (بعكس الإشارة)
+    const targetBranchId = inv.branchId || activeBranch?.id;
+    const branchShift = allReceptionShifts.find(
+      (s) => s.status === 'Open' && s.tenantId === tenant?.id && (!targetBranchId || s.branchId === targetBranchId)
+    );
+
+    if (branchShift) {
+      const dayNames = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+      const dayName = dayNames[new Date().getDay()] || 'اليوم';
+      const totalQty = inv.items ? inv.items.reduce((s, i) => s + i.quantity, 0) : 0;
+
+      const refundRows: ShiftRunRow[] = [];
+
+      // Row 1: Invoice refund with reversed signs
+      refundRows.push({
+        id: `run-row-pos-ref-${Date.now()}-1`,
+        date: new Date().toISOString().split('T')[0],
+        dayName,
+        customerId: inv.customerId,
+        patientId: inv.customerId,
+        customerName: inv.customerName,
+        patientName: inv.customerName,
+        roomNumber: 'نقطة البيع (POS)',
+        serviceName: `إلغاء / مرتجع فاتورة رقم ${inv.invoiceNumber}`,
+        pulsesCount: 0,
+        consumedQuantity: inv.isCollectionOnly ? 0 : -totalQty,
+        unitPrice: inv.isCollectionOnly ? 0 : (totalQty > 0 ? inv.netAmount / totalQty : 0),
+        totalRevenue: inv.isCollectionOnly ? 0 : -inv.netAmount,
+        paymentMethod: inv.paymentMethod || 'نقداً (كاش)',
+        collectedAmount: -inv.netAmount,
+        laserDevice: 'نقطة البيع (POS)',
+        doctorName: currentUser?.name || 'الكاشير / نقطة البيع',
+        description: `إلغاء وارتجاع فاتورة ${inv.invoiceNumber} - السبب: ${reason}`,
+      });
+
+      // Row 2: Payment fee refund with reversed signs if fee existed
+      if (inv.paymentFeeAmount && inv.paymentFeeAmount > 0) {
+        refundRows.push({
+          id: `run-row-pos-ref-fee-${Date.now()}-2`,
+          date: new Date().toISOString().split('T')[0],
+          dayName,
+          customerId: inv.customerId,
+          patientId: inv.customerId,
+          customerName: inv.customerName,
+          patientName: inv.customerName,
+          roomNumber: 'نقطة البيع (POS)',
+          serviceName: `إلغاء رسوم وسيلة سداد (${inv.paymentMethod})`,
+          pulsesCount: 0,
+          consumedQuantity: -1,
+          unitPrice: inv.paymentFeeAmount,
+          totalRevenue: -inv.paymentFeeAmount,
+          paymentMethod: inv.paymentMethod || 'نقداً (كاش)',
+          collectedAmount: -inv.paymentFeeAmount,
+          laserDevice: 'نقطة البيع (POS)',
+          doctorName: currentUser?.name || 'الكاشير / نقطة البيع',
+          description: `إلغاء رسوم سداد الفاتورة رقم ${inv.invoiceNumber}`,
+        });
+      }
 
       setAllReceptionShifts((prevShifts) =>
         prevShifts.map((s) => {
-          if (s.id === activeReceptionShift.id) {
-            const nextRows = [...s.runRows, posRunRow];
+          if (s.id === branchShift.id) {
+            const nextRows = [...s.runRows, ...refundRows];
             const totalRev = nextRows.reduce((sum, r) => sum + r.totalRevenue, 0);
             const totalColl = nextRows.reduce((sum, r) => sum + (r.collectedAmount || 0), 0);
             const nextBalancing = s.balancing.map((b) => {
@@ -3461,142 +4090,13 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       );
     }
 
-    logUserActivity(
-      'pos',
-      'نقطة البيع السريعة',
-      'POS Terminal',
-      'إصدار فاتورة بيع',
-      'Create Invoice',
-      `إصدار الفاتورة رقم ${invoiceNum} بقيمة ${netAmount} ج.م للعميل ${customer.name}${isCollOnly ? ' (تحصيل فقط)' : ''}`
-    );
-
-    // Auto-post journal entry for invoice into General Ledger using the linked payment method GL account
-    const pm = paymentMethods.find(
-      (p) => p.id === payload.paymentMethodId || p.nameAr === payload.paymentMethod || p.code === payload.paymentMethod
-    );
-    const debitAccount =
-      (pm?.linkedAccountId ? accounts.find((a) => a.id === pm.linkedAccountId) : null) ||
-      accounts.find((a) => a.code === (payload.paymentMethod?.includes('Card') || payload.paymentMethod?.includes('فيزا') ? '1112' : '1111')) ||
-      accounts.find((a) => a.type === 'Asset');
-
-    const hasServices = payload.items.some((i) => i.product.isService);
-    const revenueAccount =
-      accounts.find((a) => a.code === (hasServices ? '4200' : '4100')) ||
-      accounts.find((a) => a.code === '4000') ||
-      accounts.find((a) => a.type === 'Revenue');
-
-    const vatAccount = accounts.find((a) => a.code === '2150') || accounts.find((a) => a.type === 'Liability');
-
-    if (debitAccount && revenueAccount && netAmount > 0) {
-      const jvNum = `JV-INV-${invoiceNum.slice(-6)}`;
-      const jvLines = [];
-
-      // Debit: Cash / Bank / Linked Account
-      jvLines.push({
-        id: `line-${Date.now()}-1`,
-        accountId: debitAccount.id,
-        accountCode: debitAccount.code,
-        accountNameAr: debitAccount.nameAr,
-        accountNameEn: debitAccount.nameEn,
-        debit: netAmount,
-        credit: 0,
-        memo: `تحصيل فاتورة مبيعات ${invoiceNum} عبر ${pm?.nameAr || payload.paymentMethod}`,
-      });
-
-      // Credit: Revenue
-      const revAmount = taxAmount > 0 ? afterDiscount : netAmount;
-      jvLines.push({
-        id: `line-${Date.now()}-2`,
-        accountId: revenueAccount.id,
-        accountCode: revenueAccount.code,
-        accountNameAr: revenueAccount.nameAr,
-        accountNameEn: revenueAccount.nameEn,
-        debit: 0,
-        credit: revAmount,
-        memo: `إيراد مبيعات فاتورة ${invoiceNum}`,
-      });
-
-      // Credit: VAT if applicable
-      if (taxAmount > 0 && vatAccount) {
-        jvLines.push({
-          id: `line-${Date.now()}-3`,
-          accountId: vatAccount.id,
-          accountCode: vatAccount.code,
-          accountNameAr: vatAccount.nameAr,
-          accountNameEn: vatAccount.nameEn,
-          debit: 0,
-          credit: taxAmount,
-          memo: `ضريبة القيمة المضافة 14% - فاتورة ${invoiceNum}`,
-        });
-      }
-
-      const invJv: JournalEntry = {
-        id: `jv-inv-${Date.now()}`,
-        tenantId: tenant?.id || INITIAL_TENANT.id,
-        branchId: activeBranch.id,
-        entryNumber: jvNum,
-        date: nowIso.split('T')[0],
-        description: `إثبات تحصيل مبيعات فاتورة ${invoiceNum} للعميل ${customer.name} عبر ${pm?.nameAr || payload.paymentMethod}`,
-        isPosted: true,
-        sourceDocument: `فاتورة مبيعات ${invoiceNum}`,
-        createdAt: nowIso,
-        lines: jvLines,
-      };
-      setAllJournals((prev) => [invJv, ...prev]);
-    }
-
-    return { success: true, invoice: newInvoice };
-  };
-
-  // Refund & Void Invoice
-  const refundInvoice = (invoiceId: string, reason: string, restockItems: boolean = true): { success: boolean; error?: string } => {
-    const inv = allInvoices.find((i) => i.id === invoiceId);
-    if (!inv) return { success: false, error: 'الفاتورة غير موجودة' };
-    if (inv.status === 'Refunded' || inv.status === 'Cancelled') {
-      return { success: false, error: 'تم ارتجاع أو إلغاء هذه الفاتورة مسبقاً!' };
-    }
-
-    const refundIso = new Date().toISOString();
-    setAllInvoices((prev) =>
-      prev.map((i) => {
-        if (i.id === invoiceId) {
-          return {
-            ...i,
-            status: 'Refunded',
-            isRefunded: true,
-            refundReason: reason || 'طلب العميل / إلغاء',
-            refundedAt: refundIso,
-            refundedBy: currentUser?.name || 'المشرف',
-            refundedAmount: i.netAmount,
-          };
-        }
-        return i;
-      })
-    );
-
-    if (restockItems && !inv.isCollectionOnly && inv.items && inv.items.length > 0) {
-      setStockLevels((prev) => {
-        const next = [...prev];
-        for (const item of inv.items) {
-          const idx = next.findIndex((s) => s.productId === item.productId && s.warehouseId === inv.warehouseId);
-          if (idx >= 0) {
-            next[idx] = {
-              ...next[idx],
-              quantityOnHand: next[idx].quantityOnHand + item.quantity,
-            };
-          }
-        }
-        return next;
-      });
-    }
-
     recordAudit({
       branchId: inv.branchId,
       entityType: 'Invoice',
       entityId: inv.id,
       entityName: `فاتورة ${inv.invoiceNumber}`,
       actionType: 'CANCEL',
-      details: `تم ارتجاع وإلغاء الفاتورة ${inv.invoiceNumber} بمبلغ ${inv.netAmount} ج.م - السبب: ${reason}`,
+      details: `تم ارتجاع وإلغاء الفاتورة ${inv.invoiceNumber} بمبلغ ${inv.totalWithFee || inv.netAmount} ج.م وعكسها في شيفت التشغيل - السبب: ${reason}`,
     });
 
     logUserActivity(
@@ -3605,7 +4105,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       'POS',
       'ارتجاع فاتورة',
       'Refund Invoice',
-      `تم ارتجاع الفاتورة ${inv.invoiceNumber} بمبلغ ${inv.netAmount} ج.م`
+      `تم ارتجاع الفاتورة ${inv.invoiceNumber} بمبلغ ${inv.totalWithFee || inv.netAmount} ج.م وعكسها في شيفت التشغيل`
     );
 
     return { success: true };
@@ -3730,7 +4230,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // Tenant Operations
   const addTenant = (tenantData: Omit<Tenant, 'id'>): Tenant => {
     const nameEn = tenantData.nameEn || autoTranslateArabic(tenantData.name);
-    const newId = `tenant-eg-${(tenants.length + 1).toString().padStart(3, '0')}`;
+    const newId = `tenant-eg-${(allTenants.length + 1).toString().padStart(3, '0')}`;
     const newTenant: Tenant = {
       ...tenantData,
       nameEn,
@@ -3740,7 +4240,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       customerNumberingMode: tenantData.customerNumberingMode || 'per_company',
       customerStartNumber: tenantData.customerStartNumber || 1001,
     };
-    setTenants((prev) => [...prev, newTenant]);
+    setAllTenants((prev) => [...prev, newTenant]);
     recordAudit({
       entityType: 'Tenant',
       entityId: newId,
@@ -3754,7 +4254,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const updateTenant = (tenantId: string, updatedData: Partial<Tenant>) => {
     const nameEn = updatedData.nameEn || (updatedData.name ? autoTranslateArabic(updatedData.name) : undefined);
-    setTenants((prev) =>
+    setAllTenants((prev) =>
       prev.map((t) => {
         if (t.id === tenantId) {
           const updated = { ...t, ...updatedData, nameEn: nameEn || t.nameEn };
@@ -3773,14 +4273,20 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const switchTenant = (tenantId: string) => {
-    const target = tenants.find((t) => t.id === tenantId);
+    if (!canAccessTenant(tenantId)) return;
+    const target = allTenants.find((t) => t.id === tenantId);
     if (!target) return;
     setTenant(target);
-    const tenantBranches = branches.filter((b) => b.tenantId === target.id);
+    const isSuper = currentUser?.isAdmin || currentUser?.role === 'SuperAdmin';
+    const tenantBranches = allBranches.filter(
+      (b) => b.tenantId === target.id && !b.isArchived && (isSuper || currentUser?.allowedBranchIds?.includes('*') || currentUser?.allowedBranchIds?.includes(b.id))
+    );
     if (tenantBranches.length > 0) {
       setActiveBranch(tenantBranches[0]);
-      const branchWh = warehouses.find((w) => w.branchId === tenantBranches[0].id) || warehouses.find((w) => w.tenantId === target.id);
-      setActiveWarehouse(branchWh || null);
+      const branchWh = allWarehouses.filter(
+        (w) => w.tenantId === target.id && !w.isArchived && (isSuper || currentUser?.allowedWarehouseIds?.includes('*') || currentUser?.allowedWarehouseIds?.includes(w.id))
+      );
+      setActiveWarehouse(branchWh[0] || null);
     } else {
       setActiveBranch(null);
       setActiveWarehouse(null);
@@ -3788,10 +4294,10 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const deleteTenant = (tenantId: string): { status: 'archived' | 'deleted'; message: string } => {
-    const tItem = tenants.find((t) => t.id === tenantId);
+    const tItem = allTenants.find((t) => t.id === tenantId);
     if (!tItem) return { status: 'deleted', message: 'الشركة غير موجودة' };
 
-    setTenants((prev) =>
+    setAllTenants((prev) =>
       prev.map((t) =>
         t.id === tenantId
           ? {
@@ -3804,6 +4310,25 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           : t
       )
     );
+
+    const tObj = allTenants.find((t) => t.id === tenantId);
+    logUserActivity(
+      'companies',
+      'إدارة الشركات والمؤسسات',
+      'Companies Hub',
+      'أرشفة / حذف شركة',
+      'Archive / Delete Company',
+      `تم نقل الشركة (${tObj?.name || tenantId}) كود (${tObj?.code || ''}) إلى الأرشيف الآمن لحماية سجلاتها التشغيلية والمحاسبية.`
+    );
+    recordAudit({
+      entityType: 'Tenant',
+      entityId: tenantId,
+      entityName: tObj?.name || tenantId,
+      actionType: 'DELETE',
+      diffSummary: `نقل الشركة (${tObj?.name}) إلى الأرشيف الآمن لحماية سجلاتها`,
+      previousState: tObj,
+    });
+
     return {
       status: 'archived',
       message: 'تمت أرشفة الشركة لحماية القيود والفواتير التاريخية المرتبطة بها.',
@@ -3811,7 +4336,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const restoreTenant = (tenantId: string): boolean => {
-    setTenants((prev) =>
+    setAllTenants((prev) =>
       prev.map((t) =>
         t.id === tenantId
           ? {
@@ -3824,7 +4349,329 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           : t
       )
     );
+
+    const tObj = allTenants.find((t) => t.id === tenantId);
+    logUserActivity(
+      'companies',
+      'إدارة الشركات والمؤسسات',
+      'Companies Hub',
+      'استعادة شركة من الأرشيف',
+      'Restore Company',
+      `تمت استعادة الشركة (${tObj?.name || tenantId}) من الأرشيف الآمن وتفعيلها بنجاح.`
+    );
+    recordAudit({
+      entityType: 'Tenant',
+      entityId: tenantId,
+      entityName: tObj?.name || tenantId,
+      actionType: 'UPDATE',
+      diffSummary: `استعادة الشركة (${tObj?.name}) من الأرشيف الآمن`,
+      newState: tObj,
+    });
+
     return true;
+  };
+
+  const purgeTenant = (tenantId: string): { success: boolean; message: string } => {
+    const tObj = allTenants.find((t) => t.id === tenantId);
+    if (!tObj) return { success: false, message: 'الشركة غير موجودة' };
+
+    const remainingTenants = allTenants.filter((t) => t.id !== tenantId);
+    if (remainingTenants.length === 0) {
+      return {
+        success: false,
+        message: 'لا يمكن مسح كافة الشركات، يجب الإبقاء على شركة واحدة على الأقل أو إنشاء شركة بديلة أولاً.',
+      };
+    }
+
+    // 1. Remove from allTenants
+    setAllTenants(remainingTenants);
+
+    // 2. Cascade remove all branches and warehouses
+    const tenantWhIds = new Set(allWarehouses.filter((w) => w.tenantId === tenantId).map((w) => w.id));
+    setAllBranches((prev) => prev.filter((b) => b.tenantId !== tenantId));
+    setAllWarehouses((prev) => prev.filter((w) => w.tenantId !== tenantId));
+
+    // 3. Cascade remove accounts, payment methods, categories, products, stock
+    setAllAccounts((prev) => prev.filter((a) => a.tenantId !== tenantId));
+    setAllPaymentMethods((prev) => prev.filter((p) => p.tenantId !== tenantId));
+    setAllCategories((prev) => prev.filter((c) => c.tenantId !== tenantId));
+    setAllProducts((prev) => prev.filter((p) => p.tenantId !== tenantId));
+    setStockLevels((prev) => prev.filter((s) => !tenantWhIds.has(s.warehouseId)));
+
+    // 4. Cascade remove invoices, parties, appointments, journals, patient follow-ups
+    setAllInvoices((prev) => prev.filter((inv) => inv.tenantId !== tenantId));
+    setAllParties((prev) => prev.filter((p) => p.tenantId !== tenantId));
+    setAllAppointments((prev) => prev.filter((ap) => ap.tenantId !== tenantId));
+    setAllJournals((prev) => prev.filter((j) => j.tenantId !== tenantId));
+    setAllPatientFollowUps((prev) => prev.filter((f) => f.tenantId !== tenantId));
+
+    // 5. If this was the active tenant, switch to another active tenant
+    if (tenant?.id === tenantId) {
+      const nextTenant = remainingTenants[0];
+      setTenant(nextTenant);
+      const nextBranches = allBranches.filter((b) => b.tenantId === nextTenant.id && !b.isArchived);
+      const nextBranch = nextBranches[0] || null;
+      setActiveBranch(nextBranch);
+      const nextWarehouses = allWarehouses.filter((w) => w.tenantId === nextTenant.id && !w.isArchived);
+      setActiveWarehouse(nextWarehouses[0] || null);
+    }
+
+    logUserActivity(
+      'companies',
+      'إدارة الشركات والمؤسسات',
+      'Companies Hub',
+      'مسح شركة نهائياً من السيستم',
+      'Purge / Permanently Delete Company',
+      `تم مسح الشركة (${tObj.name}) كود (${tObj.code}) نهائياً من النظام وحذف كافة سجلاتها المحاسبية والتنظيمية.`
+    );
+
+    recordAudit({
+      entityType: 'Tenant',
+      entityId: tenantId,
+      entityName: tObj.name,
+      actionType: 'DELETE',
+      diffSummary: `مسح نهائي كامل للشركة (${tObj.name}) وكافة سجلاتها من النظام`,
+      previousState: tObj,
+    });
+
+    return {
+      success: true,
+      message: `تم مسح الشركة (${tObj.name}) نهائياً من النظام بنجاح.`,
+    };
+  };
+
+  const initializeCleanProductionCompany = async (
+    params: CleanCompanySetupParams
+  ): Promise<{ success: boolean; tenantId: string; message: string }> => {
+    const timestamp = Date.now();
+    const cleanId = `tenant-prod-${timestamp.toString(36)}`;
+    const nameEn = params.nameEn?.trim() || autoTranslateArabic(params.name.trim());
+
+    // 1. New Clean Tenant
+    const newTenant: Tenant = {
+      id: cleanId,
+      name: params.name.trim(),
+      nameEn,
+      code: (params.code.trim() || 'PROD').toUpperCase(),
+      plan: 'Enterprise',
+      currency: params.currency || 'EGP',
+      currencySymbol: params.currencySymbol || (params.currency === 'EGP' ? 'ج.م' : params.currency === 'SAR' ? 'ر.س' : '$'),
+      taxRate: Number(params.taxRate) || 0,
+      activeModules: INITIAL_TENANT.activeModules,
+      customerNumberingMode: 'per_company',
+      customerStartNumber: 1001,
+      supplierNumberingMode: 'per_company',
+      supplierStartNumber: 2001,
+      isArchived: false,
+    };
+
+    // 2. New Main Branch
+    const branchId = `branch-${cleanId}-main`;
+    const newBranch: Branch = {
+      id: branchId,
+      tenantId: cleanId,
+      name: params.mainBranchName?.trim() || 'الفرع الرئيسي',
+      nameEn: `${nameEn} Main Branch`,
+      code: 'BR-MAIN',
+      city: params.city?.trim() || 'المركز الرئيسي',
+      phone: params.phone?.trim() || '',
+      isMain: true,
+      isHeadquarters: true,
+      isArchived: false,
+    };
+
+    // 3. New Main Warehouse
+    const whId = `wh-${cleanId}-main`;
+    const newWarehouse: Warehouse = {
+      id: whId,
+      tenantId: cleanId,
+      branchId: branchId,
+      name: params.mainWarehouseName?.trim() || 'المستودع الرئيسي',
+      nameEn: 'Main Warehouse',
+      code: 'WH-MAIN',
+      location: params.city?.trim() || 'المركز الرئيسي',
+      isDefault: true,
+      isArchived: false,
+    };
+
+    // 4. Clean Standard Chart of Accounts (All 0.00 Balance)
+    const baseAccountDefs: Array<{
+      code: string;
+      nameAr: string;
+      nameEn: string;
+      type: 'Asset' | 'Liability' | 'Equity' | 'Revenue' | 'Expense';
+      parentCode?: string;
+      isDebitNormal: boolean;
+      level: number;
+    }> = [
+      { code: '1000', nameAr: 'الأصول', nameEn: 'Assets', type: 'Asset', isDebitNormal: true, level: 1 },
+      { code: '1100', nameAr: 'الأصول المتداولة', nameEn: 'Current Assets', type: 'Asset', parentCode: '1000', isDebitNormal: true, level: 2 },
+      { code: '1111', nameAr: 'الخزينة الرئيسية (الصندوق)', nameEn: 'Main Cashier Drawer', type: 'Asset', parentCode: '1100', isDebitNormal: true, level: 3 },
+      { code: '1112', nameAr: 'الحساب البنكي / جاري بنك', nameEn: 'Operating Bank Account', type: 'Asset', parentCode: '1100', isDebitNormal: true, level: 3 },
+      { code: '1120', nameAr: 'العملاء والمدينون التجاريون', nameEn: 'Accounts Receivable', type: 'Asset', parentCode: '1100', isDebitNormal: true, level: 3 },
+      { code: '1130', nameAr: 'مخزون البضائع والمستلزمات', nameEn: 'Inventory', type: 'Asset', parentCode: '1100', isDebitNormal: true, level: 3 },
+      { code: '1200', nameAr: 'الأصول الثابتة', nameEn: 'Fixed Assets', type: 'Asset', parentCode: '1000', isDebitNormal: true, level: 2 },
+      { code: '2000', nameAr: 'الخصوم والالتزامات', nameEn: 'Liabilities', type: 'Liability', isDebitNormal: false, level: 1 },
+      { code: '2100', nameAr: 'الخصوم المتداولة', nameEn: 'Current Liabilities', type: 'Liability', parentCode: '2000', isDebitNormal: false, level: 2 },
+      { code: '2110', nameAr: 'الموردون والدائنون التجاريون', nameEn: 'Accounts Payable', type: 'Liability', parentCode: '2100', isDebitNormal: false, level: 3 },
+      { code: '2150', nameAr: 'ضريبة القيمة المضافة المستحقة', nameEn: 'VAT Output Payable', type: 'Liability', parentCode: '2100', isDebitNormal: false, level: 3 },
+      { code: '3000', nameAr: 'حقوق الملكية', nameEn: 'Equity', type: 'Equity', isDebitNormal: false, level: 1 },
+      { code: '3100', nameAr: 'رأس المال المدفوع', nameEn: 'Paid-in Capital', type: 'Equity', parentCode: '3000', isDebitNormal: false, level: 2 },
+      { code: '3200', nameAr: 'الأرباح المبقاة والمحتجزة', nameEn: 'Retained Earnings', type: 'Equity', parentCode: '3000', isDebitNormal: false, level: 2 },
+      { code: '4000', nameAr: 'الإيرادات', nameEn: 'Revenue', type: 'Revenue', isDebitNormal: false, level: 1 },
+      { code: '4100', nameAr: 'إيرادات المبيعات والخدمات', nameEn: 'Sales & Service Revenue', type: 'Revenue', parentCode: '4000', isDebitNormal: false, level: 2 },
+      { code: '4200', nameAr: 'إيرادات أخرى متنوعة', nameEn: 'Other Operating Income', type: 'Revenue', parentCode: '4000', isDebitNormal: false, level: 2 },
+      { code: '5000', nameAr: 'المصروفات', nameEn: 'Expenses', type: 'Expense', isDebitNormal: true, level: 1 },
+      { code: '5100', nameAr: 'تكلفة البضاعة والخدمات المباعة', nameEn: 'Cost of Goods Sold (COGS)', type: 'Expense', parentCode: '5000', isDebitNormal: true, level: 2 },
+      { code: '5200', nameAr: 'المصروفات العمومية والإدارية', nameEn: 'General & Admin Expenses', type: 'Expense', parentCode: '5000', isDebitNormal: true, level: 2 },
+      { code: '5210', nameAr: 'الرواتب والأجور', nameEn: 'Salaries & Wages', type: 'Expense', parentCode: '5200', isDebitNormal: true, level: 3 },
+      { code: '5220', nameAr: 'إيجار المقرات والفروع', nameEn: 'Rent Expense', type: 'Expense', parentCode: '5200', isDebitNormal: true, level: 3 },
+      { code: '5250', nameAr: 'الصيانة والتشغيل', nameEn: 'Maintenance & Repairs', type: 'Expense', parentCode: '5200', isDebitNormal: true, level: 3 },
+      { code: '5300', nameAr: 'المرافق والكهرباء والإنترنت', nameEn: 'Utilities Expense', type: 'Expense', parentCode: '5200', isDebitNormal: true, level: 3 },
+    ];
+
+    const cleanAccounts: Account[] = baseAccountDefs.map((b) => ({
+      id: `acc-${cleanId}-${b.code}`,
+      tenantId: cleanId,
+      code: b.code,
+      nameAr: b.nameAr,
+      nameEn: b.nameEn,
+      type: b.type,
+      parentId: b.parentCode ? `acc-${cleanId}-${b.parentCode}` : undefined,
+      balance: 0,
+      isDebitNormal: b.isDebitNormal,
+      level: b.level,
+    }));
+
+    // 5. Payment Methods
+    const cleanPaymentMethods: PaymentMethod[] = [
+      {
+        id: `pm-${cleanId}-cash`,
+        tenantId: cleanId,
+        code: 'CASH',
+        nameAr: 'نقداً (كاش)',
+        nameEn: 'Cash',
+        type: 'Cash',
+        isDefault: true,
+        isArchived: false,
+        orderIndex: 1,
+        displayOnReceipt: true,
+        instructionsAr: 'الدفع نقداً عند الصندوق',
+        instructionsEn: 'Pay cash at checkout',
+        linkedAccountId: `acc-${cleanId}-1111`,
+      },
+      {
+        id: `pm-${cleanId}-card`,
+        tenantId: cleanId,
+        code: 'CARD',
+        nameAr: 'بطاقة مصرفية / شبكة / فيزا',
+        nameEn: 'Credit / Debit Card (POS)',
+        type: 'Card',
+        isDefault: false,
+        isArchived: false,
+        orderIndex: 2,
+        displayOnReceipt: true,
+        instructionsAr: 'الدفع عبر جهاز نقاط البيع البنكي',
+        instructionsEn: 'Pay via POS bank terminal',
+        linkedAccountId: `acc-${cleanId}-1112`,
+      },
+    ];
+
+    // 6. Categories
+    const cleanCategories: ItemCategory[] = [
+      {
+        id: `cat-${cleanId}-1`,
+        tenantId: cleanId,
+        nameAr: 'أصناف ومخزون تجاري',
+        nameEn: 'Commercial Goods & Products',
+        type: 'product',
+        description: 'الأصناف والمستلزمات التجارية المعدة للبيع والتخزين',
+      },
+      {
+        id: `cat-${cleanId}-2`,
+        tenantId: cleanId,
+        nameAr: 'خدمات تشغيلية',
+        nameEn: 'Services',
+        type: 'service',
+        description: 'الخدمات والاستشارات بدون حركة مخزنية',
+      },
+    ];
+
+    if (params.wipeDemoData) {
+      setAllTenants([newTenant]);
+      setAllBranches([newBranch]);
+      setAllWarehouses([newWarehouse]);
+      setAllAccounts(cleanAccounts);
+      setAllPaymentMethods(cleanPaymentMethods);
+      setAllCategories(cleanCategories);
+      setAllProducts([]);
+      setStockLevels([]);
+      setAllInvoices([]);
+      setAllParties([]);
+      setAllAppointments([]);
+      setAllJournals([]);
+      setAllPatientFollowUps([]);
+    } else {
+      setAllTenants((prev) => [...prev, newTenant]);
+      setAllBranches((prev) => [...prev, newBranch]);
+      setAllWarehouses((prev) => [...prev, newWarehouse]);
+      setAllAccounts((prev) => [...prev, ...cleanAccounts]);
+      setAllPaymentMethods((prev) => [...prev, ...cleanPaymentMethods]);
+      setAllCategories((prev) => [...prev, ...cleanCategories]);
+    }
+
+    // Set as active
+    setTenant(newTenant);
+    setActiveBranch(newBranch);
+    setActiveWarehouse(newWarehouse);
+
+    logUserActivity(
+      'companies',
+      'إدارة الشركات والمؤسسات',
+      'Companies Hub',
+      'إنشاء شركة إنتاجية نظيفة',
+      'Create Clean Production Company',
+      `تم إطلاق وتأسيس الشركة (${newTenant.name}) برصيد صفر 0.00 وشجرة حسابات قياسية ودون أي فواتير أو حركات سابقة.`
+    );
+
+    recordAudit({
+      entityType: 'Tenant',
+      entityId: newTenant.id,
+      entityName: newTenant.name,
+      actionType: 'CREATE',
+      diffSummary: `تأسيس شركة جديدة خالية من البيانات (${newTenant.name}) بهيكل محاسبي وتنظيمي نظيف`,
+      newState: newTenant,
+    });
+
+    let cloudMsg = '';
+    if (neonDb.connected && neonDb.connectionString) {
+      try {
+        const syncRes = await NeonService.syncAllData(neonDb.connectionString, {
+          tenant: newTenant,
+          branches: [newBranch],
+          warehouses: [newWarehouse],
+          products: [],
+          stockLevels: [],
+          accounts: cleanAccounts,
+          invoices: [],
+          patients: [],
+          parties: [],
+          appointments: [],
+          journalEntries: [],
+        });
+        if (syncRes.success) {
+          cloudMsg = ' وتم إنشاء الجداول ومزامنة الشركة فوراً على خادم Neon السحابي!';
+        }
+      } catch (err) {
+        console.warn('Auto cloud sync failed:', err);
+      }
+    }
+
+    return {
+      success: true,
+      tenantId: newTenant.id,
+      message: `تم تأسيس وتهيئة شركة (${newTenant.name}) بنجاح تام! الحسابات برصيد صفر، ولا توجد أي حركات أو فواتير وهمية.${cloudMsg}`,
+    };
   };
 
   // Branch Operations
@@ -3840,6 +4687,15 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       isArchived: false,
     };
     setAllBranches((prev) => [...prev, newBranch]);
+    const parentT = allTenants.find((t) => t.id === activeTenantId) || tenant;
+    logUserActivity(
+      'companies',
+      'إدارة الشركات والفروع',
+      'Companies & Branches',
+      'إضافة فرع',
+      'Add Branch',
+      `تمت إضافة فرع جديد (${newBranch.name}) كود (${newBranch.code}) لشركة (${parentT?.name || ''}).`
+    );
     recordAudit({
       entityType: 'Branch',
       entityId: newBranchId,
@@ -3880,6 +4736,25 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           : b
       )
     );
+
+    const b = allBranches.find((x) => x.id === branchId);
+    const parentT = allTenants.find((x) => x.id === b?.tenantId) || tenant;
+    logUserActivity(
+      'companies',
+      'إدارة الشركات والفروع',
+      'Companies & Branches',
+      'أرشفة / حذف فرع',
+      'Archive / Delete Branch',
+      `تم نقل الفرع (${b?.name || branchId}) كود [${b?.code || ''}] التابع لشركة (${parentT?.name || 'الشركة'}) إلى الأرشيف الآمن.`
+    );
+    recordAudit({
+      entityType: 'Branch',
+      entityId: branchId,
+      entityName: b?.name || branchId,
+      actionType: 'DELETE',
+      diffSummary: `نقل الفرع (${b?.name}) التابع لشركة (${parentT?.name}) للأرشيف الآمن لحماية سجلاته`,
+      previousState: b,
+    });
   };
 
   const deleteBranch = (branchId: string): { status: 'archived' | 'deleted'; message: string } => {
@@ -3904,6 +4779,26 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           : b
       )
     );
+
+    const b = allBranches.find((x) => x.id === branchId);
+    const parentT = allTenants.find((x) => x.id === b?.tenantId) || tenant;
+    logUserActivity(
+      'companies',
+      'إدارة الشركات والفروع',
+      'Companies & Branches',
+      'استعادة فرع من الأرشيف',
+      'Restore Branch',
+      `تمت استعادة الفرع (${b?.name || branchId}) كود [${b?.code || ''}] التابع لشركة (${parentT?.name || 'الشركة'}) من الأرشيف الآمن وإعادته للفروع النشطة.`
+    );
+    recordAudit({
+      entityType: 'Branch',
+      entityId: branchId,
+      entityName: b?.name || branchId,
+      actionType: 'UPDATE',
+      diffSummary: `استعادة الفرع (${b?.name}) التابع لشركة (${parentT?.name}) من الأرشيف الآمن`,
+      newState: b,
+    });
+
     return true;
   };
 
@@ -3920,6 +4815,23 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       isArchived: false,
     };
     setAllWarehouses((prev) => [...prev, newWarehouse]);
+    const parentT = allTenants.find((t) => t.id === activeTenantId) || tenant;
+    logUserActivity(
+      'companies',
+      'إدارة الشركات والمخازن',
+      'Companies & Warehouses',
+      'إضافة مستودع',
+      'Add Warehouse',
+      `تمت إضافة مستودع جديد (${newWarehouse.name}) كود (${newWarehouse.code}) لشركة (${parentT?.name || ''}).`
+    );
+    recordAudit({
+      entityType: 'Warehouse',
+      entityId: newWhId,
+      entityName: newWarehouse.name,
+      actionType: 'CREATE',
+      diffSummary: `إضافة مستودع جديد (${newWarehouse.name})`,
+      newState: newWarehouse,
+    });
   };
 
   const updateWarehouse = (warehouseId: string, updatedData: Partial<Warehouse>) => {
@@ -3947,16 +4859,35 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               isArchived: true,
               archivedAt: new Date().toISOString(),
               archivedBy: currentUser?.name || 'Admin',
-              archiveReason: reason || 'أرشفة المستودع',
+              archiveReason: reason || 'أرشفة المخزن',
             }
           : w
       )
     );
+
+    const w = allWarehouses.find((x) => x.id === warehouseId);
+    const parentT = allTenants.find((x) => x.id === w?.tenantId) || tenant;
+    logUserActivity(
+      'companies',
+      'إدارة الشركات والمخازن',
+      'Companies & Warehouses',
+      'أرشفة / حذف مستودع',
+      'Archive / Delete Warehouse',
+      `تم نقل المستودع (${w?.name || warehouseId}) كود [${w?.code || ''}] التابع لشركة (${parentT?.name || 'الشركة'}) إلى الأرشيف الآمن لحماية المخزون التاريخي.`
+    );
+    recordAudit({
+      entityType: 'Warehouse',
+      entityId: warehouseId,
+      entityName: w?.name || warehouseId,
+      actionType: 'DELETE',
+      diffSummary: `نقل المستودع (${w?.name}) التابع لشركة (${parentT?.name}) للأرشيف الآمن`,
+      previousState: w,
+    });
   };
 
   const deleteWarehouse = (warehouseId: string): { status: 'archived' | 'deleted'; message: string } => {
     archiveWarehouse(warehouseId, 'أرشفة لحماية المخزون التاريخي');
-    return { status: 'archived', message: 'تم نقل المستودع للأرشيف.' };
+    return { status: 'archived', message: 'تم نقل المخزن للأرشيف.' };
   };
 
   const restoreWarehouse = (warehouseId: string): boolean => {
@@ -3973,6 +4904,26 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           : w
       )
     );
+
+    const w = allWarehouses.find((x) => x.id === warehouseId);
+    const parentT = allTenants.find((x) => x.id === w?.tenantId) || tenant;
+    logUserActivity(
+      'companies',
+      'إدارة الشركات والمخازن',
+      'Companies & Warehouses',
+      'استعادة مستودع من الأرشيف',
+      'Restore Warehouse',
+      `تمت استعادة المستودع (${w?.name || warehouseId}) كود [${w?.code || ''}] التابع لشركة (${parentT?.name || 'الشركة'}) من الأرشيف الآمن وتفعيله.`
+    );
+    recordAudit({
+      entityType: 'Warehouse',
+      entityId: warehouseId,
+      entityName: w?.name || warehouseId,
+      actionType: 'UPDATE',
+      diffSummary: `استعادة المستودع (${w?.name}) التابع لشركة (${parentT?.name}) من الأرشيف الآمن`,
+      newState: w,
+    });
+
     return true;
   };
 
@@ -3997,6 +4948,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (viewId === 'suppliers' && currentUser?.allowedViews?.includes('parties')) return true;
     if (viewId === 'laser_devices' && (currentUser?.allowedViews?.includes('reception_ops') || currentUser?.allowedViews?.includes('inventory'))) return true;
     if ((viewId === 'products' || viewId === 'inventory_mgmt') && currentUser?.allowedViews?.includes('inventory')) return true;
+    if ((viewId === 'cash_receipts' || viewId === 'cash_payments' || viewId === 'tax_invoices' || viewId === 'fiscal_documents') && (currentUser?.allowedViews?.includes('accounting') || currentUser?.allowedViews?.includes('fiscal_documents') || currentUser?.allowedViews?.includes('pos_sales'))) return true;
+    if ((viewId === 'goods_receipts' || viewId === 'goods_issues' || viewId === 'goods_vouchers') && (currentUser?.allowedViews?.includes('inventory') || currentUser?.allowedViews?.includes('goods_vouchers') || currentUser?.allowedViews?.includes('inventory_mgmt'))) return true;
     return currentUser?.allowedViews?.includes('*') || currentUser?.allowedViews?.includes(viewId);
   };
 
@@ -4015,6 +4968,25 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       }
       setCurrentUser(user);
       setIsLoggedIn(true);
+
+      // Automatically align tenant, branch, and warehouse with user permissions:
+      const isSuper = user.isAdmin || user.role === 'SuperAdmin';
+      const userTenants = allTenants.filter(
+        (t) => !t.isArchived && (isSuper || user.allowedTenantIds?.includes('*') || user.allowedTenantIds?.includes(t.id))
+      );
+      if (userTenants.length > 0 && !userTenants.some((t) => t.id === tenant?.id)) {
+        const nextTenant = userTenants.find((t) => t.id === user.tenantId) || userTenants[0];
+        setTenant(nextTenant);
+        const userBranches = allBranches.filter(
+          (b) => b.tenantId === nextTenant.id && !b.isArchived && (isSuper || user.allowedBranchIds?.includes('*') || user.allowedBranchIds?.includes(b.id))
+        );
+        setActiveBranch(userBranches[0] || null);
+        const userWh = allWarehouses.filter(
+          (w) => w.tenantId === nextTenant.id && !w.isArchived && (isSuper || user.allowedWarehouseIds?.includes('*') || user.allowedWarehouseIds?.includes(w.id))
+        );
+        setActiveWarehouse(userWh[0] || null);
+      }
+
       logUserActivity('identity', 'الهوية وتسجيل الدخول', 'Authentication', 'تسجيل دخول', 'Login', `تم تسجيل دخول المستخدم: ${user.name}`);
       return { success: true };
     }
@@ -4029,30 +5001,108 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const addUser = (userData: Omit<AppUser, 'id' | 'createdAt'>) => {
     const nameEn = userData.nameEn || autoTranslateArabic(userData.name);
+    const tenantId =
+      userData.tenantId ||
+      (userData.allowedTenantIds && userData.allowedTenantIds.length > 0 && userData.allowedTenantIds[0] !== '*'
+        ? userData.allowedTenantIds[0]
+        : tenant?.id || INITIAL_TENANT.id);
+    const branchId =
+      userData.branchId ||
+      (userData.allowedBranchIds && userData.allowedBranchIds.length > 0 && userData.allowedBranchIds[0] !== '*'
+        ? userData.allowedBranchIds[0]
+        : undefined);
     const newUser: AppUser = {
       ...userData,
+      tenantId,
+      branchId,
       nameEn,
       id: `user-${Date.now()}`,
       createdAt: new Date().toISOString(),
     };
     setAllUsers((prev) => [...prev, newUser]);
+    logUserActivity(
+      'users',
+      'المستخدمين والصلاحيات',
+      'Users & Permissions',
+      'إضافة مستخدم',
+      'Add User',
+      `تمت إضافة مستخدم جديد (${newUser.name}) اسم الدخول (${newUser.username}) بصلاحية (${newUser.role}).`
+    );
+    recordAudit({
+      entityType: 'User',
+      entityId: newUser.id,
+      entityName: newUser.name,
+      actionType: 'CREATE',
+      diffSummary: `إضافة مستخدم جديد (${newUser.name}) بالصلاحية (${newUser.role})`,
+      newState: newUser,
+    });
   };
 
   const updateUser = (userId: string, updatedData: Partial<AppUser>) => {
     const nameEn = updatedData.nameEn || (updatedData.name ? autoTranslateArabic(updatedData.name) : undefined);
     setAllUsers((prev) =>
-      prev.map((u) => (u.id === userId ? { ...u, ...updatedData, nameEn: nameEn || u.nameEn } : u))
+      prev.map((u) => {
+        if (u.id === userId) {
+          const tenantId =
+            updatedData.tenantId ||
+            (updatedData.allowedTenantIds && updatedData.allowedTenantIds.length > 0 && updatedData.allowedTenantIds[0] !== '*'
+              ? updatedData.allowedTenantIds[0]
+              : u.tenantId);
+          const branchId =
+            updatedData.branchId ||
+            (updatedData.allowedBranchIds && updatedData.allowedBranchIds.length > 0 && updatedData.allowedBranchIds[0] !== '*'
+              ? updatedData.allowedBranchIds[0]
+              : u.branchId);
+          const updated = { ...u, ...updatedData, tenantId, branchId, nameEn: nameEn || u.nameEn };
+          if (currentUser?.id === userId) {
+            setCurrentUser(updated);
+          }
+          return updated;
+        }
+        return u;
+      })
     );
   };
 
   const deleteUser = (userId: string) => {
+    const targetUser = allUsers.find((u) => u.id === userId);
     setAllUsers((prev) => prev.filter((u) => u.id !== userId));
+    if (targetUser) {
+      logUserActivity(
+        'users',
+        'المستخدمين والصلاحيات',
+        'Users & Permissions',
+        'حذف مستخدم',
+        'Delete User',
+        `تم حذف المستخدم (${targetUser.name}) اسم الدخول (${targetUser.username}) دور (${targetUser.role}) نهائياً من النظام.`
+      );
+      recordAudit({
+        entityType: 'User',
+        entityId: userId,
+        entityName: targetUser.name,
+        actionType: 'DELETE',
+        diffSummary: `حذف المستخدم (${targetUser.name}) من النظام`,
+        previousState: targetUser,
+      });
+    }
   };
 
   const toggleUserStatus = (userId: string) => {
+    const targetUser = allUsers.find((u) => u.id === userId);
+    const nextStatus = !targetUser?.isActive;
     setAllUsers((prev) =>
-      prev.map((u) => (u.id === userId ? { ...u, isActive: !u.isActive } : u))
+      prev.map((u) => (u.id === userId ? { ...u, isActive: nextStatus } : u))
     );
+    if (targetUser) {
+      logUserActivity(
+        'users',
+        'المستخدمين والصلاحيات',
+        'Users & Permissions',
+        nextStatus ? 'تفعيل مستخدم' : 'تعطيل مستخدم',
+        nextStatus ? 'Activate User' : 'Deactivate User',
+        `تم ${nextStatus ? 'تفعيل' : 'تعطيل'} حساب المستخدم (${targetUser.name}) بنجاح.`
+      );
+    }
   };
 
   // Modules
@@ -4177,6 +5227,16 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return res;
   };
 
+  const runNeonMigrations = async (): Promise<{ success: boolean; message: string }> => {
+    if (!neonDb.connectionString) {
+      return { success: false, message: 'الرجاء إدخال رابط اتصال Neon أولاً' };
+    }
+    setNeonDb((prev) => ({ ...prev, isSyncing: true }));
+    const res = await NeonService.runSchemaMigrations(neonDb.connectionString);
+    setNeonDb((prev) => ({ ...prev, isSyncing: false }));
+    return res;
+  };
+
   const fetchRemoteCounts = async (): Promise<{ [key: string]: number }> => {
     if (!neonDb.connectionString) return {};
     return await NeonService.fetchTableCounts(neonDb.connectionString);
@@ -4184,6 +5244,315 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const getPostgresSchemaSql = (): string => {
     return `-- Universal PostgreSQL schema script --`;
+  };
+
+  // ==========================================
+  // Fiscal Vouchers, Tax Invoices & Stock Notes
+  // ==========================================
+  const [allCashReceipts, setAllCashReceipts] = useState<CashReceiptVoucher[]>(() => {
+    try {
+      const saved = localStorage.getItem('erp_cash_receipts');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed.map((r: CashReceiptVoucher) => ({
+            ...r,
+            currency: r.currency === 'SAR' ? 'EGP' : (r.currency || 'EGP'),
+          }));
+        }
+      }
+    } catch (e) {
+      console.error(e);
+    }
+    return INITIAL_CASH_RECEIPTS;
+  });
+
+  const [allCashPayments, setAllCashPayments] = useState<CashPaymentVoucher[]>(() => {
+    try {
+      const saved = localStorage.getItem('erp_cash_payments');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed.map((p: CashPaymentVoucher) => ({
+            ...p,
+            currency: p.currency === 'SAR' ? 'EGP' : (p.currency || 'EGP'),
+          }));
+        }
+      }
+    } catch (e) {
+      console.error(e);
+    }
+    return INITIAL_CASH_PAYMENTS;
+  });
+
+  const [allSpecializedTaxInvoices, setAllSpecializedTaxInvoices] = useState<SpecializedTaxInvoice[]>(() => {
+    try {
+      const saved = localStorage.getItem('erp_tax_invoices');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed.map((inv: SpecializedTaxInvoice) => ({
+            ...inv,
+            currency: inv.currency === 'SAR' ? 'EGP' : (inv.currency || 'EGP'),
+          }));
+        }
+      }
+    } catch (e) {
+      console.error(e);
+    }
+    return INITIAL_TAX_INVOICES;
+  });
+
+  const [allGoodsReceipts, setAllGoodsReceipts] = useState<GoodsReceiptVoucher[]>(() => {
+    try {
+      const saved = localStorage.getItem('erp_goods_receipts');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.error(e);
+    }
+    return INITIAL_GOODS_RECEIPTS;
+  });
+
+  const [allGoodsIssues, setAllGoodsIssues] = useState<GoodsIssueVoucher[]>(() => {
+    try {
+      const saved = localStorage.getItem('erp_goods_issues');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.error(e);
+    }
+    return INITIAL_GOODS_ISSUES;
+  });
+
+  // Filtered lists by tenant
+  const cashReceipts = allCashReceipts.filter((r) => r.tenantId === tenant.id);
+  const cashPayments = allCashPayments.filter((p) => p.tenantId === tenant.id);
+  const specializedTaxInvoices = allSpecializedTaxInvoices.filter((inv) => inv.tenantId === tenant.id);
+  const goodsReceipts = allGoodsReceipts.filter((grn) => grn.tenantId === tenant.id);
+  const goodsIssues = allGoodsIssues.filter((gin) => gin.tenantId === tenant.id);
+
+  const addCashReceipt = (data: Omit<CashReceiptVoucher, 'id' | 'voucherNumber' | 'createdAt'>): CashReceiptVoucher => {
+    const nextSeq = allCashReceipts.length + 1;
+    const padSeq = String(nextSeq).padStart(4, '0');
+    const voucherNumber = `CR-${new Date().getFullYear()}-${padSeq}`;
+    const newReceipt: CashReceiptVoucher = {
+      ...data,
+      id: `rv-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      voucherNumber,
+      createdAt: new Date().toISOString(),
+    };
+
+    const updated = [newReceipt, ...allCashReceipts];
+    setAllCashReceipts(updated);
+    localStorage.setItem('erp_cash_receipts', JSON.stringify(updated));
+
+    logUserActivity(
+      'fiscal_documents',
+      'السندات والفواتير',
+      'Fiscal Documents',
+      'إصدار سند قبض نقدي',
+      'Issue Cash Receipt',
+      `تم إصدار سند قبض برقم ${voucherNumber} بمبلغ ${formatMoney(newReceipt.amount)} من ${newReceipt.receivedFrom}`
+    );
+
+    return newReceipt;
+  };
+
+  const deleteCashReceipt = (id: string) => {
+    const updated = allCashReceipts.filter((r) => r.id !== id);
+    setAllCashReceipts(updated);
+    localStorage.setItem('erp_cash_receipts', JSON.stringify(updated));
+  };
+
+  const addCashPayment = (data: Omit<CashPaymentVoucher, 'id' | 'voucherNumber' | 'createdAt'>): CashPaymentVoucher => {
+    const nextSeq = allCashPayments.length + 1;
+    const padSeq = String(nextSeq).padStart(4, '0');
+    const voucherNumber = `CP-${new Date().getFullYear()}-${padSeq}`;
+    const newPayment: CashPaymentVoucher = {
+      ...data,
+      id: `pv-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      voucherNumber,
+      createdAt: new Date().toISOString(),
+    };
+
+    const updated = [newPayment, ...allCashPayments];
+    setAllCashPayments(updated);
+    localStorage.setItem('erp_cash_payments', JSON.stringify(updated));
+
+    logUserActivity(
+      'fiscal_documents',
+      'السندات والفواتير',
+      'Fiscal Documents',
+      'إصدار سند صرف نقدي',
+      'Issue Cash Payment Voucher',
+      `تم إصدار سند صرف برقم ${voucherNumber} بمبلغ ${formatMoney(newPayment.amount)} إلى ${newPayment.paidTo}`
+    );
+
+    return newPayment;
+  };
+
+  const deleteCashPayment = (id: string) => {
+    const updated = allCashPayments.filter((p) => p.id !== id);
+    setAllCashPayments(updated);
+    localStorage.setItem('erp_cash_payments', JSON.stringify(updated));
+  };
+
+  const addSpecializedTaxInvoice = async (
+    data: Omit<SpecializedTaxInvoice, 'id' | 'invoiceNumber' | 'createdAt'>
+  ): Promise<SpecializedTaxInvoice> => {
+    const nextSeq = allSpecializedTaxInvoices.length + 1;
+    const padSeq = String(nextSeq).padStart(4, '0');
+    const invoiceNumber = `TAX-${new Date().getFullYear()}-${padSeq}`;
+
+    // Generate ZATCA Base64 TLV
+    const zatcaTlv = generateZatcaTlvBase64(
+      data.sellerVatNumber ? tenant.nameAr : 'عيادات ومجمع طبي',
+      data.sellerVatNumber || '300000000000003',
+      `${data.date}T${data.time || '12:00:00'}Z`,
+      data.grandTotal,
+      data.totalVat
+    );
+
+    let qrCodeDataUrl = '';
+    try {
+      qrCodeDataUrl = await generateQrDataUrl(zatcaTlv);
+    } catch (e) {
+      console.error(e);
+    }
+
+    const newInvoice: SpecializedTaxInvoice = {
+      ...data,
+      id: `tax-inv-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      invoiceNumber,
+      qrCodeDataUrl,
+      createdAt: new Date().toISOString(),
+    };
+
+    const updated = [newInvoice, ...allSpecializedTaxInvoices];
+    setAllSpecializedTaxInvoices(updated);
+    localStorage.setItem('erp_tax_invoices', JSON.stringify(updated));
+
+    logUserActivity(
+      'fiscal_documents',
+      'السندات والفواتير',
+      'Fiscal Documents',
+      'إصدار فاتورة ضريبية رسمية',
+      'Issue Tax Invoice',
+      `تم إصدار فاتورة ضريبية برقم ${invoiceNumber} للعميل ${newInvoice.customerName} بقيمة ${formatMoney(newInvoice.grandTotal)}`
+    );
+
+    return newInvoice;
+  };
+
+  const deleteSpecializedTaxInvoice = (id: string) => {
+    const updated = allSpecializedTaxInvoices.filter((i) => i.id !== id);
+    setAllSpecializedTaxInvoices(updated);
+    localStorage.setItem('erp_tax_invoices', JSON.stringify(updated));
+  };
+
+  const cancelSpecializedTaxInvoice = (id: string, reason: string) => {
+    const inv = allSpecializedTaxInvoices.find((i) => i.id === id);
+    if (!inv) return;
+    const updated = allSpecializedTaxInvoices.map((i) => {
+      if (i.id === id) {
+        return {
+          ...i,
+          status: 'cancelled' as const,
+          cancellationReason: reason,
+          cancelledAt: new Date().toISOString(),
+          cancelledBy: currentUser?.name || 'المدير المسؤول',
+        };
+      }
+      return i;
+    });
+    setAllSpecializedTaxInvoices(updated);
+    localStorage.setItem('erp_tax_invoices', JSON.stringify(updated));
+
+    logUserActivity(
+      'fiscal_documents',
+      'السندات والفواتير',
+      'Fiscal Documents',
+      'إلغاء فاتورة ضريبية رسمية',
+      'Cancel Tax Invoice',
+      `تم إلغاء الفاتورة الضريبية رقم ${inv.invoiceNumber} للعميل ${inv.customerName} - السبب: ${reason}`
+    );
+  };
+
+  const addGoodsReceipt = (data: Omit<GoodsReceiptVoucher, 'id' | 'grnNumber' | 'createdAt'>): GoodsReceiptVoucher => {
+    const nextSeq = allGoodsReceipts.length + 1;
+    const padSeq = String(nextSeq).padStart(4, '0');
+    const grnNumber = `GRN-${new Date().getFullYear()}-${padSeq}`;
+
+    const newGrn: GoodsReceiptVoucher = {
+      ...data,
+      id: `grn-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      grnNumber,
+      createdAt: new Date().toISOString(),
+    };
+
+    // Update stock levels in warehouse
+    data.items.forEach((item) => {
+      adjustStock(item.productId, data.warehouseId, item.quantityReceived, `إذن إضافة واستلام مخزني: ${grnNumber}`);
+    });
+
+    const updated = [newGrn, ...allGoodsReceipts];
+    setAllGoodsReceipts(updated);
+    localStorage.setItem('erp_goods_receipts', JSON.stringify(updated));
+
+    logUserActivity(
+      'fiscal_documents',
+      'السندات والفواتير',
+      'Fiscal Documents',
+      'إصدار إذن استلام أصناف مخزنية',
+      'Issue Goods Receipt Note',
+      `تم استلام وإضافة ${data.items.length} صنف بإذن استلام مخزني رقم ${grnNumber} من المورد ${data.supplierName}`
+    );
+
+    return newGrn;
+  };
+
+  const deleteGoodsReceipt = (id: string) => {
+    const updated = allGoodsReceipts.filter((g) => g.id !== id);
+    setAllGoodsReceipts(updated);
+    localStorage.setItem('erp_goods_receipts', JSON.stringify(updated));
+  };
+
+  const addGoodsIssue = (data: Omit<GoodsIssueVoucher, 'id' | 'ginNumber' | 'createdAt'>): GoodsIssueVoucher => {
+    const nextSeq = allGoodsIssues.length + 1;
+    const padSeq = String(nextSeq).padStart(4, '0');
+    const ginNumber = `GIN-${new Date().getFullYear()}-${padSeq}`;
+
+    const newGin: GoodsIssueVoucher = {
+      ...data,
+      id: `gin-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      ginNumber,
+      createdAt: new Date().toISOString(),
+    };
+
+    // Deduct stock levels in warehouse
+    data.items.forEach((item) => {
+      adjustStock(item.productId, data.warehouseId, -item.quantityIssued, `إذن صرف مخزني: ${ginNumber}`);
+    });
+
+    const updated = [newGin, ...allGoodsIssues];
+    setAllGoodsIssues(updated);
+    localStorage.setItem('erp_goods_issues', JSON.stringify(updated));
+
+    logUserActivity(
+      'fiscal_documents',
+      'السندات والفواتير',
+      'Fiscal Documents',
+      'إصدار إذن صرف أصناف مخزنية',
+      'Issue Goods Issue Note',
+      `تم صرف ${data.items.length} أصناف مخزنية بإذن صرف رقم ${ginNumber} إلى ${data.recipientName}`
+    );
+
+    return newGin;
+  };
+
+  const deleteGoodsIssue = (id: string) => {
+    const updated = allGoodsIssues.filter((g) => g.id !== id);
+    setAllGoodsIssues(updated);
+    localStorage.setItem('erp_goods_issues', JSON.stringify(updated));
   };
 
   const resetToDefaults = () => {
@@ -4201,12 +5570,15 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         tenant,
         setTenant,
         tenants,
+        allTenants,
         addTenant,
         updateTenant,
         updateTenantModules,
         switchTenant,
         deleteTenant,
         restoreTenant,
+        purgeTenant,
+        initializeCleanProductionCompany,
         branches,
         allBranches,
         activeBranch,
@@ -4297,6 +5669,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         importPartiesFromExcel,
         importCustomersFromExcel,
         getNextCustomerSystemCode,
+        addClientOffer,
+        consumeClientOfferSession,
         appointments,
         allAppointments,
         patientFollowUps,
@@ -4339,6 +5713,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         addDeviceMaintenance,
         deleteDeviceMaintenance,
         activeShift,
+        allPosShifts,
         invoices,
         allInvoices,
         processCheckout,
@@ -4358,11 +5733,33 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         activityLogs: userActivityLogs,
         recordAudit,
         logUserActivity,
+        cashReceipts,
+        allCashReceipts,
+        addCashReceipt,
+        deleteCashReceipt,
+        cashPayments,
+        allCashPayments,
+        addCashPayment,
+        deleteCashPayment,
+        specializedTaxInvoices,
+        allSpecializedTaxInvoices,
+        addSpecializedTaxInvoice,
+        cancelSpecializedTaxInvoice,
+        deleteSpecializedTaxInvoice,
+        goodsReceipts,
+        allGoodsReceipts,
+        addGoodsReceipt,
+        deleteGoodsReceipt,
+        goodsIssues,
+        allGoodsIssues,
+        addGoodsIssue,
+        deleteGoodsIssue,
         neonDb,
         updateNeonConnectionString,
         testNeonConnection,
         syncAllToNeon,
         fixNeonSchema,
+        runNeonMigrations,
         fetchRemoteCounts,
         getPostgresSchemaSql,
         resetToDefaults,

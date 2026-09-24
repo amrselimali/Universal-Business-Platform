@@ -595,4 +595,178 @@ export class NeonService {
       return false;
     }
   }
+
+  // Safe schema migration - creates tables if not present and adds new columns if they do not exist without losing any data
+  static async runSchemaMigrations(connectionString: string): Promise<{ success: boolean; message: string }> {
+    try {
+      const sql = this.getClient(connectionString);
+
+      // 1. Ensure all base tables exist safely (CREATE TABLE IF NOT EXISTS never touches existing data)
+      await sql`
+        CREATE TABLE IF NOT EXISTS tenants (
+          id VARCHAR(100) PRIMARY KEY,
+          code VARCHAR(50) UNIQUE NOT NULL,
+          name_ar VARCHAR(255) NOT NULL,
+          name_en VARCHAR(255) NOT NULL,
+          plan VARCHAR(50) DEFAULT 'Enterprise',
+          currency VARCHAR(10) DEFAULT 'EGP',
+          tax_rate NUMERIC(5, 4) DEFAULT 0.1400,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
+      `;
+
+      await sql`
+        CREATE TABLE IF NOT EXISTS branches (
+          id VARCHAR(100) PRIMARY KEY,
+          tenant_id VARCHAR(100) NOT NULL,
+          code VARCHAR(50) NOT NULL,
+          name_ar VARCHAR(255) NOT NULL,
+          name_en VARCHAR(255),
+          city VARCHAR(100),
+          phone VARCHAR(50),
+          is_main BOOLEAN DEFAULT FALSE,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
+      `;
+
+      await sql`
+        CREATE TABLE IF NOT EXISTS warehouses (
+          id VARCHAR(100) PRIMARY KEY,
+          tenant_id VARCHAR(100) NOT NULL,
+          branch_id VARCHAR(100),
+          code VARCHAR(50) NOT NULL,
+          name_ar VARCHAR(255) NOT NULL,
+          name_en VARCHAR(255),
+          location TEXT
+        );
+      `;
+
+      await sql`
+        CREATE TABLE IF NOT EXISTS products (
+          id VARCHAR(100) PRIMARY KEY,
+          tenant_id VARCHAR(100) NOT NULL,
+          sku VARCHAR(100) NOT NULL,
+          barcode VARCHAR(100),
+          name_ar VARCHAR(255) NOT NULL,
+          name_en VARCHAR(255),
+          category VARCHAR(100),
+          purchase_price NUMERIC(15, 2) DEFAULT 0.00,
+          selling_price NUMERIC(15, 2) DEFAULT 0.00,
+          min_stock_level NUMERIC(12, 2) DEFAULT 5.00,
+          is_service BOOLEAN DEFAULT FALSE,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
+      `;
+
+      await sql`
+        CREATE TABLE IF NOT EXISTS stock_levels (
+          id VARCHAR(100) PRIMARY KEY,
+          tenant_id VARCHAR(100) NOT NULL,
+          product_id VARCHAR(100) NOT NULL,
+          warehouse_id VARCHAR(100) NOT NULL,
+          quantity_on_hand NUMERIC(15, 3) DEFAULT 0.000
+        );
+      `;
+
+      await sql`
+        CREATE TABLE IF NOT EXISTS accounts (
+          id VARCHAR(100) PRIMARY KEY,
+          tenant_id VARCHAR(100) NOT NULL,
+          code VARCHAR(50) NOT NULL,
+          name_ar VARCHAR(255) NOT NULL,
+          name_en VARCHAR(255),
+          account_type VARCHAR(50) NOT NULL,
+          parent_id VARCHAR(100),
+          balance NUMERIC(18, 2) DEFAULT 0.00,
+          level INT DEFAULT 1
+        );
+      `;
+
+      await sql`
+        CREATE TABLE IF NOT EXISTS sales_invoices (
+          id VARCHAR(100) PRIMARY KEY,
+          tenant_id VARCHAR(100) NOT NULL,
+          branch_id VARCHAR(100),
+          warehouse_id VARCHAR(100),
+          invoice_number VARCHAR(100) NOT NULL,
+          customer_id VARCHAR(100),
+          customer_name VARCHAR(255),
+          subtotal NUMERIC(15, 2) NOT NULL,
+          discount_amount NUMERIC(15, 2) DEFAULT 0.00,
+          tax_amount NUMERIC(15, 2) DEFAULT 0.00,
+          net_amount NUMERIC(15, 2) NOT NULL,
+          payment_method VARCHAR(50) NOT NULL,
+          cashier_name VARCHAR(255),
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
+      `;
+
+      await sql`
+        CREATE TABLE IF NOT EXISTS parties (
+          id VARCHAR(100) PRIMARY KEY,
+          tenant_id VARCHAR(100) NOT NULL,
+          name VARCHAR(255) NOT NULL,
+          name_en VARCHAR(255),
+          type VARCHAR(50),
+          phone VARCHAR(50),
+          email VARCHAR(100),
+          balance NUMERIC(15, 2) DEFAULT 0.00
+        );
+      `;
+
+      await sql`
+        CREATE TABLE IF NOT EXISTS patients (
+          id VARCHAR(100) PRIMARY KEY,
+          tenant_id VARCHAR(100) NOT NULL,
+          file_number VARCHAR(50),
+          full_name VARCHAR(255) NOT NULL,
+          phone VARCHAR(50),
+          gender VARCHAR(20)
+        );
+      `;
+
+      await sql`
+        CREATE TABLE IF NOT EXISTS appointments (
+          id VARCHAR(100) PRIMARY KEY,
+          tenant_id VARCHAR(100) NOT NULL,
+          branch_id VARCHAR(100),
+          patient_id VARCHAR(100),
+          patient_name VARCHAR(255),
+          doctor_name VARCHAR(255),
+          service_name_ar VARCHAR(255),
+          price NUMERIC(15, 2) DEFAULT 0.00,
+          appointment_date VARCHAR(50),
+          appointment_time VARCHAR(50),
+          status VARCHAR(50)
+        );
+      `;
+
+      await sql`
+        CREATE TABLE IF NOT EXISTS journal_entries (
+          id VARCHAR(100) PRIMARY KEY,
+          tenant_id VARCHAR(100) NOT NULL,
+          branch_id VARCHAR(100),
+          entry_number VARCHAR(100),
+          date VARCHAR(50),
+          description TEXT,
+          is_posted BOOLEAN DEFAULT TRUE
+        );
+      `;
+
+      // 2. Safe Column Additions (Adds new schema fields if not already present)
+      await sql`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS default_pos_collection_only BOOLEAN DEFAULT FALSE;`;
+      await sql`ALTER TABLE branches ADD COLUMN IF NOT EXISTS default_pos_collection_only BOOLEAN DEFAULT FALSE;`;
+      await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS default_collection_only BOOLEAN DEFAULT FALSE;`;
+      await sql`ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS is_collection_only BOOLEAN DEFAULT FALSE;`;
+      await sql`ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS payment_fee_percentage NUMERIC(5, 2) DEFAULT 0.00;`;
+      await sql`ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS payment_fee_amount NUMERIC(15, 2) DEFAULT 0.00;`;
+      await sql`ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS total_with_fee NUMERIC(15, 2) DEFAULT 0.00;`;
+      await sql`ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS branch_id VARCHAR(100);`;
+      await sql`ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS payment_method_id VARCHAR(100);`;
+
+      return { success: true, message: 'تم تحديث وترحيل هيكل الجداول في Neon بنجاح تام وبأمان 100% دون أي مساس بالبيانات الحالية!' };
+    } catch (err: any) {
+      return { success: false, message: 'فشل في تحديث هيكل الجداول: ' + (err.message || String(err)) };
+    }
+  }
 }

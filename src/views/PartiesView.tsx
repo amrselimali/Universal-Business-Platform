@@ -22,18 +22,41 @@ import {
   Hash,
   Filter,
   FileText,
+  Package,
+  MessageCircle,
 } from 'lucide-react';
 import { PartyStatementModal } from '../components/PartyStatementModal';
+import { exportToCsv, shareViaWhatsApp } from '../utils/exportUtils';
 
 export const PartiesView: React.FC = () => {
-  const { t, formatMoney, parties, addParty, importCustomersFromExcel, language, tenant, activeBranch } = usePlatform();
+  const {
+    t,
+    formatMoney,
+    parties,
+    addParty,
+    importCustomersFromExcel,
+    language,
+    tenant,
+    activeBranch,
+    clientOffers,
+    addClientOffer,
+    consumeClientOfferSession,
+  } = usePlatform();
 
   const [activeFilter, setActiveFilter] = useState<'ALL' | 'WITH_BALANCE' | 'ZERO_BALANCE'>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [showAddModal, setShowAddModal] = useState<boolean>(false);
   const [showExcelModal, setShowExcelModal] = useState<boolean>(false);
   const [statementPartyId, setStatementPartyId] = useState<string | null>(null);
+  const [statementInitialMode, setStatementInitialMode] = useState<'VALUE' | 'QUANTITY'>('VALUE');
   const [showStatementModal, setShowStatementModal] = useState<boolean>(false);
+  const [selectedPackageParty, setSelectedPackageParty] = useState<Party | null>(null);
+  const [newOfferName, setNewOfferName] = useState('');
+  const [newOfferSessions, setNewOfferSessions] = useState(6);
+  const [newOfferPrice, setNewOfferPrice] = useState(1500);
+  const [newOfferExpiry, setNewOfferExpiry] = useState(
+    new Date(Date.now() + 90 * 86400000).toISOString().split('T')[0]
+  );
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [newParty, setNewParty] = useState({
@@ -227,6 +250,26 @@ export const PartiesView: React.FC = () => {
           </button>
 
           <button
+            onClick={() => {
+              const rows = filteredParties.map((p) => ({
+                'كود النظام': p.systemCode || '',
+                'الاسم بالعربي': p.name,
+                'الاسم بالإنجليزية': p.nameEn || '',
+                'رقم الهاتف': p.phone,
+                'الرصيد المالي': p.balance,
+                'الرقم القومي': p.nationalId || '',
+                'الكود الورقي': p.paperCode || '',
+                'المصدر التسويقي': p.leadSource || '',
+              }));
+              exportToCsv(rows, 'سجل_المرضى_والعملاء');
+            }}
+            className="flex items-center gap-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3.5 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-all cursor-pointer"
+          >
+            <Download className="h-4 w-4 text-sky-600" />
+            <span>{t('تصدير إكسيل', 'Export Excel')}</span>
+          </button>
+
+          <button
             onClick={() => setShowAddModal(true)}
             className="flex items-center gap-1.5 rounded-xl bg-indigo-600 px-4 py-2 text-xs font-bold text-white shadow-md shadow-indigo-600/20 hover:bg-indigo-700 transition-all cursor-pointer"
           >
@@ -350,22 +393,48 @@ export const PartiesView: React.FC = () => {
               </div>
             </div>
 
-            <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2">
+            <div className="pt-2.5 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-1.5">
               <div className="text-[10px] text-slate-400 truncate">
                 {party.leadSource && <span>{party.leadSource} • </span>}
                 <span>{formatMoney(party.creditLimit)} {t('ائتمان', 'limit')}</span>
               </div>
 
-              <button
-                onClick={() => {
-                  setStatementPartyId(party.id);
-                  setShowStatementModal(true);
-                }}
-                className="inline-flex items-center gap-1 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800/60 px-2.5 py-1 text-[11px] font-bold text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors cursor-pointer shrink-0"
-              >
-                <FileText className="h-3.5 w-3.5 text-indigo-600" />
-                <span>{t('كشف الحساب', 'Statement')}</span>
-              </button>
+              <div className="flex items-center gap-1.5">
+                {party.phone && (
+                  <button
+                    onClick={() =>
+                      shareViaWhatsApp(
+                        party.phone,
+                        `مرحباً ${party.name}، نتواصل معكم بخصوص مواعيدكم وحسابكم في ${tenant?.name || 'المركز'}...`
+                      )
+                    }
+                    title={t('مراسلة عبر واتساب', 'Chat on WhatsApp')}
+                    className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 text-emerald-600 hover:bg-emerald-100 cursor-pointer"
+                  >
+                    <MessageCircle className="h-3.5 w-3.5" />
+                  </button>
+                )}
+
+                <button
+                  onClick={() => setSelectedPackageParty(party)}
+                  title={t('إدارة باقات وعروض واشتراكات المريض', 'Client Packages & Sessions')}
+                  className="inline-flex items-center gap-1 rounded-lg bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800/60 px-2 py-1 text-[11px] font-bold text-purple-700 dark:text-purple-300 hover:bg-purple-100 cursor-pointer"
+                >
+                  <Package className="h-3.5 w-3.5 text-purple-600" />
+                  <span>{t('الباقات', 'Packages')}</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    setStatementPartyId(party.id);
+                    setShowStatementModal(true);
+                  }}
+                  className="inline-flex items-center gap-1 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800/60 px-2.5 py-1 text-[11px] font-bold text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors cursor-pointer shrink-0"
+                >
+                  <FileText className="h-3.5 w-3.5 text-indigo-600" />
+                  <span>{t('كشف الحساب', 'Statement')}</span>
+                </button>
+              </div>
             </div>
           </div>
         ))}
@@ -585,11 +654,226 @@ export const PartiesView: React.FC = () => {
       {showStatementModal && (
         <PartyStatementModal
           initialPartyId={statementPartyId}
+          initialMode={statementInitialMode}
           onClose={() => {
             setShowStatementModal(false);
             setStatementPartyId(null);
+            setStatementInitialMode('VALUE');
           }}
         />
+      )}
+
+      {/* CLIENT PACKAGES & SUBSCRIPTIONS MODAL */}
+      {selectedPackageParty && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-2xl rounded-2xl bg-white p-6 shadow-2xl dark:bg-slate-900 border border-slate-100 dark:border-slate-800 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800 mb-4">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-xl bg-purple-50 dark:bg-purple-950/40 text-purple-600">
+                  <Package className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-slate-900 dark:text-white">
+                    {t('باقات وعروض واشتراكات العميل', 'Client Packages & Subscriptions')}
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    {selectedPackageParty.name} • {selectedPackageParty.phone}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    setStatementPartyId(selectedPackageParty.id);
+                    setStatementInitialMode('QUANTITY');
+                    setSelectedPackageParty(null);
+                    setShowStatementModal(true);
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300 text-xs font-bold hover:bg-purple-200 cursor-pointer"
+                >
+                  <FileText className="h-4 w-4" />
+                  <span>{t('كشف حساب الكميات', 'Quantity Statement')}</span>
+                </button>
+                <button
+                  onClick={() => setSelectedPackageParty(null)}
+                  className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* List of Active Packages */}
+            <div className="space-y-3 mb-6">
+              <h4 className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                {t('الباقات والاشتراكات الحالية:', 'Current Packages:')}
+              </h4>
+
+              {(() => {
+                const partyOffers = clientOffers.filter((o) => o.clientId === selectedPackageParty.id);
+                if (partyOffers.length === 0) {
+                  return (
+                    <div className="p-6 text-center rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-dashed border-slate-200 dark:border-slate-700 text-xs text-slate-500">
+                      لا توجد باقات أو اشتراكات مسجلة لهذا العميل حالياً. يمكنك إضافة باقة جديدة بالأسفل.
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="space-y-2">
+                    {partyOffers.map((offer) => {
+                      const percent = Math.round(((offer.totalSessions - offer.remainingSessions) / offer.totalSessions) * 100);
+                      const isFinished = offer.remainingSessions <= 0;
+
+                      return (
+                        <div
+                          key={offer.id}
+                          className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 space-y-2 shadow-xs"
+                        >
+                          <div className="flex items-start justify-between">
+                            <div>
+                              <h5 className="text-xs font-black text-slate-900 dark:text-white">
+                                {offer.offerName}
+                              </h5>
+                              <p className="text-[11px] text-slate-400 mt-0.5">
+                                القيمة: {formatMoney(offer.totalPrice)} • صالح حتى: {offer.expiresAt}
+                              </p>
+                            </div>
+                            <span
+                              className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
+                                isFinished
+                                  ? 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300'
+                                  : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300'
+                              }`}
+                            >
+                              {isFinished ? 'مكتمل الاستهلاك' : 'نشطة وجارية'}
+                            </span>
+                          </div>
+
+                          {/* Progress Bar */}
+                          <div>
+                            <div className="flex justify-between text-[11px] font-bold mb-1">
+                              <span className="text-purple-600 dark:text-purple-400">
+                                المتبقي: {offer.remainingSessions} من {offer.totalSessions} جلسة
+                              </span>
+                              <span className="text-slate-400">{percent}% مستهلك</span>
+                            </div>
+                            <div className="h-2 w-full bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-purple-600 rounded-full transition-all duration-300"
+                                style={{ width: `${percent}%` }}
+                              />
+                            </div>
+                          </div>
+
+                          {/* Actions */}
+                          {!isFinished && (
+                            <div className="flex justify-end pt-1">
+                              <button
+                                onClick={() => consumeClientOfferSession(offer.id)}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold shadow-xs cursor-pointer transition-colors"
+                              >
+                                <CheckCircle2 className="h-3.5 w-3.5" />
+                                <span>استهلاك جلسة واحدة الآن</span>
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Add New Package Form */}
+            <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
+              <h4 className="text-xs font-bold text-slate-900 dark:text-white mb-3 flex items-center gap-1.5">
+                <Plus className="h-4 w-4 text-purple-600" />
+                <span>{t('إسناد باقة أو عرض جديد للعميل', 'Assign New Package')}</span>
+              </h4>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+                <div className="sm:col-span-2">
+                  <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    اسم الباقة أو العرض
+                  </label>
+                  <input
+                    type="text"
+                    value={newOfferName}
+                    onChange={(e) => setNewOfferName(e.target.value)}
+                    placeholder="مثال: باقة إزالة الشعر كامل الجسم 6 جلسات..."
+                    className="w-full px-3 py-1.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    عدد الجلسات الإجمالي
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={newOfferSessions}
+                    onChange={(e) => setNewOfferSessions(Number(e.target.value) || 1)}
+                    className="w-full px-3 py-1.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    السعر الإجمالي للباقة (ج.م)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={newOfferPrice}
+                    onChange={(e) => setNewOfferPrice(Number(e.target.value) || 0)}
+                    className="w-full px-3 py-1.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold text-purple-600"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    تاريخ انتهاء الصلاحية
+                  </label>
+                  <input
+                    type="date"
+                    value={newOfferExpiry}
+                    onChange={(e) => setNewOfferExpiry(e.target.value)}
+                    className="w-full px-3 py-1.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!newOfferName.trim()) {
+                      alert('يرجى كتابة اسم الباقة أولاً');
+                      return;
+                    }
+                    addClientOffer({
+                      clientId: selectedPackageParty.id,
+                      clientName: selectedPackageParty.name,
+                      offerName: newOfferName.trim(),
+                      totalSessions: newOfferSessions,
+                      remainingSessions: newOfferSessions,
+                      totalPrice: newOfferPrice,
+                      expiresAt: newOfferExpiry,
+                    });
+                    setNewOfferName('');
+                  }}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold shadow-md shadow-purple-600/20 cursor-pointer"
+                >
+                  <Plus className="h-4 w-4" />
+                  <span>تأكيد إسناد الباقة للمريض</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

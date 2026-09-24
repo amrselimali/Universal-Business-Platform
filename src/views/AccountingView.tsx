@@ -102,17 +102,26 @@ export const AccountingView: React.FC = () => {
     .reduce((sum, a) => sum + a.balance, 0);
   const netIncome = totalRevenue - totalExpense;
 
-  // Filtered accounts for COA table
-  const filteredAccounts = accounts.filter((acc) => {
-    const matchesType = selectedType === 'ALL' || acc.type === selectedType;
-    const q = searchQuery.toLowerCase().trim();
-    const matchesSearch =
-      !q ||
-      acc.code.includes(q) ||
-      acc.nameAr.toLowerCase().includes(q) ||
-      acc.nameEn.toLowerCase().includes(q);
-    return matchesType && matchesSearch;
-  });
+  // Sorted accounts by account code (ترتيب شجرة الحسابات بكود الحساب)
+  const sortedAccounts = useMemo(() => {
+    return [...accounts].sort((a, b) =>
+      a.code.localeCompare(b.code, undefined, { numeric: true, sensitivity: 'base' })
+    );
+  }, [accounts]);
+
+  // Filtered accounts for COA table (ordered by account code)
+  const filteredAccounts = useMemo(() => {
+    return sortedAccounts.filter((acc) => {
+      const matchesType = selectedType === 'ALL' || acc.type === selectedType;
+      const q = searchQuery.toLowerCase().trim();
+      const matchesSearch =
+        !q ||
+        acc.code.includes(q) ||
+        acc.nameAr.toLowerCase().includes(q) ||
+        acc.nameEn.toLowerCase().includes(q);
+      return matchesType && matchesSearch;
+    });
+  }, [sortedAccounts, selectedType, searchQuery]);
 
   // Open Add Account modal (optionally with parent preset)
   const handleOpenAddAccount = (parentId: string = '') => {

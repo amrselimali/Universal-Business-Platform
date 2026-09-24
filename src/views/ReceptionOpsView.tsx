@@ -93,8 +93,10 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
   const [openShiftReceptionist, setOpenShiftReceptionist] = useState(currentUser?.name || '');
   const [openShiftNotes, setOpenShiftNotes] = useState('');
 
-  // Close Shift Form
+  // Close Shift Form & Z-Report Reconciliation
   const [closeShiftNotes, setCloseShiftNotes] = useState('');
+  const [actualCashCount, setActualCashCount] = useState<number>(0);
+  const [transferredToMainTreasury, setTransferredToMainTreasury] = useState<boolean>(true);
 
   // Add Run Row Form
   const [patientId, setPatientId] = useState('');
@@ -205,16 +207,40 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
     }
   }, [activeShift?.id, activeShift?.notes]);
 
+  const [openShiftOpeningFloat, setOpenShiftOpeningFloat] = useState<number>(0);
+
   const handleOpenShiftSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    openReceptionShift(openShiftReceptionist, openShiftNotes);
+    openReceptionShift(openShiftReceptionist, openShiftNotes, activeBranch?.id, openShiftOpeningFloat);
     setShowOpenShiftModal(false);
   };
 
   const handleCloseShiftSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (activeShift) {
-      closeReceptionShift(activeShift.id, closeShiftNotes);
+      const cashBal = activeShift.balancing?.find(
+        (b) =>
+          b.paymentMethodName.includes('نقد') ||
+          b.paymentMethodName.toLowerCase().includes('cash') ||
+          b.paymentMethodId.toLowerCase().includes('cash') ||
+          b.paymentMethodId === 'pm-01' ||
+          b.paymentMethodId === 'pm-cash-1'
+      ) || activeShift.balancing?.[0];
+
+      const openFloat = activeShift.openingFloat ?? activeShift.initialBalance ?? (cashBal?.openingBalance || 0);
+      const expected = activeShift.expectedCashInDrawer !== undefined
+        ? activeShift.expectedCashInDrawer
+        : cashBal?.closingBalance !== undefined
+        ? cashBal.closingBalance
+        : openFloat + (activeShift.cashCollected ?? cashBal?.totalCollected ?? 0) - (activeShift.cashExpenses ?? cashBal?.totalDisbursed ?? 0);
+
+      closeReceptionShift(activeShift.id, {
+        notes: closeShiftNotes,
+        actualCashCount: Number(actualCashCount) || 0,
+        openingFloat: openFloat,
+        expectedCash: expected,
+        transferredToMainTreasury,
+      });
       setShowCloseShiftModal(false);
     }
   };
@@ -353,8 +379,9 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
   };
 
   const handleSaveManualNotes = () => {
-    if (activeShift) {
-      updateShiftNotes(activeShift.id, manualNotes);
+    if (activeShift && manualNotes.trim()) {
+      updateShiftNotes(activeShift.id, manualNotes.trim(), activeShift.receptionistName);
+      setManualNotes('');
       setNotesSavedAlert(true);
       setTimeout(() => setNotesSavedAlert(false), 3000);
     }
@@ -385,7 +412,7 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-lg md:text-xl font-black text-slate-900 dark:text-white">
-                  {t('شاشة التشغيل اليومي (الريسيبشن)', 'Reception Operating Shift Run-Sheet')}
+                  {t('شاشة التشغيل', 'Operations Run-Sheet')}
                 </h1>
                 {activeShift ? (
                   <span className="px-2.5 py-0.5 text-xs font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-400 rounded-full flex items-center gap-1.5">
@@ -439,7 +466,26 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
                 </button>
 
                 <button
-                  onClick={() => setShowCloseShiftModal(true)}
+                  onClick={() => {
+                    const cashBal = activeShift.balancing?.find(
+                      (b) =>
+                        b.paymentMethodName.includes('نقد') ||
+                        b.paymentMethodName.toLowerCase().includes('cash') ||
+                        b.paymentMethodId.toLowerCase().includes('cash') ||
+                        b.paymentMethodId === 'pm-01' ||
+                        b.paymentMethodId === 'pm-cash-1'
+                    ) || activeShift.balancing?.[0];
+
+                    const openFloat = activeShift.openingFloat ?? activeShift.initialBalance ?? (cashBal?.openingBalance || 0);
+                    const expected = activeShift.expectedCashInDrawer !== undefined
+                      ? activeShift.expectedCashInDrawer
+                      : cashBal?.closingBalance !== undefined
+                      ? cashBal.closingBalance
+                      : openFloat + (activeShift.cashCollected ?? cashBal?.totalCollected ?? 0) - (activeShift.cashExpenses ?? cashBal?.totalDisbursed ?? 0);
+
+                    setActualCashCount(expected);
+                    setShowCloseShiftModal(true);
+                  }}
                   className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-bold text-white bg-slate-800 hover:bg-slate-900 dark:bg-slate-700 dark:hover:bg-slate-600 rounded-xl shadow-md transition-all cursor-pointer"
                 >
                   <Square className="h-4 w-4 fill-current" />
@@ -451,7 +497,54 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
         </div>
       </div>
 
-      {/* 2. Main Shift Run-Sheet Table (With Inline Editing & Pulses before Qty & Bottom Totals) */}
+      {/* 2. Shift Operating Totals & Summary Cards (Placed ABOVE the Run-Sheet Table as Requested) */}
+      {activeShift && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          <div className="p-3.5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
+            <span className="text-[11px] font-semibold text-slate-400 block">{t('إجمالي إيراد الخدمات', 'Gross Revenue')}</span>
+            <span className="text-base font-black text-slate-900 dark:text-white mt-1 block">
+              {formatMoney(activeShift.totalRevenue)}
+            </span>
+          </div>
+
+          <div className="p-3.5 bg-emerald-50/60 dark:bg-emerald-950/30 rounded-2xl border border-emerald-100 dark:border-emerald-800/40 shadow-xs">
+            <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 block">{t('إجمالي المحصل الفعلي', 'Total Collected')}</span>
+            <span className="text-base font-black text-emerald-700 dark:text-emerald-300 mt-1 block">
+              {formatMoney(activeShift.totalCollected)}
+            </span>
+          </div>
+
+          <div className="p-3.5 bg-rose-50/60 dark:bg-rose-950/30 rounded-2xl border border-rose-100 dark:border-rose-800/40 shadow-xs">
+            <span className="text-[11px] font-semibold text-rose-600 dark:text-rose-400 block">{t('المصروفات المنصرفة', 'Total Expenses')}</span>
+            <span className="text-base font-black text-rose-700 dark:text-rose-300 mt-1 block">
+              {formatMoney(activeShift.totalExpenses)}
+            </span>
+          </div>
+
+          <div className="p-3.5 bg-indigo-50/60 dark:bg-indigo-950/30 rounded-2xl border border-indigo-100 dark:border-indigo-800/40 shadow-xs">
+            <span className="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 block">{t('صافي نقدية الشيفت', 'Net Cash in Shift')}</span>
+            <span className="text-base font-black text-indigo-700 dark:text-indigo-300 mt-1 block">
+              {formatMoney(activeShift.netShiftCash)}
+            </span>
+          </div>
+
+          <div className="p-3.5 bg-amber-50/60 dark:bg-amber-950/30 rounded-2xl border border-amber-100 dark:border-amber-800/40 shadow-xs">
+            <span className="text-[11px] font-semibold text-amber-600 dark:text-amber-400 block">{t('إجمالي النبضات', 'Total Pulses')}</span>
+            <span className="text-base font-black text-amber-700 dark:text-amber-300 mt-1 block">
+              {totalPulsesCount.toLocaleString()} {t('نبضة', 'p')}
+            </span>
+          </div>
+
+          <div className="p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-xs">
+            <span className="text-[11px] font-semibold text-slate-500 block">{t('عدد الحركات المنفذة', 'Total Entries')}</span>
+            <span className="text-base font-black text-slate-900 dark:text-white mt-1 block">
+              {activeShift.runRows.length} {t('حركة', 'rows')}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* 3. Main Shift Run-Sheet Table (With Inline Editing & Room Column Removed) */}
       {activeShift ? (
         <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden">
           <div className="flex items-center justify-between p-4 border-b border-slate-100 dark:border-slate-800">
@@ -465,7 +558,7 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
               </span>
             </div>
             <div className="text-[11px] text-slate-400 font-medium">
-              {t('* يمكنك تعديل الغرفة والخدمة والنبضات والكمية والسعر والجهاز مباشرة أثناء فتح الشيفت', '* Editable columns enabled while shift is open')}
+              {t('* يمكنك تعديل الخدمة والنبضات والكمية والسعر والجهاز مباشرة أثناء فتح الشيفت', '* Editable columns enabled while shift is open')}
             </div>
           </div>
 
@@ -476,7 +569,6 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
                   <th className="p-3">#</th>
                   <th className="p-3">{t('المريض / العميل', 'Patient / Client')}</th>
                   <th className="p-3">{t('الطبيب / التكنيشن', 'Doctor / Technician')}</th>
-                  <th className="p-3">{t('الغرفة (قابل للتعديل)', 'Room')}</th>
                   <th className="p-3">{t('الخدمة / الجلسة', 'Service / Session')}</th>
                   {/* Pulse Count Column BEFORE Quantity */}
                   <th className="p-3">{t('عدد النبضات', 'Pulse Count')}</th>
@@ -492,7 +584,7 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {activeShift.runRows.length === 0 ? (
                   <tr>
-                    <td colSpan={13} className="py-12 text-center text-slate-400">
+                    <td colSpan={12} className="py-12 text-center text-slate-400">
                       <Activity className="h-8 w-8 text-slate-300 dark:text-slate-700 mx-auto mb-2" />
                       <p>{t('لم يتم تسجيل أي حركة تشغيل في هذا الشيفت حتى الآن.', 'No run-sheet entries yet.')}</p>
                       <button
@@ -542,20 +634,6 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
                           <div>{row.doctorName || '-'}</div>
                           {row.technicianName && (
                             <div className="text-[10px] text-slate-400">تك: {row.technicianName}</div>
-                          )}
-                        </td>
-
-                        {/* Room (Editable) */}
-                        <td className="p-3">
-                          {isEditing ? (
-                            <input
-                              type="text"
-                              value={editRowData.roomNumber || ''}
-                              onChange={(e) => setEditRowData({ ...editRowData, roomNumber: e.target.value })}
-                              className="w-24 px-2 py-1 text-xs rounded-lg border border-indigo-300 bg-white dark:bg-slate-800"
-                            />
-                          ) : (
-                            <span className="text-slate-600 dark:text-slate-300">{row.roomNumber || '-'}</span>
                           )}
                         </td>
 
@@ -700,11 +778,11 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
                 )}
               </tbody>
 
-              {/* 3. Totals Aggregates Placed at the Bottom of Table (الإجماليات أسفل الجدول) */}
+              {/* 3. Totals Aggregates Placed at the Bottom of Table (Totals) */}
               {activeShift.runRows.length > 0 && (
                 <tfoot className="bg-slate-100/80 dark:bg-slate-800 font-bold border-t-2 border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white">
                   <tr>
-                    <td colSpan={5} className="p-3 text-right rtl:text-left font-black uppercase text-xs">
+                    <td colSpan={4} className="p-3 text-right rtl:text-left font-black uppercase text-xs">
                       {t('إجمالي حركات الشيفت (Totals):', 'Shift Table Totals:')}
                     </td>
                     <td className="p-3 text-amber-600 font-black">
@@ -726,37 +804,6 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
                 </tfoot>
               )}
             </table>
-          </div>
-
-          {/* Quick Bottom Summary Bar */}
-          <div className="p-4 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-200 dark:border-slate-700 grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <div className="p-2.5 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">
-              <span className="text-[11px] font-semibold text-slate-400 block">{t('إجمالي إيراد الخدمات', 'Gross Revenue')}</span>
-              <span className="text-base font-black text-slate-900 dark:text-white mt-0.5 block">
-                {formatMoney(activeShift.totalRevenue)}
-              </span>
-            </div>
-
-            <div className="p-2.5 bg-emerald-50/60 dark:bg-emerald-950/30 rounded-xl border border-emerald-100 dark:border-emerald-800/40">
-              <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 block">{t('إجمالي المحصل الفعلي', 'Total Collected')}</span>
-              <span className="text-base font-black text-emerald-700 dark:text-emerald-300 mt-0.5 block">
-                {formatMoney(activeShift.totalCollected)}
-              </span>
-            </div>
-
-            <div className="p-2.5 bg-rose-50/60 dark:bg-rose-950/30 rounded-xl border border-rose-100 dark:border-rose-800/40">
-              <span className="text-[11px] font-semibold text-rose-600 dark:text-rose-400 block">{t('إجمالي المصروفات المنصرفة', 'Total Expenses')}</span>
-              <span className="text-base font-black text-rose-700 dark:text-rose-300 mt-0.5 block">
-                {formatMoney(activeShift.totalExpenses)}
-              </span>
-            </div>
-
-            <div className="p-2.5 bg-indigo-50/60 dark:bg-indigo-950/30 rounded-xl border border-indigo-100 dark:border-indigo-800/40">
-              <span className="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 block">{t('صافي نقدية الشيفت', 'Net Cash in Shift')}</span>
-              <span className="text-base font-black text-indigo-700 dark:text-indigo-300 mt-0.5 block">
-                {formatMoney(activeShift.netShiftCash)}
-              </span>
-            </div>
           </div>
         </div>
       ) : (
@@ -965,15 +1012,15 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
                     <th className="p-2.5 text-indigo-700 dark:text-indigo-400 font-black">{t('الرصيد الافتتاحي', 'Opening Bal')}</th>
                     <th className="p-2.5">{t('المقبوضات', 'Collected')}</th>
                     <th className="p-2.5">{t('المصروفات', 'Disbursed')}</th>
-                    <th className="p-2.5">{t('التسويات', 'Adjustments')}</th>
-                    <th className="p-2.5 font-black text-slate-900 dark:text-white">{t('الرصيد الختامي', 'Closing Bal')}</th>
+                    <th className="p-2.5 text-amber-600 font-bold">{t('التسويات (الفرق)', 'Adjustments')}</th>
+                    <th className="p-2.5 font-black text-slate-900 dark:text-white">{t('الرصيد الختامي (قابل للتعديل)', 'Closing Bal (Editable)')}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                   {activeShift.balancing.map((row) => {
                     const openingBal = row.openingBalance ?? 0;
                     return (
-                      <tr key={row.paymentMethodId}>
+                      <tr key={row.paymentMethodId} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40">
                         <td className="p-2.5 font-bold text-slate-900 dark:text-white">
                           {row.paymentMethodName}
                         </td>
@@ -982,9 +1029,35 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
                         </td>
                         <td className="p-2.5 font-semibold text-emerald-600">{formatMoney(row.totalCollected)}</td>
                         <td className="p-2.5 font-semibold text-rose-600">{formatMoney(row.totalDisbursed)}</td>
-                        <td className="p-2.5">{formatMoney(row.adjustments)}</td>
-                        <td className="p-2.5 font-black text-indigo-700 dark:text-indigo-300">
-                          {formatMoney(row.closingBalance)}
+                        <td className="p-2.5 font-bold font-mono">
+                          <span className={`px-2 py-0.5 rounded-md text-xs inline-block ${
+                            (row.adjustments || 0) > 0
+                              ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-400'
+                              : (row.adjustments || 0) < 0
+                              ? 'bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-400'
+                              : 'text-slate-400'
+                          }`}>
+                            {(row.adjustments || 0) > 0 ? `+${formatMoney(row.adjustments)}` : formatMoney(row.adjustments)}
+                          </span>
+                        </td>
+                        <td className="p-2.5">
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={row.closingBalance}
+                            onChange={(e) => {
+                              const val = Number(e.target.value);
+                              updateShiftBalancing(
+                                activeShift.id,
+                                row.paymentMethodId,
+                                undefined,
+                                undefined,
+                                undefined,
+                                val
+                              );
+                            }}
+                            className="w-24 px-2 py-1 text-xs rounded-lg border border-indigo-300 dark:border-indigo-700 bg-white dark:bg-slate-800 font-mono font-bold text-indigo-700 dark:text-indigo-300 text-center focus:ring-2 focus:ring-indigo-500"
+                          />
                         </td>
                       </tr>
                     );
@@ -1012,8 +1085,8 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
                   </div>
                   <p className="text-[11px] text-slate-500 dark:text-slate-400">
                     {t(
-                      'مراقبة فورية للنبضات المستهلكة، وحالة اللمبات، وتأثير حركات الشيفت على عدادات الأجهزة',
-                      'Real-time pulse consumption tracking, lamp health, and shift counters reconciliation'
+                      'مراقبة فورية للنبضات وتعديل الرصيد الختامي مع تسجيل الفروق في عمود التسويات',
+                      'Real-time pulse consumption tracking with editable closing balance and automatic adjustments'
                     )}
                   </p>
                 </div>
@@ -1037,12 +1110,11 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
                 <thead className="bg-slate-50 dark:bg-slate-800/70 text-slate-500 font-bold border-b border-slate-200 dark:border-slate-700">
                   <tr>
                     <th className="p-2.5">{t('الجهاز والموقع', 'Device & Location')}</th>
-                    <th className="p-2.5">{t('صحة اللمبة / الفلاش', 'Lamp Health')}</th>
                     <th className="p-2.5">{t('الافتتاحي', 'Opening')}</th>
                     <th className="p-2.5 text-indigo-600 font-bold">{t('المستهلك بالشيفت', 'Consumed')}</th>
-                    {/* Adjustments Column */}
-                    <th className="p-2.5 text-amber-600 font-bold">{t('التسويات (+ أو -)', 'Adjustments')}</th>
-                    <th className="p-2.5 font-black text-emerald-700 dark:text-emerald-400">{t('الختامي المحسوب', 'Closing')}</th>
+                    {/* Adjustments Column (Difference) */}
+                    <th className="p-2.5 text-amber-600 font-bold">{t('التسويات (الفرق)', 'Adjustments')}</th>
+                    <th className="p-2.5 font-black text-emerald-700 dark:text-emerald-400">{t('الرصيد الختامي (قابل للتعديل)', 'Closing Bal (Editable)')}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -1051,10 +1123,6 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
                     const masterDev = laserDevices.find(
                       (d) => d.id === dev.deviceId || d.name === dev.deviceName
                     );
-                    const lampMax = masterDev?.maxCapacityShots || 500000;
-                    const lampUsed = masterDev?.currentLampShots || 0;
-                    const lampPct = Math.min(100, Math.round((lampUsed / lampMax) * 100));
-                    const isNearWarning = masterDev?.warningLimitShots && lampUsed >= masterDev.warningLimitShots;
 
                     return (
                       <tr key={dev.deviceId} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40">
@@ -1084,28 +1152,6 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
                           </div>
                         </td>
 
-                        {/* Lamp Health Progress */}
-                        <td className="p-2.5 min-w-[140px]">
-                          <div className="space-y-1">
-                            <div className="flex items-center justify-between text-[10px]">
-                              <span className="font-mono text-slate-600 dark:text-slate-300">
-                                {lampUsed.toLocaleString()} / {lampMax.toLocaleString()}
-                              </span>
-                              <span className={`font-bold ${isNearWarning ? 'text-rose-500' : 'text-slate-500'}`}>
-                                {lampPct}%
-                              </span>
-                            </div>
-                            <div className="w-full h-1.5 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
-                              <div
-                                className={`h-full rounded-full ${
-                                  lampPct > 80 ? 'bg-rose-500' : lampPct > 50 ? 'bg-amber-500' : 'bg-emerald-500'
-                                }`}
-                                style={{ width: `${lampPct}%` }}
-                              />
-                            </div>
-                          </div>
-                        </td>
-
                         <td className="p-2.5 text-slate-600 dark:text-slate-300 font-mono font-medium">
                           {dev.openingCounter.toLocaleString()}
                         </td>
@@ -1114,24 +1160,36 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
                           +{dev.consumedCounter.toLocaleString()}
                         </td>
 
+                        {/* Adjustments (Difference auto-calculated when closing balance edited) */}
+                        <td className="p-2.5 font-bold font-mono">
+                          <span className={`px-2 py-0.5 rounded-md text-xs inline-block ${
+                            adj > 0
+                              ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-400'
+                              : adj < 0
+                              ? 'bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-400'
+                              : 'text-slate-400'
+                          }`}>
+                            {adj > 0 ? `+${adj.toLocaleString()}` : adj.toLocaleString()}
+                          </span>
+                        </td>
+
+                        {/* Closing Balance (Editable, Difference goes to Adjustments) */}
                         <td className="p-2.5">
                           <input
                             type="number"
-                            value={adj}
-                            onChange={(e) =>
+                            value={dev.closingCounter}
+                            onChange={(e) => {
+                              const val = Number(e.target.value);
                               updateDeviceCounter(
                                 activeShift.id,
                                 dev.deviceId,
                                 dev.consumedCounter,
-                                Number(e.target.value)
-                              )
-                            }
-                            className="w-20 px-2 py-1 text-xs rounded-lg border border-amber-300 bg-amber-50/50 dark:bg-slate-800 font-mono text-center font-bold"
+                                undefined,
+                                val
+                              );
+                            }}
+                            className="w-24 px-2 py-1 text-xs rounded-lg border border-emerald-300 dark:border-emerald-700 bg-white dark:bg-slate-800 font-mono text-center font-bold text-emerald-700 dark:text-emerald-300 focus:ring-2 focus:ring-emerald-500"
                           />
-                        </td>
-
-                        <td className="p-2.5 font-black text-emerald-700 dark:text-emerald-300 font-mono">
-                          {dev.closingCounter.toLocaleString()}
                         </td>
                       </tr>
                     );
@@ -1143,41 +1201,145 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
         </div>
       )}
 
-      {/* 6. Manual Notes Table / Section at the Bottom of Screen (جدول الملاحظات اليدوية في أسفل الشاشة) */}
+      {/* 6. Manual Notes Table & Operational Logs Section (جدول وسجلات الملاحظات اليدوية للشيفت) */}
       {activeShift && (
         <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-xs">
-          <div className="flex items-center justify-between mb-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
             <div className="flex items-center gap-2">
               <MessageSquare className="h-5 w-5 text-indigo-600" />
-              <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                {t('جدول وسجل الملاحظات اليدوية للشيفت (التسليم والملاحظات الخاصة)', 'Manual Shift Notes & Handover Log')}
-              </h3>
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                  {t('جدول وسجلات الملاحظات اليدوية والتشغيلية للشيفت', 'Manual Shift Notes & Operational Logs')}
+                </h3>
+                <p className="text-[11px] text-slate-400">
+                  {t(
+                    '* الملاحظات المسجلة هنا تُحفظ تلقائياً وتظهر في تقارير شيتات التشغيل عند استدعاء الشيفت مستقبلاً',
+                    '* All notes recorded here are archived and appear in shift run-sheet reports when recalled'
+                  )}
+                </p>
+              </div>
             </div>
             {notesSavedAlert && (
-              <span className="px-3 py-1 text-xs font-bold text-emerald-800 bg-emerald-100 rounded-lg animate-fade-in flex items-center gap-1">
+              <span className="px-3 py-1 text-xs font-bold text-emerald-800 bg-emerald-100 dark:bg-emerald-950/60 dark:text-emerald-400 rounded-lg animate-fade-in flex items-center gap-1 self-start">
                 <Check className="h-3.5 w-3.5" />
-                {t('تم حفظ الملاحظات بنجاح', 'Notes saved successfully')}
+                {t('تم تسجيل وحفظ الملاحظة بنجاح', 'Note saved to shift log')}
               </span>
             )}
           </div>
 
-          <div className="space-y-3">
-            <textarea
-              rows={3}
-              value={manualNotes}
-              onChange={(e) => setManualNotes(e.target.value)}
-              placeholder="اكتب هنا أي ملاحظات يدوية خاصة بحركات الشيفت، تسليم الوردية التالية، أمانات المرضى، أو تعليمات الدكاترة..."
-              className="w-full p-3 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-indigo-600"
-            />
-            <div className="flex justify-end">
-              <button
-                onClick={handleSaveManualNotes}
-                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-md shadow-indigo-600/20 cursor-pointer"
-              >
-                <Save className="h-4 w-4" />
-                <span>{t('حفظ الملاحظات اليدوية', 'Save Manual Notes')}</span>
-              </button>
+          {/* Table of Recorded Manual Notes */}
+          <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden mb-4">
+            <table className="w-full text-xs text-left rtl:text-right">
+              <thead className="bg-slate-50 dark:bg-slate-800/70 text-slate-500 font-bold border-b border-slate-200 dark:border-slate-700">
+                <tr>
+                  <th className="p-2.5 w-12">#</th>
+                  <th className="p-2.5 w-28">{t('التوقيت', 'Time')}</th>
+                  <th className="p-2.5 w-36">{t('المسؤول / الكاتب', 'Author')}</th>
+                  <th className="p-2.5">{t('نص الملاحظة اليدوية المسجلة', 'Note Content')}</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                {activeShift.manualNotesHistory && activeShift.manualNotesHistory.length > 0 ? (
+                  activeShift.manualNotesHistory.map((noteItem, idx) => (
+                    <tr key={noteItem.id || idx} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30">
+                      <td className="p-2.5 text-slate-400 font-mono">{idx + 1}</td>
+                      <td className="p-2.5 text-slate-500 font-mono text-[11px]">
+                        {new Date(noteItem.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </td>
+                      <td className="p-2.5 font-bold text-slate-800 dark:text-slate-200">
+                        {noteItem.author}
+                      </td>
+                      <td className="p-2.5 text-slate-700 dark:text-slate-300 font-medium">
+                        {noteItem.note}
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={4} className="p-4 text-center text-slate-400">
+                      {t('لا توجد ملاحظات مسجلة في سجل الشيفت حتى الآن. يمكنك إضافة ملاحظة جديدة أدناه.', 'No shift log notes recorded yet.')}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Add Note Entry Input and General Shift Notes */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
+            <div className="md:col-span-2 space-y-2">
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                {t('إضافة ملاحظة جديدة لسجل شيت التشغيل:', 'Add New Note to Shift Log:')}
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={manualNotes}
+                  onChange={(e) => setManualNotes(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleSaveManualNotes();
+                    }
+                  }}
+                  placeholder={t('اكتب هنا ملاحظة يدوية (تسليم وردية، ملاحظات دكاترة، أمانات مرضى...) ثم اضغط تسجيل...', 'Write manual note...')}
+                  className="flex-1 px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-indigo-600 font-medium"
+                />
+                <button
+                  type="button"
+                  onClick={handleSaveManualNotes}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-md shadow-indigo-600/20 cursor-pointer shrink-0"
+                >
+                  <Save className="h-4 w-4" />
+                  <span>{t('تسجيل في السجل', 'Record Note')}</span>
+                </button>
+              </div>
             </div>
+
+            <div className="space-y-1">
+              <span className="block text-xs font-bold text-slate-500">
+                {t('المسؤول المسجل:', 'Author in Log:')}
+              </span>
+              <div className="p-2 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-800 dark:text-slate-200">
+                {activeShift.receptionistName || t('موظف الاستقبال', 'Receptionist')}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* If No Active Shift for Current Branch */}
+      {!activeShift && (
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border-2 border-dashed border-indigo-200 dark:border-indigo-900/50 p-8 sm:p-12 text-center shadow-xs">
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 mb-4 shadow-xs">
+            <Building2 className="h-8 w-8" />
+          </div>
+          <h2 className="text-lg font-black text-slate-900 dark:text-white">
+            {t('لا يوجد شيفت تشغيل مفتوح لفرع:', 'No Open Reception Shift for Branch:')}{' '}
+            <span className="text-indigo-600 dark:text-indigo-400">
+              {language === 'ar' ? activeBranch?.name : activeBranch?.nameEn}
+            </span>
+          </h2>
+          <p className="text-xs text-slate-500 dark:text-slate-400 max-w-lg mx-auto mt-2 leading-relaxed">
+            {t(
+              'كل فرع له شيفته المستقل والمنفصل تماماً. يمكنك فتح شيفت جديد لهذا الفرع لمباشرة تسجيل حركات المرضى، تحصيل الإيرادات، ومراقبة أجهزة الليزر دون التأثير على شفتات الفروع الأخرى.',
+              'Each branch operates with its own independent shift. Open a new shift for this branch to start logging patient runs and revenues independently.'
+            )}
+          </p>
+          <div className="mt-6 flex flex-wrap justify-center gap-3">
+            <button
+              onClick={() => {
+                setOpenShiftReceptionist(currentUser?.name || '');
+                setShowOpenShiftModal(true);
+              }}
+              className="inline-flex items-center gap-2 px-6 py-3 text-xs font-black text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-lg shadow-indigo-600/30 transition-all cursor-pointer"
+            >
+              <Play className="h-4 w-4 fill-current" />
+              <span>
+                {t('فتح شيفت تشغيل لـ', 'Open Shift for')}{' '}
+                {language === 'ar' ? activeBranch?.name : activeBranch?.nameEn}
+              </span>
+            </button>
           </div>
         </div>
       )}
@@ -1186,9 +1348,20 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
       {showOpenShiftModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
           <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl p-5">
-            <h3 className="text-base font-bold text-slate-900 dark:text-white mb-4">
+            <h3 className="text-base font-bold text-slate-900 dark:text-white mb-2">
               {t('فتح شيفت تشغيل ريسيبشن جديد', 'Open Reception Shift')}
             </h3>
+
+            {/* Target Branch Badge */}
+            <div className="flex items-center gap-2 mb-4 bg-indigo-50 dark:bg-indigo-950/50 p-2.5 rounded-xl border border-indigo-200 dark:border-indigo-800">
+              <Building2 className="h-4 w-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
+              <div className="text-xs">
+                <span className="text-slate-500 font-bold">{t('الفرع المستهدف:', 'Target Branch:')} </span>
+                <span className="font-black text-indigo-700 dark:text-indigo-300">
+                  {language === 'ar' ? activeBranch?.name : activeBranch?.nameEn}
+                </span>
+              </div>
+            </div>
 
             <form onSubmit={handleOpenShiftSubmit} className="space-y-4">
               <div>
@@ -1201,6 +1374,21 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
                   value={openShiftReceptionist}
                   onChange={(e) => setOpenShiftReceptionist(e.target.value)}
                   className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-indigo-600"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  {t('عهدة ورصيد بداية الشيفت في الدرج (ج.م)', 'Opening Cash Float in Drawer (EGP)')}
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={openShiftOpeningFloat}
+                  onChange={(e) => setOpenShiftOpeningFloat(Number(e.target.value) || 0)}
+                  placeholder="0.00"
+                  className="w-full px-3 py-2 text-xs font-mono font-bold rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-indigo-600"
                 />
               </div>
 
@@ -1251,36 +1439,152 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
               )}
             </p>
 
-            <form onSubmit={handleCloseShiftSubmit} className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  {t('ملاحظات تقفيل الشيفت والتسليم', 'Closing & Handover Notes')}
-                </label>
-                <textarea
-                  rows={3}
-                  value={closeShiftNotes}
-                  onChange={(e) => setCloseShiftNotes(e.target.value)}
-                  placeholder="ملاحظات التسليم والمتبقيات..."
-                  className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-indigo-600"
-                />
-              </div>
+            {/* Z-Report Financial Breakdown */}
+            {(() => {
+              const cashBal = activeShift.balancing?.find(
+                (b) =>
+                  b.paymentMethodName.includes('نقد') ||
+                  b.paymentMethodName.toLowerCase().includes('cash') ||
+                  b.paymentMethodId.toLowerCase().includes('cash') ||
+                  b.paymentMethodId === 'pm-01' ||
+                  b.paymentMethodId === 'pm-cash-1'
+              ) || activeShift.balancing?.[0];
 
-              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setShowCloseShiftModal(false)}
-                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
-                >
-                  {t('إلغاء', 'Cancel')}
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl cursor-pointer"
-                >
-                  {t('تأكيد إغلاق الشيفت', 'Confirm Close')}
-                </button>
-              </div>
-            </form>
+              const openFloat = activeShift.openingFloat ?? activeShift.initialBalance ?? (cashBal?.openingBalance || 0);
+
+              const cashColl = activeShift.cashCollected !== undefined
+                ? activeShift.cashCollected
+                : cashBal?.totalCollected !== undefined
+                ? cashBal.totalCollected
+                : activeShift.runRows
+                    .filter((r) => (r.paymentMethod || '').includes('نقد') || (r.paymentMethod || '').toLowerCase().includes('cash'))
+                    .reduce((sum, r) => sum + (r.collectedAmount || 0), 0);
+
+              const cashExp = activeShift.cashExpenses !== undefined
+                ? activeShift.cashExpenses
+                : cashBal?.totalDisbursed !== undefined
+                ? cashBal.totalDisbursed
+                : activeShift.expenses
+                    .filter((e) => (e.disbursementMethod || '').includes('نقد') || (e.disbursementMethod || '').toLowerCase().includes('cash'))
+                    .reduce((sum, e) => sum + (e.amount || 0), 0);
+
+              const adjustments = cashBal?.adjustments || 0;
+
+              const expectedCashInDrawer = activeShift.expectedCashInDrawer !== undefined
+                ? activeShift.expectedCashInDrawer
+                : cashBal?.closingBalance !== undefined
+                ? cashBal.closingBalance
+                : openFloat + cashColl - cashExp + adjustments;
+
+              const cashDiff = actualCashCount - expectedCashInDrawer;
+
+              return (
+                <form onSubmit={handleCloseShiftSubmit} className="space-y-4">
+                  <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/60 p-3 text-xs space-y-2">
+                    <div className="flex justify-between text-slate-600 dark:text-slate-400">
+                      <span>{t('عهدة ورصيد بداية الشيفت:', 'Opening Float / Initial:')}</span>
+                      <span className="font-bold text-slate-800 dark:text-slate-200 font-mono">
+                        {formatMoney(openFloat)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-emerald-600 dark:text-emerald-400">
+                      <span>{t('+ المقبوضات النقدية المسجلة:', '+ Cash Collected:')}</span>
+                      <span className="font-bold font-mono">
+                        +{formatMoney(cashColl)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-rose-600 dark:text-rose-400">
+                      <span>{t('- المصروفات النقدية من الدرج:', '- Cash Expenses:')}</span>
+                      <span className="font-bold font-mono">
+                        -{formatMoney(cashExp)}
+                      </span>
+                    </div>
+                    <div className="border-t border-slate-200 dark:border-slate-700 pt-1.5 flex justify-between font-bold text-slate-900 dark:text-white">
+                      <span>{t('النقدية الدفترية المتوقعة بالدرج:', 'Expected Cash in Drawer:')}</span>
+                      <span className="text-sm font-black text-indigo-600 dark:text-indigo-400 font-mono">
+                        {formatMoney(expectedCashInDrawer)}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      <span className="text-rose-600 font-black ml-1">*</span>
+                      {t('النقدية الفعلية المحصاة في الدرج (ج.م) *', 'Actual Physical Cash Counted (EGP) *')}
+                    </label>
+                    <input
+                      type="number"
+                      required
+                      min="0"
+                      step="any"
+                      value={actualCashCount}
+                      onChange={(e) => setActualCashCount(Number(e.target.value) || 0)}
+                      className="w-full px-3 py-2 text-sm font-black rounded-xl bg-white dark:bg-slate-800 border-2 border-indigo-500 text-slate-900 dark:text-white outline-none"
+                    />
+                    <div className="mt-1.5 flex items-center justify-between text-xs">
+                      <span className="text-slate-500">{t('فارق الجرد:', 'Reconciliation Diff:')}</span>
+                      {cashDiff === 0 ? (
+                        <span className="font-bold text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-md">
+                          {t('مطابقة تماماً بدون عجز أو زيادة', 'Perfect Match')}
+                        </span>
+                      ) : cashDiff < 0 ? (
+                        <span className="font-bold text-rose-600 bg-rose-50 dark:bg-rose-950/40 px-2 py-0.5 rounded-md">
+                          {t('عجز بالدرج:', 'Shortage:')} {formatMoney(Math.abs(cashDiff))}
+                        </span>
+                      ) : (
+                        <span className="font-bold text-amber-600 bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 rounded-md">
+                          {t('فائض بالدرج:', 'Surplus:')} +{formatMoney(cashDiff)}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <label className="flex items-center gap-2 p-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={transferredToMainTreasury}
+                      onChange={(e) => setTransferredToMainTreasury(e.target.checked)}
+                      className="rounded text-indigo-600 h-4 w-4"
+                    />
+                    <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                      {t(
+                        'توريد النقدية الفعلية للخزينة الرئيسية آلياً (توليد سند قبض رسمي)',
+                        'Auto-transfer cash to main treasury (generates cash voucher)'
+                      )}
+                    </span>
+                  </label>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      {t('ملاحظات تقفيل الشيفت والتسليم', 'Closing & Handover Notes')}
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={closeShiftNotes}
+                      onChange={(e) => setCloseShiftNotes(e.target.value)}
+                      placeholder="ملاحظات التسليم والمتبقيات..."
+                      className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-indigo-600"
+                    />
+                  </div>
+
+                  <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+                    <button
+                      type="button"
+                      onClick={() => setShowCloseShiftModal(false)}
+                      className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
+                    >
+                      {t('إلغاء', 'Cancel')}
+                    </button>
+                    <button
+                      type="submit"
+                      className="px-5 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl cursor-pointer"
+                    >
+                      {t('تأكيد إغلاق الشيفت وترحيل Z-Report', 'Confirm Close & Post Z-Report')}
+                    </button>
+                  </div>
+                </form>
+              );
+            })()}
           </div>
         </div>
       )}

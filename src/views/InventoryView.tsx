@@ -357,8 +357,8 @@ export const InventoryView: React.FC = () => {
               </h1>
               <p className="text-xs text-slate-500 dark:text-slate-400">
                 {t(
-                  'إدارة وتسجيل الخدمات الطبية، السلع والمستلزمات، وتتبع أرصدة الفروع والمستودعات.',
-                  'Manage medical services, goods, and track stock levels per warehouse.'
+                  'إدارة وتسجيل الخدمات الطبية، السلع والمستلزمات، وتتبع أرصدة الفروع والمخازن.',
+                  'Manage medical services, goods, and track stock levels per store/warehouse.'
                 )}
               </p>
             </div>
@@ -370,7 +370,7 @@ export const InventoryView: React.FC = () => {
                   className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 transition-colors"
                 >
                   <ArrowRightLeft className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
-                  <span>{t('تحويل بين المستودعات', 'Inter-Warehouse Transfer')}</span>
+                  <span>{t('تحويل بين المخازن', 'Inter-Store Transfer')}</span>
                 </button>
               )}
 
@@ -455,7 +455,7 @@ export const InventoryView: React.FC = () => {
               {activeWarehouse && (
                 <div className="hidden lg:flex items-center gap-1 border-s border-slate-200 ps-3 dark:border-slate-700">
                   <WarehouseIcon className="h-3.5 w-3.5 text-slate-400" />
-                  <span className="text-[11px] text-slate-500">{t('المستودع:', 'Warehouse:')}</span>
+                  <span className="text-[11px] text-slate-500">{t('المخزن:', 'Store / Warehouse:')}</span>
                   <select
                     value={activeWarehouse.id}
                     onChange={(e) => {
@@ -976,7 +976,7 @@ export const InventoryView: React.FC = () => {
                 <div className="grid grid-cols-2 gap-3 p-3 bg-amber-50/60 dark:bg-amber-950/20 rounded-xl border border-amber-200/60 dark:border-amber-900/40">
                   <div>
                     <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                      {t('الرصيد الافتتاحي بالمستودع:', 'Initial Stock:')}
+                      {t('الرصيد الافتتاحي بالمخزن:', 'Initial Stock:')}
                     </label>
                     <input
                       type="number"
@@ -1407,7 +1407,7 @@ export const InventoryView: React.FC = () => {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-xs">
           <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl dark:bg-slate-900 border border-slate-100 dark:border-slate-800">
             <h3 className="text-sm font-extrabold text-slate-900 dark:text-white mb-2">
-              {t('تحويل بضاعة بين المستودعات', 'Inter-Warehouse Stock Transfer')}
+              {t('تحويل بضاعة بين المخازن', 'Inter-Store Stock Transfer')}
             </h3>
 
             <div className="space-y-3 text-xs">
@@ -1432,7 +1432,7 @@ export const InventoryView: React.FC = () => {
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    {t('من مستودع:', 'From Warehouse:')}
+                    {t('من مخزن:', 'From Store:')}
                   </label>
                   <select
                     value={transferData.fromWh}
@@ -1448,7 +1448,7 @@ export const InventoryView: React.FC = () => {
                 </div>
                 <div>
                   <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    {t('إلى مستودع:', 'To Warehouse:')}
+                    {t('إلى مخزن:', 'To Store:')}
                   </label>
                   <select
                     value={transferData.toWh}

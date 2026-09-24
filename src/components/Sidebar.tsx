@@ -29,6 +29,11 @@ import {
   Zap,
   Warehouse,
   Boxes,
+  BookOpen,
+  PackagePlus,
+  PackageMinus,
+  ArrowDownLeft,
+  ArrowUpRight,
   LucideIcon,
 } from 'lucide-react';
 
@@ -44,8 +49,6 @@ interface MenuItemDef {
   icon: LucideIcon;
   alwaysShow?: boolean;
   moduleId?: string;
-  badge?: string;
-  badgeColor?: string;
   highlight?: boolean;
 }
 
@@ -56,7 +59,7 @@ interface MenuSectionDef {
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate }) => {
-  const { language, t, isModuleActive, resetToDefaults, canAccessView, currentUser, logout, activeReceptionShift } = usePlatform();
+  const { language, t, isModuleActive, resetToDefaults, canAccessView, currentUser, logout } = usePlatform();
   const isRtl = language === 'ar';
 
   const menuSections: MenuSectionDef[] = [
@@ -67,18 +70,16 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate }) => 
         {
           id: 'dashboard',
           labelAr: 'لوحة التحكم والتحليلات',
-          labelEn: 'Dashboard & KPIs',
+          labelEn: 'Dashboard & Analytics',
           icon: LayoutDashboard,
           alwaysShow: true,
         },
         {
           id: 'reception_ops',
-          labelAr: 'شاشة التشغيل (الريسيبشن)',
-          labelEn: 'Reception Run-Sheet',
+          labelAr: 'شاشة التشغيل',
+          labelEn: 'Operations Run-Sheet',
           icon: Activity,
           alwaysShow: true,
-          badge: activeReceptionShift ? 'مفتوح' : undefined,
-          badgeColor: 'bg-emerald-500 text-white animate-pulse',
         },
         {
           id: 'laser_devices',
@@ -86,8 +87,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate }) => 
           labelEn: 'Laser Devices Directory',
           icon: Zap,
           alwaysShow: true,
-          badge: 'جديد',
-          badgeColor: 'bg-amber-500 text-white',
         },
         {
           id: 'bookings',
@@ -98,11 +97,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate }) => 
         },
         {
           id: 'pos',
-          labelAr: 'نقطة البيع السريعة (POS)',
-          labelEn: 'Fast POS Terminal',
+          labelAr: 'نقطة البيع السريعة',
+          labelEn: 'Point of Sale',
           icon: ShoppingCart,
           moduleId: 'pos_sales',
-          badge: 'F2',
         },
         {
           id: 'invoices',
@@ -114,38 +112,49 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate }) => 
       ],
     },
     {
-      titleAr: 'الكوادر والعملاء والخدمات',
-      titleEn: 'Directory & Management',
+      titleAr: 'السندات والوثائق المالية',
+      titleEn: 'Fiscal Vouchers & Tax Invoices',
       items: [
         {
-          id: 'parties',
-          labelAr: 'المرضى والعملاء 360',
-          labelEn: 'Patients & Customers',
-          icon: Users,
-          moduleId: 'parties',
-        },
-        {
-          id: 'suppliers',
-          labelAr: 'سجل وإدارة الموردين',
-          labelEn: 'Suppliers Directory',
-          icon: Truck,
-          moduleId: 'parties',
-        },
-        {
-          id: 'staff',
-          labelAr: 'إدارة الموظفين',
-          labelEn: 'Employee Management',
-          icon: UserCheck,
+          id: 'cash_receipts',
+          labelAr: 'سندات القبض النقدية',
+          labelEn: 'Cash Receipt Vouchers',
+          icon: ArrowDownLeft,
           alwaysShow: true,
         },
         {
-          id: 'payroll',
-          labelAr: 'مسير الرواتب والأجور',
-          labelEn: 'Staff Payroll & Salaries',
-          icon: Wallet,
+          id: 'cash_payments',
+          labelAr: 'سندات الصرف النقدية',
+          labelEn: 'Cash Payment Vouchers',
+          icon: ArrowUpRight,
           alwaysShow: true,
-          badge: 'جديد',
-          badgeColor: 'bg-emerald-500 text-white',
+        },
+        {
+          id: 'tax_invoices',
+          labelAr: 'فواتير المبيعات',
+          labelEn: 'Sales Invoices',
+          icon: FileText,
+          alwaysShow: true,
+        },
+      ],
+    },
+    {
+      titleAr: 'المخازن وأذونات المخازن',
+      titleEn: 'Stock & Warehouse Vouchers',
+      items: [
+        {
+          id: 'goods_receipts',
+          labelAr: 'أذونات استلام مخزني',
+          labelEn: 'Goods Receipt Notes',
+          icon: PackagePlus,
+          moduleId: 'inventory',
+        },
+        {
+          id: 'goods_issues',
+          labelAr: 'أذونات صرف مخزني',
+          labelEn: 'Goods Issue Notes',
+          icon: PackageMinus,
+          moduleId: 'inventory',
         },
         {
           id: 'products',
@@ -160,27 +169,65 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate }) => 
           labelEn: 'Warehouse & Stocktaking',
           icon: Warehouse,
           moduleId: 'inventory',
-          badge: 'جرد وتسوية',
-          badgeColor: 'bg-indigo-600 text-white',
+        },
+      ],
+    },
+    {
+      titleAr: 'الكوادر والعملاء والرواتب',
+      titleEn: 'Directory & Management',
+      items: [
+        {
+          id: 'parties',
+          labelAr: 'إدارة العملاء',
+          labelEn: 'Customer Management',
+          icon: Users,
+          moduleId: 'parties',
         },
         {
+          id: 'suppliers',
+          labelAr: 'إدارة الموردين',
+          labelEn: 'Supplier Management',
+          icon: Truck,
+          moduleId: 'parties',
+        },
+        {
+          id: 'staff',
+          labelAr: 'إدارة الموظفين',
+          labelEn: 'Employee Management',
+          icon: UserCheck,
+          alwaysShow: true,
+        },
+        {
+          id: 'payroll',
+          labelAr: 'إدارة الأجور',
+          labelEn: 'Payroll Management',
+          icon: Wallet,
+          alwaysShow: true,
+        },
+      ],
+    },
+    {
+      titleAr: 'الحسابات والتقارير المالية',
+      titleEn: 'Accounts & Financial Reports',
+      items: [
+        {
           id: 'payment_methods',
-          labelAr: 'طرق السداد وإيصالات الدفع',
-          labelEn: 'Payment Methods & Receipt',
+          labelAr: 'إدارة طرق التحصيل والسداد',
+          labelEn: 'Payment & Collection Methods',
           icon: CreditCard,
           alwaysShow: true,
         },
         {
           id: 'accounting',
-          labelAr: 'الشجرة المحاسبية والقيود',
-          labelEn: 'Chart of Accounts & GL',
+          labelAr: 'إدارة الحسابات',
+          labelEn: 'Accounts Management',
           icon: Calculator,
           moduleId: 'accounting',
         },
         {
           id: 'shift_reports',
-          labelAr: 'تقارير شيتات التشغيل',
-          labelEn: 'Historical Shift Reports',
+          labelAr: 'تقارير التشغيل',
+          labelEn: 'Operations Reports',
           icon: FileText,
           alwaysShow: true,
         },
@@ -213,7 +260,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate }) => 
         },
         {
           id: 'users',
-          labelAr: 'المستخدمين والصلاحيات (RBAC)',
+          labelAr: 'المستخدمين والصلاحيات',
           labelEn: 'Users & Permissions',
           icon: ShieldCheck,
           alwaysShow: true,
@@ -228,10 +275,17 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate }) => 
         },
         {
           id: 'neon',
-          labelAr: 'قاعدة بيانات Neon PostgreSQL',
-          labelEn: 'Neon Database Hub',
+          labelAr: 'قاعدة بيانات نيون السحابية',
+          labelEn: 'Neon Cloud Database',
           icon: Database,
           alwaysShow: true,
+        },
+        {
+          id: 'system_manual',
+          labelAr: 'دليل المستخدم والتوثيق التقني',
+          labelEn: 'User Manual & Tech Specs',
+          icon: BookOpen,
+          highlight: true,
         },
       ],
     },
@@ -247,10 +301,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate }) => 
           </div>
           <div className="overflow-hidden">
             <p className="truncate text-xs font-bold text-slate-800 dark:text-slate-200">
-              {t('نظام إدارة المنشآت الطبية والشركات', 'Medical & Enterprise ERP')}
+              Universal Business Platform
             </p>
             <p className="text-[10px] text-slate-400">
-              {t('Multi-Tenant • Multi-Branch', 'Multi-Tenant • Multi-Branch')}
+              {t('منصة إدارة الأعمال الشاملة', 'Universal Business Platform')}
             </p>
           </div>
         </div>
@@ -298,16 +352,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate }) => 
                       />
                       <span className="truncate">{language === 'ar' ? item.labelAr : item.labelEn}</span>
                     </div>
-
-                    {item.badge && (
-                      <span
-                        className={`rounded-md px-1.5 py-0.5 text-[9px] font-bold ${
-                          item.badgeColor || (isActive ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400')
-                        }`}
-                      >
-                        {item.badge}
-                      </span>
-                    )}
                   </button>
                 );
               })}

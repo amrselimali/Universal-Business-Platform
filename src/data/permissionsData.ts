@@ -150,7 +150,7 @@ export const SYSTEM_VIEWS: SystemViewDef[] = [
     id: 'companies',
     nameAr: 'إدارة الشركات والفروع والمخازن',
     nameEn: 'Companies, Branches & Warehouses',
-    descriptionAr: 'هيكلة المؤسسة، إضافة الفروع والمستودعات والتحكم بموديولات كل شركة',
+    descriptionAr: 'هيكلة المؤسسة، إضافة الفروع والمخازن والتحكم بموديولات كل شركة',
     descriptionEn: 'Multi-tenant hierarchy, branch/warehouse routing and module toggles',
     iconName: 'Building2',
     category: 'admin',
@@ -180,6 +180,15 @@ export const SYSTEM_VIEWS: SystemViewDef[] = [
     descriptionAr: 'لوحة التحكم والاتصال بالسيرفر السحابي ومزامنة الجداول',
     descriptionEn: 'Cloud database connectivity, sync logs, and schema engine',
     iconName: 'Database',
+    category: 'admin',
+  },
+  {
+    id: 'system_manual',
+    nameAr: 'دليل المستخدم والتوثيق التقني',
+    nameEn: 'User Manual & Tech Specs',
+    descriptionAr: 'الدليل الإرشادي والتوثيق المعماري ومخطط النظام ومسارات العمل',
+    descriptionEn: 'Comprehensive user guide, architecture specs, and system blueprints',
+    iconName: 'BookOpen',
     category: 'admin',
   },
 ];
@@ -481,10 +490,10 @@ export const SYSTEM_ACTIONS: ActionPermissionDef[] = [
   },
   {
     key: 'warehouses.manage',
-    nameAr: 'إضافة وإدارة المستودعات',
+    nameAr: 'إضافة وإدارة المخازن',
     nameEn: 'Create & Manage Warehouses',
     viewId: 'companies',
-    descriptionAr: 'إضافة مستودع تخزين جديد وربطه بالفرع المناسب',
+    descriptionAr: 'إضافة مخزن تخزين جديد وربطه بالفرع المناسب',
   },
 
   // Users & RBAC

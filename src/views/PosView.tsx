@@ -23,6 +23,8 @@ import {
   Wallet,
   History,
   Coins,
+  Send,
+  Share2,
 } from 'lucide-react';
 
 export const PosView: React.FC = () => {
@@ -33,15 +35,16 @@ export const PosView: React.FC = () => {
     activeBranch,
     activeWarehouse,
     products,
+    categories: systemCategories,
     parties,
     paymentMethods,
     getProductStock,
     processCheckout,
     refundInvoice,
     invoices,
-    activeShift,
-    closeShift,
-    openShift,
+    activeReceptionShift,
+    openReceptionShift,
+    currentUser,
     language,
     setCurrentView,
     canPerformAction,
@@ -52,7 +55,14 @@ export const PosView: React.FC = () => {
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>(parties[0]?.id || '');
   const [discountAmount, setDiscountAmount] = useState<number>(0);
   const [taxPercent, setTaxPercent] = useState<number>(0);
-  const [isCollectionOnly, setIsCollectionOnly] = useState<boolean>(false);
+  const [isCollectionOnly, setIsCollectionOnly] = useState<boolean>(Boolean(tenant?.defaultPosCollectionOnly));
+
+  // Sync tenant default if changed
+  React.useEffect(() => {
+    if (cart.length === 0) {
+      setIsCollectionOnly(Boolean(tenant?.defaultPosCollectionOnly));
+    }
+  }, [tenant?.defaultPosCollectionOnly]);
 
   // Cart state
   interface CartItem {
@@ -75,18 +85,86 @@ export const PosView: React.FC = () => {
   // Modals
   const [completedInvoice, setCompletedInvoice] = useState<SalesInvoice | null>(null);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
-  const [showShiftModal, setShowShiftModal] = useState<boolean>(false);
-  const [actualCashInput, setActualCashInput] = useState<number>(activeShift?.expectedCash || 0);
+  const [showOpenShiftModal, setShowOpenShiftModal] = useState<boolean>(false);
+  const [receptionistInput, setReceptionistInput] = useState<string>(currentUser?.name || 'موظف الاستقبال');
+  const [openingFloatInput, setOpeningFloatInput] = useState<number>(500);
+  const [openingNotesInput, setOpeningNotesInput] = useState<string>('');
   const [showInvoicesHistory, setShowInvoicesHistory] = useState<boolean>(false);
   const [refundModalInvoice, setRefundModalInvoice] = useState<SalesInvoice | null>(null);
   const [refundReason, setRefundReason] = useState<string>('');
   const [restockOnRefund, setRestockOnRefund] = useState<boolean>(true);
 
-  // Categories list
-  const categories = ['ALL', ...Array.from(new Set(products.map((p) => p.category)))];
+  // 1. Strict Sellable Products Filter (المنتج البيعي فقط المسجل في إدارة المنتجات والخدمات)
+  const isSellableSalesProduct = (p: Product) => {
+    // Exclude internal stock/raw/consumables
+    if (p.isStockItem && !p.isSalesItem) return false;
+    if (p.itemType === 'stock_raw' || p.itemType === 'consumable' || p.itemType === 'medical_supply') {
+      return false;
+    }
+    // Exclude consumables & medical supplies category explicitly
+    const catName = p.category || '';
+    if (
+      catName.includes('مستهلكات وخامات طبية') ||
+      catName.includes('مستهلكات وخدمات طبية') ||
+      catName.includes('مستلزمات طبية ووقائية') ||
+      catName.toLowerCase().includes('consumable') ||
+      catName.toLowerCase().includes('raw')
+    ) {
+      return false;
+    }
+    if (p.isActive === false) return false;
+    if (p.isSalesItem) return true;
+    if (p.itemType === 'sales_product' || p.itemType === 'sales_service' || p.itemType === 'sales_package') return true;
 
-  // Filter products
-  const filteredProducts = products.filter((p) => {
+    return (p.sellingPrice > 0 || p.isService || p.isPackage) && !p.isStockItem;
+  };
+
+  // Scoped to active branch
+  const branchSellableProducts = React.useMemo(() => {
+    return products.filter((p) => {
+      if (!isSellableSalesProduct(p)) return false;
+      if (activeBranch && p.branchIds && p.branchIds.length > 0) {
+        if (!p.branchIds.includes('*') && !p.branchIds.includes(activeBranch.id)) {
+          return false;
+        }
+      } else if (activeBranch && p.branchId) {
+        if (p.branchId !== '*' && p.branchId !== activeBranch.id) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [products, activeBranch]);
+
+  // 2. POS Categories: Registered in Products & Services, excluding consumables
+  const categories = React.useMemo(() => {
+    const validSysCats = (systemCategories || [])
+      .filter((c) => {
+        const name = c.nameAr || '';
+        return (
+          !name.includes('مستهلكات وخامات') &&
+          !name.includes('مستهلكات وخدمات') &&
+          !name.includes('مستلزمات طبية ووقائية') &&
+          !name.toLowerCase().includes('consumable')
+        );
+      })
+      .map((c) => c.nameAr);
+
+    const productCats = Array.from(new Set(branchSellableProducts.map((p) => p.category || '')))
+      .filter((cat: string) => (
+        Boolean(cat) &&
+        !cat.includes('مستهلكات وخامات') &&
+        !cat.includes('مستهلكات وخدمات') &&
+        !cat.includes('مستلزمات طبية ووقائية') &&
+        !cat.toLowerCase().includes('consumable')
+      ));
+
+    const combined = Array.from(new Set([...validSysCats, ...productCats]));
+    return ['ALL', ...combined];
+  }, [systemCategories, branchSellableProducts]);
+
+  // Filter products by category and search
+  const filteredProducts = branchSellableProducts.filter((p) => {
     const matchesCat = selectedCategory === 'ALL' || p.category === selectedCategory;
     const q = searchQuery.toLowerCase().trim();
     const matchesSearch =
@@ -98,23 +176,38 @@ export const PosView: React.FC = () => {
     return matchesCat && matchesSearch;
   });
 
+  // Invoices scoped strictly to current active branch
+  const branchInvoices = React.useMemo(() => {
+    return (invoices || []).filter((inv) => {
+      if (!activeBranch || !activeBranch.id || activeBranch.id === 'none') return true;
+      return inv.branchId === activeBranch.id;
+    });
+  }, [invoices, activeBranch]);
+
   const addToCart = (product: Product) => {
-    if (!activeWarehouse) {
-      alert(t('يرجى أولاً تعيين أو إضافة مستودع للشركة الحالية!', 'Please assign or create a warehouse first!'));
-      return;
+    // If product specifies defaultCollectionOnly, adopt it
+    if (product.defaultCollectionOnly !== undefined) {
+      setIsCollectionOnly(product.defaultCollectionOnly);
     }
-    const available = getProductStock(product.id, activeWarehouse.id);
-    if (!product.isService && available <= 0) {
-      alert(t('عفواً، الصنف نفد من المستودع الحالي!', 'Sorry, item is out of stock in current warehouse!'));
-      return;
+
+    // If product is a physical item and warehouse is present, check stock
+    if (!product.isService && activeWarehouse) {
+      const available = getProductStock(product.id, activeWarehouse.id);
+      if (available <= 0) {
+        alert(t('عفواً، الصنف نفد من المخزن الحالي!', 'Sorry, item is out of stock in current store!'));
+        return;
+      }
     }
 
     setCart((prev) => {
       const existing = prev.find((item) => item.product.id === product.id);
       if (existing) {
-        if (!product.isService && existing.quantity >= available) {
-          alert(t('لا يمكن تجاوز الرصيد المتاح بالمخزن!', 'Cannot exceed available stock!'));
-          return prev;
+        if (!product.isService && activeWarehouse) {
+          const available = getProductStock(product.id, activeWarehouse.id);
+          if (existing.quantity >= available) {
+            alert(t('لا يمكن تجاوز الرصيد المتاح بالمخزن!', 'Cannot exceed available stock!'));
+            return prev;
+          }
         }
         return prev.map((item) =>
           item.product.id === product.id ? { ...item, quantity: item.quantity + 1 } : item
@@ -130,10 +223,12 @@ export const PosView: React.FC = () => {
         .map((item) => {
           if (item.product.id === productId) {
             const nextQty = item.quantity + delta;
-            const available = activeWarehouse ? getProductStock(item.product.id, activeWarehouse.id) : 0;
-            if (!item.product.isService && delta > 0 && nextQty > available) {
-              alert(t('لا يمكن تجاوز الرصيد المتاح بالمخزن!', 'Cannot exceed available stock!'));
-              return item;
+            if (!item.product.isService && activeWarehouse && delta > 0) {
+              const available = getProductStock(item.product.id, activeWarehouse.id);
+              if (nextQty > available) {
+                alert(t('لا يمكن تجاوز الرصيد المتاح بالمخزن!', 'Cannot exceed available stock!'));
+                return item;
+              }
             }
             return { ...item, quantity: nextQty };
           }
@@ -150,7 +245,7 @@ export const PosView: React.FC = () => {
   const clearCart = () => {
     setCart([]);
     setDiscountAmount(0);
-    setIsCollectionOnly(false);
+    setIsCollectionOnly(Boolean(tenant?.defaultPosCollectionOnly));
     setUseSplitPayment(false);
   };
 
@@ -161,18 +256,32 @@ export const PosView: React.FC = () => {
   const cartNetTotal = Number((taxableAmount + cartTax).toFixed(2));
 
   const activePaymentMethod = paymentMethods.find((pm) => pm.id === selectedMethodId) || paymentMethods[0];
+  const paymentFeeRate = (activePaymentMethod && activePaymentMethod.feePercentage) ? activePaymentMethod.feePercentage : 0;
+  const paymentFeeAmount = paymentFeeRate > 0 ? Number(((cartNetTotal * paymentFeeRate) / 100).toFixed(2)) : 0;
+  const grandTotalWithFee = Number((cartNetTotal + paymentFeeAmount).toFixed(2));
 
   const handleExecuteCheckout = () => {
     setCheckoutError(null);
 
+    if (!activeReceptionShift || activeReceptionShift.status !== 'Open') {
+      const branchName = activeBranch ? (language === 'ar' ? activeBranch.name : activeBranch.nameEn) : 'هذا الفرع';
+      setCheckoutError(
+        language === 'ar'
+          ? `لا يوجد شيفت تشغيل مفتوح لـ (${branchName}). يرجى فتح شيفت التشغيل أولاً لإتمام البيع والتحصيل!`
+          : `No active reception operating shift open for (${branchName}). Please open an operating shift first!`
+      );
+      setShowOpenShiftModal(true);
+      return;
+    }
+
     let splitPayload: PaymentSplit[] | undefined = undefined;
     if (useSplitPayment) {
       const totalSplit = splits.reduce((s, item) => s + (Number(item.amount) || 0), 0);
-      if (Math.abs(totalSplit - cartNetTotal) > 0.01) {
+      if (Math.abs(totalSplit - grandTotalWithFee) > 0.05 && Math.abs(totalSplit - cartNetTotal) > 0.05) {
         setCheckoutError(
-          `${t('مجموع مبالغ التقسيم لا يساوي إجمالي الفاتورة!', 'Split sum does not equal net total!')} (${formatMoney(
+          `${t('مجموع مبالغ التقسيم لا يساوي إجمالي الفاتورة المطلوب!', 'Split sum does not equal net total!')} (${formatMoney(
             totalSplit
-          )} ≠ ${formatMoney(cartNetTotal)})`
+          )} ≠ ${formatMoney(grandTotalWithFee)})`
         );
         return;
       }
@@ -189,6 +298,8 @@ export const PosView: React.FC = () => {
       discountAmount,
       paymentMethod: activePaymentMethod ? activePaymentMethod.nameAr : 'نقداً',
       paymentMethodId: activePaymentMethod?.id,
+      paymentFeePercentage: paymentFeeRate,
+      paymentFeeAmount: paymentFeeAmount,
       taxRate: taxPercent / 100,
       isCollectionOnly,
       splitPayments: splitPayload,
@@ -200,6 +311,40 @@ export const PosView: React.FC = () => {
     } else {
       setCheckoutError(result.error || t('حدث خطأ أثناء إتمام العملية', 'Error completing checkout'));
     }
+  };
+
+  const handleSendWhatsApp = () => {
+    if (!completedInvoice) return;
+    const branchName = activeBranch ? (language === 'ar' ? activeBranch.name : activeBranch.nameEn) : tenant.name;
+    const itemsText = completedInvoice.items
+      .map((it) => `• ${it.productNameAr} (x${it.quantity}) - ${formatMoney(it.lineTotal)}`)
+      .join('\n');
+
+    const feeText = completedInvoice.paymentFeeAmount && completedInvoice.paymentFeeAmount > 0
+      ? `\nرسوم وسيلة السداد (${completedInvoice.paymentMethod} ${completedInvoice.paymentFeePercentage}%): +${formatMoney(completedInvoice.paymentFeeAmount)}`
+      : '';
+
+    const message = `🧾 *إيصال سداد - ${tenant.name}*
+الفرع: ${branchName}
+رقم الفاتورة: ${completedInvoice.invoiceNumber}
+التاريخ: ${new Date(completedInvoice.createdAt).toLocaleString('ar-EG')}
+العميل: ${completedInvoice.customerName}
+-------------------------
+البيان والأصناف:
+${itemsText}
+-------------------------
+المجموع: ${formatMoney(completedInvoice.subtotal - completedInvoice.discountAmount)}
+الضريبة (VAT): ${formatMoney(completedInvoice.taxAmount)}${feeText}
+*الصافي المسدد: ${formatMoney(completedInvoice.totalWithFee || completedInvoice.netAmount)}*
+طريقة السداد: ${completedInvoice.paymentMethod}
+-------------------------
+شكراً لتعاملكم معنا! ✨`;
+
+    const customerObj = parties.find((p) => p.id === completedInvoice.customerId);
+    const phone = customerObj?.phone?.replace(/\D/g, '') || '';
+    const encoded = encodeURIComponent(message);
+    const url = phone ? `https://wa.me/${phone}?text=${encoded}` : `https://wa.me/?text=${encoded}`;
+    window.open(url, '_blank');
   };
 
   const handleRefund = (invoice: SalesInvoice) => {
@@ -217,48 +362,47 @@ export const PosView: React.FC = () => {
     }
   };
 
-  // Guard if company has no branch or warehouse yet
-  if (!activeBranch || !activeWarehouse) {
-    return (
-      <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-amber-300 bg-amber-50/50 p-12 text-center dark:border-amber-800/60 dark:bg-amber-950/20">
-        <div className="rounded-2xl bg-amber-100 p-4 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300 mb-3">
-          <AlertCircle className="h-10 w-10" />
-        </div>
-        <h3 className="text-base font-bold text-slate-900 dark:text-white mb-2">
-          {t('هذه الشركة لا تحتوي على فرع أو مستودع بعد', 'This company has no branch or warehouse configured')}
-        </h3>
-        <p className="text-xs text-slate-600 dark:text-slate-400 max-w-md mb-5 leading-relaxed">
-          {t(
-            'لإصدار فواتير المبيعات ونقاط البيع، يرجى الانتقال إلى شاشة الشركات والفروع وإضافة فرع ومستودع لهذه الشركة أولاً.',
-            'To issue sales invoices and operate POS, please go to Companies & Branches to add a branch and warehouse for this company.'
-          )}
-        </p>
-        <button
-          onClick={() => setCurrentView('companies')}
-          className="rounded-xl bg-indigo-600 px-5 py-2.5 text-xs font-bold text-white shadow-md hover:bg-indigo-700 cursor-pointer"
-        >
-          {t('الانتقال لإدارة الشركات والفروع والمستودعات', 'Go to Companies, Branches & Warehouses')}
-        </button>
-      </div>
-    );
-  }
-
+  // Render POS Interface directly (without requiring branch or warehouse)
   return (
     <div className="flex h-[calc(100vh-6.5rem)] flex-col lg:flex-row gap-4">
       {/* LEFT: Products Catalog & Search (60%) */}
       <div className="flex flex-1 flex-col rounded-2xl border border-slate-200 bg-white p-4 shadow-xs dark:border-slate-800 dark:bg-slate-900 overflow-hidden">
         {/* Top Shift Status Strip */}
-        <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-3 dark:border-slate-800">
-          <div className="flex items-center gap-2">
-            <span className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
-            <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
-              {t('شيفت الكاشير:', 'Current Shift:')} {activeShift.cashierName}
-            </span>
-            <span className="text-xs text-slate-400">|</span>
-            <span className="text-xs text-slate-500">
-              {t('نقدية متوقعة:', 'Expected Cash:')} {formatMoney(activeShift.expectedCash)}
-            </span>
-          </div>
+        <div className="flex flex-wrap items-center justify-between border-b border-slate-100 pb-3 mb-3 dark:border-slate-800 gap-2">
+          {activeReceptionShift && activeReceptionShift.status === 'Open' ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                {t('شيفت التشغيل المفتوح:', 'Active Operation Shift:')} {activeReceptionShift.shiftNumber}
+              </span>
+              <span className="text-xs text-slate-400">|</span>
+              <span className="text-xs text-slate-600 dark:text-slate-300">
+                {t('المسؤول:', 'Responsible:')} {activeReceptionShift.receptionistName}
+              </span>
+              {activeBranch ? (
+                <>
+                  <span className="text-xs text-slate-400">|</span>
+                  <span className="text-xs font-bold text-indigo-600 dark:text-indigo-400">
+                    {language === 'ar' ? activeBranch.name : activeBranch.nameEn}
+                  </span>
+                </>
+              ) : null}
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <span className="h-2.5 w-2.5 rounded-full bg-amber-500"></span>
+              <span className="text-xs font-bold text-amber-700 dark:text-amber-400">
+                {t('لا يوجد شيفت تشغيل مفتوح لفرع:', 'No open operation shift for:')}{' '}
+                <span className="underline">{activeBranch ? (language === 'ar' ? activeBranch.name : activeBranch.nameEn) : ''}</span>
+              </span>
+              <button
+                onClick={() => setShowOpenShiftModal(true)}
+                className="rounded-lg bg-indigo-600 px-2.5 py-1 text-xs font-bold text-white hover:bg-indigo-700 transition-colors shadow-xs cursor-pointer"
+              >
+                {t('فتح شيفت تشغيل للفرع', 'Open Shift')}
+              </button>
+            </div>
+          )}
 
           <div className="flex items-center gap-2">
             <button
@@ -268,20 +412,29 @@ export const PosView: React.FC = () => {
               <History className="h-3.5 w-3.5 text-indigo-500" />
               <span>{t('سجل الفواتير والارتجاع', 'Invoices & Refunds')}</span>
             </button>
-
-            {canPerformAction('pos.close_shift') && (
-              <button
-                onClick={() => {
-                  setActualCashInput(activeShift.expectedCash);
-                  setShowShiftModal(true);
-                }}
-                className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 transition-colors cursor-pointer"
-              >
-                {t('تقفيل الشيفت', 'Close Shift')}
-              </button>
-            )}
           </div>
         </div>
+
+        {/* Warning Banner if No Shift is Open */}
+        {(!activeReceptionShift || activeReceptionShift.status !== 'Open') && (
+          <div className="mb-3 flex items-center justify-between rounded-xl bg-amber-50 border border-amber-200 p-2.5 text-xs text-amber-800 dark:bg-amber-950/30 dark:border-amber-800 dark:text-amber-300">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+              <span className="font-semibold">
+                {t(
+                  'يجب فتح شيفت تشغيل للفرع الحالي للتمكن من تسجيل وإصدار فواتير البيع والتحصيلات وترحيلها لتقرير الوردية.',
+                  'An active reception operating shift is required for the current branch to process sales and collections.'
+                )}
+              </span>
+            </div>
+            <button
+              onClick={() => setShowOpenShiftModal(true)}
+              className="rounded-lg bg-amber-600 px-3 py-1 text-xs font-bold text-white hover:bg-amber-700 transition-colors shrink-0 cursor-pointer shadow-xs"
+            >
+              {t('فتح الشيفت الآن', 'Open Shift Now')}
+            </button>
+          </div>
+        )}
 
         {/* Search Bar & Barcode Input */}
         <div className="flex items-center gap-2 mb-3">
@@ -323,7 +476,8 @@ export const PosView: React.FC = () => {
           <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3">
             {filteredProducts.map((prod) => {
               const stock = activeWarehouse ? getProductStock(prod.id, activeWarehouse.id) : 0;
-              const isOutOfStock = !prod.isService && stock <= 0;
+              const isNonPhysical = prod.isService || prod.isPackage || prod.itemType === 'sales_package' || prod.itemType === 'sales_service' || prod.itemType === 'service';
+              const isOutOfStock = !isNonPhysical && stock <= 0;
 
               return (
                 <button
@@ -339,7 +493,11 @@ export const PosView: React.FC = () => {
                   <div>
                     <div className="flex items-center justify-between mb-1.5">
                       <span className="text-[10px] font-mono text-slate-400">{prod.sku}</span>
-                      {prod.isService ? (
+                      {prod.isPackage || prod.itemType === 'sales_package' ? (
+                        <span className="rounded bg-purple-100 px-1.5 py-0.5 text-[9px] font-bold text-purple-800 dark:bg-purple-900/40 dark:text-purple-300">
+                          {prod.totalSessions ? `${prod.totalSessions} جلسات` : t('باقة وعرض', 'Package')}
+                        </span>
+                      ) : prod.isService ? (
                         <span className="rounded bg-cyan-100 px-1.5 py-0.5 text-[9px] font-bold text-cyan-800 dark:bg-cyan-900/40 dark:text-cyan-300">
                           {t('خدمة/كشف', 'Service')}
                         </span>
@@ -421,14 +579,9 @@ export const PosView: React.FC = () => {
         <div className="mt-2 flex items-center justify-between rounded-xl bg-amber-50/80 border border-amber-200/80 p-2.5 dark:bg-amber-950/20 dark:border-amber-800/50">
           <div className="flex items-center gap-2">
             <Coins className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
-            <div>
-              <p className="text-xs font-bold text-amber-950 dark:text-amber-200">
-                {t('تحصيل فقط (ليس إيراد)', 'Collection Only (No Revenue)')}
-              </p>
-              <p className="text-[10px] text-amber-700 dark:text-amber-400">
-                {t('تسجل بالمحصل في الشيفت بدون كميات/إيراد', 'Recorded as collection in shift only')}
-              </p>
-            </div>
+            <p className="text-xs font-bold text-amber-950 dark:text-amber-200">
+              {t('تحصيل فقط (ليس إيراد)', 'Collection Only (No Revenue)')}
+            </p>
           </div>
           <input
             type="checkbox"
@@ -460,6 +613,11 @@ export const PosView: React.FC = () => {
                   <p className="text-xs font-bold text-slate-800 dark:text-slate-200 line-clamp-1">
                     {language === 'ar' ? item.product.nameAr : item.product.nameEn}
                   </p>
+                  {(item.product.isPackage || item.product.itemType === 'sales_package') && (
+                    <span className="inline-block mt-0.5 rounded bg-purple-100 dark:bg-purple-950/60 px-1.5 py-0.2 text-[9px] font-bold text-purple-700 dark:text-purple-300">
+                      ⚡ باقة {item.product.totalSessions ? `${item.product.totalSessions * item.quantity} جلسات للعميل` : 'جلسات'}
+                    </span>
+                  )}
                   <p className="text-[11px] text-slate-500 dark:text-slate-400">
                     {formatMoney(item.unitPrice)}
                   </p>
@@ -538,12 +696,21 @@ export const PosView: React.FC = () => {
             </div>
           </div>
 
+          {paymentFeeAmount > 0 && (
+            <div className="flex items-center justify-between text-amber-700 dark:text-amber-400 font-semibold">
+              <span>
+                {t('رسوم وسيلة السداد', 'Payment Method Fee')} ({activePaymentMethod?.nameAr} {paymentFeeRate}%):
+              </span>
+              <span>+{formatMoney(paymentFeeAmount)}</span>
+            </div>
+          )}
+
           <div className="flex items-center justify-between border-t border-slate-200 pt-2 dark:border-slate-700">
             <span className="text-sm font-extrabold text-slate-900 dark:text-white">
               {t('الإجمالي النهائي المطلوب:', 'Net Total:')}
             </span>
             <span className="text-base font-black text-indigo-600 dark:text-indigo-400">
-              {formatMoney(cartNetTotal)}
+              {formatMoney(grandTotalWithFee)}
             </span>
           </div>
         </div>
@@ -563,7 +730,7 @@ export const PosView: React.FC = () => {
                     {
                       methodId: paymentMethods[0]?.id || '',
                       methodName: paymentMethods[0]?.nameAr || 'نقداً',
-                      amount: cartNetTotal,
+                      amount: grandTotalWithFee,
                     },
                   ]);
                 }
@@ -671,9 +838,7 @@ export const PosView: React.FC = () => {
           >
             <CheckCircle2 className="h-5 w-5" />
             <span>
-              {isCollectionOnly
-                ? t('حفظ كإيصال تحصيل فقط', 'Post as Collection Only')
-                : t('حفظ وإصدار الفاتورة فوراً (F9)', 'Complete Sale & Post')} • {formatMoney(cartNetTotal)}
+              {t('حفظ', 'Save')} • {formatMoney(grandTotalWithFee)}
             </span>
           </button>
         </div>
@@ -706,12 +871,12 @@ export const PosView: React.FC = () => {
             </div>
 
             <div className="flex-1 overflow-y-auto py-3 space-y-2">
-              {invoices.length === 0 ? (
+              {branchInvoices.length === 0 ? (
                 <div className="text-center py-8 text-slate-400 text-xs">
-                  {t('لا توجد فواتير سابقة', 'No invoices found')}
+                  {t('لا توجد فواتير سابقة لهذا الفرع', 'No invoices found for this branch')}
                 </div>
               ) : (
-                invoices.map((inv) => (
+                branchInvoices.map((inv) => (
                   <div
                     key={inv.id}
                     className={`flex items-center justify-between rounded-xl border p-3 ${
@@ -887,9 +1052,17 @@ export const PosView: React.FC = () => {
                   </span>
                   <span>{formatMoney(completedInvoice.taxAmount)}</span>
                 </div>
+                {completedInvoice.paymentFeeAmount && completedInvoice.paymentFeeAmount > 0 ? (
+                  <div className="flex justify-between text-amber-700 dark:text-amber-400 font-bold">
+                    <span>
+                      {t('رسوم وسيلة السداد:', 'Payment Fee:')} ({completedInvoice.paymentMethod} {completedInvoice.paymentFeePercentage}%)
+                    </span>
+                    <span>+{formatMoney(completedInvoice.paymentFeeAmount)}</span>
+                  </div>
+                ) : null}
                 <div className="flex justify-between font-extrabold text-sm border-t border-slate-300 pt-1 dark:border-slate-700 text-slate-900 dark:text-white">
                   <span>{t('الصافي المحصل:', 'Net Collected:')}</span>
-                  <span>{formatMoney(completedInvoice.netAmount)}</span>
+                  <span>{formatMoney(completedInvoice.totalWithFee || completedInvoice.netAmount)}</span>
                 </div>
                 <div className="flex justify-between text-[10px] text-slate-500 pt-1">
                   <span>{t('طريقة السداد:', 'Payment Method:')}</span>
@@ -906,90 +1079,103 @@ export const PosView: React.FC = () => {
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 onClick={() => {
                   window.print();
                 }}
-                className="flex-1 flex items-center justify-center gap-2 rounded-xl bg-slate-900 py-2.5 text-xs font-bold text-white hover:bg-slate-800 transition-colors"
+                className="flex-1 min-w-[100px] flex items-center justify-center gap-1.5 rounded-xl bg-slate-900 py-2.5 text-xs font-bold text-white hover:bg-slate-800 transition-colors cursor-pointer"
               >
                 <Printer className="h-4 w-4" />
-                <span>{t('طباعة الإيصال (Print)', 'Print Receipt')}</span>
+                <span>{t('طباعة الإيصال', 'Print')}</span>
+              </button>
+
+              <button
+                onClick={handleSendWhatsApp}
+                className="flex-1 min-w-[110px] flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600 py-2.5 text-xs font-bold text-white hover:bg-emerald-700 transition-colors shadow-xs cursor-pointer"
+              >
+                <Send className="h-4 w-4" />
+                <span>{t('إرسال واتساب', 'WhatsApp')}</span>
               </button>
 
               <button
                 onClick={() => setCompletedInvoice(null)}
-                className="flex-1 rounded-xl border border-slate-200 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 transition-colors"
+                className="flex-1 min-w-[100px] rounded-xl border border-slate-200 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 transition-colors cursor-pointer"
               >
-                {t('فاتورة جديدة (New Sale)', 'Next Sale')}
+                {t('فاتورة جديدة', 'Next Sale')}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* BLIND CASH RECONCILIATION MODAL */}
-      {showShiftModal && (
+      {/* Open Reception Operating Shift Modal */}
+      {showOpenShiftModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-xs">
           <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl dark:bg-slate-900 border border-slate-100 dark:border-slate-800">
             <h3 className="text-sm font-extrabold text-slate-900 dark:text-white mb-2">
-              {t('تقفيل شيفت الكاشير (الجرد الأعمى Blind Count)', 'Shift Close & Cash Reconciliation')}
+              {t('فتح شيفت تشغيل للفرع', 'Open Reception Shift for Branch')}
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
-              {t(
-                'وفقاً لمعمارية النظام، يقوم الكاشير بعد النقدية الفعلية داخل الدرج دون معرفة الرقم المتوقع مسبقاً لمنع التلاعب.',
-                'Blind count architecture ensures the cashier counts physical cash without seeing expected numbers.'
-              )}
+              {t('الفرع المستهدف:', 'Target Branch:')}{' '}
+              <span className="font-bold text-indigo-600 dark:text-indigo-400">
+                {activeBranch ? (language === 'ar' ? activeBranch.name : activeBranch.nameEn) : 'الفرع الافتراضي'}
+              </span>
             </p>
 
-            <div className="space-y-3">
+            <div className="space-y-3.5">
               <div>
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  {t('المبلغ الفعلي الموجود بالدرج (ج.م):', 'Actual Counted Cash (EGP):')}
+                  {t('اسم موظف الاستقبال / المسؤول:', 'Receptionist / Operator Name:')}
+                </label>
+                <input
+                  type="text"
+                  value={receptionistInput}
+                  onChange={(e) => setReceptionistInput(e.target.value)}
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-xs font-bold text-slate-900 outline-none focus:border-indigo-500 focus:bg-white dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  {t('الرصيد الافتتاحي للدرج (العهدة النقدية):', 'Opening Float / Cash in Drawer:')}
                 </label>
                 <input
                   type="number"
-                  value={actualCashInput}
-                  onChange={(e) => setActualCashInput(Number(e.target.value))}
+                  min="0"
+                  step="50"
+                  value={openingFloatInput}
+                  onChange={(e) => setOpeningFloatInput(Math.max(0, Number(e.target.value)))}
                   className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-sm font-black text-slate-900 outline-none focus:border-indigo-500 focus:bg-white dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                 />
               </div>
 
-              <div className="rounded-xl bg-slate-50 p-3 text-xs space-y-1.5 dark:bg-slate-800">
-                <div className="flex justify-between text-slate-500">
-                  <span>{t('المبلغ المتوقع بالخزينة:', 'System Expected Cash:')}</span>
-                  <span className="font-bold text-slate-900 dark:text-white">{formatMoney(activeShift.expectedCash)}</span>
-                </div>
-                <div className="flex justify-between text-slate-500">
-                  <span>{t('الفارق (عجز / زيادة):', 'Difference (Deficit/Surplus):')}</span>
-                  <span
-                    className={`font-bold ${
-                      actualCashInput - activeShift.expectedCash < 0
-                        ? 'text-rose-600'
-                        : actualCashInput - activeShift.expectedCash > 0
-                        ? 'text-emerald-600'
-                        : 'text-slate-600'
-                    }`}
-                  >
-                    {formatMoney(actualCashInput - activeShift.expectedCash)}
-                  </span>
-                </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  {t('ملاحظات الشيفت (اختياري):', 'Shift Notes (Optional):')}
+                </label>
+                <input
+                  type="text"
+                  placeholder={t('ملاحظات بدء الوردية...', 'Shift start notes...')}
+                  value={openingNotesInput}
+                  onChange={(e) => setOpeningNotesInput(e.target.value)}
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-xs text-slate-900 outline-none focus:border-indigo-500 focus:bg-white dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                />
               </div>
 
-              <div className="flex items-center gap-2 pt-3">
+              <div className="flex items-center gap-2 pt-2">
                 <button
                   onClick={() => {
-                    closeShift(actualCashInput);
-                    setShowShiftModal(false);
-                    alert(t('تم تقفيل الشيفت وتسجيل الفروقات بنجاح!', 'Shift closed and reconciled successfully!'));
+                    openReceptionShift(receptionistInput, openingNotesInput, activeBranch?.id, openingFloatInput);
+                    setShowOpenShiftModal(false);
                   }}
-                  className="flex-1 rounded-xl bg-indigo-600 py-2.5 text-xs font-bold text-white hover:bg-indigo-700 transition-colors"
+                  className="flex-1 rounded-xl bg-emerald-600 py-2.5 text-xs font-bold text-white hover:bg-emerald-700 transition-colors cursor-pointer"
                 >
-                  {t('اعتماد وتقفيل الشيفت', 'Reconcile & Close Shift')}
+                  {t('اعتماد وفتح الشيفت', 'Authorize & Open Shift')}
                 </button>
                 <button
-                  onClick={() => setShowShiftModal(false)}
-                  className="rounded-xl border border-slate-200 px-4 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 transition-colors"
+                  onClick={() => setShowOpenShiftModal(false)}
+                  className="rounded-xl border border-slate-200 px-4 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 transition-colors cursor-pointer"
                 >
                   {t('إلغاء', 'Cancel')}
                 </button>
