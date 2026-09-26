@@ -118,8 +118,13 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
   const [editingRowId, setEditingRowId] = useState<string | null>(null);
   const [editRowData, setEditRowData] = useState<Partial<ShiftRunRow>>({});
 
-  // Expense Form
-  const [expenseCategory, setExpenseCategory] = useState('مشتريات ضيافة وعيادة');
+  // Expense Form State
+  const [expenseCategory, setExpenseCategory] = useState('');
+  const [expenseTransactionType, setExpenseTransactionType] = useState<'receipt_and_payment' | 'receipt_only' | 'balance_payment'>('receipt_and_payment');
+  const [expenseItemId, setExpenseItemId] = useState('');
+  const [expenseItemName, setExpenseItemName] = useState('');
+  const [expenseQty, setExpenseQty] = useState<number>(1);
+  const [expenseUnitPrice, setExpenseUnitPrice] = useState<number>(0);
   const [expenseAmount, setExpenseAmount] = useState<number>(0);
   const [expenseReason, setExpenseReason] = useState('');
   const [expenseMethod, setExpenseMethod] = useState('الخزينة الرئيسية (نقداً)');
@@ -128,6 +133,13 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
   const [supplierName, setSupplierName] = useState('');
   const [supplierSearchTerm, setSupplierSearchTerm] = useState('');
   const [isSupplierDropdownOpen, setIsSupplierDropdownOpen] = useState(false);
+
+  // Filter warehouse/stock items only (البنود المخزنية المضافة للمخزن فقط)
+  const stockItems = React.useMemo(() => {
+    return products.filter(
+      (p) => p.isStockItem || p.itemType === 'stock_raw' || p.itemType === 'consumable' || p.itemType === 'medical_supply'
+    );
+  }, [products]);
 
   // List of coded suppliers (Supplier or Both)
   const suppliersList = React.useMemo(() => {
@@ -189,8 +201,26 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
       'الخزينة الرئيسية (نقداً)';
     setExpenseMethod(defPM);
 
-    setExpenseCategory('مشتريات ضيافة وعيادة');
-    setExpenseAmount(0);
+    setExpenseTransactionType('receipt_and_payment');
+    const firstStockItem = stockItems[0];
+    if (firstStockItem) {
+      setExpenseItemId(firstStockItem.id);
+      const name = language === 'ar' ? firstStockItem.nameAr : firstStockItem.nameEn;
+      setExpenseItemName(name);
+      setExpenseCategory(name);
+      const cost = firstStockItem.purchasePrice || 0;
+      setExpenseUnitPrice(cost);
+      setExpenseQty(1);
+      setExpenseAmount(cost * 1);
+    } else {
+      setExpenseItemId('');
+      setExpenseItemName('');
+      setExpenseCategory('مستلزمات وبنود مخزنية');
+      setExpenseUnitPrice(0);
+      setExpenseQty(1);
+      setExpenseAmount(0);
+    }
+
     setExpenseReason('');
     setExpenseDate(todayIso);
     setShowAddExpenseModal(true);
@@ -207,12 +237,27 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
     }
   }, [activeShift?.id, activeShift?.notes]);
 
+  const cashAccount = (accounts || []).find((a) => a && a.code === '1111') || (accounts || []).find((a) => a && ((a.nameAr || '').includes('الخزينة') || (a.nameAr || '').includes('النقدية')));
+  const cashAccountBalance = cashAccount ? (Number(cashAccount.balance) || 0) : 0;
   const [openShiftOpeningFloat, setOpenShiftOpeningFloat] = useState<number>(0);
 
-  const handleOpenShiftSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    openReceptionShift(openShiftReceptionist, openShiftNotes, activeBranch?.id, openShiftOpeningFloat);
-    setShowOpenShiftModal(false);
+  const handleOpenShiftSubmit = (e?: React.FormEvent) => {
+    if (e && e.preventDefault) {
+      e.preventDefault();
+    }
+    try {
+      openReceptionShift(
+        openShiftReceptionist.trim() || currentUser?.name || 'موظف الاستقبال',
+        openShiftNotes.trim(),
+        activeBranch?.id,
+        cashAccountBalance || 0
+      );
+      setShowOpenShiftModal(false);
+      setOpenShiftNotes('');
+    } catch (err) {
+      console.error('Failed to open shift:', err);
+      setShowOpenShiftModal(false);
+    }
   };
 
   const handleCloseShiftSubmit = (e: React.FormEvent) => {
@@ -267,17 +312,19 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
     e.preventDefault();
     if (!activeShift) return;
 
+    const selectedParty = parties.find((p) => p.id === patientId);
+    const finalPatientName = selectedParty?.name || patientName || 'عميل نقدي';
     const doc = staffMembers.find((s) => s.id === doctorId);
-    const tech = staffMembers.find((s) => s.id === technicianId);
 
     addShiftRunRow(activeShift.id, {
-      patientId: patientId || undefined,
-      patientName: patientName || 'عميل / مريض نقدي',
+      customerId: selectedParty?.id || patientId || undefined,
+      patientId: selectedParty?.id || patientId || undefined,
+      systemCode: selectedParty?.systemCode,
+      customerName: finalPatientName,
+      patientName: finalPatientName,
+      patientPhone: selectedParty?.phone,
       doctorId: doctorId || undefined,
-      doctorName: doc ? doc.nameAr : 'د. استشاري',
-      technicianId: technicianId || undefined,
-      technicianName: tech ? tech.nameAr : undefined,
-      roomNumber,
+      doctorName: doc ? doc.nameAr : undefined,
       serviceName: serviceName || 'جلسة علاجية / خدمة',
       pulsesCount: pulsesCount > 0 ? pulsesCount : undefined,
       consumedQuantity: consumedQty,
@@ -286,7 +333,7 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
       paymentMethod: paymentMethodName,
       collectedAmount,
       laserDevice: laserDevice || undefined,
-      notes,
+      notes: notes.trim() || undefined,
     });
 
     // Reset Form
@@ -302,7 +349,6 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
     setEditingRowId(row.id);
     setEditRowData({
       patientName: row.patientName || row.customerName || '',
-      roomNumber: row.roomNumber,
       serviceName: row.serviceName,
       pulsesCount: row.pulsesCount,
       consumedQuantity: row.consumedQuantity,
@@ -310,6 +356,7 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
       laserDevice: row.laserDevice,
       paymentMethod: row.paymentMethod,
       collectedAmount: row.collectedAmount,
+      notes: row.notes || '',
     });
   };
 
@@ -327,6 +374,7 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
       customerName: pName,
       totalRevenue: rev,
       collectedAmount: editRowData.collectedAmount !== undefined ? editRowData.collectedAmount : rev,
+      notes: editRowData.notes,
     });
     setEditingRowId(null);
     setEditRowData({});
@@ -334,18 +382,30 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
 
   const handleAddExpenseSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!activeShift || expenseAmount <= 0) return;
+    if (!activeShift) return;
+    if (expenseAmount <= 0) {
+      alert(t('يرجى تحديد كمية وسعر أو إدخال مبلغ صحيح أكبر من الصفر', 'Please specify quantity and price or valid amount'));
+      return;
+    }
     if (!supplierName.trim()) {
       alert(t('برجاء اختيار اسم المورد أولاً (إجباري)', 'Please select a supplier name (mandatory)'));
       return;
     }
 
-    const isDirectSupplierPayment = expenseCategory === 'سداد دفعات ومستلزمات موردين';
-    const finalDesc =
-      expenseReason.trim() ||
-      (isDirectSupplierPayment
-        ? `سداد دفعة للمورد: ${supplierName}`
-        : `مصروف: ${expenseCategory} (${supplierName})`);
+    const isBalancePay = expenseTransactionType === 'balance_payment';
+    const isCreditReceipt = expenseTransactionType === 'receipt_only';
+
+    const finalCategory = isBalancePay
+      ? 'سداد دفعات ومستلزمات موردين'
+      : (expenseItemName || expenseCategory || 'مستلزمات وبنود مخزنية');
+
+    const defaultReason = isBalancePay
+      ? `سداد دفعة للمورد: ${supplierName}`
+      : isCreditReceipt
+      ? `استلام أصناف آجل: ${finalCategory} (${supplierName})`
+      : `استلام وسداد أصناف: ${finalCategory} (${supplierName})`;
+
+    const finalDesc = expenseReason.trim() || defaultReason;
 
     const activePMs = paymentMethods.filter((pm) => !pm.isArchived);
     const resolvedMethod =
@@ -355,11 +415,16 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
       'الخزينة الرئيسية (نقداً)';
 
     addShiftExpense(activeShift.id, {
-      category: expenseCategory,
+      category: finalCategory,
+      itemId: isBalancePay ? undefined : (expenseItemId || undefined),
+      itemName: isBalancePay ? undefined : (expenseItemName || undefined),
+      quantity: isBalancePay ? undefined : expenseQty,
+      unitPrice: isBalancePay ? undefined : expenseUnitPrice,
+      expenseType: expenseTransactionType,
       amount: expenseAmount,
       reason: finalDesc,
       description: finalDesc,
-      disbursementMethod: resolvedMethod,
+      disbursementMethod: isCreditReceipt ? 'آجل (حساب المورد)' : resolvedMethod,
       disbursedBy: currentUser?.name || 'الريسيبشن',
       date: expenseDate,
       timestamp: expenseDate
@@ -438,7 +503,8 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
             {!activeShift ? (
               <button
                 onClick={() => {
-                  setOpenShiftReceptionist(currentUser?.name || '');
+                  setOpenShiftReceptionist(currentUser?.name || 'موظف الاستقبال');
+                  setOpenShiftNotes('');
                   setShowOpenShiftModal(true);
                 }}
                 className="inline-flex items-center gap-2 px-5 py-2.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-md shadow-emerald-600/20 transition-all cursor-pointer"
@@ -453,7 +519,7 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
                   className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-md shadow-indigo-600/20 transition-all cursor-pointer"
                 >
                   <Plus className="h-4 w-4" />
-                  <span>{t('إضافة حركة تشغيل / مريض', 'Add Patient Run Entry')}</span>
+                  <span>{t('إضافة حركة تشغيل', 'Add Operation Entry')}</span>
                 </button>
 
                 <button
@@ -557,9 +623,6 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
                 {activeShift.runRows.length} {t('حركة منفذة', 'Entries')}
               </span>
             </div>
-            <div className="text-[11px] text-slate-400 font-medium">
-              {t('* يمكنك تعديل الخدمة والنبضات والكمية والسعر والجهاز مباشرة أثناء فتح الشيفت', '* Editable columns enabled while shift is open')}
-            </div>
           </div>
 
           <div className="overflow-x-auto">
@@ -578,20 +641,21 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
                   <th className="p-3">{t('طريقة السداد', 'Payment Method')}</th>
                   <th className="p-3">{t('المحصل', 'Collected')}</th>
                   <th className="p-3">{t('جهاز الليزر', 'Laser Device')}</th>
+                  <th className="p-3">{t('الملاحظات', 'Notes')}</th>
                   <th className="p-3 text-center">{t('إجراءات', 'Actions')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {activeShift.runRows.length === 0 ? (
                   <tr>
-                    <td colSpan={12} className="py-12 text-center text-slate-400">
+                    <td colSpan={13} className="py-12 text-center text-slate-400">
                       <Activity className="h-8 w-8 text-slate-300 dark:text-slate-700 mx-auto mb-2" />
                       <p>{t('لم يتم تسجيل أي حركة تشغيل في هذا الشيفت حتى الآن.', 'No run-sheet entries yet.')}</p>
                       <button
                         onClick={() => setShowAddRowModal(true)}
                         className="mt-3 text-xs font-bold text-indigo-600 hover:text-indigo-700 cursor-pointer"
                       >
-                        + {t('إضافة أول حركة للشيفت', 'Add First Entry')}
+                        + {t('إضافة حركة تشغيل', 'Add Operation Entry')}
                       </button>
                     </td>
                   </tr>
@@ -717,28 +781,56 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
                           {formatMoney(row.collectedAmount)}
                         </td>
 
-                        {/* Laser Device (Editable) */}
+                        {/* Laser Device (Editable - only coded laser devices allowed) */}
                         <td className="p-3">
+                          {(() => {
+                            const matchedDevice = laserDevices.find(
+                              (d) =>
+                                row.laserDevice &&
+                                (d.name.trim().toLowerCase() === row.laserDevice.trim().toLowerCase() || d.id === row.laserDevice)
+                            );
+                            if (isEditing) {
+                              return (
+                                <select
+                                  value={editRowData.laserDevice || ''}
+                                  onChange={(e) => setEditRowData({ ...editRowData, laserDevice: e.target.value })}
+                                  className="w-40 px-2 py-1 text-xs rounded-lg border border-indigo-300 bg-white dark:bg-slate-800"
+                                >
+                                  <option value="">{t('بدون جهاز', 'None')}</option>
+                                  {laserDevices.map((d) => (
+                                    <option key={d.id} value={d.name}>
+                                      {d.name} {d.room ? `(${d.room})` : ''}
+                                    </option>
+                                  ))}
+                                </select>
+                              );
+                            }
+                            if (matchedDevice) {
+                              return (
+                                <div className="flex items-center gap-1 text-slate-700 dark:text-slate-300">
+                                  <Zap className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                                  <span>{matchedDevice.name}</span>
+                                </div>
+                              );
+                            }
+                            return null;
+                          })()}
+                        </td>
+
+                        {/* Notes Column */}
+                        <td className="p-3 text-slate-600 dark:text-slate-300">
                           {isEditing ? (
-                            <select
-                              value={editRowData.laserDevice || ''}
-                              onChange={(e) => setEditRowData({ ...editRowData, laserDevice: e.target.value })}
-                              className="w-40 px-2 py-1 text-xs rounded-lg border border-indigo-300 bg-white dark:bg-slate-800"
-                            >
-                              <option value="">{t('بدون جهاز', 'None')}</option>
-                              {laserDevices.map((d) => (
-                                <option key={d.id} value={d.name}>
-                                  {d.name} {d.room ? `(${d.room})` : ''}
-                                </option>
-                              ))}
-                            </select>
-                          ) : row.laserDevice ? (
-                            <div className="flex items-center gap-1 text-slate-700 dark:text-slate-300">
-                              <Zap className="h-3.5 w-3.5 text-amber-500 shrink-0" />
-                              <span>{row.laserDevice}</span>
-                            </div>
+                            <input
+                              type="text"
+                              value={editRowData.notes || ''}
+                              onChange={(e) => setEditRowData({ ...editRowData, notes: e.target.value })}
+                              placeholder={t('ملاحظات...', 'Notes...')}
+                              className="w-28 px-2 py-1 text-xs rounded-lg border border-indigo-300 bg-white dark:bg-slate-800"
+                            />
                           ) : (
-                            '-'
+                            <span className="text-[11px] text-slate-500 dark:text-slate-400 max-w-[120px] truncate block" title={row.notes}>
+                              {row.notes || '-'}
+                            </span>
                           )}
                         </td>
 
@@ -789,7 +881,7 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
                       {totalPulsesCount.toLocaleString()} {t('نبضة', 'pulses')}
                     </td>
                     <td className="p-3 font-black">
-                      {totalConsumedQty}
+                      -
                     </td>
                     <td className="p-3">-</td>
                     <td className="p-3 text-slate-900 dark:text-white font-black">
@@ -799,6 +891,7 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
                     <td className="p-3 text-emerald-600 dark:text-emerald-400 font-black">
                       {formatMoney(totalRunCollected)}
                     </td>
+                    <td className="p-3">-</td>
                     <td colSpan={2} className="p-3"></td>
                   </tr>
                 </tfoot>
@@ -1013,47 +1106,82 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
                     <th className="p-2.5">{t('المقبوضات', 'Collected')}</th>
                     <th className="p-2.5">{t('المصروفات', 'Disbursed')}</th>
                     <th className="p-2.5 text-amber-600 font-bold">{t('التسويات (الفرق)', 'Adjustments')}</th>
-                    <th className="p-2.5 font-black text-slate-900 dark:text-white">{t('الرصيد الختامي (قابل للتعديل)', 'Closing Bal (Editable)')}</th>
+                    <th className="p-2.5 font-black text-slate-900 dark:text-white">{t('الرصيد الختامي', 'Closing Bal')}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                   {activeShift.balancing.map((row) => {
                     const openingBal = row.openingBalance ?? 0;
+                    const pmObj = paymentMethods.find((p) => p.id === row.paymentMethodId || p.nameAr === row.paymentMethodName);
+                    const linkedAcc = accounts.find((a) => {
+                      if (pmObj?.linkedAccountId) return a.id === pmObj.linkedAccountId;
+                      if (pmObj?.code) return a.code === pmObj.code || a.id === pmObj.id;
+                      if (row.paymentMethodName.includes('نقد') || row.paymentMethodId.includes('cash')) return a.code === '1111';
+                      if (row.paymentMethodName.includes('فيزا') || row.paymentMethodName.includes('بطاقة') || row.paymentMethodName.includes('إنستاباي')) return a.code === '1112';
+                      return false;
+                    });
+                    const expected = Number(((row.openingBalance || 0) + (row.totalCollected || 0) - (row.totalDisbursed || 0)).toFixed(2));
+                    const closing = Number(row.closingBalance) || 0;
+                    const diff = row.adjustments !== undefined ? Number(row.adjustments) : Number((closing - expected).toFixed(2));
+
                     return (
                       <tr key={row.paymentMethodId} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40">
                         <td className="p-2.5 font-bold text-slate-900 dark:text-white">
-                          {row.paymentMethodName}
+                          <div>{row.paymentMethodName}</div>
+                          {linkedAcc && (
+                            <div className="text-[10px] font-normal text-slate-400 dark:text-slate-500 mt-0.5 flex items-center gap-1">
+                              <span className="font-mono text-[9px] bg-slate-100 dark:bg-slate-800 px-1 py-0.2 rounded text-slate-600 dark:text-slate-400 font-bold">{linkedAcc.code}</span>
+                              <span>{language === 'ar' ? linkedAcc.nameAr : (linkedAcc.nameEn || linkedAcc.nameAr)}</span>
+                            </div>
+                          )}
                         </td>
-                        <td className="p-2.5 font-bold text-indigo-600 dark:text-indigo-400">
-                          {formatMoney(openingBal)}
+                        <td className="p-2.5 font-bold text-indigo-600 dark:text-indigo-400 font-mono">
+                          <div
+                            className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-900/50"
+                            title={t('الرصيد الافتتاحي مسجل من شجرة الحسابات للحساب المرتبط وقت فتح الشيفت (إجباري وغير قابل للتعديل)', 'Opening balance registered from Chart of Accounts at shift opening (Mandatory & Non-editable)')}
+                          >
+                            <span>{formatMoney(openingBal)}</span>
+                            <span className="text-[10px] text-indigo-400 dark:text-indigo-500 font-bold" title={t('غير قابل للتعديل - مستند من شجرة الحسابات', 'Non-editable - fixed from Chart of Accounts')}>
+                              🔒
+                            </span>
+                          </div>
                         </td>
-                        <td className="p-2.5 font-semibold text-emerald-600">{formatMoney(row.totalCollected)}</td>
-                        <td className="p-2.5 font-semibold text-rose-600">{formatMoney(row.totalDisbursed)}</td>
+                        <td className="p-2.5 font-semibold text-emerald-600 font-mono">{formatMoney(row.totalCollected)}</td>
+                        <td className="p-2.5 font-semibold text-rose-600 font-mono">{formatMoney(row.totalDisbursed)}</td>
                         <td className="p-2.5 font-bold font-mono">
-                          <span className={`px-2 py-0.5 rounded-md text-xs inline-block ${
-                            (row.adjustments || 0) > 0
-                              ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-400'
-                              : (row.adjustments || 0) < 0
-                              ? 'bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-400'
-                              : 'text-slate-400'
-                          }`}>
-                            {(row.adjustments || 0) > 0 ? `+${formatMoney(row.adjustments)}` : formatMoney(row.adjustments)}
+                          <span
+                            className={`px-2 py-0.5 rounded-md text-xs inline-block font-mono ${
+                              diff > 0
+                                ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-400 font-bold'
+                                : diff < 0
+                                ? 'bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-400 font-bold'
+                                : 'text-slate-400 bg-slate-100 dark:bg-slate-800'
+                            }`}
+                            title={
+                              diff === 0
+                                ? t('مطابق تماماً بدون فروق', 'Balanced - No variance')
+                                : diff > 0
+                                ? t(`فائض بمقدار: +${formatMoney(diff)}`, `Surplus: +${formatMoney(diff)}`)
+                                : t(`عجز بمقدار: ${formatMoney(diff)}`, `Deficit: ${formatMoney(diff)}`)
+                            }
+                          >
+                            {diff > 0 ? `+${formatMoney(diff)}` : formatMoney(diff)}
                           </span>
                         </td>
                         <td className="p-2.5">
                           <input
                             type="number"
-                            step="0.01"
+                            step="any"
                             value={row.closingBalance}
                             onChange={(e) => {
-                              const val = Number(e.target.value);
+                              const raw = e.target.value;
+                              const val = raw === '' ? 0 : parseFloat(raw);
                               updateShiftBalancing(
                                 activeShift.id,
                                 row.paymentMethodId,
-                                undefined,
-                                undefined,
-                                undefined,
-                                val
+                                {
+                                  closingBalance: isNaN(val) ? 0 : val,
+                                }
                               );
                             }}
                             className="w-24 px-2 py-1 text-xs rounded-lg border border-indigo-300 dark:border-indigo-700 bg-white dark:bg-slate-800 font-mono font-bold text-indigo-700 dark:text-indigo-300 text-center focus:ring-2 focus:ring-indigo-500"
@@ -1083,25 +1211,7 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
                       {activeShift.deviceCounters.reduce((s, d) => s + (d.consumedCounter || 0), 0).toLocaleString()} {t('نبضة مستهلكة بالشيفت', 'shift pulses')}
                     </span>
                   </div>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                    {t(
-                      'مراقبة فورية للنبضات وتعديل الرصيد الختامي مع تسجيل الفروق في عمود التسويات',
-                      'Real-time pulse consumption tracking with editable closing balance and automatic adjustments'
-                    )}
-                  </p>
                 </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                {onNavigateToLaserDevices && (
-                  <button
-                    onClick={onNavigateToLaserDevices}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 text-xs font-bold text-amber-800 dark:text-amber-300 hover:bg-amber-100 transition-all cursor-pointer"
-                  >
-                    <Zap className="h-3.5 w-3.5 text-amber-600" />
-                    <span>{t('إدارة وتكويد الأجهزة (إضافة / تعديل / حذف)', 'Manage Laser Devices')}</span>
-                  </button>
-                )}
               </div>
             </div>
 
@@ -1114,50 +1224,68 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
                     <th className="p-2.5 text-indigo-600 font-bold">{t('المستهلك بالشيفت', 'Consumed')}</th>
                     {/* Adjustments Column (Difference) */}
                     <th className="p-2.5 text-amber-600 font-bold">{t('التسويات (الفرق)', 'Adjustments')}</th>
-                    <th className="p-2.5 font-black text-emerald-700 dark:text-emerald-400">{t('الرصيد الختامي (قابل للتعديل)', 'Closing Bal (Editable)')}</th>
+                    <th className="p-2.5 font-black text-emerald-700 dark:text-emerald-400">{t('الرصيد الختامي', 'Closing Bal')}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {activeShift.deviceCounters.map((dev) => {
-                    const adj = dev.adjustments ?? 0;
-                    const masterDev = laserDevices.find(
-                      (d) => d.id === dev.deviceId || d.name === dev.deviceName
+                  {laserDevices.map((masterDev) => {
+                    const devCounter = activeShift.deviceCounters?.find(
+                      (d) => d.deviceId === masterDev.id || d.deviceName === masterDev.name
                     );
 
+                    // Find last closed shift for this branch to carry forward opening balances
+                    const closedShifts = receptionShifts
+                      .filter((s) => s.status === 'Closed' && s.id !== activeShift.id && (!activeShift.branchId || s.branchId === activeShift.branchId))
+                      .sort((a, b) => new Date(b.openedAt || b.shiftDate).getTime() - new Date(a.openedAt || a.shiftDate).getTime());
+                    const lastClosed = closedShifts[0];
+                    const lastClosedCounter = lastClosed?.deviceCounters?.find(
+                      (dc) => dc.deviceId === masterDev.id || dc.deviceName === masterDev.name
+                    );
+
+                    const openingCounter = lastClosedCounter?.closingCounter !== undefined
+                      ? lastClosedCounter.closingCounter
+                      : (devCounter?.openingCounter !== undefined ? devCounter.openingCounter : (masterDev.totalShotsCounter || 0));
+
+                    const consumed = devCounter?.consumedCounter ?? 0;
+                    const adj = devCounter?.adjustments ?? 0;
+                    const closing = devCounter?.closingCounter !== undefined
+                      ? devCounter.closingCounter
+                      : (openingCounter + consumed + adj);
+
                     return (
-                      <tr key={dev.deviceId} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40">
+                      <tr key={masterDev.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40">
                         <td className="p-2.5">
                           <div className="flex items-center gap-2">
                             <span
                               className={`h-2.5 w-2.5 rounded-full shrink-0 ${
-                                masterDev?.status === 'Maintenance'
+                                masterDev.status === 'Maintenance'
                                   ? 'bg-amber-500 animate-pulse'
                                   : 'bg-emerald-500'
                               }`}
-                              title={masterDev?.status || 'Active'}
+                              title={masterDev.status || 'Active'}
                             />
                             <div>
                               <div className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                                <span>{dev.deviceName}</span>
-                                {masterDev?.code && (
+                                <span>{masterDev.name}</span>
+                                {masterDev.code && (
                                   <span className="font-mono text-[10px] px-1 py-0.2 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600">
                                     {masterDev.code}
                                   </span>
                                 )}
                               </div>
                               <div className="text-[10px] text-slate-400 mt-0.5">
-                                {masterDev?.room || t('غرفة ليزر', 'Laser Room')} {masterDev?.model ? `• ${masterDev.model}` : ''}
+                                {masterDev.room || t('غرفة ليزر', 'Laser Room')} {masterDev.model ? `• ${masterDev.model}` : ''}
                               </div>
                             </div>
                           </div>
                         </td>
 
                         <td className="p-2.5 text-slate-600 dark:text-slate-300 font-mono font-medium">
-                          {dev.openingCounter.toLocaleString()}
+                          {openingCounter.toLocaleString()}
                         </td>
 
                         <td className="p-2.5 font-black text-indigo-600 dark:text-indigo-400 font-mono">
-                          +{dev.consumedCounter.toLocaleString()}
+                          +{consumed.toLocaleString()}
                         </td>
 
                         {/* Adjustments (Difference auto-calculated when closing balance edited) */}
@@ -1173,19 +1301,20 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
                           </span>
                         </td>
 
-                        {/* Closing Balance (Editable, Difference goes to Adjustments) */}
+                        {/* Closing Balance */}
                         <td className="p-2.5">
                           <input
                             type="number"
-                            value={dev.closingCounter}
+                            value={closing}
                             onChange={(e) => {
-                              const val = Number(e.target.value);
+                              const raw = e.target.value;
+                              const val = raw === '' ? 0 : parseFloat(raw);
                               updateDeviceCounter(
                                 activeShift.id,
-                                dev.deviceId,
-                                dev.consumedCounter,
-                                undefined,
-                                val
+                                masterDev.id,
+                                {
+                                  closingCounter: isNaN(val) ? 0 : val,
+                                }
                               );
                             }}
                             className="w-24 px-2 py-1 text-xs rounded-lg border border-emerald-300 dark:border-emerald-700 bg-white dark:bg-slate-800 font-mono text-center font-bold text-emerald-700 dark:text-emerald-300 focus:ring-2 focus:ring-emerald-500"
@@ -1379,21 +1508,6 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  {t('عهدة ورصيد بداية الشيفت في الدرج (ج.م)', 'Opening Cash Float in Drawer (EGP)')}
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  step="any"
-                  value={openShiftOpeningFloat}
-                  onChange={(e) => setOpenShiftOpeningFloat(Number(e.target.value) || 0)}
-                  placeholder="0.00"
-                  className="w-full px-3 py-2 text-xs font-mono font-bold rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-indigo-600"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                   {t('ملاحظات افتتاح الشيفت', 'Opening Notes')}
                 </label>
                 <textarea
@@ -1415,6 +1529,7 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
                 </button>
                 <button
                   type="submit"
+                  onClick={handleOpenShiftSubmit}
                   className="px-5 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl cursor-pointer"
                 >
                   {t('تأكيد فتح الشيفت', 'Confirm Open')}
@@ -1595,7 +1710,7 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
           <div className="w-full max-w-2xl bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl p-5 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800 mb-4">
               <h3 className="font-bold text-slate-900 dark:text-white text-base">
-                {t('تسجيل حركة تشغيل / خدمة لمريض', 'Add Patient Service Run Entry')}
+                {t('تسجيل حركة تشغيل', 'Add Operation Entry')}
               </h3>
               <button
                 onClick={() => setShowAddRowModal(false)}
@@ -1606,92 +1721,46 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
             </div>
 
             <form onSubmit={handleAddRunRowSubmit} className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    {t('اختيار العميل / المريض من السجل', 'Select Patient')}
-                  </label>
-                  <select
-                    value={patientId}
-                    onChange={(e) => handleSelectPatient(e.target.value)}
-                    className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-indigo-600"
-                  >
-                    <option value="">{t('اختر مريض مسجل أو اكتب اسمه...', 'Select patient...')}</option>
-                    {parties.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name} ({p.systemCode || p.phone})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    {t('اسم المريض *', 'Patient Name *')}
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={patientName}
-                    onChange={(e) => setPatientName(e.target.value)}
-                    placeholder="اسم المريض..."
-                    className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-indigo-600"
-                  />
-                </div>
+              {/* Select Client (اختيار العميل) */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  <span className="text-rose-500 font-bold ml-1">*</span>
+                  {t('اختيار العميل', 'Select Client')}
+                </label>
+                <select
+                  required
+                  value={patientId}
+                  onChange={(e) => handleSelectPatient(e.target.value)}
+                  className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-indigo-600"
+                >
+                  <option value="">{t('اختر العميل من السجل...', 'Select client from records...')}</option>
+                  {parties.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} ({p.systemCode || p.phone || t('عميل مسجل', 'Client')})
+                    </option>
+                  ))}
+                </select>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    {t('الطبيب المعالج', 'Doctor')}
-                  </label>
-                  <select
-                    value={doctorId}
-                    onChange={(e) => setDoctorId(e.target.value)}
-                    className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-indigo-600"
-                  >
-                    <option value="">{t('اختر الطبيب...', 'Select Doctor...')}</option>
-                    {staffMembers
-                      .filter((s) => s.roleType === 'Doctor')
-                      .map((d) => (
-                        <option key={d.id} value={d.id}>
-                          {d.nameAr}
-                        </option>
-                      ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    {t('التكنيشن / المساعد', 'Technician')}
-                  </label>
-                  <select
-                    value={technicianId}
-                    onChange={(e) => setTechnicianId(e.target.value)}
-                    className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-indigo-600"
-                  >
-                    <option value="">{t('اختر التكنيشن...', 'Select Technician...')}</option>
-                    {staffMembers
-                      .filter((s) => s.roleType === 'Technician' || s.roleType === 'Employee')
-                      .map((t) => (
-                        <option key={t.id} value={t.id}>
-                          {t.nameAr}
-                        </option>
-                      ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    {t('رقم الغرفة / العيادة', 'Room')}
-                  </label>
-                  <input
-                    type="text"
-                    value={roomNumber}
-                    onChange={(e) => setRoomNumber(e.target.value)}
-                    className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-indigo-600"
-                  />
-                </div>
+              {/* Service Provider / Doctor (مقدم الخدمة / الطبيب المعالج) */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  {t('الطبيب المعالج / مقدم الخدمة', 'Service Provider / Doctor')}
+                </label>
+                <select
+                  value={doctorId}
+                  onChange={(e) => setDoctorId(e.target.value)}
+                  className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-indigo-600"
+                >
+                  <option value="">{t('اختر مقدم الخدمة المكود...', 'Select Service Provider...')}</option>
+                  {staffMembers
+                    .filter((s) => s.isActive && !s.isArchived && (s.isServiceProvider ?? (s.roleType === 'Doctor' || s.roleType === 'Technician')))
+                    .map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.nameAr} {d.jobTitleAr ? `(${d.jobTitleAr})` : ''}
+                      </option>
+                    ))}
+                </select>
               </div>
 
               {/* Service & Pulse Count BEFORE Quantity */}
@@ -1796,22 +1865,37 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  {t('جهاز الليزر (إن وجد)', 'Laser Device')}
-                </label>
-                <select
-                  value={laserDevice}
-                  onChange={(e) => setLaserDevice(e.target.value)}
-                  className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
-                >
-                  <option value="">{t('بدون جهاز ليزر', 'None')}</option>
-                  {laserDevices.map((d) => (
-                    <option key={d.id} value={d.name}>
-                      {d.name} {d.room ? `(${d.room})` : ''} - {d.status === 'Active' ? 'جاهز' : 'صيانة'}
-                    </option>
-                  ))}
-                </select>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    {t('جهاز الليزر (إن وجد)', 'Laser Device')}
+                  </label>
+                  <select
+                    value={laserDevice}
+                    onChange={(e) => setLaserDevice(e.target.value)}
+                    className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
+                  >
+                    <option value="">{t('بدون جهاز ليزر', 'None')}</option>
+                    {laserDevices.map((d) => (
+                      <option key={d.id} value={d.name}>
+                        {d.name} {d.room ? `(${d.room})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    {t('الملاحظات', 'Notes')}
+                  </label>
+                  <input
+                    type="text"
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    placeholder={t('ملاحظات اختيارية عن الحركة...', 'Optional notes...')}
+                    className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
+                  />
+                </div>
               </div>
 
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
@@ -2007,11 +2091,8 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
                 </div>
                 <div>
                   <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                    {t('تسجيل مصروف جديد من نقدية الشيفت', 'Add Shift Expense')}
+                    {t('تسجيل مصروف جديد', 'Add Expense')}
                   </h3>
-                  <p className="text-[11px] text-slate-500">
-                    {t('خصم المصروف من نقدية الشيفت وربطه بحسابات المورد وشجرة الحسابات', 'Disburse from shift float and link to supplier & GL')}
-                  </p>
                 </div>
               </div>
               <button
@@ -2027,6 +2108,77 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
             </div>
 
             <form onSubmit={handleAddExpenseSubmit} className="space-y-4">
+              {/* Transaction Type with Supplier (نوع المعاملة بجوار المورد) */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-800 dark:text-slate-200">
+                  {t('نوع المعاملة مع المورد', 'Transaction Type with Supplier')}
+                </label>
+                <div className="grid grid-cols-3 gap-2 p-1 bg-slate-100 dark:bg-slate-800/80 rounded-xl">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setExpenseTransactionType('receipt_and_payment');
+                      if (stockItems.length > 0) {
+                        const itm = stockItems.find((s) => s.id === expenseItemId) || stockItems[0];
+                        setExpenseItemId(itm.id);
+                        const name = language === 'ar' ? itm.nameAr : itm.nameEn;
+                        setExpenseItemName(name);
+                        setExpenseCategory(name);
+                        const cost = itm.purchasePrice || 0;
+                        setExpenseUnitPrice(cost);
+                        setExpenseAmount(expenseQty * cost);
+                      }
+                    }}
+                    className={`py-2 px-1 text-center text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                      expenseTransactionType === 'receipt_and_payment'
+                        ? 'bg-white dark:bg-slate-700 text-rose-700 dark:text-rose-300 shadow-xs border border-rose-200 dark:border-rose-800'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                    }`}
+                  >
+                    {t('استلام وسداد', 'Receipt & Pay')}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setExpenseTransactionType('receipt_only');
+                      if (stockItems.length > 0) {
+                        const itm = stockItems.find((s) => s.id === expenseItemId) || stockItems[0];
+                        setExpenseItemId(itm.id);
+                        const name = language === 'ar' ? itm.nameAr : itm.nameEn;
+                        setExpenseItemName(name);
+                        setExpenseCategory(name);
+                        const cost = itm.purchasePrice || 0;
+                        setExpenseUnitPrice(cost);
+                        setExpenseAmount(expenseQty * cost);
+                      }
+                    }}
+                    className={`py-2 px-1 text-center text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                      expenseTransactionType === 'receipt_only'
+                        ? 'bg-white dark:bg-slate-700 text-amber-700 dark:text-amber-300 shadow-xs border border-amber-200 dark:border-amber-800'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                    }`}
+                  >
+                    {t('استلام فقط (آجل)', 'Receipt Only (Credit)')}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setExpenseTransactionType('balance_payment');
+                      setExpenseCategory('سداد دفعات ومستلزمات موردين');
+                    }}
+                    className={`py-2 px-1 text-center text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                      expenseTransactionType === 'balance_payment'
+                        ? 'bg-white dark:bg-slate-700 text-indigo-700 dark:text-indigo-300 shadow-xs border border-indigo-200 dark:border-indigo-800'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                    }`}
+                  >
+                    {t('سداد من الرصيد', 'Pay from Balance')}
+                  </button>
+                </div>
+              </div>
+
               {/* Supplier Selection (Mandatory Searchable Dropdown - Default: Cash Supplier) */}
               <div className="p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/70 space-y-2">
                 <div className="flex items-center justify-between">
@@ -2144,131 +2296,193 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
                   )}
                 </div>
 
-                {/* Selected Supplier Balance Info */}
-                {supplierId && (() => {
+                {/* وفى حالة سداد من الرصيد يظهر الرصيد الخاص بالمورد بالحسابات */}
+                {expenseTransactionType === 'balance_payment' && supplierId && (() => {
                   const selSup = suppliersList.find((p) => p.id === supplierId);
-                  if (!selSup) return null;
                   return (
-                    <div className="flex justify-between items-center text-[11px] bg-white/90 dark:bg-slate-800/90 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300">
-                      <span>{t('الرصيد الدفتري الحالي للمورد:', 'Current balance:')}</span>
-                      <span className="font-bold text-indigo-600 dark:text-indigo-400">{formatMoney(selSup.balance)}</span>
+                    <div className="flex justify-between items-center text-xs bg-indigo-50 dark:bg-indigo-950/40 p-2.5 rounded-xl border border-indigo-200 dark:border-indigo-800 text-indigo-900 dark:text-indigo-200 font-bold">
+                      <span>{t('الرصيد الخاص بالمورد بالحسابات:', 'Supplier Account Balance:')}</span>
+                      <span className="font-black text-sm text-indigo-600 dark:text-indigo-400 font-mono">
+                        {formatMoney(selSup?.balance || 0)}
+                      </span>
                     </div>
                   );
                 })()}
               </div>
 
-              {/* Category and Date */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    {t('بند المصروف', 'Category')}
-                  </label>
-                  <select
-                    value={expenseCategory}
-                    onChange={(e) => setExpenseCategory(e.target.value)}
-                    className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-bold focus:outline-indigo-600"
-                  >
-                    <option value="مشتريات ضيافة وعيادة">مشتريات ضيافة وعيادة</option>
-                    <option value="مستلزمات طبية سريعة">مستلزمات طبية سريعة</option>
-                    <option value="سداد دفعات ومستلزمات موردين">سداد دفعات ومستلزمات موردين</option>
-                    <option value="صيانة ونظافة">صيانة ونظافة</option>
-                    <option value="أخرى">أخرى</option>
-                  </select>
-                </div>
+              {/* بند المصروف محصور في البنود المخزنية المضافة للمخزن فقط + الكمية + سعر الوحدة (في حالتي استلام وسداد أو استلام فقط) */}
+              {expenseTransactionType !== 'balance_payment' ? (
+                <div className="space-y-3 p-3.5 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-slate-200 dark:border-slate-700">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      <span className="text-rose-600 font-black ml-1">*</span>
+                      {t('بند المصروف (الأصناف المخزنية المضافة للمخزن فقط)', 'Stock Item (Warehouse Items Only)')}
+                    </label>
+                    <select
+                      value={expenseItemId}
+                      required
+                      onChange={(e) => {
+                        const id = e.target.value;
+                        setExpenseItemId(id);
+                        const itm = stockItems.find((p) => p.id === id);
+                        if (itm) {
+                          const name = language === 'ar' ? itm.nameAr : itm.nameEn;
+                          setExpenseItemName(name);
+                          setExpenseCategory(name);
+                          const cost = itm.purchasePrice || 0;
+                          setExpenseUnitPrice(cost);
+                          setExpenseAmount(expenseQty * cost);
+                        }
+                      }}
+                      className="w-full px-3 py-2 text-xs font-bold rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 focus:outline-indigo-600 text-slate-900 dark:text-white"
+                    >
+                      <option value="">{t('-- اختر الصنف المخزني --', '-- Select Stock Item --')}</option>
+                      {stockItems.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {language === 'ar' ? item.nameAr : item.nameEn} ({item.sku || item.category}) - {formatMoney(item.purchasePrice || 0)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
+                  {/* Quantity and Unit Price and Computed Total Amount */}
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        <span className="text-rose-600 font-black ml-1">*</span>
+                        {t('الكمية', 'Qty')}
+                      </label>
+                      <input
+                        type="number"
+                        required
+                        min="1"
+                        value={expenseQty}
+                        onChange={(e) => {
+                          const q = Math.max(1, Number(e.target.value) || 1);
+                          setExpenseQty(q);
+                          setExpenseAmount(q * expenseUnitPrice);
+                        }}
+                        className="w-full px-3 py-2 text-xs font-bold rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 font-mono"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        <span className="text-rose-600 font-black ml-1">*</span>
+                        {t('سعر الوحدة', 'Unit Price')}
+                      </label>
+                      <input
+                        type="number"
+                        required
+                        min="0"
+                        step="any"
+                        value={expenseUnitPrice}
+                        onChange={(e) => {
+                          const p = Number(e.target.value) || 0;
+                          setExpenseUnitPrice(p);
+                          setExpenseAmount(expenseQty * p);
+                        }}
+                        className="w-full px-3 py-2 text-xs font-bold rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 font-mono"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        {t('المبلغ (الكمية × السعر)', 'Total')}
+                      </label>
+                      <div className="w-full px-3 py-2 text-xs font-black text-rose-600 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 flex items-center font-mono">
+                        {formatMoney(expenseAmount)}
+                      </div>
+                    </div>
+                  </div>
+
+                  {expenseTransactionType === 'receipt_only' && (
+                    <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-[11px] font-bold text-amber-800 dark:text-amber-300">
+                      {t('📌 استلام فقط (آجل): القيمة تُضاف لحساب المورد في شجرة الحسابات ولا تُخصم من نقدية أو مصروفات الشيفت.', '📌 Credit receipt: Value added to supplier account and NOT deducted from shift cash/expenses.')}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                /* سداد من الرصيد: عدم اشتراط وجود الصنف أو الكمية، والمبلغ قابل للإدخال بالقيمة المسددة */
                 <div>
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    {t('تاريخ المصروف', 'Date')}
+                    <span className="text-rose-600 font-black ml-1">*</span>
+                    {t('القيمة المسددة للمورد (ج.م) *', 'Payment Amount (EGP) *')}
                   </label>
                   <input
-                    type="date"
-                    value={expenseDate}
-                    onChange={(e) => setExpenseDate(e.target.value)}
-                    className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-bold"
+                    type="number"
+                    required
+                    min="1"
+                    value={expenseAmount || ''}
+                    onChange={(e) => setExpenseAmount(Number(e.target.value))}
+                    placeholder="0.00"
+                    className="w-full px-3 py-2 text-xs font-bold text-rose-600 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-indigo-600 font-mono"
                   />
                 </div>
-              </div>
+              )}
 
-              {/* Amount */}
+              {/* Date */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  <span className="text-rose-600 font-black ml-1">*</span>
-                  {t('المبلغ (ج.م) *', 'Amount (EGP) *')}
+                  {t('تاريخ الحركة', 'Date')}
                 </label>
                 <input
-                  type="number"
-                  required
-                  min="1"
-                  value={expenseAmount || ''}
-                  onChange={(e) => setExpenseAmount(Number(e.target.value))}
-                  placeholder="0.00"
-                  className="w-full px-3 py-2 text-xs font-bold text-rose-600 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-indigo-600"
+                  type="date"
+                  value={expenseDate}
+                  onChange={(e) => setExpenseDate(e.target.value)}
+                  className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-bold"
                 />
               </div>
 
               {/* Reason / Description */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  <span className="text-rose-600 font-black ml-1">*</span>
-                  {t('البيان وسبب الصرف *', 'Reason & Description *')}
+                  {t('البيان وسبب الصرف', 'Reason & Description')}
                 </label>
                 <input
                   type="text"
-                  required
                   value={expenseReason}
                   onChange={(e) => setExpenseReason(e.target.value)}
                   placeholder={
-                    supplierName && supplierName !== 'مورد كاش (نقدي)'
-                      ? `سداد دفعة للمورد: ${supplierName}`
-                      : 'مثال: شراء شاي وسكر ومستلزمات نظافة...'
+                    expenseTransactionType === 'balance_payment'
+                      ? `سداد دفعة للمورد: ${supplierName || ''}`
+                      : expenseTransactionType === 'receipt_only'
+                      ? `استلام أصناف آجل: ${expenseItemName || ''}`
+                      : `استلام وسداد أصناف: ${expenseItemName || ''}`
                   }
                   className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-indigo-600"
                 />
               </div>
 
-              {/* Disbursement Method (Dropdown from Registered Payment Methods) */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  <span className="text-rose-600 font-black ml-1">*</span>
-                  {t('جهة وطريقة الصرف (من طرق التحصيل والسداد المسجلة)', 'Disbursement Method (Registered Payment Methods)')}
-                </label>
-                <select
-                  value={expenseMethod}
-                  required
-                  onChange={(e) => setExpenseMethod(e.target.value)}
-                  className="w-full px-3 py-2 text-xs font-bold rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-indigo-600 text-slate-900 dark:text-white"
-                >
-                  {paymentMethods
-                    .filter((pm) => !pm.isArchived)
-                    .map((pm) => {
-                      const linkedAcc = accounts.find((a) => a.id === pm.linkedAccountId);
-                      const accLabel = linkedAcc ? ` (${linkedAcc.code} - ${linkedAcc.nameAr})` : '';
-                      return (
-                        <option key={pm.id} value={pm.nameAr}>
-                          {pm.nameAr}
-                          {pm.isDefault ? ` [${t('افتراضي', 'Default')}]` : ''}
-                          {accLabel}
-                        </option>
-                      );
-                    })}
-                </select>
-                {/* Visual indicator of the linked GL account */}
-                {(() => {
-                  const selPM = paymentMethods.find((pm) => pm.nameAr === expenseMethod);
-                  const linkedAcc = selPM ? accounts.find((a) => a.id === selPM.linkedAccountId) : null;
-                  if (linkedAcc) {
-                    return (
-                      <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1">
-                        <span>{t('الحساب الدائن المتأثر في شجرة الحسابات:', 'Linked Credit GL Account:')}</span>
-                        <span className="font-bold text-indigo-600 dark:text-indigo-400 font-mono">
-                          {linkedAcc.code} - {linkedAcc.nameAr}
-                        </span>
-                      </div>
-                    );
-                  }
-                  return null;
-                })()}
-              </div>
+              {/* Disbursement Method (Only if paying cash out of shift: receipt_and_payment or balance_payment) */}
+              {expenseTransactionType !== 'receipt_only' && (
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    <span className="text-rose-600 font-black ml-1">*</span>
+                    {t('جهة وطريقة الصرف (من طرق التحصيل والسداد المسجلة)', 'Disbursement Method (Registered Payment Methods)')}
+                  </label>
+                  <select
+                    value={expenseMethod}
+                    required
+                    onChange={(e) => setExpenseMethod(e.target.value)}
+                    className="w-full px-3 py-2 text-xs font-bold rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-indigo-600 text-slate-900 dark:text-white"
+                  >
+                    {paymentMethods
+                      .filter((pm) => !pm.isArchived)
+                      .map((pm) => {
+                        const linkedAcc = accounts.find((a) => a.id === pm.linkedAccountId);
+                        const accLabel = linkedAcc ? ` (${linkedAcc.code} - ${linkedAcc.nameAr})` : '';
+                        return (
+                          <option key={pm.id} value={pm.nameAr}>
+                            {pm.nameAr}
+                            {pm.isDefault ? ` [${t('افتراضي', 'Default')}]` : ''}
+                            {accLabel}
+                          </option>
+                        );
+                      })}
+                  </select>
+                </div>
+              )}
 
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
                 <button
@@ -2285,7 +2499,11 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
                   type="submit"
                   className="px-5 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl cursor-pointer shadow-md shadow-rose-600/20"
                 >
-                  {t('صرف المصروف', 'Disburse Expense')}
+                  {expenseTransactionType === 'receipt_only'
+                    ? t('تسجيل الاستلام الآجل', 'Record Credit Receipt')
+                    : expenseTransactionType === 'balance_payment'
+                    ? t('سداد وسحب من الشيفت', 'Pay from Shift')
+                    : t('صرف وسداد المصروف', 'Disburse & Pay')}
                 </button>
               </div>
             </form>

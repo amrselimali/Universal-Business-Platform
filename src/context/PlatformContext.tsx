@@ -7,6 +7,7 @@ import {
   ItemCategory,
   Product,
   StockLevel,
+  StockMovement,
   Account,
   Party,
   ModuleDefinition,
@@ -177,6 +178,9 @@ interface PlatformContextType {
   products: Product[];
   allProducts: Product[];
   stockLevels: StockLevel[];
+  stockMovements: StockMovement[];
+  allStockMovements: StockMovement[];
+  recordStockMovement: (movement: Omit<StockMovement, 'id' | 'createdAt' | 'tenantId'>) => void;
   getProductStock: (productId: string, warehouseId?: string) => number;
   addProduct: (product: Omit<Product, 'id' | 'tenantId'>, initialStock: number) => void;
   updateProduct: (productId: string, updatedData: Partial<Product>) => void;
@@ -296,12 +300,20 @@ interface PlatformContextType {
   removeShiftRunRow: (shiftId: string, rowId: string) => void;
   addShiftExpense: (shiftId: string, expense: Omit<ShiftExpense, 'id'>) => void;
   removeShiftExpense: (shiftId: string, expenseId: string) => void;
-  updateShiftBalancing: (shiftId: string, methodId: string, data: Partial<ShiftBalancingRow>) => void;
+  updateShiftBalancing: (
+    shiftId: string,
+    methodId: string,
+    dataOrOpening?: Partial<ShiftBalancingRow> | number,
+    totalCollectedVal?: number,
+    totalDisbursedVal?: number,
+    closingBalanceVal?: number
+  ) => void;
   updateDeviceCounter: (
     shiftId: string,
     deviceId: string,
-    dataOrConsumed: Partial<ShiftDeviceCounter> | number,
-    adjustmentsVal?: number
+    dataOrConsumed?: Partial<ShiftDeviceCounter> | number,
+    adjustmentsVal?: number,
+    closingVal?: number
   ) => void;
   updateShiftNotes: (shiftId: string, notes: string, author?: string) => void;
   addAccountantAdjustment: (shiftId: string, adjustmentAmount: number, reason: string) => void;
@@ -343,6 +355,7 @@ interface PlatformContextType {
   deleteAccount: (accountId: string) => { success: boolean; error?: string };
   createManualJournalEntry: (entry: {
     description: string;
+    branchId?: string;
     lines: { accountId: string; debit: number; credit: number; memo?: string }[];
   }) => { success: boolean; error?: string };
 
@@ -764,6 +777,44 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, [allPaymentMethods]);
 
   const paymentMethods = allPaymentMethods.filter((p) => p.tenantId === tenant?.id);
+
+  // 13. Accounting & Accounts
+  const [allAccounts, setAllAccounts] = useState<Account[]>(() => {
+    try {
+      const saved = localStorage.getItem('erp_accounts');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {
+      console.error('Failed to load accounts:', e);
+    }
+    return INITIAL_ACCOUNTS;
+  });
+
+  const [allJournals, setAllJournals] = useState<JournalEntry[]>(() => {
+    try {
+      const saved = localStorage.getItem('erp_journals');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {
+      console.error('Failed to load journals:', e);
+    }
+    return INITIAL_JOURNAL_ENTRIES;
+  });
+
+  useEffect(() => {
+    localStorage.setItem('erp_accounts', JSON.stringify(allAccounts));
+  }, [allAccounts]);
+
+  useEffect(() => {
+    localStorage.setItem('erp_journals', JSON.stringify(allJournals));
+  }, [allJournals]);
+
+  const accounts = allAccounts.filter((a) => a.tenantId === tenant?.id);
+  const journalEntries = allJournals.filter((j) => j.tenantId === tenant?.id);
 
   const addPaymentMethod = (data: Omit<PaymentMethod, 'id' | 'tenantId'>): PaymentMethod => {
     const nameEn = data.nameEn || autoTranslateArabic(data.nameAr);
@@ -2065,48 +2116,142 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const receptionShifts = allReceptionShifts.filter((s) => s.tenantId === tenant?.id);
   const activeReceptionShift = useMemo(() => {
-    const rawShift = receptionShifts.find((s) => s.status === 'Open' && (!activeBranch || s.branchId === activeBranch.id)) || null;
-    if (!rawShift) return null;
+    try {
+      const currentBranchId = activeBranch?.id;
+      // 1. Look for open shift in current branch
+      let rawShift = receptionShifts.find(
+        (s) => s && s.status === 'Open' && (!currentBranchId || s.branchId === currentBranchId)
+      ) || null;
 
-    // Dynamically calculate accurate cash breakdown for the active shift
-    const cashBal = rawShift.balancing?.find(
-      (b) =>
-        b.paymentMethodName.includes('نقد') ||
-        b.paymentMethodName.toLowerCase().includes('cash') ||
-        b.paymentMethodId.toLowerCase().includes('cash') ||
-        b.paymentMethodId === 'pm-01' ||
-        b.paymentMethodId === 'pm-cash-1'
-    ) || rawShift.balancing?.[0];
+      // 2. If not found and activeBranch is set, check if any open shift belongs to this tenant
+      if (!rawShift) {
+        rawShift = receptionShifts.find((s) => s && s.status === 'Open') || null;
+      }
 
-    const initialBal = rawShift.openingFloat ?? rawShift.initialBalance ?? (cashBal?.openingBalance || 0);
+      if (!rawShift) return null;
 
-    const cashColl = cashBal?.totalCollected !== undefined
-      ? cashBal.totalCollected
-      : rawShift.runRows
-          .filter((r) => (r.paymentMethod || '').includes('نقد') || (r.paymentMethod || '').toLowerCase().includes('cash'))
-          .reduce((sum, r) => sum + (r.collectedAmount || 0), 0);
+      // Helper to find the linked Chart of Accounts account for any payment method safely
+      const getAccountForMethod = (methodId?: string, methodName?: string): Account | undefined => {
+        try {
+          const pm = (paymentMethods || []).find((p) => p && (p.id === methodId || p.nameAr === methodName));
+          if (pm?.linkedAccountId && Array.isArray(accounts)) {
+            const found = accounts.find((a) => a && a.id === pm.linkedAccountId);
+            if (found) return found;
+          }
+          if (pm?.code && Array.isArray(accounts)) {
+            const byCode = accounts.find((a) => a && (a.code === pm.code || a.id === pm.id));
+            if (byCode) return byCode;
+          }
+          const mName = methodName || '';
+          const mId = methodId || '';
+          const pType = pm?.type || '';
+          if (mName.includes('نقد') || mId.toLowerCase().includes('cash') || pType === 'Cash') {
+            return (
+              (accounts || []).find((a) => a && a.code === '1111') ||
+              (accounts || []).find((a) => a && ((a.nameAr || '').includes('الخزينة') || (a.nameAr || '').includes('النقدية'))) ||
+              (accounts || []).find((a) => a && a.type === 'Asset')
+            );
+          }
+          if (pType === 'Card' || pType === 'Transfer' || mName.includes('فيزا') || mName.includes('إنستاباي')) {
+            return (
+              (accounts || []).find((a) => a && a.code === '1112') ||
+              (accounts || []).find((a) => a && ((a.nameAr || '').includes('البنك') || (a.nameAr || '').includes('حسابات'))) ||
+              (accounts || []).find((a) => a && a.type === 'Asset')
+            );
+          }
+          if (pType === 'Wallet' || mName.includes('محفظة')) {
+            return (
+              (accounts || []).find((a) => a && (a.nameAr || '').includes('محفظة')) ||
+              (accounts || []).find((a) => a && a.code === '1111') ||
+              (accounts || []).find((a) => a && a.code === '1112')
+            );
+          }
+        } catch (e) {
+          console.warn('Error resolving account for method in activeReceptionShift:', e);
+        }
+        return undefined;
+      };
 
-    const cashExp = cashBal?.totalDisbursed !== undefined
-      ? cashBal.totalDisbursed
-      : rawShift.expenses
-          .filter((e) => (e.disbursementMethod || '').includes('نقد') || (e.disbursementMethod || '').toLowerCase().includes('cash'))
-          .reduce((sum, e) => sum + (e.amount || 0), 0);
+      // Ensure balancing rows reflect latest registered balance in Chart of Accounts if uninitialized or 0
+      const resolvedBalancing: ShiftBalancingRow[] = (rawShift.balancing || []).map((b) => {
+        let coaBalance = 0;
+        try {
+          const linkedAcc = getAccountForMethod(b.paymentMethodId, b.paymentMethodName);
+          const bal = linkedAcc ? Number(linkedAcc.balance) : 0;
+          coaBalance = typeof bal === 'number' && !isNaN(bal) && isFinite(bal) ? bal : 0;
+        } catch {
+          coaBalance = 0;
+        }
 
-    const adjustments = cashBal?.adjustments || 0;
+        const rawOpen = Number(b.openingBalance);
+        const openingBal = (!isNaN(rawOpen) && isFinite(rawOpen) && rawOpen !== 0) ? rawOpen : coaBalance;
+        const collected = Number(b.totalCollected) || 0;
+        const disbursed = Number(b.totalDisbursed) || 0;
+        const expected = Number((openingBal + collected - disbursed).toFixed(2));
+        const rawClose = Number(b.closingBalance);
+        const closing = (!isNaN(rawClose) && isFinite(rawClose) && rawClose !== (collected - disbursed))
+          ? rawClose
+          : Number((expected + (Number(b.adjustments) || 0)).toFixed(2));
+        const adj = b.adjustments !== undefined ? Number(b.adjustments) || 0 : Number((closing - expected).toFixed(2));
 
-    const expectedCashInDrawer = cashBal?.closingBalance !== undefined
-      ? cashBal.closingBalance
-      : initialBal + cashColl - cashExp + adjustments;
+        return {
+          paymentMethodId: b.paymentMethodId || 'pm-default',
+          paymentMethodName: b.paymentMethodName || 'طريقة دفع',
+          openingBalance: openingBal || 0,
+          totalCollected: collected || 0,
+          totalDisbursed: disbursed || 0,
+          adjustments: adj || 0,
+          closingBalance: closing || 0,
+        };
+      });
 
-    return {
-      ...rawShift,
-      initialBalance: initialBal,
-      openingFloat: initialBal,
-      cashCollected: cashColl,
-      cashExpenses: cashExp,
-      expectedCashInDrawer,
-    };
-  }, [receptionShifts, activeBranch?.id]);
+      // Dynamically calculate accurate cash breakdown for the active shift safely
+      const cashBal = resolvedBalancing.find(
+        (b) =>
+          (b.paymentMethodName || '').includes('نقد') ||
+          (b.paymentMethodName || '').toLowerCase().includes('cash') ||
+          (b.paymentMethodId || '').toLowerCase().includes('cash') ||
+          b.paymentMethodId === 'pm-01' ||
+          b.paymentMethodId === 'pm-cash-1'
+      ) || resolvedBalancing[0];
+
+      const initialBal = cashBal?.openingBalance || rawShift.openingFloat || rawShift.initialBalance || 0;
+
+      const cashColl = cashBal?.totalCollected !== undefined
+        ? cashBal.totalCollected
+        : (rawShift.runRows || [])
+            .filter((r) => ((r.paymentMethod || '').includes('نقد') || (r.paymentMethod || '').toLowerCase().includes('cash')))
+            .reduce((sum, r) => sum + (Number(r.collectedAmount) || 0), 0);
+
+      const cashExp = cashBal?.totalDisbursed !== undefined
+        ? cashBal.totalDisbursed
+        : (rawShift.expenses || [])
+            .filter((e) => ((e.disbursementMethod || '').includes('نقد') || (e.disbursementMethod || '').toLowerCase().includes('cash')))
+            .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+
+      const adjustments = Number(cashBal?.adjustments) || 0;
+
+      const expectedCashInDrawer = cashBal?.closingBalance !== undefined
+        ? cashBal.closingBalance
+        : Number((initialBal + cashColl - cashExp + adjustments).toFixed(2));
+
+      return {
+        ...rawShift,
+        balancing: resolvedBalancing,
+        initialBalance: initialBal,
+        openingFloat: initialBal,
+        cashCollected: cashColl,
+        cashExpenses: cashExp,
+        expectedCashInDrawer,
+      };
+    } catch (err) {
+      console.error('Error evaluating activeReceptionShift:', err);
+      // Safe fallback: return rawShift if available with defaults of 0
+      const currentBranchId = activeBranch?.id;
+      const rawShift = receptionShifts.find((s) => s && s.status === 'Open' && (!currentBranchId || s.branchId === currentBranchId)) || receptionShifts.find((s) => s && s.status === 'Open');
+      return rawShift || null;
+    }
+  }, [receptionShifts, activeBranch?.id, accounts, paymentMethods]);
 
   const openReceptionShift = (
     receptionistName?: string,
@@ -2118,113 +2263,217 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const shiftNum = `SH-${new Date().getFullYear()}-${(receptionShifts.length + 1).toString().padStart(4, '0')}`;
     const targetBranchId = branchIdParam || activeBranch?.id || branches[0]?.id || 'branch-cairo';
 
-    // Enforce branch-level isolation and prevent opening more than one shift for the SAME branch:
-    const existingOpenShift = receptionShifts.find(
-      (s) => s.status === 'Open' && s.branchId === targetBranchId
-    );
-    if (existingOpenShift) {
-      const branchObj = branches.find((b) => b.id === targetBranchId);
-      const branchName = branchObj ? branchObj.name : 'هذا الفرع';
-      const msg = language === 'ar'
-        ? `يوجد شيفت تشغيل مفتوح بالفعل لـ (${branchName}) برقم [${existingOpenShift.shiftNumber}]. لا يمكن فتح أكثر من شيفت لنفس الفرع في نفس الوقت. يرجى إغلاق الشيفت المفتوح أولاً!`
-        : `An open shift already exists for (${branchName}) [#${existingOpenShift.shiftNumber}]. Cannot open multiple shifts for the same branch simultaneously!`;
-      alert(msg);
-      return existingOpenShift;
-    }
-
     // Find the last closed shift for this branch to carry forward opening balances
-    const lastClosedShift = receptionShifts.find(
-      (s) => s.status === 'Closed' && s.branchId === targetBranchId
-    );
+    const closedShiftsForBranch = (receptionShifts || [])
+      .filter((s) => s && s.status === 'Closed' && (!targetBranchId || s.branchId === targetBranchId))
+      .sort((a, b) => new Date(b.openedAt || b.shiftDate).getTime() - new Date(a.openedAt || a.shiftDate).getTime());
+    const lastClosedShift = closedShiftsForBranch[0];
 
-    // Auto-populate default runRows with today's scheduled/attended bookings for this branch
-    const todayAppointments = allAppointments.filter(
-      (a) => a.tenantId === tenant?.id && a.date === today && (!activeBranch || a.branchId === targetBranchId) && a.status !== 'Cancelled'
-    );
-    const dayNames = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
-    const dayName = dayNames[new Date().getDay()] || 'اليوم';
-    const initialRunRows: ShiftRunRow[] = todayAppointments.map((apt, idx) => {
-      const patientParty = parties.find((p) => p.id === apt.patientId || p.name === apt.patientName);
-      return {
-        id: `run-row-init-${Date.now()}-${idx}`,
-        date: today,
-        dayName,
-        customerId: apt.patientId || `cust-${idx}`,
-        patientId: apt.patientId || `cust-${idx}`,
-        systemCode: apt.systemCode || patientParty?.systemCode || `CUST-${1000 + idx}`,
-        customerName: apt.patientName,
-        patientName: apt.patientName,
-        patientPhone: apt.patientPhone,
-        roomNumber: apt.roomNumber || 'غرفة 1',
-        serviceName: apt.serviceNameAr || 'جلسة علاجية',
-        pulsesCount: 0,
-        consumedQuantity: 1,
-        unitPrice: apt.price || 0,
-        totalRevenue: apt.price || 0,
-        paymentMethod: paymentMethods[0]?.nameAr || 'نقداً (كاش)',
-        collectedAmount: apt.deposit !== undefined ? apt.deposit : (apt.status === 'Attended' ? apt.price : 0),
-        laserDevice: 'جهاز كانديلا ليزر GentleMax Pro #1',
-        doctorName: apt.doctorName || 'د. استشاري',
-        doctorId: apt.doctorId,
-        technicianName: apt.technicianName || '',
-        technicianId: apt.technicianId,
-        appointmentId: apt.id,
-        description: apt.notes || 'حجز مجدول لليوم',
-      };
-    });
-
-    const initTotalRev = initialRunRows.reduce((sum, r) => sum + r.totalRevenue, 0);
-    const initTotalColl = initialRunRows.reduce((sum, r) => sum + (r.collectedAmount || 0), 0);
-
-    // Default balancing rows based on available payment methods with opening balance from last closed shift
-    const initialBalancing: ShiftBalancingRow[] = paymentMethods
-      .filter((pm) => !pm.isArchived)
-      .map((pm) => {
-        const isCashMethod = pm.id === 'pm-01' || pm.id === 'pm-cash-1' || pm.nameAr.includes('نقد');
-        const prevBal = lastClosedShift?.balancing.find(
-          (b) => b.paymentMethodId === pm.id || b.paymentMethodName === pm.nameAr
-        );
-        const openingBal = (isCashMethod && openingFloatParam !== undefined)
-          ? openingFloatParam
-          : (prevBal ? prevBal.closingBalance : (isCashMethod && lastClosedShift?.openingFloat ? lastClosedShift.openingFloat : 0));
-        const methodRows = initialRunRows.filter(
-          (r) => r.paymentMethod.includes(pm.nameAr) || pm.nameAr.includes(r.paymentMethod)
-        );
-        const methodColl = methodRows.reduce((sum, r) => sum + (r.collectedAmount || 0), 0);
+    // Auto-populate default runRows with today's scheduled/attended bookings for this branch safely
+    let initialRunRows: ShiftRunRow[] = [];
+    try {
+      const todayAppointments = (allAppointments || []).filter(
+        (a) => a && a.tenantId === tenant?.id && a.date === today && (!activeBranch || a.branchId === targetBranchId) && a.status !== 'Cancelled'
+      );
+      const dayNames = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+      const dayName = dayNames[new Date().getDay()] || 'اليوم';
+      initialRunRows = todayAppointments.map((apt, idx) => {
+        const patientParty = (parties || []).find((p) => p && (p.id === apt.patientId || p.name === apt.patientName));
         return {
-          paymentMethodId: pm.id,
-          paymentMethodName: pm.nameAr,
-          openingBalance: openingBal,
-          totalCollected: methodColl,
-          totalDisbursed: 0,
-          adjustments: 0,
-          closingBalance: openingBal + methodColl,
+          id: `run-row-init-${Date.now()}-${idx}`,
+          date: today,
+          dayName,
+          customerId: apt.patientId || `cust-${idx}`,
+          patientId: apt.patientId || `cust-${idx}`,
+          systemCode: apt.systemCode || patientParty?.systemCode || `CUST-${1000 + idx}`,
+          customerName: apt.patientName || 'مريض',
+          patientName: apt.patientName || 'مريض',
+          patientPhone: apt.patientPhone || '',
+          roomNumber: apt.roomNumber || 'غرفة 1',
+          serviceName: apt.serviceNameAr || 'جلسة علاجية',
+          pulsesCount: 0,
+          consumedQuantity: 1,
+          unitPrice: Number(apt.price) || 0,
+          totalRevenue: Number(apt.price) || 0,
+          paymentMethod: (paymentMethods && paymentMethods[0]?.nameAr) ? paymentMethods[0].nameAr : 'نقداً (كاش)',
+          collectedAmount: apt.deposit !== undefined ? (Number(apt.deposit) || 0) : (apt.status === 'Attended' ? (Number(apt.price) || 0) : 0),
+          laserDevice: 'جهاز كانديلا ليزر GentleMax Pro #1',
+          doctorName: apt.doctorName || 'د. استشاري',
+          doctorId: apt.doctorId,
+          technicianName: apt.technicianName || '',
+          technicianId: apt.technicianId,
+          appointmentId: apt.id,
+          description: apt.notes || 'حجز مجدول لليوم',
         };
       });
+    } catch (e) {
+      console.warn('Error populating initial runRows, defaulting to empty:', e);
+      initialRunRows = [];
+    }
 
-    // Dynamically build device counters from all active laser devices for this branch/tenant
-    const branchDevices = allLaserDevices.filter(
-      (d) =>
-        (d.status === 'Active' || d.status === 'Maintenance') &&
-        (!d.branchId || !targetBranchId || d.branchId === targetBranchId)
-    );
-    const devicesToMonitor = branchDevices.length > 0 ? branchDevices : allLaserDevices.filter((d) => d.status === 'Active');
+    const initTotalRev = initialRunRows.reduce((sum, r) => sum + (Number(r.totalRevenue) || 0), 0);
+    const initTotalColl = initialRunRows.reduce((sum, r) => sum + (Number(r.collectedAmount) || 0), 0);
 
-    const initialDeviceCounters: ShiftDeviceCounter[] = devicesToMonitor.map((d) => {
-      const prevDev = lastClosedShift?.deviceCounters.find((dc) => dc.deviceId === d.id || dc.deviceName === d.name);
-      const opening = prevDev ? prevDev.closingCounter : d.totalShotsCounter;
-      return {
-        deviceId: d.id,
-        deviceName: d.name,
-        openingCounter: opening,
-        consumedCounter: 0,
-        adjustments: 0,
-        closingCounter: opening,
-      };
-    });
+    // Helper to find the linked Chart of Accounts account for any payment method safely - defaults to 0 on any error
+    const getAccountForMethod = (pm?: PaymentMethod): Account | undefined => {
+      if (!pm) return undefined;
+      try {
+        if (pm.linkedAccountId && Array.isArray(accounts)) {
+          const found = accounts.find((a) => a && a.id === pm.linkedAccountId);
+          if (found) return found;
+        }
+        if (pm.code && Array.isArray(accounts)) {
+          const byCode = accounts.find((a) => a && (a.code === pm.code || a.id === pm.id));
+          if (byCode) return byCode;
+        }
+        const nameAr = pm.nameAr || '';
+        const pmCode = pm.code || '';
+        const pmType = pm.type || '';
 
-    const cashBalInitial = initialBalancing.find((b) => b.paymentMethodName.includes('نقد')) || initialBalancing[0];
-    const initialCashVal = cashBalInitial ? cashBalInitial.openingBalance : (openingFloatParam || 0);
+        if (pmType === 'Cash' || nameAr.includes('نقد') || pmCode === 'CASH') {
+          return (
+            (accounts || []).find((a) => a && a.code === '1111') ||
+            (accounts || []).find((a) => a && ((a.nameAr || '').includes('الخزينة') || (a.nameAr || '').includes('النقدية'))) ||
+            (accounts || []).find((a) => a && a.type === 'Asset')
+          );
+        }
+        if (pmType === 'Card' || pmCode === 'CARD_VISA' || nameAr.includes('فيزا') || nameAr.includes('بطاقة')) {
+          return (
+            (accounts || []).find((a) => a && a.code === '1112') ||
+            (accounts || []).find((a) => a && ((a.nameAr || '').includes('البنك') || (a.nameAr || '').includes('حسابات جارية'))) ||
+            (accounts || []).find((a) => a && a.type === 'Asset')
+          );
+        }
+        if (pmType === 'Transfer' || pmCode === 'INSTAPAY' || nameAr.includes('إنستاباي')) {
+          return (
+            (accounts || []).find((a) => a && a.code === '1112') ||
+            (accounts || []).find((a) => a && ((a.nameAr || '').includes('إنستاباي') || (a.nameAr || '').includes('البنك'))) ||
+            (accounts || []).find((a) => a && a.type === 'Asset')
+          );
+        }
+        if (pmType === 'Wallet' || nameAr.includes('محفظة') || pmCode.includes('WALLET')) {
+          return (
+            (accounts || []).find((a) => a && (a.nameAr || '').includes('محفظة')) ||
+            (accounts || []).find((a) => a && a.code === '1111') ||
+            (accounts || []).find((a) => a && a.code === '1112')
+          );
+        }
+      } catch (e) {
+        console.warn('Error resolving account for payment method:', e);
+      }
+      return undefined;
+    };
+
+    // Default balancing rows based on available payment methods with opening balance from Chart of Accounts, defaulting to 0 on any error or missing link
+    let initialBalancing: ShiftBalancingRow[] = [];
+    try {
+      const safePaymentMethods = Array.isArray(paymentMethods)
+        ? paymentMethods.filter((pm) => pm && !pm.isArchived)
+        : [];
+
+      if (safePaymentMethods.length > 0) {
+        initialBalancing = safePaymentMethods.map((pm) => {
+          let openingBal = 0;
+          try {
+            const linkedAcc = getAccountForMethod(pm);
+            const rawBal = linkedAcc ? Number(linkedAcc.balance) : 0;
+            openingBal = typeof rawBal === 'number' && !isNaN(rawBal) && isFinite(rawBal) ? rawBal : 0;
+          } catch {
+            openingBal = 0;
+          }
+
+          let methodColl = 0;
+          try {
+            const pmName = pm.nameAr || '';
+            const methodRows = initialRunRows.filter(
+              (r) =>
+                r.paymentMethod &&
+                pmName &&
+                (r.paymentMethod.includes(pmName) || pmName.includes(r.paymentMethod))
+            );
+            methodColl = methodRows.reduce((sum, r) => sum + (Number(r.collectedAmount) || 0), 0);
+          } catch {
+            methodColl = 0;
+          }
+
+          return {
+            paymentMethodId: pm.id || `pm-${Math.random().toString(36).substr(2, 5)}`,
+            paymentMethodName: pm.nameAr || 'طريقة دفع',
+            openingBalance: openingBal,
+            totalCollected: methodColl,
+            totalDisbursed: 0,
+            adjustments: 0,
+            closingBalance: Number((openingBal + methodColl).toFixed(2)),
+          };
+        });
+      }
+    } catch (e) {
+      console.warn('Failed to build balancing rows, defaulting to 0:', e);
+    }
+
+    if (initialBalancing.length === 0) {
+      initialBalancing = [
+        {
+          paymentMethodId: 'pm-01',
+          paymentMethodName: 'نقداً (كاش)',
+          openingBalance: Number(openingFloatParam) || 0,
+          totalCollected: 0,
+          totalDisbursed: 0,
+          adjustments: 0,
+          closingBalance: Number(openingFloatParam) || 0,
+        },
+      ];
+    }
+
+    // Dynamically build device counters from all active laser devices for this branch/tenant - defaulting to 0 on any error or missing counters
+    let initialDeviceCounters: ShiftDeviceCounter[] = [];
+    try {
+      const devices = Array.isArray(allLaserDevices) ? allLaserDevices : [];
+      const branchDevices = devices.filter(
+        (d) =>
+          d &&
+          (d.status === 'Active' || d.status === 'Maintenance') &&
+          (!d.branchId || !targetBranchId || d.branchId === targetBranchId)
+      );
+      const devicesToMonitor =
+        branchDevices.length > 0 ? branchDevices : devices.filter((d) => d && d.status === 'Active');
+
+      initialDeviceCounters = devicesToMonitor.map((d) => {
+        let opening = 0;
+        try {
+          const prevDev = Array.isArray(lastClosedShift?.deviceCounters)
+            ? lastClosedShift.deviceCounters.find((dc) => dc && (dc.deviceId === d.id || dc.deviceName === d.name))
+            : undefined;
+          const prevClosing = prevDev ? Number(prevDev.closingCounter) : NaN;
+          const totalShots = Number(d?.totalShotsCounter);
+          if (!isNaN(prevClosing) && isFinite(prevClosing) && prevClosing >= 0) {
+            opening = prevClosing;
+          } else if (!isNaN(totalShots) && isFinite(totalShots) && totalShots >= 0) {
+            opening = totalShots;
+          } else {
+            opening = 0;
+          }
+        } catch {
+          opening = 0;
+        }
+
+        return {
+          deviceId: d?.id || `dev-${Math.random().toString(36).substr(2, 6)}`,
+          deviceName: d?.name || 'جهاز ليزر',
+          openingCounter: opening,
+          consumedCounter: 0,
+          adjustments: 0,
+          closingCounter: opening,
+        };
+      });
+    } catch (e) {
+      console.warn('Error reading laser device counters, defaulting to 0:', e);
+      initialDeviceCounters = [];
+    }
+
+    const cashBalInitial =
+      initialBalancing.find((b) => (b.paymentMethodName || '').includes('نقد')) || initialBalancing[0];
+    const initialCashVal = cashBalInitial ? Number(cashBalInitial.openingBalance) || 0 : (Number(openingFloatParam) || 0);
 
     const newShift: ReceptionShift = {
       id: `shift-rec-${Date.now()}`,
@@ -2247,28 +2496,46 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       netShiftCash: initTotalColl,
       openingFloat: initialCashVal,
       initialBalance: initialCashVal,
-      cashCollected: cashBalInitial ? cashBalInitial.totalCollected : 0,
+      cashCollected: cashBalInitial ? Number(cashBalInitial.totalCollected) || 0 : 0,
       cashExpenses: 0,
-      expectedCashInDrawer: initialCashVal + (cashBalInitial ? cashBalInitial.totalCollected : 0),
+      expectedCashInDrawer: initialCashVal + (cashBalInitial ? Number(cashBalInitial.totalCollected) || 0 : 0),
     };
 
-    setAllReceptionShifts((prev) => [newShift, ...prev]);
-    recordAudit({
-      entityType: 'Shift',
-      entityId: newShift.id,
-      entityName: `شيفت ${newShift.shiftNumber}`,
-      actionType: 'CREATE',
-      diffSummary: `فتح شيفت تشغيل ريسيبشن جديد رقم (${newShift.shiftNumber}) مع تحميل (${initialRunRows.length}) حجز لليوم ورصيد افتتاحي`,
-      newState: newShift,
-    });
-    logUserActivity(
-      'reception_ops',
-      'شاشة التشغيل (الريسيبشن)',
-      'Reception Run-sheet',
-      'فتح الشيفت',
-      'Open Shift',
-      `تم فتح الشيفت رقم ${newShift.shiftNumber} مع تحميل حجوزات اليوم تلقائياً`
-    );
+    setAllReceptionShifts((prev) => [
+      newShift,
+      ...(prev || []).map((s) =>
+        s && s.status === 'Open' && (!targetBranchId || s.branchId === targetBranchId)
+          ? { ...s, status: 'Closed' as const, closedAt: new Date().toISOString() }
+          : s
+      ),
+    ]);
+
+    try {
+      recordAudit({
+        entityType: 'Shift',
+        entityId: newShift.id,
+        entityName: `شيفت ${newShift.shiftNumber}`,
+        actionType: 'CREATE',
+        diffSummary: `فتح شيفت تشغيل ريسيبشن جديد رقم (${newShift.shiftNumber}) مع تحميل (${initialRunRows.length}) حجز لليوم ورصيد افتتاحي`,
+        newState: newShift,
+      });
+    } catch (e) {
+      console.warn('Audit record failed:', e);
+    }
+
+    try {
+      logUserActivity(
+        'reception_ops',
+        'شاشة التشغيل (الريسيبشن)',
+        'Reception Run-sheet',
+        'فتح الشيفت',
+        'Open Shift',
+        `تم فتح الشيفت رقم ${newShift.shiftNumber} مع تحميل حجوزات اليوم تلقائياً`
+      );
+    } catch (e) {
+      console.warn('User activity log failed:', e);
+    }
+
     return newShift;
   };
 
@@ -2430,17 +2697,19 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           const existingDeviceIds = new Set(shift.deviceCounters.map((d) => d.deviceName));
           let currentCounters = [...shift.deviceCounters];
 
-          // If new row used a device not in counters list, add it
+          // If new row used a laser device from allLaserDevices not in counters list, add it
           if (newRow.laserDevice && !existingDeviceIds.has(newRow.laserDevice)) {
             const devObj = allLaserDevices.find((d) => d.name === newRow.laserDevice || d.id === newRow.laserDevice);
-            currentCounters.push({
-              deviceId: devObj?.id || `dev-${Date.now()}`,
-              deviceName: newRow.laserDevice,
-              openingCounter: devObj?.totalShotsCounter || 0,
-              consumedCounter: 0,
-              adjustments: 0,
-              closingCounter: devObj?.totalShotsCounter || 0,
-            });
+            if (devObj) {
+              currentCounters.push({
+                deviceId: devObj.id,
+                deviceName: devObj.name,
+                openingCounter: devObj.totalShotsCounter || 0,
+                consumedCounter: 0,
+                adjustments: 0,
+                closingCounter: devObj.totalShotsCounter || 0,
+              });
+            }
           }
 
           const nextCounters = currentCounters.map((d) => {
@@ -2540,43 +2809,69 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       id: `exp-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
     };
 
+    const isCreditReceipt = newExp.expenseType === 'receipt_only';
+    const isBalancePayment = newExp.expenseType === 'balance_payment' || newExp.category === 'سداد دفعات ومستلزمات موردين' || newExp.category?.includes('سداد');
+
     // Link Supplier: If expense is linked to an existing payable supplier (non-cash), update supplier ledger balance
     if (newExp.supplierId && newExp.supplierId !== 'party-s-cash') {
-      setAllParties((prev) =>
-        prev.map((p) => {
-          if (p.id === newExp.supplierId) {
-            return {
-              ...p,
-              balance: Number(p.balance || 0) + Number(newExp.amount),
-            };
-          }
-          return p;
-        })
-      );
-
-      recordAudit({
-        branchId: activeBranch?.id,
-        entityType: 'Party' as any,
-        entityId: newExp.supplierId,
-        entityName: newExp.supplierName || 'مورد',
-        actionType: 'UPDATE',
-        diffSummary: `سند صرف / سداد دفعة لمورد (${newExp.supplierName || ''}) بقيمة ${newExp.amount} ج.م من نقدية الشيفت`,
-      });
+      if (isCreditReceipt) {
+        // استلام فقط (آجل): القيمة تضاف لحساب المورد (زيادة المديونية للمورد)
+        setAllParties((prev) =>
+          prev.map((p) => {
+            if (p.id === newExp.supplierId) {
+              return {
+                ...p,
+                balance: Number(p.balance || 0) + Number(newExp.amount),
+              };
+            }
+            return p;
+          })
+        );
+        recordAudit({
+          branchId: activeBranch?.id,
+          entityType: 'Party' as any,
+          entityId: newExp.supplierId,
+          entityName: newExp.supplierName || 'مورد',
+          actionType: 'UPDATE',
+          diffSummary: `إذن استلام أصناف آجل من المورد (${newExp.supplierName || ''}) بقيمة ${newExp.amount} ج.م تمت إضافتها لحسابه`,
+        });
+      } else if (isBalancePayment) {
+        // سداد من الرصيد: تخفيض رصيد مديونية المورد
+        setAllParties((prev) =>
+          prev.map((p) => {
+            if (p.id === newExp.supplierId) {
+              return {
+                ...p,
+                balance: Math.max(0, Number(p.balance || 0) - Number(newExp.amount)),
+              };
+            }
+            return p;
+          })
+        );
+        recordAudit({
+          branchId: activeBranch?.id,
+          entityType: 'Party' as any,
+          entityId: newExp.supplierId,
+          entityName: newExp.supplierName || 'مورد',
+          actionType: 'UPDATE',
+          diffSummary: `سداد دفعة للمورد (${newExp.supplierName || ''}) بقيمة ${newExp.amount} ج.م وخصمها من رصيده الدفتري ونقدية الشيفت`,
+        });
+      }
     }
 
-    // Auto-post journal entry for shift disbursement
-    const isPayablePayment = newExp.category === 'سداد دفعات ومستلزمات موردين' && newExp.supplierId !== 'party-s-cash';
-    const debitAcc = isPayablePayment
+    // Auto-post journal entry for the transaction
+    const debitAcc = isBalancePayment
       ? (allAccounts.find((a) => a.code === '2100') || allAccounts.find((a) => a.type === 'Liability'))
-      : (allAccounts.find((a) => a.code === '5200') || allAccounts.find((a) => a.code === '5100') || allAccounts.find((a) => a.type === 'Expense'));
+      : (allAccounts.find((a) => a.code === '1130') || allAccounts.find((a) => a.code === '5200') || allAccounts.find((a) => a.type === 'Expense'));
 
     const pm = allPaymentMethods.find(
       (p) => p.nameAr === newExp.disbursementMethod || p.id === newExp.disbursementMethod || p.nameEn === newExp.disbursementMethod
     );
-    const cashAcc =
-      (pm?.linkedAccountId ? allAccounts.find((a) => a.id === pm.linkedAccountId) : null) ||
-      allAccounts.find((a) => a.code === '1111') ||
-      allAccounts.find((a) => a.type === 'Asset');
+    const cashAcc = isCreditReceipt
+      ? (allAccounts.find((a) => a.code === '2100') || allAccounts.find((a) => a.type === 'Liability'))
+      : ((pm?.linkedAccountId ? allAccounts.find((a) => a.id === pm.linkedAccountId) : null) ||
+        allAccounts.find((a) => a.code === '1111') ||
+        allAccounts.find((a) => a.type === 'Asset'));
 
     if (debitAcc && cashAcc) {
       const jvNum = `JV-EXP-${Date.now().toString().slice(-5)}`;
@@ -2586,7 +2881,9 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         branchId: activeBranch?.id || '',
         entryNumber: jvNum,
         date: newExp.date || new Date().toISOString().split('T')[0],
-        description: `سند صرف شيفت: ${newExp.description || newExp.reason} (${newExp.supplierName ? `المورد: ${newExp.supplierName}` : ''})`,
+        description: isCreditReceipt
+          ? `استلام أصناف آجل: ${newExp.description || newExp.reason} (المورد: ${newExp.supplierName || ''})`
+          : `سند صرف شيفت: ${newExp.description || newExp.reason} (${newExp.supplierName ? `المورد: ${newExp.supplierName}` : ''})`,
         isPosted: true,
         sourceDocument: `سند صرف شيفت #${shiftId.slice(-4)}`,
         createdAt: new Date().toISOString(),
@@ -2599,7 +2896,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             accountNameEn: debitAcc.nameEn,
             debit: newExp.amount,
             credit: 0,
-            memo: newExp.supplierName ? `صرف للمورد: ${newExp.supplierName}` : newExp.reason,
+            memo: newExp.supplierName ? `للمورد: ${newExp.supplierName}` : newExp.reason,
           },
           {
             id: `line-${Date.now()}-2`,
@@ -2609,11 +2906,16 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             accountNameEn: cashAcc.nameEn,
             debit: 0,
             credit: newExp.amount,
-            memo: `صرف عبر: ${newExp.disbursementMethod || 'الخزينة'}`,
+            memo: isCreditReceipt ? `مستحق للمورد: ${newExp.supplierName || ''}` : `صرف عبر: ${newExp.disbursementMethod || 'الخزينة'}`,
           },
         ],
       };
       setAllJournals((prev) => [autoJv, ...prev]);
+    }
+
+    // وفى حالة استلام فقط: القيمة تضاف لحساب المورد ولا تضاف لمصروفات الشيفت
+    if (isCreditReceipt) {
+      return;
     }
 
     setAllReceptionShifts((prev) =>
@@ -2679,19 +2981,45 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     );
   };
 
-  const updateShiftBalancing = (shiftId: string, methodId: string, data: Partial<ShiftBalancingRow>) => {
+  const updateShiftBalancing = (
+    shiftId: string,
+    methodId: string,
+    dataOrOpening?: Partial<ShiftBalancingRow> | number,
+    totalCollectedVal?: number,
+    totalDisbursedVal?: number,
+    closingBalanceVal?: number
+  ) => {
+    let data: Partial<ShiftBalancingRow> = {};
+    if (typeof dataOrOpening === 'object' && dataOrOpening !== null) {
+      data = { ...dataOrOpening };
+    } else {
+      if (typeof dataOrOpening === 'number') data.openingBalance = dataOrOpening;
+      if (totalCollectedVal !== undefined) data.totalCollected = totalCollectedVal;
+      if (totalDisbursedVal !== undefined) data.totalDisbursed = totalDisbursedVal;
+      if (closingBalanceVal !== undefined) data.closingBalance = closingBalanceVal;
+    }
+
     setAllReceptionShifts((prev) =>
       prev.map((shift) => {
         if (shift.id === shiftId) {
           const nextBalancing = shift.balancing.map((b) => {
             if (b.paymentMethodId === methodId) {
               const updated = { ...b, ...data };
+              const op = Number(updated.openingBalance) || 0;
+              const col = Number(updated.totalCollected) || 0;
+              const dis = Number(updated.totalDisbursed) || 0;
+              const expected = Number((op + col - dis).toFixed(2));
+
               if (data.closingBalance !== undefined && data.adjustments === undefined) {
-                // عند تعديل الرصيد الختامي مباشرة، الفرق يسجل تلقائياً في عمود التسويات
-                const expected = updated.openingBalance + updated.totalCollected - updated.totalDisbursed;
-                updated.adjustments = Number((updated.closingBalance - expected).toFixed(2));
+                // عند تعديل الرصيد الختامي مباشرة: الفرق = الرصيد الختامي الفعلي - المتوقع
+                const closing = Number(updated.closingBalance) || 0;
+                updated.adjustments = Number((closing - expected).toFixed(2));
               } else if (data.adjustments !== undefined && data.closingBalance === undefined) {
-                updated.closingBalance = Number((updated.openingBalance + updated.totalCollected - updated.totalDisbursed + updated.adjustments).toFixed(2));
+                const adj = Number(updated.adjustments) || 0;
+                updated.closingBalance = Number((expected + adj).toFixed(2));
+              } else if (data.closingBalance === undefined && data.adjustments === undefined) {
+                const adj = Number(updated.adjustments) || 0;
+                updated.closingBalance = Number((expected + adj).toFixed(2));
               }
               return updated;
             }
@@ -2707,13 +3035,18 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const updateDeviceCounter = (
     shiftId: string,
     deviceId: string,
-    dataOrConsumed: Partial<ShiftDeviceCounter> | number,
-    adjustmentsVal?: number
+    dataOrConsumed?: Partial<ShiftDeviceCounter> | number,
+    adjustmentsVal?: number,
+    closingVal?: number
   ) => {
-    const data: Partial<ShiftDeviceCounter> =
-      typeof dataOrConsumed === 'object'
-        ? dataOrConsumed
-        : { consumedCounter: dataOrConsumed, adjustments: adjustmentsVal ?? 0 };
+    let data: Partial<ShiftDeviceCounter> = {};
+    if (typeof dataOrConsumed === 'object' && dataOrConsumed !== null) {
+      data = { ...dataOrConsumed };
+    } else {
+      if (typeof dataOrConsumed === 'number') data.consumedCounter = dataOrConsumed;
+      if (adjustmentsVal !== undefined) data.adjustments = adjustmentsVal;
+      if (closingVal !== undefined) data.closingCounter = closingVal;
+    }
 
     setAllReceptionShifts((prev) =>
       prev.map((shift) => {
@@ -2721,15 +3054,19 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           const nextCounters = shift.deviceCounters.map((d) => {
             if (d.deviceId === deviceId) {
               const updated = { ...d, ...data };
+              const op = Number(updated.openingCounter ?? d.openingCounter) || 0;
+              const consumed = Number(updated.consumedCounter ?? d.consumedCounter) || 0;
+              const expected = op + consumed;
+
               if (data.closingCounter !== undefined && data.adjustments === undefined) {
                 // عند تعديل الرصيد الختامي للعداد مباشرة، الفرق يسجل تلقائياً في عمود التسويات
-                const expected = (updated.openingCounter ?? d.openingCounter) + (updated.consumedCounter ?? d.consumedCounter);
-                updated.adjustments = updated.closingCounter - expected;
+                const closing = Number(updated.closingCounter) || 0;
+                updated.adjustments = closing - expected;
+              } else if (data.adjustments !== undefined && data.closingCounter === undefined) {
+                const adj = Number(updated.adjustments) || 0;
+                updated.closingCounter = expected + adj;
               } else {
-                updated.closingCounter =
-                  (updated.openingCounter ?? d.openingCounter) +
-                  (updated.consumedCounter ?? d.consumedCounter) +
-                  (updated.adjustments ?? d.adjustments ?? 0);
+                updated.closingCounter = expected + (Number(updated.adjustments ?? d.adjustments) || 0);
               }
               return updated;
             }
@@ -2892,6 +3229,129 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     localStorage.setItem('erp_stock', JSON.stringify(stockLevels));
   }, [stockLevels]);
 
+  const [allStockMovements, setAllStockMovements] = useState<StockMovement[]>(() => {
+    try {
+      const saved = localStorage.getItem('erp_stock_movements');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {
+      console.error('Failed to load stock movements:', e);
+    }
+    return [
+      {
+        id: 'mov-init-1',
+        tenantId: 'tenant-eg-001',
+        branchId: 'branch-cairo',
+        branchNameAr: 'الفرع الرئيسي - القاهرة (مدينة نصر)',
+        productId: 'raw-001',
+        productNameAr: 'جل تبريد ليزر طبي عالي النقاوة',
+        warehouseId: 'wh-cairo-main',
+        warehouseNameAr: 'المخزن الرئيسي المركزي - القاهرة',
+        type: 'IN',
+        quantity: 5000,
+        unitCost: 0.15,
+        referenceNo: 'INIT-BAL-01',
+        createdAt: '2026-09-01T09:00:00Z',
+        note: 'رصيد مخزني افتتاحي معتمد',
+      },
+      {
+        id: 'mov-init-2',
+        tenantId: 'tenant-eg-001',
+        branchId: 'branch-cairo',
+        branchNameAr: 'الفرع الرئيسي - القاهرة (مدينة نصر)',
+        productId: 'raw-002',
+        productNameAr: 'كريم مخدر موضعي طبي بريدوكايين',
+        warehouseId: 'wh-cairo-main',
+        warehouseNameAr: 'المخزن الرئيسي المركزي - القاهرة',
+        type: 'IN',
+        quantity: 120,
+        unitCost: 45,
+        referenceNo: 'INIT-BAL-02',
+        createdAt: '2026-09-01T09:00:00Z',
+        note: 'رصيد مخزني افتتاحي معتمد',
+      },
+      {
+        id: 'mov-init-3',
+        tenantId: 'tenant-eg-001',
+        branchId: 'branch-alex',
+        branchNameAr: 'فرع الإسكندرية - سموحة',
+        productId: 'raw-001',
+        productNameAr: 'جل تبريد ليزر طبي عالي النقاوة',
+        warehouseId: 'wh-alex-store',
+        warehouseNameAr: 'مخزن فرع الإسكندرية',
+        type: 'IN',
+        quantity: 2000,
+        unitCost: 0.15,
+        referenceNo: 'INIT-BAL-03',
+        createdAt: '2026-09-02T10:00:00Z',
+        note: 'رصيد مخزني افتتاحي فرع الإسكندرية',
+      },
+      {
+        id: 'mov-init-4',
+        tenantId: 'tenant-eg-001',
+        branchId: 'branch-cairo',
+        branchNameAr: 'الفرع الرئيسي - القاهرة (مدينة نصر)',
+        productId: 'raw-001',
+        productNameAr: 'جل تبريد ليزر طبي عالي النقاوة',
+        warehouseId: 'wh-cairo-main',
+        warehouseNameAr: 'المخزن الرئيسي المركزي - القاهرة',
+        type: 'CONSUMPTION',
+        quantity: 150,
+        unitCost: 0.15,
+        referenceNo: 'CSM-CAI-101',
+        createdAt: '2026-09-15T14:30:00Z',
+        note: 'صرف استهلاك جلسات ليزر شيفت صباحي',
+      },
+      {
+        id: 'mov-init-5',
+        tenantId: 'tenant-eg-001',
+        branchId: 'branch-alex',
+        branchNameAr: 'فرع الإسكندرية - سموحة',
+        productId: 'raw-002',
+        productNameAr: 'كريم مخدر موضعي طبي بريدوكايين',
+        warehouseId: 'wh-alex-store',
+        warehouseNameAr: 'مخزن فرع الإسكندرية',
+        type: 'CONSUMPTION',
+        quantity: 12,
+        unitCost: 45,
+        referenceNo: 'CSM-ALX-102',
+        createdAt: '2026-09-18T16:00:00Z',
+        note: 'صرف استهلاك عيادة الجلدية فرع الإسكندرية',
+      },
+    ];
+  });
+
+  useEffect(() => {
+    localStorage.setItem('erp_stock_movements', JSON.stringify(allStockMovements));
+  }, [allStockMovements]);
+
+  const stockMovements = useMemo(() => {
+    return allStockMovements.filter((m) => m.tenantId === tenant?.id);
+  }, [allStockMovements, tenant?.id]);
+
+  const recordStockMovement = (
+    movement: Omit<StockMovement, 'id' | 'createdAt' | 'tenantId'>
+  ) => {
+    const targetWh = allWarehouses.find((w) => w.id === movement.warehouseId);
+    const targetBranch = targetWh ? allBranches.find((b) => b.id === targetWh.branchId) : null;
+    const targetProd = allProducts.find((p) => p.id === movement.productId);
+
+    const newMov: StockMovement = {
+      ...movement,
+      id: `mov-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      tenantId: tenant?.id || INITIAL_TENANT.id,
+      branchId: movement.branchId || targetWh?.branchId || activeBranch?.id,
+      branchNameAr: movement.branchNameAr || targetBranch?.name || activeBranch?.name,
+      productNameAr: movement.productNameAr || targetProd?.nameAr,
+      warehouseNameAr: movement.warehouseNameAr || targetWh?.name,
+      createdAt: new Date().toISOString(),
+    };
+
+    setAllStockMovements((prev) => [newMov, ...prev]);
+  };
+
   const products = allProducts.filter((p) => p.tenantId === tenant?.id);
 
   const getProductStock = (productId: string, warehouseId?: string) => {
@@ -2992,11 +3452,37 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       }
       return [...prev, { productId, warehouseId, quantityOnHand: Math.max(0, delta) }];
     });
+
+    const targetWh = allWarehouses.find((w) => w.id === warehouseId);
+    const targetBranch = targetWh ? allBranches.find((b) => b.id === targetWh.branchId) : null;
+    const targetProd = allProducts.find((p) => p.id === productId);
+
+    let movType: 'IN' | 'OUT' | 'TRANSFER' | 'ADJUSTMENT' | 'CONSUMPTION' = delta > 0 ? 'ADJUSTMENT' : 'ADJUSTMENT';
+    if (reason.includes('استلام') || reason.includes('شراء')) movType = 'IN';
+    else if (reason.includes('صرف') || reason.includes('تسليم')) movType = 'OUT';
+    else if (reason.includes('تحويل')) movType = 'TRANSFER';
+    else if (reason.includes('استهلاك') || reason.includes('جلسة')) movType = 'CONSUMPTION';
+
+    recordStockMovement({
+      branchId: targetWh?.branchId || activeBranch?.id,
+      branchNameAr: targetBranch?.name || activeBranch?.name,
+      productId,
+      productNameAr: targetProd?.nameAr,
+      warehouseId,
+      warehouseNameAr: targetWh?.name,
+      type: movType,
+      quantity: Math.abs(delta),
+      unitCost: targetProd?.purchasePrice || 0,
+      referenceNo: `STK-${Date.now().toString().slice(-5)}`,
+      note: reason,
+    });
   };
 
   const transferStock = (productId: string, fromWh: string, toWh: string, qty: number) => {
-    adjustStock(productId, fromWh, -qty, 'تحويل صادر');
-    adjustStock(productId, toWh, qty, 'تحويل وارد');
+    const fromWhObj = allWarehouses.find((w) => w.id === fromWh);
+    const toWhObj = allWarehouses.find((w) => w.id === toWh);
+    adjustStock(productId, fromWh, -qty, `تحويل مخزني صادر إلى (${toWhObj?.name || toWh})`);
+    adjustStock(productId, toWh, qty, `تحويل مخزني وارد من (${fromWhObj?.name || fromWh})`);
   };
 
   const pullLatestFromNeon = async (): Promise<boolean> => {
@@ -3283,44 +3769,6 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       diffSummary: `حذف جلسة الجرد (${prev.auditNumber})`,
     });
   };
-
-  // 13. Accounting & Accounts
-  const [allAccounts, setAllAccounts] = useState<Account[]>(() => {
-    try {
-      const saved = localStorage.getItem('erp_accounts');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch (e) {
-      console.error('Failed to load accounts:', e);
-    }
-    return INITIAL_ACCOUNTS;
-  });
-
-  const [allJournals, setAllJournals] = useState<JournalEntry[]>(() => {
-    try {
-      const saved = localStorage.getItem('erp_journals');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch (e) {
-      console.error('Failed to load journals:', e);
-    }
-    return INITIAL_JOURNAL_ENTRIES;
-  });
-
-  useEffect(() => {
-    localStorage.setItem('erp_accounts', JSON.stringify(allAccounts));
-  }, [allAccounts]);
-
-  useEffect(() => {
-    localStorage.setItem('erp_journals', JSON.stringify(allJournals));
-  }, [allJournals]);
-
-  const accounts = allAccounts.filter((a) => a.tenantId === tenant?.id);
-  const journalEntries = allJournals.filter((j) => j.tenantId === tenant?.id);
 
   // 13b. Staff Payroll & Salaries (مسير الرواتب والأجور)
   const [allPayrollRuns, setAllPayrollRuns] = useState<PayrollRun[]>(() => {
@@ -4181,6 +4629,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // Manual Journal Entry
   const createManualJournalEntry = (entryData: {
     description: string;
+    branchId?: string;
     lines: { accountId: string; debit: number; credit: number; memo?: string }[];
   }) => {
     const totalDebit = entryData.lines.reduce((s, l) => s + l.debit, 0);
@@ -4214,7 +4663,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const newEntry: JournalEntry = {
       id: `jv-manual-${Date.now()}`,
       tenantId: tenant?.id || INITIAL_TENANT.id,
-      branchId: activeBranch?.id || '',
+      branchId: entryData.branchId || activeBranch?.id || branches[0]?.id || '',
       entryNumber: entryNum,
       date: new Date().toISOString().split('T')[0],
       description: entryData.description,
@@ -5624,6 +6073,9 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         products,
         allProducts,
         stockLevels,
+        stockMovements,
+        allStockMovements,
+        recordStockMovement,
         getProductStock,
         addProduct,
         updateProduct,

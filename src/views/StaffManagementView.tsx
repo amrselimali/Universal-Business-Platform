@@ -74,6 +74,7 @@ export const StaffManagementView: React.FC<StaffManagementViewProps> = ({ onNavi
   const [email, setEmail] = useState('');
   const [branchId, setBranchId] = useState('');
   const [isActive, setIsActive] = useState(true);
+  const [isServiceProvider, setIsServiceProvider] = useState(true);
   const [hireDate, setHireDate] = useState(new Date().toISOString().split('T')[0]);
 
   // Financial & Rates State
@@ -130,6 +131,7 @@ export const StaffManagementView: React.FC<StaffManagementViewProps> = ({ onNavi
     setEmail('');
     setBranchId(branches[0]?.id || '');
     setIsActive(true);
+    setIsServiceProvider(true);
     setHireDate(new Date().toISOString().split('T')[0]);
     setFixedMonthlySalary(15000);
     setFixedAllowances(1500);
@@ -160,6 +162,7 @@ export const StaffManagementView: React.FC<StaffManagementViewProps> = ({ onNavi
     setEmail(staff.email || '');
     setBranchId(staff.branchId || '');
     setIsActive(staff.isActive);
+    setIsServiceProvider(staff.isServiceProvider ?? (staff.roleType === 'Doctor' || staff.roleType === 'Technician'));
     setHireDate(staff.hireDate || new Date().toISOString().split('T')[0]);
     setFixedMonthlySalary(staff.fixedMonthlySalary ?? staff.monthlySalary ?? 0);
     setFixedAllowances(staff.fixedAllowances ?? 0);
@@ -250,6 +253,7 @@ export const StaffManagementView: React.FC<StaffManagementViewProps> = ({ onNavi
       email: email.trim() || undefined,
       branchId: branchId || undefined,
       isActive,
+      isServiceProvider,
       hireDate: hireDate || new Date().toISOString().split('T')[0],
       monthlySalary: Number(fixedMonthlySalary) || 0,
       fixedMonthlySalary: Number(fixedMonthlySalary) || 0,
@@ -956,6 +960,28 @@ export const StaffManagementView: React.FC<StaffManagementViewProps> = ({ onNavi
                     <span>{isActive ? t('مفعل (نشط)', 'Active') : t('معطل (متوقف)', 'Inactive')}</span>
                     {isActive ? (
                       <ToggleRight className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+                    ) : (
+                      <ToggleLeft className="h-5 w-5 text-slate-400" />
+                    )}
+                  </button>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    {t('مقدم خدمة (يظهر بشاشة التشغيل)', 'Service Provider (Operations)')}
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setIsServiceProvider(!isServiceProvider)}
+                    className={`w-full py-2 px-3 text-xs font-bold rounded-xl border flex items-center justify-between transition-all cursor-pointer ${
+                      isServiceProvider
+                        ? 'bg-indigo-50 text-indigo-700 border-indigo-300 dark:bg-indigo-950/50 dark:text-indigo-300 dark:border-indigo-800'
+                        : 'bg-slate-100 text-slate-600 border-slate-300 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700'
+                    }`}
+                  >
+                    <span>{isServiceProvider ? t('مقدم خدمة (نعم)', 'Provider (Yes)') : t('غير مقدم خدمة (لا)', 'No')}</span>
+                    {isServiceProvider ? (
+                      <ToggleRight className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
                     ) : (
                       <ToggleLeft className="h-5 w-5 text-slate-400" />
                     )}

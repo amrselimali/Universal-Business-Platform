@@ -757,12 +757,42 @@ export class NeonService {
       await sql`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS default_pos_collection_only BOOLEAN DEFAULT FALSE;`;
       await sql`ALTER TABLE branches ADD COLUMN IF NOT EXISTS default_pos_collection_only BOOLEAN DEFAULT FALSE;`;
       await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS default_collection_only BOOLEAN DEFAULT FALSE;`;
+      await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS sales_account_id VARCHAR(100);`;
+      await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS sales_account_name_ar VARCHAR(255);`;
+      await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS expense_account_id VARCHAR(100);`;
+      await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS expense_account_name_ar VARCHAR(255);`;
+      await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS inventory_account_id VARCHAR(100);`;
+      await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS inventory_account_name_ar VARCHAR(255);`;
+      await sql`ALTER TABLE accounts ADD COLUMN IF NOT EXISTS branch_id VARCHAR(100);`;
+      await sql`ALTER TABLE accounts ADD COLUMN IF NOT EXISTS branch_name_ar VARCHAR(255);`;
+      await sql`ALTER TABLE journal_entries ADD COLUMN IF NOT EXISTS branch_id VARCHAR(100);`;
+      await sql`ALTER TABLE journal_entries ADD COLUMN IF NOT EXISTS branch_name_ar VARCHAR(255);`;
       await sql`ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS is_collection_only BOOLEAN DEFAULT FALSE;`;
       await sql`ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS payment_fee_percentage NUMERIC(5, 2) DEFAULT 0.00;`;
       await sql`ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS payment_fee_amount NUMERIC(15, 2) DEFAULT 0.00;`;
       await sql`ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS total_with_fee NUMERIC(15, 2) DEFAULT 0.00;`;
       await sql`ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS branch_id VARCHAR(100);`;
       await sql`ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS payment_method_id VARCHAR(100);`;
+
+      // 3. Create stock_movements table if not exists (سجل حركات المخازن والاستهلاك لكل فرع)
+      await sql`
+        CREATE TABLE IF NOT EXISTS stock_movements (
+          id VARCHAR(100) PRIMARY KEY,
+          tenant_id VARCHAR(100) NOT NULL,
+          branch_id VARCHAR(100),
+          branch_name_ar VARCHAR(255),
+          product_id VARCHAR(100) NOT NULL,
+          product_name_ar VARCHAR(255),
+          warehouse_id VARCHAR(100) NOT NULL,
+          warehouse_name_ar VARCHAR(255),
+          type VARCHAR(50) NOT NULL,
+          quantity NUMERIC(15, 3) NOT NULL,
+          unit_cost NUMERIC(15, 2) DEFAULT 0.00,
+          reference_no VARCHAR(100),
+          note TEXT,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
+      `;
 
       return { success: true, message: 'تم تحديث وترحيل هيكل الجداول في Neon بنجاح تام وبأمان 100% دون أي مساس بالبيانات الحالية!' };
     } catch (err: any) {

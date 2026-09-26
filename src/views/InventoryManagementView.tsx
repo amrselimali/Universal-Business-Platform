@@ -6,6 +6,8 @@ import {
   InventoryStaffLiability,
   Product,
   Warehouse,
+  StockMovement,
+  Account,
 } from '../types';
 import {
   Warehouse as WarehouseIcon,
@@ -28,6 +30,10 @@ import {
   Clock,
   BarChart3,
   PackageSearch,
+  BookOpen,
+  History,
+  GitCommit,
+  Filter,
 } from 'lucide-react';
 
 export const InventoryManagementView: React.FC = () => {
@@ -35,9 +41,13 @@ export const InventoryManagementView: React.FC = () => {
     t,
     formatMoney,
     branches,
+    activeBranch,
     warehouses,
     products,
     stockLevels,
+    stockMovements,
+    recordStockMovement,
+    accounts,
     getProductStock,
     adjustStock,
     transferStock,
@@ -52,17 +62,28 @@ export const InventoryManagementView: React.FC = () => {
     invoices,
   } = usePlatform();
 
-  // Active Tab: Stock items control, Cost mapping (BOM), Consumption & Forecasting reports, Audits & Settlements
-  const [activeTab, setActiveTab] = useState<'stock_items' | 'cost_mapping' | 'consumption_forecast' | 'audits'>('stock_items');
+  // Active Tab: Stock items control, Movements log, Cost mapping (BOM), Consumption & Forecasting reports, Audits & Settlements
+  const [activeTab, setActiveTab] = useState<'stock_items' | 'movements' | 'cost_mapping' | 'consumption_forecast' | 'audits'>('stock_items');
+  const [selectedBranchId, setSelectedBranchId] = useState<string>(activeBranch?.id || 'all');
   const [selectedWarehouseId, setSelectedWarehouseId] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [filterLinkedOnly, setFilterLinkedOnly] = useState<'all' | 'linked' | 'unlinked'>('all');
+
+  // Movements Tab state
+  const [movementTypeFilter, setMovementTypeFilter] = useState<string>('all');
+  const [movementSearchQuery, setMovementSearchQuery] = useState<string>('');
 
   // Sales Cost Mapping Tab state
   const [salesSearchQuery, setSalesSearchQuery] = useState<string>('');
   const [salesCategoryFilter, setSalesCategoryFilter] = useState<string>('all');
   const [showRecipeModal, setShowRecipeModal] = useState<boolean>(false);
   const [selectedSalesForRecipe, setSelectedSalesForRecipe] = useState<Product | null>(null);
+
+  // Filtered warehouses by selected branch
+  const branchWarehouses = useMemo(() => {
+    if (selectedBranchId === 'all') return warehouses;
+    return warehouses.filter((w) => w.branchId === selectedBranchId);
+  }, [warehouses, selectedBranchId]);
 
   // --- Modals State ---
   // 1. Add Stock Item Modal
@@ -82,6 +103,10 @@ export const InventoryManagementView: React.FC = () => {
     linkedSalesProductIds: string[];
     consumptionBasis: 'units_sold' | 'revenue_ratio' | 'monthly_period' | 'client_count';
     consumptionRate: number;
+    expenseAccountId: string;
+    expenseAccountNameAr: string;
+    inventoryAccountId: string;
+    inventoryAccountNameAr: string;
   }>({
     nameAr: '',
     nameEn: '',
@@ -97,6 +122,10 @@ export const InventoryManagementView: React.FC = () => {
     linkedSalesProductIds: [],
     consumptionBasis: 'units_sold',
     consumptionRate: 1,
+    expenseAccountId: 'acc-5100',
+    expenseAccountNameAr: 'تكلفة البضاعة المباعة (COGS)',
+    inventoryAccountId: 'acc-1130',
+    inventoryAccountNameAr: 'مخزون البضائع ومستلزمات العيادة',
   });
 
   // 2. Quick Stock In (+) / Out (-) Modal
@@ -218,29 +247,48 @@ export const InventoryManagementView: React.FC = () => {
     });
   }, [stockItems, searchQuery, filterLinkedOnly]);
 
+  // Filtered Stock Movements for display (سجل حركات المخازن والاستهلاك)
+  const filteredMovements = useMemo(() => {
+    return (stockMovements || []).filter((mov) => {
+      const matchesBranch = selectedBranchId === 'all' || mov.branchId === selectedBranchId;
+      const matchesWh = selectedWarehouseId === 'all' || mov.warehouseId === selectedWarehouseId;
+      const matchesType = movementTypeFilter === 'all' || mov.type === movementTypeFilter;
+      const q = movementSearchQuery.toLowerCase().trim();
+      const matchesSearch =
+        !q ||
+        (mov.productNameAr && mov.productNameAr.toLowerCase().includes(q)) ||
+        (mov.referenceNo && mov.referenceNo.toLowerCase().includes(q)) ||
+        (mov.warehouseNameAr && mov.warehouseNameAr.toLowerCase().includes(q)) ||
+        (mov.branchNameAr && mov.branchNameAr.toLowerCase().includes(q)) ||
+        (mov.note && mov.note.toLowerCase().includes(q));
+
+      return matchesBranch && matchesWh && matchesType && matchesSearch;
+    });
+  }, [stockMovements, selectedBranchId, selectedWarehouseId, movementTypeFilter, movementSearchQuery]);
+
   // Total Quantity of an item across warehouses or specific warehouse
   const getItemCurrentStock = (productId: string) => {
-    if (selectedWarehouseId === 'all') {
-      return warehouses.reduce((sum, wh) => sum + getProductStock(productId, wh.id), 0);
+    if (selectedWarehouseId !== 'all') {
+      return getProductStock(productId, selectedWarehouseId);
     }
-    return getProductStock(productId, selectedWarehouseId);
+    return branchWarehouses.reduce((sum, wh) => sum + getProductStock(productId, wh.id), 0);
   };
 
-  // KPIs
+  // KPIs (filtered by branch if specified)
   const totalStockItemsCount = stockItems.length;
   const totalStockValuation = useMemo(() => {
     return stockItems.reduce((sum, p) => {
-      const qty = warehouses.reduce((wSum, wh) => wSum + getProductStock(p.id, wh.id), 0);
+      const qty = branchWarehouses.reduce((wSum, wh) => wSum + getProductStock(p.id, wh.id), 0);
       return sum + qty * (p.purchasePrice || 0);
     }, 0);
-  }, [stockItems, warehouses, getProductStock]);
+  }, [stockItems, branchWarehouses, getProductStock]);
 
   const lowStockItemsCount = useMemo(() => {
     return stockItems.filter((p) => {
-      const currentQty = warehouses.reduce((wSum, wh) => wSum + getProductStock(p.id, wh.id), 0);
+      const currentQty = branchWarehouses.reduce((wSum, wh) => wSum + getProductStock(p.id, wh.id), 0);
       return currentQty <= (p.minStockLevel || 0);
     }).length;
-  }, [stockItems, warehouses, getProductStock]);
+  }, [stockItems, branchWarehouses, getProductStock]);
 
   const linkedStockItemsCount = stockItems.filter(
     (p) => p.linkedSalesProductIds && p.linkedSalesProductIds.length > 0
@@ -301,13 +349,21 @@ export const InventoryManagementView: React.FC = () => {
     return Array.from(set);
   }, [salesItems]);
 
-  // --- Sales-Driven Consumption & Future Forecasting Calculation ---
+  // --- Sales-Driven Consumption & Future Forecasting Calculation (مع فلترة الفروع المنفصلة) ---
   const consumptionForecastReport = useMemo(() => {
     const salesVolumeMap: { [productId: string]: number } = {};
     let totalPatientsServiced = 0;
 
+    // Filter shifts and invoices by selected branch
+    const branchShifts = receptionShifts.filter(
+      (s) => selectedBranchId === 'all' || !s.branchId || s.branchId === selectedBranchId
+    );
+    const branchInvoices = invoices.filter(
+      (i) => selectedBranchId === 'all' || !i.branchId || i.branchId === selectedBranchId
+    );
+
     // From reception shifts runRows
-    receptionShifts.forEach((shift) => {
+    branchShifts.forEach((shift) => {
       if (shift.runRows && Array.isArray(shift.runRows)) {
         shift.runRows.forEach((row) => {
           totalPatientsServiced += 1;
@@ -322,7 +378,7 @@ export const InventoryManagementView: React.FC = () => {
     });
 
     // Also from invoices lines
-    invoices.forEach((inv) => {
+    branchInvoices.forEach((inv) => {
       if (inv.lines && Array.isArray(inv.lines)) {
         inv.lines.forEach((line) => {
           salesVolumeMap[line.productId] = (salesVolumeMap[line.productId] || 0) + (line.quantity || 1);
@@ -331,7 +387,7 @@ export const InventoryManagementView: React.FC = () => {
     });
 
     return stockItems.map((stk) => {
-      const currentOnHand = warehouses.reduce((sum, wh) => sum + getProductStock(stk.id, wh.id), 0);
+      const currentOnHand = branchWarehouses.reduce((sum, wh) => sum + getProductStock(stk.id, wh.id), 0);
       let totalConsumedFromSales = 0;
       const linkedSalesNames: string[] = [];
 
@@ -389,6 +445,9 @@ export const InventoryManagementView: React.FC = () => {
   // --- Handlers: Add New Stock Item ---
   const handleOpenAddStockItem = () => {
     const nextSku = `RAW-${(stockItems.length + 1).toString().padStart(3, '0')}`;
+    const defaultExpenseAcc = accounts.find((a) => a.code === '5100') || accounts.find((a) => a.type === 'Expense');
+    const defaultInvAcc = accounts.find((a) => a.code === '1130') || accounts.find((a) => a.type === 'Asset');
+
     setStockItemForm({
       nameAr: '',
       nameEn: '',
@@ -399,11 +458,15 @@ export const InventoryManagementView: React.FC = () => {
       purchasePrice: 0.15,
       minStockLevel: 100,
       initialStock: 500,
-      initialWarehouseId: warehouses[0]?.id || '',
+      initialWarehouseId: branchWarehouses[0]?.id || warehouses[0]?.id || '',
       notes: '',
       linkedSalesProductIds: [],
       consumptionBasis: 'units_sold',
       consumptionRate: 1,
+      expenseAccountId: defaultExpenseAcc?.id || 'acc-5100',
+      expenseAccountNameAr: defaultExpenseAcc?.nameAr || 'تكلفة البضاعة المباعة (COGS)',
+      inventoryAccountId: defaultInvAcc?.id || 'acc-1130',
+      inventoryAccountNameAr: defaultInvAcc?.nameAr || 'مخزون البضائع ومستلزمات العيادة',
     });
     setShowAddStockItemModal(true);
   };
@@ -411,6 +474,9 @@ export const InventoryManagementView: React.FC = () => {
   const handleSaveAddStockItem = (e: React.FormEvent) => {
     e.preventDefault();
     if (!stockItemForm.nameAr.trim()) return;
+
+    const chosenExpense = accounts.find((a) => a.id === stockItemForm.expenseAccountId);
+    const chosenInv = accounts.find((a) => a.id === stockItemForm.inventoryAccountId);
 
     addProduct(
       {
@@ -432,6 +498,10 @@ export const InventoryManagementView: React.FC = () => {
         linkedSalesProductIds: stockItemForm.linkedSalesProductIds,
         consumptionBasis: stockItemForm.consumptionBasis,
         consumptionRate: Number(stockItemForm.consumptionRate) || 1,
+        expenseAccountId: stockItemForm.expenseAccountId || chosenExpense?.id || undefined,
+        expenseAccountNameAr: chosenExpense?.nameAr || stockItemForm.expenseAccountNameAr || undefined,
+        inventoryAccountId: stockItemForm.inventoryAccountId || chosenInv?.id || undefined,
+        inventoryAccountNameAr: chosenInv?.nameAr || stockItemForm.inventoryAccountNameAr || undefined,
       },
       Number(stockItemForm.initialStock) || 0
     );
@@ -793,6 +863,27 @@ export const InventoryManagementView: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2.5 flex-wrap">
+          {/* Multi-Branch Isolation Selector */}
+          <div className="flex items-center gap-2 bg-indigo-50/70 border border-indigo-200 px-3.5 py-2 rounded-xl text-xs font-semibold">
+            <Building2 className="w-4 h-4 text-indigo-600 shrink-0" />
+            <span className="text-indigo-900 whitespace-nowrap">{t('الفرع:', 'Branch:')}</span>
+            <select
+              value={selectedBranchId}
+              onChange={(e) => {
+                setSelectedBranchId(e.target.value);
+                setSelectedWarehouseId('all');
+              }}
+              className="bg-transparent font-bold text-indigo-700 focus:outline-none cursor-pointer"
+            >
+              <option value="all">{t('جميع الفروع (عرض شامل)', 'All Branches (Consolidated)')}</option>
+              {branches.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
           <button
             id="btn-add-stock-item"
             onClick={handleOpenAddStockItem}
@@ -807,8 +898,8 @@ export const InventoryManagementView: React.FC = () => {
             onClick={() => {
               setTransferData({
                 productId: stockItems[0]?.id || '',
-                fromWarehouseId: warehouses[0]?.id || '',
-                toWarehouseId: warehouses[1]?.id || '',
+                fromWarehouseId: branchWarehouses[0]?.id || warehouses[0]?.id || '',
+                toWarehouseId: branchWarehouses[1]?.id || warehouses[1]?.id || '',
                 quantity: 10,
                 notes: '',
               });
@@ -850,7 +941,9 @@ export const InventoryManagementView: React.FC = () => {
           <div>
             <p className="text-xs font-medium text-slate-500">{t('القيمة التقديرية للمخزون', 'Total Stock Valuation')}</p>
             <h3 className="text-2xl font-bold text-slate-800 mt-1">{formatMoney(totalStockValuation)}</h3>
-            <span className="text-xs text-slate-400 mt-0.5 inline-block">{t('بسعر تكلفة الشراء', 'At purchase cost')}</span>
+            <span className="text-xs text-slate-400 mt-0.5 inline-block">
+              {selectedBranchId !== 'all' ? branches.find((b) => b.id === selectedBranchId)?.name : t('بسعر تكلفة الشراء', 'At purchase cost')}
+            </span>
           </div>
           <div className="w-12 h-12 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
             <DollarSign className="w-6 h-6" />
@@ -872,9 +965,11 @@ export const InventoryManagementView: React.FC = () => {
 
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
           <div>
-            <p className="text-xs font-medium text-slate-500">{t('المخازن النشطة', 'Active Stores')}</p>
-            <h3 className="text-2xl font-bold text-slate-800 mt-1">{warehouses.length}</h3>
-            <span className="text-xs text-indigo-600 mt-0.5 inline-block">{branches.length} {t('فروع مشغلة', 'branches')}</span>
+            <p className="text-xs font-medium text-slate-500">{t('المخازن المشغلة', 'Active Stores')}</p>
+            <h3 className="text-2xl font-bold text-slate-800 mt-1">{branchWarehouses.length}</h3>
+            <span className="text-xs text-indigo-600 mt-0.5 inline-block">
+              {selectedBranchId !== 'all' ? t('مخازن هذا الفرع', 'Branch warehouses') : `${branches.length} ${t('فروع مشغلة', 'branches')}`}
+            </span>
           </div>
           <div className="w-12 h-12 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
             <Building2 className="w-6 h-6" />
@@ -898,6 +993,22 @@ export const InventoryManagementView: React.FC = () => {
             <span>{t('الأصناف المخزنية والتحكم (+ / -)', 'Stock Items Control (+ / -)')}</span>
             <span className="px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-600 font-bold">
               {stockItems.length}
+            </span>
+          </button>
+
+          <button
+            id="tab-movements"
+            onClick={() => setActiveTab('movements')}
+            className={`pb-4 text-sm font-semibold flex items-center gap-2 border-b-2 whitespace-nowrap transition ${
+              activeTab === 'movements'
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            <History className="w-4 h-4 text-indigo-600" />
+            <span>{t('حركة وسجل المخازن والاستهلاك', 'Stock & Consumption Log')}</span>
+            <span className="px-2 py-0.5 rounded-full text-xs bg-indigo-100 text-indigo-700 font-bold">
+              {filteredMovements.length}
             </span>
           </button>
 

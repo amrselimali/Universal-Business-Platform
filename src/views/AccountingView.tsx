@@ -20,6 +20,7 @@ import {
   CheckCircle2,
   X,
   ExternalLink,
+  Building2,
 } from 'lucide-react';
 import { PartyStatementModal } from '../components/PartyStatementModal';
 
@@ -35,12 +36,17 @@ export const AccountingView: React.FC = () => {
     createManualJournalEntry,
     language,
     tenant,
+    branches,
     activeBranch,
   } = usePlatform();
 
   const [activeTab, setActiveTab] = useState<'coa' | 'general_ledger' | 'journal' | 'trial_balance' | 'statements'>('coa');
   const [selectedType, setSelectedType] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
+
+  // Multi-Branch Isolation state for Accounting (الفصل المحاسبي بين الفروع)
+  const [selectedBranchId, setSelectedBranchId] = useState<string>('all');
+  const [branchOnlyFilter, setBranchOnlyFilter] = useState<boolean>(false);
 
   // Account Modal State (Add / Edit)
   const [showAccountModal, setShowAccountModal] = useState<boolean>(false);
@@ -54,6 +60,8 @@ export const AccountingView: React.FC = () => {
     parentId: string;
     isDebitNormal: boolean;
     balance: number;
+    branchId: string;
+    branchNameAr: string;
   }>({
     code: '',
     nameAr: '',
@@ -62,6 +70,8 @@ export const AccountingView: React.FC = () => {
     parentId: '',
     isDebitNormal: true,
     balance: 0,
+    branchId: '',
+    branchNameAr: '',
   });
   const [accountModalError, setAccountModalError] = useState<string | null>(null);
 
@@ -76,6 +86,7 @@ export const AccountingView: React.FC = () => {
 
   // Manual Journal Modal State
   const [showManualModal, setShowManualModal] = useState<boolean>(false);
+  const [manualJournalBranchId, setManualJournalBranchId] = useState<string>('');
   const [entryDesc, setEntryDesc] = useState<string>('');
   const [lines, setLines] = useState<
     { accountId: string; debit: number; credit: number; memo: string }[]
@@ -85,31 +96,43 @@ export const AccountingView: React.FC = () => {
   ]);
   const [modalError, setModalError] = useState<string | null>(null);
 
-  // Totals for Trial Balance
-  const totalDebits = accounts
+  // Filtered accounts based on Selected Branch
+  const activeBranchAccounts = useMemo(() => {
+    if (selectedBranchId === 'all') return accounts;
+    if (selectedBranchId === 'general') {
+      return accounts.filter((a) => !a.branchId || a.branchId === 'all');
+    }
+    if (branchOnlyFilter) {
+      return accounts.filter((a) => a.branchId === selectedBranchId);
+    }
+    return accounts.filter((a) => a.branchId === selectedBranchId || !a.branchId || a.branchId === 'all');
+  }, [accounts, selectedBranchId, branchOnlyFilter]);
+
+  // Totals for Trial Balance & Health Ribbon (isolated per branch if selected)
+  const totalDebits = activeBranchAccounts
     .filter((a) => a.isDebitNormal)
     .reduce((sum, a) => sum + a.balance, 0);
-  const totalCredits = accounts
+  const totalCredits = activeBranchAccounts
     .filter((a) => !a.isDebitNormal)
     .reduce((sum, a) => sum + a.balance, 0);
 
   // Total Revenue & Expense for Net Profit
-  const totalRevenue = accounts
+  const totalRevenue = activeBranchAccounts
     .filter((a) => a.type === 'Revenue')
     .reduce((sum, a) => sum + a.balance, 0);
-  const totalExpense = accounts
+  const totalExpense = activeBranchAccounts
     .filter((a) => a.type === 'Expense')
     .reduce((sum, a) => sum + a.balance, 0);
   const netIncome = totalRevenue - totalExpense;
 
   // Sorted accounts by account code (ترتيب شجرة الحسابات بكود الحساب)
   const sortedAccounts = useMemo(() => {
-    return [...accounts].sort((a, b) =>
+    return [...activeBranchAccounts].sort((a, b) =>
       a.code.localeCompare(b.code, undefined, { numeric: true, sensitivity: 'base' })
     );
-  }, [accounts]);
+  }, [activeBranchAccounts]);
 
-  // Filtered accounts for COA table (ordered by account code)
+  // Filtered accounts for COA table (ordered by account code and search)
   const filteredAccounts = useMemo(() => {
     return sortedAccounts.filter((acc) => {
       const matchesType = selectedType === 'ALL' || acc.type === selectedType;
@@ -118,10 +141,20 @@ export const AccountingView: React.FC = () => {
         !q ||
         acc.code.includes(q) ||
         acc.nameAr.toLowerCase().includes(q) ||
-        acc.nameEn.toLowerCase().includes(q);
+        (acc.nameEn && acc.nameEn.toLowerCase().includes(q)) ||
+        (acc.branchNameAr && acc.branchNameAr.toLowerCase().includes(q));
       return matchesType && matchesSearch;
     });
   }, [sortedAccounts, selectedType, searchQuery]);
+
+  // Filtered Journal Entries by Branch (فصل القيود المحاسبية لكل فرع)
+  const filteredJournalEntries = useMemo(() => {
+    return journalEntries.filter((entry) => {
+      if (selectedBranchId === 'all') return true;
+      if (selectedBranchId === 'general') return !entry.branchId || entry.branchId === 'all';
+      return entry.branchId === selectedBranchId;
+    });
+  }, [journalEntries, selectedBranchId]);
 
   // Open Add Account modal (optionally with parent preset)
   const handleOpenAddAccount = (parentId: string = '') => {
@@ -155,6 +188,10 @@ export const AccountingView: React.FC = () => {
       parentId,
       isDebitNormal: isDebit,
       balance: 0,
+      branchId: selectedBranchId !== 'all' && selectedBranchId !== 'general' ? selectedBranchId : '',
+      branchNameAr: selectedBranchId !== 'all' && selectedBranchId !== 'general'
+        ? (branches.find((b) => b.id === selectedBranchId)?.name || '')
+        : '',
     });
     setShowAccountModal(true);
   };
@@ -172,6 +209,8 @@ export const AccountingView: React.FC = () => {
       parentId: acc.parentId || '',
       isDebitNormal: acc.isDebitNormal,
       balance: acc.balance,
+      branchId: acc.branchId || '',
+      branchNameAr: acc.branchNameAr || (branches.find((b) => b.id === acc.branchId)?.name || ''),
     });
     setShowAccountModal(true);
   };
@@ -189,6 +228,8 @@ export const AccountingView: React.FC = () => {
     const nameEn = accountForm.nameEn.trim() || autoTranslateArabic(accountForm.nameAr);
     const parent = accounts.find((a) => a.id === accountForm.parentId);
     const level = parent ? (parent.level || 1) + 1 : 1;
+    const matchedBranch = branches.find((b) => b.id === accountForm.branchId);
+    const branchNameAr = matchedBranch ? matchedBranch.name : (accountForm.branchId ? accountForm.branchNameAr : undefined);
 
     if (modalMode === 'add') {
       // Check code uniqueness
@@ -206,6 +247,8 @@ export const AccountingView: React.FC = () => {
         level,
         isDebitNormal: accountForm.isDebitNormal,
         balance: Number(accountForm.balance) || 0,
+        branchId: accountForm.branchId || undefined,
+        branchNameAr,
       });
     } else if (editingAccountId) {
       updateAccount(editingAccountId, {
@@ -217,6 +260,8 @@ export const AccountingView: React.FC = () => {
         level,
         isDebitNormal: accountForm.isDebitNormal,
         balance: Number(accountForm.balance) || 0,
+        branchId: accountForm.branchId || undefined,
+        branchNameAr,
       });
     }
 
@@ -277,9 +322,9 @@ export const AccountingView: React.FC = () => {
   };
 
   // Active GL Account object
-  const activeGLAccount = accounts.find((a) => a.id === selectedGLAccountId) || accounts[0];
+  const activeGLAccount = activeBranchAccounts.find((a) => a.id === selectedGLAccountId) || activeBranchAccounts[0] || accounts[0];
 
-  // General Ledger Movements calculation
+  // General Ledger Movements calculation (filtered by branch and date)
   const glData = useMemo(() => {
     if (!activeGLAccount) {
       return { movements: [], openingBalance: 0, totalDebits: 0, totalCredits: 0, endingBalance: 0 };
@@ -287,9 +332,10 @@ export const AccountingView: React.FC = () => {
 
     const isDebitNormal = activeGLAccount.isDebitNormal;
 
-    // Collect all journal lines referencing this account
+    // Collect all journal lines referencing this account from branch filtered journal entries
     const allMatchingLines: {
       journalId: string;
+      branchId?: string;
       entryNumber: string;
       date: string;
       description: string;
@@ -300,11 +346,12 @@ export const AccountingView: React.FC = () => {
       memo?: string;
     }[] = [];
 
-    journalEntries.forEach((entry) => {
+    filteredJournalEntries.forEach((entry) => {
       entry.lines.forEach((line) => {
         if (line.accountId === activeGLAccount.id) {
           allMatchingLines.push({
             journalId: entry.id,
+            branchId: entry.branchId,
             entryNumber: entry.entryNumber,
             date: entry.date,
             description: entry.description,
@@ -377,7 +424,7 @@ export const AccountingView: React.FC = () => {
       totalCredits: periodCredits,
       endingBalance: running,
     };
-  }, [activeGLAccount, journalEntries, glDateFrom, glDateTo]);
+  }, [activeGLAccount, filteredJournalEntries, glDateFrom, glDateTo]);
 
   // Save manual journal
   const handleSaveManualEntry = () => {
@@ -387,14 +434,18 @@ export const AccountingView: React.FC = () => {
       return;
     }
 
+    const assignedBranchId = manualJournalBranchId || (selectedBranchId !== 'all' && selectedBranchId !== 'general' ? selectedBranchId : activeBranch?.id || branches[0]?.id || '');
+
     const res = createManualJournalEntry({
       description: entryDesc,
+      branchId: assignedBranchId,
       lines,
     });
 
     if (res.success) {
       setShowManualModal(false);
       setEntryDesc('');
+      setManualJournalBranchId('');
       setLines([
         { accountId: accounts[0]?.id || '', debit: 0, credit: 0, memo: '' },
         { accountId: accounts[1]?.id || '', debit: 0, credit: 0, memo: '' },
@@ -414,24 +465,52 @@ export const AccountingView: React.FC = () => {
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400">
             {t(
-              'شجرة الحسابات المتكاملة، دفتر الأستاذ التفصيلي، قيود اليومية الآلية والمزدوجة، وميزان المراجعة.',
-              'Double-entry balanced accounting engine with automated posting rules and comprehensive ledger.'
+              'شجرة الحسابات المتكاملة، دفتر الأستاذ التفصيلي، قيود اليومية الآلية والمزدوجة، وميزان المراجعة مع الفصل المحاسبي التام بين الفروع.',
+              'Double-entry balanced accounting engine with automated posting rules, ledger, and isolated multi-branch accounting.'
             )}
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Multi-Branch Accounting Isolation Selector */}
+          <div className="flex items-center gap-2 bg-indigo-50/90 dark:bg-indigo-950/70 border border-indigo-200 dark:border-indigo-800 px-3.5 py-2 rounded-xl text-xs font-semibold shadow-xs">
+            <Building2 className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
+            <span className="text-indigo-950 dark:text-indigo-200 whitespace-nowrap">{t('فرع الحسابات:', 'Branch:')}</span>
+            <select
+              value={selectedBranchId}
+              onChange={(e) => {
+                setSelectedBranchId(e.target.value);
+              }}
+              className="bg-transparent font-bold text-indigo-700 dark:text-indigo-300 focus:outline-none cursor-pointer text-xs"
+            >
+              <option value="all" className="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200">
+                {t('🌐 كل الفروع (قوائم موحدة)', '🌐 All Branches (Consolidated)')}
+              </option>
+              {branches.map((b) => (
+                <option key={b.id} value={b.id} className="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200">
+                  🏢 {b.name}
+                </option>
+              ))}
+              <option value="general" className="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200">
+                🏛️ {t('المركز الرئيسي / الحسابات العامة', '🏛️ HQ / General Accounts')}
+              </option>
+            </select>
+          </div>
+
           <button
             onClick={() => handleOpenAddAccount('')}
-            className="flex items-center justify-center gap-1.5 rounded-xl bg-indigo-600 px-3.5 py-2.5 text-xs font-bold text-white shadow-sm hover:bg-indigo-700 transition-all active:scale-95"
+            className="flex items-center justify-center gap-1.5 rounded-xl bg-indigo-600 px-3.5 py-2.5 text-xs font-bold text-white shadow-sm hover:bg-indigo-700 transition-all active:scale-95 cursor-pointer"
           >
             <Plus className="h-4 w-4" />
             <span>{t('إضافة حساب بالشجرة', 'Add Account')}</span>
           </button>
 
           <button
-            onClick={() => setShowManualModal(true)}
-            className="flex items-center justify-center gap-1.5 rounded-xl bg-slate-800 dark:bg-slate-700 px-3.5 py-2.5 text-xs font-bold text-white shadow-sm hover:bg-slate-900 transition-all active:scale-95"
+            onClick={() => {
+              setManualJournalBranchId(selectedBranchId !== 'all' && selectedBranchId !== 'general' ? selectedBranchId : activeBranch?.id || branches[0]?.id || '');
+              setShowManualModal(true);
+            }}
+            className="flex items-center justify-center gap-1.5 rounded-xl bg-slate-800 dark:bg-slate-700 px-3.5 py-2.5 text-xs font-bold text-white shadow-sm hover:bg-slate-900 transition-all active:scale-95 cursor-pointer"
           >
             <FileText className="h-4 w-4" />
             <span>{t('قيد يومية يدوي', 'Manual Entry')}</span>
@@ -440,26 +519,44 @@ export const AccountingView: React.FC = () => {
       </div>
 
       {/* Financial Health Ribbon */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
-          <span className="text-xs text-slate-500">{t('إجمالي إيرادات النشاط (Revenues):', 'Total Revenues:')}</span>
-          <p className="text-lg font-black text-emerald-600 dark:text-emerald-400 mt-1">
-            {formatMoney(totalRevenue)}
-          </p>
+      <div className="space-y-2">
+        <div className="flex items-center justify-between px-1">
+          <span className="text-[11px] font-bold text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
+            <Building2 className="w-3.5 h-3.5 text-indigo-600" />
+            {selectedBranchId === 'all'
+              ? t('القوائم المالية التشغيلية الموحدة لجميع الفروع', 'Consolidated Financial Overview (All Branches)')
+              : selectedBranchId === 'general'
+              ? t('القوائم المالية للمركز الرئيسي والحسابات العامة', 'HQ / General Accounts Financial Overview')
+              : `${t('القوائم المالية التشغيلية المنفصلة لـ:', 'Isolated Financial Overview for:')} ${branches.find((b) => b.id === selectedBranchId)?.name || selectedBranchId}`}
+          </span>
+          {selectedBranchId !== 'all' && (
+            <span className="text-[11px] font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950 px-2 py-0.5 rounded-md border border-indigo-200 dark:border-indigo-800">
+              {t('بيانات مالية مخصصة للفرع', 'Branch-Isolated Financials')}
+            </span>
+          )}
         </div>
 
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
-          <span className="text-xs text-slate-500">{t('إجمالي المصروفات (Expenses):', 'Total Expenses:')}</span>
-          <p className="text-lg font-black text-rose-600 dark:text-rose-400 mt-1">
-            {formatMoney(totalExpense)}
-          </p>
-        </div>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+            <span className="text-xs text-slate-500">{t('إجمالي إيرادات النشاط (Revenues):', 'Total Revenues:')}</span>
+            <p className="text-lg font-black text-emerald-600 dark:text-emerald-400 mt-1">
+              {formatMoney(totalRevenue)}
+            </p>
+          </div>
 
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
-          <span className="text-xs text-slate-500">{t('صافي الأرباح التشغيلية (Net Income):', 'Net Operating Income:')}</span>
-          <p className="text-lg font-black text-indigo-600 dark:text-indigo-400 mt-1">
-            {formatMoney(netIncome)}
-          </p>
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+            <span className="text-xs text-slate-500">{t('إجمالي المصروفات (Expenses):', 'Total Expenses:')}</span>
+            <p className="text-lg font-black text-rose-600 dark:text-rose-400 mt-1">
+              {formatMoney(totalExpense)}
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+            <span className="text-xs text-slate-500">{t('صافي الأرباح التشغيلية (Net Income):', 'Net Operating Income:')}</span>
+            <p className="text-lg font-black text-indigo-600 dark:text-indigo-400 mt-1">
+              {formatMoney(netIncome)}
+            </p>
+          </div>
         </div>
       </div>
 
@@ -561,6 +658,17 @@ export const AccountingView: React.FC = () => {
             </div>
 
             <div className="flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto">
+              {selectedBranchId !== 'all' && selectedBranchId !== 'general' && (
+                <label className="flex items-center gap-1.5 text-xs font-semibold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/70 border border-indigo-200 dark:border-indigo-800 px-2.5 py-1 rounded-xl cursor-pointer shrink-0">
+                  <input
+                    type="checkbox"
+                    checked={branchOnlyFilter}
+                    onChange={(e) => setBranchOnlyFilter(e.target.checked)}
+                    className="rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                  />
+                  <span>{t('حسابات هذا الفرع فقط', 'Branch Only')}</span>
+                </label>
+              )}
               {(['ALL', 'Asset', 'Liability', 'Equity', 'Revenue', 'Expense'] as const).map((type) => (
                 <button
                   key={type}
@@ -595,6 +703,7 @@ export const AccountingView: React.FC = () => {
                   <th className="pb-3 font-bold text-start">{t('كود الحساب', 'Code')}</th>
                   <th className="pb-3 font-bold text-start">{t('اسم الحساب', 'Account Name')}</th>
                   <th className="pb-3 font-bold text-start">{t('النوع', 'Type')}</th>
+                  <th className="pb-3 font-bold text-start">{t('الفرع التابع', 'Branch')}</th>
                   <th className="pb-3 font-bold text-start">{t('طبيعة الحساب', 'Normal')}</th>
                   <th className="pb-3 font-bold text-end">{t('الرصيد الحالي', 'Balance')}</th>
                   <th className="pb-3 font-bold text-center">{t('الإجراءات', 'Actions')}</th>
@@ -637,6 +746,18 @@ export const AccountingView: React.FC = () => {
                         >
                           {acc.type}
                         </span>
+                      </td>
+                      <td className="py-3">
+                        {acc.branchId ? (
+                          <span className="inline-flex items-center gap-1 rounded-md bg-indigo-50 dark:bg-indigo-950/60 px-2 py-0.5 text-[10px] font-bold text-indigo-700 dark:text-indigo-300 border border-indigo-200/60 dark:border-indigo-800">
+                            <Building2 className="w-3 h-3 text-indigo-500 shrink-0" />
+                            <span>{branches.find((b) => b.id === acc.branchId)?.name || acc.branchNameAr || acc.branchId}</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 rounded-md bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-[10px] font-medium text-slate-500 dark:text-slate-400 border border-slate-200/60 dark:border-slate-700">
+                            <span>{t('عام (كل الفروع)', 'Shared / HQ')}</span>
+                          </span>
+                        )}
                       </td>
                       <td className="py-3 text-slate-500">
                         {acc.isDebitNormal ? t('مدين (Debit)', 'Debit') : t('دائن (Credit)', 'Credit')}
@@ -853,6 +974,7 @@ export const AccountingView: React.FC = () => {
                   <tr className="border-b border-slate-200 text-slate-400 dark:border-slate-800">
                     <th className="pb-3 font-bold text-start">{t('التاريخ', 'Date')}</th>
                     <th className="pb-3 font-bold text-start">{t('رقم القيد', 'JV No.')}</th>
+                    <th className="pb-3 font-bold text-start">{t('الفرع', 'Branch')}</th>
                     <th className="pb-3 font-bold text-start">{t('المستند المرجعي', 'Source Doc')}</th>
                     <th className="pb-3 font-bold text-start">{t('البيان والشرح', 'Description & Memo')}</th>
                     <th className="pb-3 font-bold text-end">{t('مدين (Debit)', 'Debit')}</th>
@@ -863,7 +985,7 @@ export const AccountingView: React.FC = () => {
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-medium">
                   {/* Row: Opening Balance */}
                   <tr className="bg-slate-50/80 dark:bg-slate-800/40 text-slate-600 dark:text-slate-300">
-                    <td className="py-2.5 font-bold" colSpan={4}>
+                    <td className="py-2.5 font-bold" colSpan={5}>
                       {t('--- رصيد بداية الفترة المنقول ---', '--- Opening Balance Carried Forward ---')}
                     </td>
                     <td className="py-2.5 text-end font-mono">-</td>
@@ -875,7 +997,7 @@ export const AccountingView: React.FC = () => {
 
                   {glData.movements.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="py-8 text-center text-slate-400">
+                      <td colSpan={8} className="py-8 text-center text-slate-400">
                         {t('لا توجد حركات مقيدة لهذا الحساب خلال الفترة المحددة', 'No transactions found for this account in the selected period.')}
                       </td>
                     </tr>
@@ -885,6 +1007,16 @@ export const AccountingView: React.FC = () => {
                         <td className="py-3 font-mono text-slate-500 whitespace-nowrap">{m.date}</td>
                         <td className="py-3 font-mono font-bold text-indigo-600 dark:text-indigo-400 whitespace-nowrap">
                           {m.entryNumber}
+                        </td>
+                        <td className="py-3 whitespace-nowrap">
+                          {m.branchId ? (
+                            <span className="inline-flex items-center gap-1 rounded bg-indigo-50 dark:bg-indigo-950/60 px-1.5 py-0.5 text-[10px] font-bold text-indigo-700 dark:text-indigo-300 border border-indigo-200/50">
+                              <Building2 className="w-2.5 h-2.5 text-indigo-500" />
+                              <span>{branches.find((b) => b.id === m.branchId)?.name || m.branchId}</span>
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-slate-400">{t('عام', 'HQ')}</span>
+                          )}
                         </td>
                         <td className="py-3 text-slate-600 dark:text-slate-300 whitespace-nowrap">
                           {m.sourceDocument || t('قيد يومية عام', 'General JV')}
@@ -908,7 +1040,7 @@ export const AccountingView: React.FC = () => {
                 </tbody>
                 <tfoot>
                   <tr className="border-t-2 border-slate-300 dark:border-slate-700 font-bold bg-slate-50/50 dark:bg-slate-800/30">
-                    <td className="py-3" colSpan={4}>
+                    <td className="py-3" colSpan={5}>
                       {t('إجمالي حركات الفترة والرصيد الختامي:', 'Total Period Movements & Closing Balance:')}
                     </td>
                     <td className="py-3 text-end font-mono text-emerald-600 font-black">
@@ -932,14 +1064,26 @@ export const AccountingView: React.FC = () => {
       {activeTab === 'journal' && (
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs dark:border-slate-800 dark:bg-slate-900 space-y-4">
           <div className="flex items-center justify-between">
-            <h3 className="text-xs font-bold text-slate-900 dark:text-white">
-              {t('سجل قيود اليومية العامة (Journal Entries)', 'General Journal')}
-            </h3>
-            <span className="text-xs text-slate-400">{journalEntries.length} {t('قيد مقيد', 'entries')}</span>
+            <div>
+              <h3 className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <span>{t('سجل قيود اليومية العامة (Journal Entries)', 'General Journal')}</span>
+                {selectedBranchId !== 'all' && (
+                  <span className="text-[10px] font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950 px-2 py-0.5 rounded-md border border-indigo-200 dark:border-indigo-800">
+                    🏢 {branches.find((b) => b.id === selectedBranchId)?.name || selectedBranchId}
+                  </span>
+                )}
+              </h3>
+              <p className="text-[11px] text-slate-500">
+                {selectedBranchId !== 'all'
+                  ? t('عرض قيود اليومية الخاصة بهذا الفرع فقط.', 'Displaying journal entries for this branch only.')
+                  : t('عرض جميع قيود اليومية لجميع الفروع والمراكز.', 'Displaying all journal entries across all branches.')}
+              </p>
+            </div>
+            <span className="text-xs text-slate-400">{filteredJournalEntries.length} {t('قيد مقيد', 'entries')}</span>
           </div>
 
           <div className="space-y-4">
-            {journalEntries.map((entry) => (
+            {filteredJournalEntries.map((entry) => (
               <div
                 key={entry.id}
                 className="rounded-xl border border-slate-200 bg-slate-50/50 p-4 dark:border-slate-800 dark:bg-slate-800/40 space-y-3"
@@ -951,7 +1095,17 @@ export const AccountingView: React.FC = () => {
                     </span>
                     <span className="font-bold text-slate-900 dark:text-white">{entry.description}</span>
                   </div>
-                  <div className="flex items-center gap-3 text-xs text-slate-500">
+                  <div className="flex items-center gap-2 text-xs text-slate-500 flex-wrap">
+                    {entry.branchId ? (
+                      <span className="inline-flex items-center gap-1 rounded-md bg-indigo-50 dark:bg-indigo-950/70 border border-indigo-200 dark:border-indigo-800 px-2 py-0.5 text-[10px] font-bold text-indigo-700 dark:text-indigo-300">
+                        <Building2 className="w-3 h-3 text-indigo-500" />
+                        <span>{branches.find((b) => b.id === entry.branchId)?.name || entry.branchId}</span>
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 rounded-md bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-2 py-0.5 text-[10px] font-medium text-slate-500 dark:text-slate-400">
+                        <span>{t('عام / المركز الرئيسي', 'Shared / HQ')}</span>
+                      </span>
+                    )}
                     <span>{entry.date}</span>
                     {entry.sourceDocument && (
                       <span className="rounded bg-slate-200 px-2 py-0.5 text-[10px] dark:bg-slate-700 text-slate-700 dark:text-slate-300">
@@ -1003,11 +1157,18 @@ export const AccountingView: React.FC = () => {
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs dark:border-slate-800 dark:bg-slate-900 space-y-4">
           <div className="flex items-center justify-between border-b border-slate-200 pb-3 dark:border-slate-800">
             <div>
-              <h3 className="text-xs font-bold text-slate-900 dark:text-white">
-                {t('ميزان المراجعة التقديري بالأرصدة', 'Trial Balance (Balances)')}
+              <h3 className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <span>{t('ميزان المراجعة التقديري بالأرصدة', 'Trial Balance (Balances)')}</span>
+                {selectedBranchId !== 'all' && (
+                  <span className="text-[10px] font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950 px-2 py-0.5 rounded-md border border-indigo-200 dark:border-indigo-800">
+                    🏢 {branches.find((b) => b.id === selectedBranchId)?.name || selectedBranchId}
+                  </span>
+                )}
               </h3>
               <p className="text-[11px] text-slate-500">
-                {t('توازن إجمالي الأرصدة المدينة مع الأرصدة الدائنة لتأكيد صحة الدفاتر.', 'Verification of double-entry equality.')}
+                {selectedBranchId !== 'all'
+                  ? t('ميزان مراجعة مخصص لفرع محدد لحصر الأرصدة والعمليات الخاصة به.', 'Branch-isolated trial balance for specific branch operations.')
+                  : t('توازن إجمالي الأرصدة المدينة مع الأرصدة الدائنة لتأكيد صحة الدفاتر لجميع الفروع.', 'Verification of double-entry equality across all branches.')}
               </p>
             </div>
 
@@ -1025,18 +1186,28 @@ export const AccountingView: React.FC = () => {
                   <th className="pb-3 font-bold text-start">{t('كود الحساب', 'Code')}</th>
                   <th className="pb-3 font-bold text-start">{t('اسم الحساب', 'Account Name')}</th>
                   <th className="pb-3 font-bold text-start">{t('النوع', 'Type')}</th>
+                  <th className="pb-3 font-bold text-start">{t('الفرع', 'Branch')}</th>
                   <th className="pb-3 font-bold text-end">{t('رصيد مدين', 'Debit Balance')}</th>
                   <th className="pb-3 font-bold text-end">{t('رصيد دائن', 'Credit Balance')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-medium">
-                {accounts.map((acc) => (
+                {activeBranchAccounts.map((acc) => (
                   <tr key={acc.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
                     <td className="py-2.5 font-mono font-bold text-indigo-600 dark:text-indigo-400">{acc.code}</td>
                     <td className="py-2.5 text-slate-900 dark:text-white">
                       {language === 'ar' ? acc.nameAr : acc.nameEn}
                     </td>
                     <td className="py-2.5 text-slate-500">{acc.type}</td>
+                    <td className="py-2.5">
+                      {acc.branchId ? (
+                        <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 dark:bg-indigo-950/60 px-1.5 py-0.5 rounded border border-indigo-200/60 dark:border-indigo-800">
+                          {branches.find((b) => b.id === acc.branchId)?.name || acc.branchNameAr || acc.branchId}
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-slate-400">{t('عام', 'HQ')}</span>
+                      )}
+                    </td>
                     <td className="py-2.5 text-end font-mono font-bold text-emerald-600">
                       {acc.isDebitNormal ? formatMoney(acc.balance) : '-'}
                     </td>
@@ -1048,7 +1219,7 @@ export const AccountingView: React.FC = () => {
               </tbody>
               <tfoot>
                 <tr className="border-t-2 border-slate-300 dark:border-slate-700 font-bold bg-slate-50 dark:bg-slate-800/50">
-                  <td className="py-3" colSpan={3}>
+                  <td className="py-3" colSpan={4}>
                     {t('الإجمالي العام لميزان المراجعة:', 'Trial Balance Total:')}
                   </td>
                   <td className="py-3 text-end font-mono font-black text-emerald-600 text-sm">
@@ -1154,7 +1325,34 @@ export const AccountingView: React.FC = () => {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 flex items-center gap-1">
+                    <Building2 className="w-3.5 h-3.5 text-indigo-600" />
+                    <span>{t('الفرع التابع له الحساب', 'Branch Affiliation')}</span>
+                  </label>
+                  <select
+                    value={accountForm.branchId}
+                    onChange={(e) => {
+                      const bId = e.target.value;
+                      const matched = branches.find((b) => b.id === bId);
+                      setAccountForm({
+                        ...accountForm,
+                        branchId: bId,
+                        branchNameAr: matched ? matched.name : '',
+                      });
+                    }}
+                    className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-indigo-600 font-bold"
+                  >
+                    <option value="">{t('🌐 حساب عام (مشترك لجميع الفروع / المركز الرئيسي)', '🌐 Shared / HQ (All Branches)')}</option>
+                    {branches.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        🏢 {b.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
                 <div>
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                     {t('الحساب الرئيسي (الأب)', 'Parent Account')}
@@ -1174,7 +1372,9 @@ export const AccountingView: React.FC = () => {
                       ))}
                   </select>
                 </div>
+              </div>
 
+              <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                     {t('طبيعة الحساب', 'Normal Balance')}
@@ -1188,18 +1388,18 @@ export const AccountingView: React.FC = () => {
                     <option value="false">{t('دائن (Credit)', 'Credit')}</option>
                   </select>
                 </div>
-              </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  {t('الرصيد الافتتاحي (ج.م)', 'Opening Balance')}
-                </label>
-                <input
-                  type="number"
-                  value={accountForm.balance}
-                  onChange={(e) => setAccountForm({ ...accountForm, balance: Number(e.target.value) || 0 })}
-                  className="w-full px-3 py-2 text-xs font-bold text-indigo-600 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-indigo-600 font-mono"
-                />
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    {t('الرصيد الافتتاحي (ج.م)', 'Opening Balance')}
+                  </label>
+                  <input
+                    type="number"
+                    value={accountForm.balance}
+                    onChange={(e) => setAccountForm({ ...accountForm, balance: Number(e.target.value) || 0 })}
+                    className="w-full px-3 py-2 text-xs font-bold text-indigo-600 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-indigo-600 font-mono"
+                  />
+                </div>
               </div>
 
               {accountModalError && (
@@ -1331,17 +1531,38 @@ export const AccountingView: React.FC = () => {
             </div>
 
             <div className="space-y-4 text-xs">
-              <div>
-                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  {t('البيان وشرح القيد *', 'Entry Description *')}
-                </label>
-                <input
-                  type="text"
-                  value={entryDesc}
-                  onChange={(e) => setEntryDesc(e.target.value)}
-                  placeholder="مثال: تسوية إيجار الفرع، سداد مصروفات عهدة..."
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 font-medium outline-none focus:border-indigo-500 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    {t('البيان وشرح القيد *', 'Entry Description *')}
+                  </label>
+                  <input
+                    type="text"
+                    value={entryDesc}
+                    onChange={(e) => setEntryDesc(e.target.value)}
+                    placeholder="مثال: تسوية إيجار الفرع، سداد مصروفات عهدة..."
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 font-medium outline-none focus:border-indigo-500 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1 flex items-center gap-1">
+                    <Building2 className="w-3.5 h-3.5 text-indigo-600" />
+                    <span>{t('الفرع المسجل عليه القيد *', 'Branch for Journal Entry *')}</span>
+                  </label>
+                  <select
+                    value={manualJournalBranchId}
+                    onChange={(e) => setManualJournalBranchId(e.target.value)}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 font-semibold text-slate-800 outline-none focus:border-indigo-500 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  >
+                    <option value="">{t('🌐 المركز الرئيسي / عام للشركة', '🌐 HQ / General Shared')}</option>
+                    {branches.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        🏢 {b.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
 
               {/* Journal Lines */}
@@ -1369,11 +1590,14 @@ export const AccountingView: React.FC = () => {
                       }}
                       className="flex-1 rounded-xl border border-slate-200 bg-slate-50 p-2 font-medium text-slate-800 outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                     >
-                      {accounts.map((a) => (
-                        <option key={a.id} value={a.id}>
-                          {a.code} - {a.nameAr}
-                        </option>
-                      ))}
+                      {accounts.map((a) => {
+                        const bName = a.branchId ? (branches.find((b) => b.id === a.branchId)?.name || a.branchNameAr || 'فرع') : '';
+                        return (
+                          <option key={a.id} value={a.id}>
+                            {a.code} - {a.nameAr} {bName ? `[${bName}]` : '[عام]'}
+                          </option>
+                        );
+                      })}
                     </select>
 
                     <input

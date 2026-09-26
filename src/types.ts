@@ -119,6 +119,14 @@ export interface Product {
   defaultCollectionOnly?: boolean; // الوضع الافتراضي عند إضافة هذا المنتج/الخدمة في نقطة البيع: تحصيل فقط
   isActive?: boolean;
 
+  // الربط المحاسبي بشجرة الحسابات (Sales, Expense, and Inventory Accounts)
+  salesAccountId?: string; // حساب المبيعات / الإيرادات بالدليل المحاسبي (للمنتجات والخدمات البيعية)
+  salesAccountNameAr?: string;
+  expenseAccountId?: string; // حساب المصروفات / الاستهلاك بالدليل المحاسبي (للأصناف المخزنية والخامات)
+  expenseAccountNameAr?: string;
+  inventoryAccountId?: string; // حساب المخزون / الأصول المتداولة
+  inventoryAccountNameAr?: string;
+
   // ربط الصنف المخزني بالمنتجات البيعية ومقاييس الاستهلاك وتكلفة البيع
   linkedSalesProductIds?: string[]; // ربطه بالمنتجات أو الخدمات البيعية
   consumptionBasis?: 'revenue_ratio' | 'units_sold' | 'clients_served' | 'fixed_monthly'; // أساس الربط
@@ -197,9 +205,13 @@ export interface InventoryAudit {
 export interface StockMovement {
   id: string;
   tenantId: string;
+  branchId?: string;
+  branchNameAr?: string;
   productId: string;
+  productNameAr?: string;
   warehouseId: string;
-  type: 'IN' | 'OUT' | 'TRANSFER' | 'ADJUSTMENT';
+  warehouseNameAr?: string;
+  type: 'IN' | 'OUT' | 'TRANSFER' | 'ADJUSTMENT' | 'CONSUMPTION';
   quantity: number;
   unitCost: number;
   referenceNo: string;
@@ -212,6 +224,8 @@ export type AccountType = 'Asset' | 'Liability' | 'Equity' | 'Revenue' | 'Expens
 export interface Account {
   id: string;
   tenantId: string;
+  branchId?: string; // معرف الفرع التابع له الحساب (فارغ أو 'all' يعني حساب عام للشركة ككل)
+  branchNameAr?: string;
   code: string;
   nameAr: string;
   nameEn: string;
@@ -366,6 +380,7 @@ export interface StaffMember {
   laserPulseRate?: number; // نسبته من عدد بلصات الليزر المستهلكة (ج.م لكل نبضة أو نسبة)
   dermatologyRevenueRate?: number; // نسبته من إيراد الجلدية %
   commissionRate?: number; // نسبة العمولة العامة %
+  isServiceProvider?: boolean; // مقدم خدمة (يظهر في شاشة التشغيل والجلسات)
   isActive: boolean; // اختيار مفعل لتعطيله أو تشغيله
   isArchived?: boolean;
   archivedAt?: string;
@@ -573,6 +588,11 @@ export interface ShiftExpense {
   id: string;
   date: string; // التاريخ والوقت
   category?: string; // بند المصروف
+  itemId?: string; // معرف الصنف المخزني
+  itemName?: string; // اسم الصنف المخزني
+  quantity?: number; // الكمية
+  unitPrice?: number; // سعر الوحدة
+  expenseType?: 'receipt_and_payment' | 'receipt_only' | 'balance_payment'; // نوع الحركة: استلام وسداد | استلام فقط (آجل) | سداد من الرصيد
   description: string; // البيان والسبب
   reason?: string; // سبب الصرف
   amount: number; // القيمة المنصرفة

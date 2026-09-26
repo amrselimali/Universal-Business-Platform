@@ -31,6 +31,8 @@ import {
   Calendar,
   Award,
   Zap,
+  BookOpen,
+  Receipt,
 } from 'lucide-react';
 
 export const ProductManagementView: React.FC = () => {
@@ -50,6 +52,7 @@ export const ProductManagementView: React.FC = () => {
     deleteProduct,
     getProductStock,
     language,
+    accounts,
   } = usePlatform();
 
   const [activeTab, setActiveTab] = useState<'sales_items' | 'categories'>('sales_items');
@@ -136,6 +139,8 @@ export const ProductManagementView: React.FC = () => {
     itemCodingType: 'EGS' | 'GS1';
     egsCode: string;
     gs1Code: string;
+    salesAccountId: string;
+    salesAccountNameAr: string;
   }>({
     nameAr: '',
     nameEn: '',
@@ -161,6 +166,8 @@ export const ProductManagementView: React.FC = () => {
     itemCodingType: 'EGS',
     egsCode: '',
     gs1Code: '',
+    salesAccountId: 'acc-4200',
+    salesAccountNameAr: 'إيرادات الكشوفات والخدمات والعيادات',
   });
 
   // Category Form
@@ -302,6 +309,10 @@ export const ProductManagementView: React.FC = () => {
       ? categories.find((c) => c.nameAr.includes('باقات') || c.id === 'cat-006') || categories[0]
       : categories.find((c) => (isSrv ? c.type === 'service' : c.type === 'product')) || categories[0];
 
+    const defaultSalesAcc = (type === 'sales_product')
+      ? (accounts.find((a) => a.code === '4100') || accounts.find((a) => a.type === 'Revenue') || accounts[0])
+      : (accounts.find((a) => a.code === '4200') || accounts.find((a) => a.type === 'Revenue') || accounts[0]);
+
     setForm({
       nameAr: '',
       nameEn: '',
@@ -328,6 +339,8 @@ export const ProductManagementView: React.FC = () => {
       egsCode: `EG-100234567-${nextSku}`,
       gs1Code: '',
       defaultCollectionOnly: false,
+      salesAccountId: defaultSalesAcc?.id || 'acc-4200',
+      salesAccountNameAr: defaultSalesAcc?.nameAr || 'إيرادات المبيعات والخدمات',
     });
     setShowAddModal(true);
   };
@@ -335,6 +348,12 @@ export const ProductManagementView: React.FC = () => {
   const handleOpenEdit = (prod: Product) => {
     setSelectedProduct(prod);
     const isPkg = !!prod.isPackage || prod.itemType === 'sales_package';
+    const isSrv = prod.isService || prod.itemType === 'sales_service';
+    const fallbackAcc = (isPkg || isSrv)
+      ? (accounts.find((a) => a.code === '4200') || accounts.find((a) => a.type === 'Revenue'))
+      : (accounts.find((a) => a.code === '4100') || accounts.find((a) => a.type === 'Revenue'));
+    const linkedAcc = accounts.find((a) => a.id === prod.salesAccountId) || fallbackAcc;
+
     setForm({
       nameAr: prod.nameAr,
       nameEn: prod.nameEn,
@@ -361,6 +380,8 @@ export const ProductManagementView: React.FC = () => {
       egsCode: prod.egsCode || (prod.sku ? `EG-100234567-${prod.sku}` : ''),
       gs1Code: prod.gs1Code || '',
       defaultCollectionOnly: Boolean(prod.defaultCollectionOnly),
+      salesAccountId: prod.salesAccountId || linkedAcc?.id || 'acc-4200',
+      salesAccountNameAr: prod.salesAccountNameAr || linkedAcc?.nameAr || 'إيرادات المبيعات والخدمات',
     });
     setShowEditModal(true);
   };
@@ -370,6 +391,7 @@ export const ProductManagementView: React.FC = () => {
     if (!form.nameAr.trim()) return;
 
     const matchedCat = categories.find((c) => c.id === form.categoryId);
+    const chosenAcc = accounts.find((a) => a.id === form.salesAccountId);
 
     addProduct(
       {
@@ -400,6 +422,8 @@ export const ProductManagementView: React.FC = () => {
         itemCodingType: form.itemCodingType,
         egsCode: form.egsCode,
         gs1Code: form.gs1Code,
+        salesAccountId: form.salesAccountId || chosenAcc?.id || undefined,
+        salesAccountNameAr: chosenAcc?.nameAr || form.salesAccountNameAr || undefined,
       },
       0
     );
@@ -412,6 +436,7 @@ export const ProductManagementView: React.FC = () => {
     if (!selectedProduct || !form.nameAr.trim()) return;
 
     const matchedCat = categories.find((c) => c.id === form.categoryId);
+    const chosenAcc = accounts.find((a) => a.id === form.salesAccountId);
 
     updateProduct(selectedProduct.id, {
       nameAr: form.nameAr.trim(),
@@ -441,6 +466,8 @@ export const ProductManagementView: React.FC = () => {
       itemCodingType: form.itemCodingType,
       egsCode: form.egsCode,
       gs1Code: form.gs1Code,
+      salesAccountId: form.salesAccountId || chosenAcc?.id || undefined,
+      salesAccountNameAr: chosenAcc?.nameAr || form.salesAccountNameAr || undefined,
     });
 
     setShowEditModal(false);
@@ -1011,6 +1038,21 @@ export const ProductManagementView: React.FC = () => {
                                     </span>
                                   )}
                                 </div>
+                                {/* حساب المبيعات المرتبط بشجرة الحسابات */}
+                                {(() => {
+                                  const linkedAcc = accounts.find((a) => a.id === prod.salesAccountId) ||
+                                    (isPkg || isService
+                                      ? accounts.find((a) => a.code === '4200')
+                                      : accounts.find((a) => a.code === '4100'));
+                                  return (
+                                    <div className="mt-1 flex items-center gap-1 text-[11px] text-blue-700 bg-blue-50/80 px-2 py-0.5 rounded-md border border-blue-200/60 w-fit">
+                                      <BookOpen className="w-3 h-3 text-blue-600 shrink-0" />
+                                      <span className="font-semibold">
+                                        {t('حساب المبيعات:', 'Sales Account:')} {linkedAcc ? `${linkedAcc.code} - ${linkedAcc.nameAr}` : (prod.salesAccountNameAr || 'إيرادات المبيعات')}
+                                      </span>
+                                    </div>
+                                  );
+                                })()}
                               </div>
                             </div>
                           </td>
@@ -1739,6 +1781,69 @@ export const ProductManagementView: React.FC = () => {
                   <span className="font-bold text-emerald-700">
                     {formatMoney(form.sellingPrice)}
                   </span>
+                </div>
+              </div>
+
+              {/* الربط المحاسبي بشجرة الحسابات (حساب إيرادات المبيعات) */}
+              <div className="p-4 bg-blue-50/70 dark:bg-blue-950/20 rounded-2xl border border-blue-200 dark:border-blue-900/50 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-blue-900 dark:text-blue-300 font-bold text-xs sm:text-sm">
+                    <BookOpen className="w-4 h-4 text-blue-600" />
+                    <span>{t('الربط المحاسبي بشجرة الحسابات (حساب المبيعات / الإيرادات) *', 'Chart of Accounts Linking (Sales Revenue Account) *')}</span>
+                  </div>
+                  <span className="text-[10px] font-bold text-blue-700 bg-blue-100 dark:bg-blue-900/60 dark:text-blue-300 px-2 py-0.5 rounded-full">
+                    {t('شجرة الحسابات التفاعلية', 'Chart of Accounts')}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-center">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                      {t('حساب المبيعات / الإيرادات المعتمد *', 'Linked Sales / Revenue Account *')}
+                    </label>
+                    <select
+                      required
+                      value={form.salesAccountId}
+                      onChange={(e) => {
+                        const chosen = accounts.find((a) => a.id === e.target.value);
+                        setForm({
+                          ...form,
+                          salesAccountId: e.target.value,
+                          salesAccountNameAr: chosen?.nameAr || form.salesAccountNameAr,
+                        });
+                      }}
+                      className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-800 border border-blue-300 dark:border-blue-700 rounded-xl text-sm font-semibold text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer shadow-xs"
+                    >
+                      <optgroup label={t('حسابات الإيرادات والمبيعات (موصى به)', 'Revenue & Sales Accounts (Recommended)')}>
+                        {accounts
+                          .filter((a) => a.type === 'Revenue')
+                          .map((acc) => (
+                            <option key={acc.id} value={acc.id}>
+                              {acc.code} - {acc.nameAr}
+                            </option>
+                          ))}
+                      </optgroup>
+                      <optgroup label={t('حسابات أخرى في الدليل المحاسبي', 'Other Accounts in Ledger')}>
+                        {accounts
+                          .filter((a) => a.type !== 'Revenue')
+                          .map((acc) => (
+                            <option key={acc.id} value={acc.id}>
+                              {acc.code} - {acc.nameAr} ({acc.type})
+                            </option>
+                          ))}
+                      </optgroup>
+                    </select>
+                  </div>
+
+                  <div className="text-xs text-blue-800 dark:text-blue-300 bg-white/80 dark:bg-slate-800/80 p-3 rounded-xl border border-blue-100 dark:border-blue-800/50 leading-relaxed">
+                    <p className="font-semibold mb-0.5">📌 {t('توجيه القيود المحاسبية التلقائية:', 'Automated Ledger Posting:')}</p>
+                    <p className="text-[11px] text-slate-600 dark:text-slate-400">
+                      {t(
+                        'عند بيع هذا الصنف في نقطة البيع أو تسجيل جلسة في شاشة التشغيل، يُسجل القيد المحاسبي دائناً لحساب الإيرادات المحدد، ويظهر مباشرة في ميزان المراجعة وقائمة الدخل لكل فرع.',
+                        'Sales of this item will be automatically credited to this revenue account in the general ledger and financial reports.'
+                      )}
+                    </p>
+                  </div>
                 </div>
               </div>
 
