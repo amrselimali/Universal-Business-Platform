@@ -16,15 +16,19 @@ import {
   ShieldCheck,
   TrendingDown,
   Hash,
+  Edit2,
+  Trash2,
 } from 'lucide-react';
 import { PartyStatementModal } from '../components/PartyStatementModal';
 
 export const SuppliersView: React.FC = () => {
-  const { t, formatMoney, parties, addParty, language } = usePlatform();
+  const { t, formatMoney, parties, addParty, updateParty, deleteParty, language } = usePlatform();
 
   const [activeFilter, setActiveFilter] = useState<'ALL' | 'PAYABLE' | 'SETTLED'>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [showAddModal, setShowAddModal] = useState<boolean>(false);
+  const [showEditModal, setShowEditModal] = useState<boolean>(false);
+  const [editingSupplier, setEditingSupplier] = useState<any | null>(null);
   const [statementPartyId, setStatementPartyId] = useState<string | null>(null);
   const [showStatementModal, setShowStatementModal] = useState<boolean>(false);
 
@@ -101,6 +105,36 @@ export const SuppliersView: React.FC = () => {
       creditLimit: 50000,
       medicalNotes: '',
     });
+  };
+
+  const handleEditClick = (supplier: any) => {
+    setEditingSupplier({ ...supplier });
+    setShowEditModal(true);
+  };
+
+  const handleSaveEditSupplier = () => {
+    if (!editingSupplier || !editingSupplier.name.trim() || !editingSupplier.phone.trim()) {
+      alert(t('يرجى ملء اسم المورد ورقم الهاتف للتواصل!', 'Please provide supplier name and phone!'));
+      return;
+    }
+    updateParty(editingSupplier.id, {
+      name: editingSupplier.name.trim(),
+      nameEn: editingSupplier.nameEn?.trim() || autoTranslateArabic(editingSupplier.name),
+      phone: editingSupplier.phone.trim(),
+      email: editingSupplier.email?.trim() || undefined,
+      address: editingSupplier.address?.trim() || undefined,
+      nationalId: editingSupplier.nationalId?.trim() || undefined,
+      creditLimit: Number(editingSupplier.creditLimit) || 0,
+      medicalNotes: editingSupplier.medicalNotes?.trim() || undefined,
+    });
+    setShowEditModal(false);
+    setEditingSupplier(null);
+  };
+
+  const handleDeleteSupplier = (id: string, name: string) => {
+    if (window.confirm(t(`هل أنت متأكد من حذف المورد "${name}" نهائياً من قاعدة البيانات؟`, `Are you sure you want to delete supplier "${name}"?`))) {
+      deleteParty(id);
+    }
   };
 
   return (
@@ -333,16 +367,36 @@ export const SuppliersView: React.FC = () => {
                   <span>{formatMoney(supplier.creditLimit)} {t('حد ائتماني', 'credit limit')}</span>
                 </div>
 
-                <button
-                  onClick={() => {
-                    setStatementPartyId(supplier.id);
-                    setShowStatementModal(true);
-                  }}
-                  className="inline-flex items-center gap-1 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 px-2.5 py-1 text-[11px] font-bold text-amber-800 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/50 transition-colors cursor-pointer shrink-0"
-                >
-                  <FileText className="h-3.5 w-3.5 text-amber-600" />
-                  <span>{t('كشف الحساب', 'Statement')}</span>
-                </button>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    onClick={() => {
+                      setStatementPartyId(supplier.id);
+                      setShowStatementModal(true);
+                    }}
+                    className="inline-flex items-center gap-1 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 px-2.5 py-1 text-[11px] font-bold text-amber-800 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/50 transition-colors cursor-pointer shrink-0"
+                  >
+                    <FileText className="h-3.5 w-3.5 text-amber-600" />
+                    <span>{t('كشف الحساب', 'Statement')}</span>
+                  </button>
+
+                  <button
+                    onClick={() => handleEditClick(supplier)}
+                    title={t('تعديل بيانات المورد', 'Edit Supplier')}
+                    className="p-1 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition-colors cursor-pointer"
+                  >
+                    <Edit2 className="h-3.5 w-3.5" />
+                  </button>
+
+                  {supplier.id !== 'party-s-cash' && (
+                    <button
+                      onClick={() => handleDeleteSupplier(supplier.id, supplier.name)}
+                      title={t('حذف المورد', 'Delete Supplier')}
+                      className="p-1 rounded-lg border border-rose-200 dark:border-rose-900/50 hover:bg-rose-50 dark:hover:bg-rose-950/30 text-rose-600 dark:text-rose-400 transition-colors cursor-pointer"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           ))}
@@ -511,6 +565,162 @@ export const SuppliersView: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setShowAddModal(false)}
+                  className="rounded-xl border border-slate-200 px-4 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 transition-colors cursor-pointer"
+                >
+                  {t('إلغاء', 'Cancel')}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* EDIT SUPPLIER MODAL */}
+      {showEditModal && editingSupplier && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl dark:bg-slate-900 border border-slate-100 dark:border-slate-800 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 mb-3 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-xl bg-amber-50 text-amber-600 dark:bg-amber-950/40">
+                  <Edit2 className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-slate-900 dark:text-white">
+                    {t('تعديل بيانات المورد', 'Edit Supplier Details')}
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    {t('تحديث الهاتف، السجل التجاري، وحد الائتمان', 'Update contact, CR/Tax ID, and credit limit')}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowEditModal(false);
+                  setEditingSupplier(null);
+                }}
+                className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    {t('اسم المورد بالعربي *', 'Supplier Name (Arabic) *')}
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={editingSupplier.name}
+                    onChange={(e) => setEditingSupplier({ ...editingSupplier, name: e.target.value })}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2 outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    {t('اسم المورد بالإنجليزي', 'Supplier Name (English)')}
+                  </label>
+                  <input
+                    type="text"
+                    value={editingSupplier.nameEn || ''}
+                    onChange={(e) => setEditingSupplier({ ...editingSupplier, nameEn: e.target.value })}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2 outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    {t('رقم الهاتف للتواصل *', 'Phone / Contact *')}
+                  </label>
+                  <input
+                    type="tel"
+                    required
+                    value={editingSupplier.phone}
+                    onChange={(e) => setEditingSupplier({ ...editingSupplier, phone: e.target.value })}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2 font-mono outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    {t('البريد الإلكتروني', 'Email')}
+                  </label>
+                  <input
+                    type="email"
+                    value={editingSupplier.email || ''}
+                    onChange={(e) => setEditingSupplier({ ...editingSupplier, email: e.target.value })}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2 outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    {t('السجل التجاري / البطاقة الضريبية', 'CR / Tax ID')}
+                  </label>
+                  <input
+                    type="text"
+                    value={editingSupplier.nationalId || ''}
+                    onChange={(e) => setEditingSupplier({ ...editingSupplier, nationalId: e.target.value })}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2 outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    {t('الحد الائتماني (ج.م)', 'Credit Limit')}
+                  </label>
+                  <input
+                    type="number"
+                    value={editingSupplier.creditLimit || 0}
+                    onChange={(e) => setEditingSupplier({ ...editingSupplier, creditLimit: Number(e.target.value) || 0 })}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2 font-mono outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  {t('العنوان ومقر الشركة', 'Address & Location')}
+                </label>
+                <input
+                  type="text"
+                  value={editingSupplier.address || ''}
+                  onChange={(e) => setEditingSupplier({ ...editingSupplier, address: e.target.value })}
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2 outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  {t('شروط السداد وملاحظات التوريد', 'Payment Terms & Notes')}
+                </label>
+                <input
+                  type="text"
+                  value={editingSupplier.medicalNotes || ''}
+                  onChange={(e) => setEditingSupplier({ ...editingSupplier, medicalNotes: e.target.value })}
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2 outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                />
+              </div>
+
+              <div className="flex items-center gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={handleSaveEditSupplier}
+                  className="flex-1 rounded-xl bg-amber-600 py-2.5 text-xs font-bold text-white hover:bg-amber-700 transition-colors cursor-pointer shadow-md shadow-amber-600/20"
+                >
+                  {t('حفظ التعديلات', 'Save Changes')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowEditModal(false);
+                    setEditingSupplier(null);
+                  }}
                   className="rounded-xl border border-slate-200 px-4 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 transition-colors cursor-pointer"
                 >
                   {t('إلغاء', 'Cancel')}

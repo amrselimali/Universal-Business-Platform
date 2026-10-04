@@ -87,7 +87,6 @@ export const PosView: React.FC = () => {
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [showOpenShiftModal, setShowOpenShiftModal] = useState<boolean>(false);
   const [receptionistInput, setReceptionistInput] = useState<string>(currentUser?.name || 'موظف الاستقبال');
-  const [openingFloatInput, setOpeningFloatInput] = useState<number>(500);
   const [openingNotesInput, setOpeningNotesInput] = useState<string>('');
   const [showInvoicesHistory, setShowInvoicesHistory] = useState<boolean>(false);
   const [refundModalInvoice, setRefundModalInvoice] = useState<SalesInvoice | null>(null);
@@ -1138,20 +1137,6 @@ ${itemsText}
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  {t('الرصيد الافتتاحي للدرج (العهدة النقدية):', 'Opening Float / Cash in Drawer:')}
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  step="50"
-                  value={openingFloatInput}
-                  onChange={(e) => setOpeningFloatInput(Math.max(0, Number(e.target.value)))}
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-sm font-black text-slate-900 outline-none focus:border-indigo-500 focus:bg-white dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                   {t('ملاحظات الشيفت (اختياري):', 'Shift Notes (Optional):')}
                 </label>
                 <input
@@ -1166,8 +1151,14 @@ ${itemsText}
               <div className="flex items-center gap-2 pt-2">
                 <button
                   onClick={() => {
-                    openReceptionShift(receptionistInput, openingNotesInput, activeBranch?.id, openingFloatInput);
+                    openReceptionShift(
+                      receptionistInput.trim() || currentUser?.name || 'موظف الاستقبال',
+                      openingNotesInput.trim(),
+                      activeBranch?.id,
+                      0
+                    );
                     setShowOpenShiftModal(false);
+                    setOpeningNotesInput('');
                   }}
                   className="flex-1 rounded-xl bg-emerald-600 py-2.5 text-xs font-bold text-white hover:bg-emerald-700 transition-colors cursor-pointer"
                 >

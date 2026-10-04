@@ -24,9 +24,111 @@ import {
   FileText,
   Package,
   MessageCircle,
+  GitBranch,
+  Edit2,
+  Trash2,
 } from 'lucide-react';
 import { PartyStatementModal } from '../components/PartyStatementModal';
 import { exportToCsv, shareViaWhatsApp } from '../utils/exportUtils';
+import {
+  ExcelDataTransferModal,
+  ExcelColumnConfig,
+  CellValidationError,
+  ExcelValidationResult,
+} from '../components/ExcelDataTransferModal';
+
+const partyExcelColumns: ExcelColumnConfig[] = [
+  {
+    key: 'name',
+    labelAr: 'الاسم بالعربي',
+    labelEn: 'Full Name Ar',
+    required: true,
+    type: 'text',
+    sampleValue: 'سارة أحمد محمود',
+    instructions: 'الاسم ثلاثي أو ثنائي على الأقل للمريض أو العميل',
+  },
+  {
+    key: 'nameEn',
+    labelAr: 'الاسم بالإنجليزي',
+    labelEn: 'Full Name En',
+    required: false,
+    type: 'text',
+    sampleValue: 'Sara Ahmed Mahmoud',
+    instructions: 'الاسم باللغة الإنجليزية (اختياري)',
+  },
+  {
+    key: 'phone',
+    labelAr: 'رقم الموبايل',
+    labelEn: 'Phone Number',
+    required: true,
+    type: 'phone',
+    sampleValue: '01011112233',
+    instructions: 'رقم هاتف صالح يبدأ بـ 01 ويتكون من أرقام ولا يقل عن 8 أرقام',
+  },
+  {
+    key: 'paperCode',
+    labelAr: 'الكود الورقي',
+    labelEn: 'Paper File Code',
+    required: false,
+    type: 'text',
+    sampleValue: 'P-101',
+    instructions: 'رقم الملف الورقي بالعيادة أو الأرشيف إن وجد',
+  },
+  {
+    key: 'nationalId',
+    labelAr: 'الرقم القومي',
+    labelEn: 'National ID',
+    required: false,
+    type: 'text',
+    sampleValue: '29501011234567',
+    instructions: 'الرقم القومي أو رقم جواز السفر',
+  },
+  {
+    key: 'leadSource',
+    labelAr: 'مصدر العميل',
+    labelEn: 'Lead Source',
+    required: false,
+    type: 'text',
+    sampleValue: 'Facebook Ads',
+    instructions: 'مصدر التعرف على العيادة (Facebook Ads, Instagram, صديق, زيارة مباشرة)',
+  },
+  {
+    key: 'balance',
+    labelAr: 'الرصيد الافتتاحي',
+    labelEn: 'Opening Balance',
+    required: false,
+    type: 'number',
+    sampleValue: 0,
+    instructions: 'الرصيد المالي السابق إن وجد (مدين موجب، دائن سالب، أو 0)',
+  },
+  {
+    key: 'creditLimit',
+    labelAr: 'الحد الائتماني',
+    labelEn: 'Credit Limit',
+    required: false,
+    type: 'number',
+    sampleValue: 10000,
+    instructions: 'الحد الأقصى للمديونية المسموحة للعميل',
+  },
+  {
+    key: 'address',
+    labelAr: 'العنوان',
+    labelEn: 'Address',
+    required: false,
+    type: 'text',
+    sampleValue: 'مدينة نصر، القاهرة',
+    instructions: 'محل الإقامة أو المحافظة والمنطقة',
+  },
+  {
+    key: 'medicalNotes',
+    labelAr: 'ملاحظات وتاريخ صحي',
+    labelEn: 'Medical Notes',
+    required: false,
+    type: 'text',
+    sampleValue: 'جلسات ليزر كانديلا سابقة، بشرة حساسة',
+    instructions: 'أي حساسية، تاريخ مرضي، أو تعليمات للجلسات',
+  },
+];
 
 export const PartiesView: React.FC = () => {
   const {
@@ -34,10 +136,13 @@ export const PartiesView: React.FC = () => {
     formatMoney,
     parties,
     addParty,
+    updateParty,
+    deleteParty,
     importCustomersFromExcel,
     language,
     tenant,
     activeBranch,
+    branches,
     clientOffers,
     addClientOffer,
     consumeClientOfferSession,
@@ -51,6 +156,8 @@ export const PartiesView: React.FC = () => {
   const [statementInitialMode, setStatementInitialMode] = useState<'VALUE' | 'QUANTITY'>('VALUE');
   const [showStatementModal, setShowStatementModal] = useState<boolean>(false);
   const [selectedPackageParty, setSelectedPackageParty] = useState<Party | null>(null);
+  const [showEditModal, setShowEditModal] = useState<boolean>(false);
+  const [editingParty, setEditingParty] = useState<Party | null>(null);
   const [newOfferName, setNewOfferName] = useState('');
   const [newOfferSessions, setNewOfferSessions] = useState(6);
   const [newOfferPrice, setNewOfferPrice] = useState(1500);
@@ -74,8 +181,27 @@ export const PartiesView: React.FC = () => {
     creditLimit: 10000,
   });
 
-  // Only patients & customers
-  const customers = parties.filter((p) => p.type === 'Customer' || p.type === 'Both');
+  // Only patients & customers strictly belonging to the active branch
+  const currentBranchId = activeBranch?.id || (branches.length > 0 ? branches[0].id : 'branch-cairo');
+  const customers = parties.filter((p) => {
+    const isCustomer = p.type === 'Customer' || p.type === 'Both';
+    if (!isCustomer) return false;
+    if (p.branchId) {
+      return (
+        p.branchId === currentBranchId ||
+        (activeBranch?.name && p.branchId === activeBranch.name) ||
+        (activeBranch?.code && p.branchId === activeBranch.code)
+      );
+    }
+    if (Array.isArray(p.branchIds) && p.branchIds.length > 0) {
+      return (
+        p.branchIds.includes(currentBranchId) ||
+        (activeBranch?.name && p.branchIds.includes(activeBranch.name)) ||
+        (activeBranch?.code && p.branchIds.includes(activeBranch.code))
+      );
+    }
+    return currentBranchId === (branches[0]?.id || 'branch-cairo');
+  });
 
   const filteredParties = customers.filter((p) => {
     if (activeFilter === 'WITH_BALANCE' && p.balance === 0) return false;
@@ -110,6 +236,7 @@ export const PartiesView: React.FC = () => {
     addParty({
       name: newParty.name.trim(),
       nameEn: newParty.nameEn.trim() || autoTranslateArabic(newParty.name),
+      branchId: activeBranch?.id || branches[0]?.id || 'branch-cairo',
       type: newParty.type,
       phone: newParty.phone.trim(),
       email: newParty.email.trim() || undefined,
@@ -140,70 +267,151 @@ export const PartiesView: React.FC = () => {
     });
   };
 
-  // Excel Upload Handler
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      try {
-        const bstr = evt.target?.result;
-        const wb = XLSX.read(bstr, { type: 'binary' });
-        const wsName = wb.SheetNames[0];
-        const ws = wb.Sheets[wsName];
-        const rawData = XLSX.utils.sheet_to_json(ws);
-
-        const formatted = rawData.map((row: any) => ({
-          name: row['الاسم'] || row['Name'] || row['الاسم بالعربي'] || 'مريض جديد',
-          nameEn: row['Name En'] || row['الاسم بالإنجليزي'] || undefined,
-          phone: String(row['الموبايل'] || row['Phone'] || row['الهاتف'] || ''),
-          email: row['Email'] || row['البريد'] || undefined,
-          paperCode: row['الكود الورقي'] || row['Paper Code'] || undefined,
-          address: row['العنوان'] || row['Address'] || undefined,
-          medicalNotes: row['ملاحظات طبية'] || row['Medical Notes'] || undefined,
-          allergies: row['حساسية'] ? String(row['حساسية']).split(',') : undefined,
-          leadSource: row['مصدر الإعلان'] || row['Lead Source'] || 'Excel Import',
-        }));
-
-        importCustomersFromExcel(formatted);
-        alert(t(`تم استيراد ${formatted.length} مريض/عميل بنجاح!`, `Successfully imported ${formatted.length} customers!`));
-        setShowExcelModal(false);
-      } catch (err) {
-        alert(t('حدث خطأ أثناء قراءة ملف الإكسيل، يرجى التأكد من التنسيق!', 'Error reading Excel file!'));
-      }
-    };
-    reader.readAsBinaryString(file);
+  const handleEditClick = (party: Party) => {
+    setEditingParty({ ...party });
+    setShowEditModal(true);
   };
 
-  const handleDownloadSample = () => {
-    const sampleData = [
-      {
-        'الاسم': 'سارة أحمد محمود',
-        'Name En': 'Sara Ahmed Mahmoud',
-        'الموبايل': '01011112233',
-        'الكود الورقي': 'P-101',
-        'العنوان': 'مدينة نصر، القاهرة',
-        'ملاحظات طبية': 'جلسات ليزر كانديلا سابقة، بشرة حساسة',
-        'حساسية': 'البنسلين, حساسية شمس',
-        'مصدر الإعلان': 'Facebook Ads',
-      },
-      {
-        'الاسم': 'مروة عبد الرحمن',
-        'Name En': 'Marwa Abdelrahman',
-        'الموبايل': '01122334455',
-        'الكود الورقي': 'P-102',
-        'العنوان': 'التجمع الخامس',
-        'ملاحظات طبية': 'علاج تصبغات وهيدرافيشل',
-        'حساسية': '',
-        'مصدر الإعلان': 'Instagram',
-      },
-    ];
+  const handleSaveEditParty = () => {
+    if (!editingParty || !editingParty.name.trim() || !editingParty.phone.trim()) {
+      alert(t('يرجى كتابة الاسم ورقم الهاتف!', 'Please provide name and phone!'));
+      return;
+    }
+    updateParty(editingParty.id, {
+      name: editingParty.name.trim(),
+      nameEn: editingParty.nameEn?.trim() || autoTranslateArabic(editingParty.name),
+      phone: editingParty.phone.trim(),
+      email: editingParty.email?.trim() || undefined,
+      paperCode: editingParty.paperCode?.trim() || undefined,
+      nationalId: editingParty.nationalId?.trim() || undefined,
+      address: editingParty.address?.trim() || undefined,
+      medicalNotes: editingParty.medicalNotes?.trim() || undefined,
+      leadSource: editingParty.leadSource,
+      creditLimit: Number(editingParty.creditLimit) || 0,
+    });
+    setShowEditModal(false);
+    setEditingParty(null);
+  };
 
-    const ws = XLSX.utils.json_to_sheet(sampleData);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Patients_Template');
-    XLSX.writeFile(wb, 'Patients_Import_Template.xlsx');
+  const handleDeleteParty = (id: string, name: string) => {
+    if (window.confirm(t(`هل أنت متأكد من حذف العميل/المريض "${name}" نهائياً من قاعدة البيانات؟`, `Are you sure you want to permanently delete "${name}"?`))) {
+      deleteParty(id);
+    }
+  };
+
+  // Validator & Importer for Customers / Patients
+  const validatePartyRows = (rawRows: any[]): ExcelValidationResult<any> => {
+    const errors: CellValidationError[] = [];
+    const validRows: any[] = [];
+
+    rawRows.forEach((row, index) => {
+      const rowNum = index + 2; // Row number in Excel
+
+      const name = String(row['الاسم بالعربي'] || row['الاسم'] || row['Name'] || row['Full Name Ar'] || '').trim();
+      const nameEn = String(row['الاسم بالإنجليزي'] || row['Name En'] || row['Full Name En'] || '').trim();
+      const phone = String(row['رقم الموبايل'] || row['الموبايل'] || row['Phone'] || row['Phone Number'] || row['الهاتف'] || '').trim();
+      const paperCode = String(row['الكود الورقي'] || row['Paper File Code'] || row['Paper Code'] || '').trim();
+      const nationalId = String(row['الرقم القومي'] || row['National ID'] || row['الهوية'] || '').trim();
+      const leadSource = String(row['مصدر العميل'] || row['Lead Source'] || row['مصدر الإعلان'] || 'Excel Import').trim();
+      const rawBalance = row['الرصيد الافتتاحي'] !== undefined && row['الرصيد الافتتاحي'] !== '' ? row['الرصيد الافتتاحي'] : (row['Opening Balance'] || 0);
+      const rawCreditLimit = row['الحد الائتماني'] !== undefined && row['الحد الائتماني'] !== '' ? row['الحد الائتماني'] : (row['Credit Limit'] || 10000);
+      const address = String(row['العنوان'] || row['Address'] || '').trim();
+      const medicalNotes = String(row['ملاحظات وتاريخ صحي'] || row['ملاحظات طبية'] || row['Medical Notes'] || '').trim();
+
+      // Validate Name
+      if (!name || name.length < 2) {
+        errors.push({
+          rowNumber: rowNum,
+          columnKey: 'name',
+          columnLabelAr: 'الاسم بالعربي',
+          enteredValue: name,
+          reasonAr: 'اسم العميل حقل إلزامي ويجب ألا يقل عن حرفين',
+        });
+      }
+
+      // Validate Phone
+      const cleanPhone = phone.replace(/[^0-9+]/g, '');
+      if (!phone) {
+        errors.push({
+          rowNumber: rowNum,
+          columnKey: 'phone',
+          columnLabelAr: 'رقم الموبايل',
+          enteredValue: phone,
+          reasonAr: 'رقم هاتف العميل حقل إلزامي لا يمكن تركه فارغاً',
+        });
+      } else if (cleanPhone.length < 7) {
+        errors.push({
+          rowNumber: rowNum,
+          columnKey: 'phone',
+          columnLabelAr: 'رقم الموبايل',
+          enteredValue: phone,
+          reasonAr: 'رقم الهاتف غير صالح، يجب أن يحتوي على أرقام فقط ولا يقل عن 7 أرقام',
+        });
+      }
+
+      // Validate Balance
+      const balanceNum = Number(rawBalance);
+      if (isNaN(balanceNum)) {
+        errors.push({
+          rowNumber: rowNum,
+          columnKey: 'balance',
+          columnLabelAr: 'الرصيد الافتتاحي',
+          enteredValue: rawBalance,
+          reasonAr: 'الرصيد الافتتاحي يجب أن يكون قيمة رقمية صالحة (مثال: 0 أو 500 أو -200)',
+        });
+      }
+
+      // Validate Credit Limit
+      const creditLimitNum = Number(rawCreditLimit);
+      if (isNaN(creditLimitNum) || creditLimitNum < 0) {
+        errors.push({
+          rowNumber: rowNum,
+          columnKey: 'creditLimit',
+          columnLabelAr: 'الحد الائتماني',
+          enteredValue: rawCreditLimit,
+          reasonAr: 'الحد الائتماني يجب أن يكون رقماً موجباً أو صفراً',
+        });
+      }
+
+      validRows.push({
+        name,
+        nameEn: nameEn || autoTranslateArabic(name),
+        phone: cleanPhone || phone,
+        paperCode,
+        nationalId,
+        leadSource,
+        balance: isNaN(balanceNum) ? 0 : balanceNum,
+        creditLimit: isNaN(creditLimitNum) ? 10000 : creditLimitNum,
+        address,
+        medicalNotes,
+      });
+    });
+
+    return {
+      totalRows: rawRows.length,
+      errors,
+      validRows: errors.length === 0 ? validRows : [],
+    };
+  };
+
+  const handleConfirmPartyImport = (validRows: any[]) => {
+    const branchToUse = activeBranch?.id || currentBranchId;
+    validRows.forEach((row) => {
+      addParty({
+        name: row.name,
+        nameEn: row.nameEn,
+        phone: row.phone,
+        type: 'Customer',
+        branchId: branchToUse,
+        paperCode: row.paperCode || undefined,
+        nationalId: row.nationalId || undefined,
+        leadSource: row.leadSource || 'Excel Import',
+        balance: row.balance || 0,
+        creditLimit: row.creditLimit || 10000,
+        address: row.address || undefined,
+        medicalNotes: row.medicalNotes || undefined,
+      });
+    });
   };
 
   return (
@@ -217,12 +425,12 @@ export const PartiesView: React.FC = () => {
             </div>
             <div>
               <h1 className="text-lg md:text-xl font-black text-slate-900 dark:text-white">
-                {t('سجل المرضى والعملاء 360 (Patients & Customers Directory)', 'Patients & Customers Directory')}
+                {t('سجل العملاء', 'Customers Directory')}
               </h1>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                 {t(
-                  'شاشة مخصصة لإدارة ملفات المرضى والعملاء، الأكواد الورقية، استيراد شيتات الإكسيل، والتاريخ الطبي',
-                  'Dedicated directory for patients & customers profiles, paper file codes, Excel import, and medical records'
+                  'سجل العملاء لإدارة الملفات، الأكواد الورقية، استيراد شيتات الإكسيل، ومتابعة الحسابات',
+                  'Customers directory for managing profiles, paper codes, Excel import, and account ledgers'
                 )}
               </p>
             </div>
@@ -345,7 +553,7 @@ export const PartiesView: React.FC = () => {
             <div>
               <div className="flex items-start justify-between">
                 <div>
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1.5 flex-wrap">
                     <span className="rounded-md px-2 py-0.5 text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">
                       {t('مريض / عميل', 'Patient / Client')}
                     </span>
@@ -354,6 +562,15 @@ export const PartiesView: React.FC = () => {
                         {party.systemCode}
                       </span>
                     )}
+                    {(() => {
+                      const branchObj = branches.find((b) => b.id === party.branchId) || activeBranch;
+                      return branchObj ? (
+                        <span className="rounded-md px-1.5 py-0.5 text-[10px] font-semibold bg-violet-50 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300 border border-violet-200 dark:border-violet-800 inline-flex items-center gap-1">
+                          <GitBranch className="h-2.5 w-2.5" />
+                          {branchObj.name}
+                        </span>
+                      ) : null;
+                    })()}
                   </div>
                   <h3 className="text-sm font-extrabold text-slate-900 dark:text-white mt-1.5">{party.name}</h3>
                   {party.nameEn && <p className="text-xs text-slate-400">{party.nameEn}</p>}
@@ -434,6 +651,22 @@ export const PartiesView: React.FC = () => {
                   <FileText className="h-3.5 w-3.5 text-indigo-600" />
                   <span>{t('كشف الحساب', 'Statement')}</span>
                 </button>
+
+                <button
+                  onClick={() => handleEditClick(party)}
+                  title={t('تعديل بيانات العميل', 'Edit Customer')}
+                  className="p-1 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition-colors cursor-pointer"
+                >
+                  <Edit2 className="h-3.5 w-3.5" />
+                </button>
+
+                <button
+                  onClick={() => handleDeleteParty(party.id, party.name)}
+                  title={t('حذف العميل', 'Delete Customer')}
+                  className="p-1 rounded-lg border border-rose-200 dark:border-rose-900/50 hover:bg-rose-50 dark:hover:bg-rose-950/30 text-rose-600 dark:text-rose-400 transition-colors cursor-pointer"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
               </div>
             </div>
           </div>
@@ -450,6 +683,29 @@ export const PartiesView: React.FC = () => {
             </h3>
 
             <div className="space-y-3 text-xs">
+
+              {/* Branch Field (الفرع التابع له العميل - بشكل افتراضي للفرع المفعل وغير قابل للتعديل) */}
+              <div className="rounded-xl border border-indigo-100 bg-indigo-50/60 p-2.5 dark:border-indigo-900/40 dark:bg-indigo-950/20">
+                <div className="flex items-center justify-between mb-1">
+                  <label className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                    <GitBranch className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />
+                    <span>{t('الفرع التابع له العميل', 'Assigned Branch')}</span>
+                  </label>
+                  <span className="rounded-md bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 px-2 py-0.5 text-[10px] font-bold">
+                    {t('الفرع المفعل (غير قابل للتعديل)', 'Active Branch (Read-Only)')}
+                  </span>
+                </div>
+                <input
+                  type="text"
+                  disabled
+                  readOnly
+                  value={activeBranch?.name || branches.find((b) => b.id === currentBranchId)?.name || t('الفرع الرئيسي', 'Main Branch')}
+                  className="w-full rounded-lg border border-indigo-200 dark:border-indigo-800 bg-white dark:bg-slate-800 p-2 text-xs font-extrabold text-slate-800 dark:text-slate-200 outline-none cursor-not-allowed select-none"
+                />
+                <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">
+                  {t('يتم تسجيل العميل وتكويده تلقائياً ضمن فرع المركز المفعل حالياً.', 'Customer will automatically be linked strictly to the active branch.')}
+                </p>
+              </div>
 
               {/* Dual Language Names */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -537,33 +793,18 @@ export const PartiesView: React.FC = () => {
                 </div>
               </div>
 
-              {/* Medical notes & Allergies */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700">
-                <div>
-                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    {t('ملاحظات طبية وتاريخ علاجي', 'Medical History')}
-                  </label>
-                  <input
-                    type="text"
-                    value={newParty.medicalNotes}
-                    onChange={(e) => setNewParty({ ...newParty, medicalNotes: e.target.value })}
-                    placeholder="جلسات سابقة، نوع البشرة..."
-                    className="w-full rounded-xl border border-slate-200 bg-white dark:bg-slate-800 p-2 outline-none dark:border-slate-700 dark:text-white"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    {t('حساسية الأدوية (مفصولة بفواصل)', 'Allergies')}
-                  </label>
-                  <input
-                    type="text"
-                    value={newParty.allergies}
-                    onChange={(e) => setNewParty({ ...newParty, allergies: e.target.value })}
-                    placeholder="بنسلين، ليدوكايين..."
-                    className="w-full rounded-xl border border-slate-200 bg-white dark:bg-slate-800 p-2 outline-none dark:border-slate-700 dark:text-white"
-                  />
-                </div>
+              {/* Notes (ملاحظات) */}
+              <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700">
+                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  {t('ملاحظات', 'Notes')}
+                </label>
+                <textarea
+                  rows={2}
+                  value={newParty.medicalNotes}
+                  onChange={(e) => setNewParty({ ...newParty, medicalNotes: e.target.value })}
+                  placeholder={t('أي ملاحظات خاصة بالعميل...', 'Any notes regarding the customer...')}
+                  className="w-full rounded-xl border border-slate-200 bg-white dark:bg-slate-800 p-2 outline-none dark:border-slate-700 dark:text-white text-xs"
+                />
               </div>
 
               <div className="flex items-center gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
@@ -585,71 +826,31 @@ export const PartiesView: React.FC = () => {
         </div>
       )}
 
-      {/* EXCEL UPLOAD MODAL */}
-      {showExcelModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-xs">
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl dark:bg-slate-900 border border-slate-100 dark:border-slate-800">
-            <h3 className="text-base font-extrabold text-slate-900 dark:text-white mb-2 flex items-center gap-2">
-              <FileSpreadsheet className="h-5 w-5 text-emerald-600" />
-              <span>{t('استيراد المرضى والعملاء عبر ملف إكسيل', 'Import Patients via Excel')}</span>
-            </h3>
-            <p className="text-xs text-slate-500 mb-4">
-              {t(
-                'يمكنك رفع ملف إكسيل يحتوي على بيانات المرضى وأرقام الهواتف والملاحظات الطبية لإضافتهم دفعة واحدة.',
-                'Upload an Excel (.xlsx/.xls) spreadsheet with patient records, phone numbers & medical notes.'
-              )}
-            </p>
-
-            <div className="space-y-4">
-              {/* File Upload Box */}
-              <div
-                onClick={() => fileInputRef.current?.click()}
-                className="border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-2xl p-6 text-center hover:bg-slate-50 dark:hover:bg-slate-800/40 cursor-pointer transition-colors"
-              >
-                <Upload className="h-8 w-8 text-indigo-600 mx-auto mb-2" />
-                <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block">
-                  {t('اضغط هنا لاختيار ملف الإكسيل (.xlsx)', 'Click to choose Excel file (.xlsx)')}
-                </span>
-                <span className="text-[11px] text-slate-400 block mt-1">
-                  {t('أو اسحب وأفلت الملف في هذا المربع', 'or drag and drop file here')}
-                </span>
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  onChange={handleFileUpload}
-                  accept=".xlsx, .xls, .csv"
-                  className="hidden"
-                />
-              </div>
-
-              {/* Download Template Link */}
-              <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
-                <span className="text-xs text-slate-600 dark:text-slate-300 font-medium">
-                  {t('نموذج إكسيل قياسي للتعبئة:', 'Download standard template:')}
-                </span>
-                <button
-                  type="button"
-                  onClick={handleDownloadSample}
-                  className="inline-flex items-center gap-1 text-xs font-bold text-indigo-600 hover:text-indigo-700 cursor-pointer"
-                >
-                  <Download className="h-3.5 w-3.5" />
-                  <span>{t('تحميل النموذج', 'Sample File')}</span>
-                </button>
-              </div>
-
-              <div className="flex justify-end pt-3 border-t border-slate-100 dark:border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setShowExcelModal(false)}
-                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
-                >
-                  {t('إلغاء', 'Cancel')}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* EXCEL DATA TRANSFER & VALIDATION MODAL */}
+      <ExcelDataTransferModal
+        isOpen={showExcelModal}
+        onClose={() => setShowExcelModal(false)}
+        entityTitleAr="بيانات وسجلات العملاء والمرضى"
+        entityTitleEn="Customers & Patients Database"
+        descriptionAr="استيراد وتصدير قاعدة بيانات العملاء مع الفحص الخلوي الذكي واكتشاف الأخطاء"
+        columns={partyExcelColumns}
+        currentDataForExport={filteredParties.map((p) => ({
+          name: p.name,
+          nameEn: p.nameEn || '',
+          phone: p.phone,
+          paperCode: p.paperCode || '',
+          nationalId: p.nationalId || '',
+          leadSource: p.leadSource || '',
+          balance: p.balance || 0,
+          creditLimit: p.creditLimit || 0,
+          address: p.address || '',
+          medicalNotes: p.medicalNotes || '',
+        }))}
+        exportFileNamePrefix="سجل_العملاء_والمرضى"
+        validator={validatePartyRows}
+        onConfirmImport={handleConfirmPartyImport}
+        branchName={activeBranch?.name || 'الفرع الحالي'}
+      />
       {/* PARTY STATEMENT MODAL */}
       {showStatementModal && (
         <PartyStatementModal
@@ -869,6 +1070,156 @@ export const PartiesView: React.FC = () => {
                 >
                   <Plus className="h-4 w-4" />
                   <span>تأكيد إسناد الباقة للمريض</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* EDIT CUSTOMER MODAL */}
+      {showEditModal && editingParty && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-xl rounded-2xl bg-white p-6 shadow-2xl dark:bg-slate-900 border border-slate-100 dark:border-slate-800 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 mb-3 border-b border-slate-100 dark:border-slate-800">
+              <h3 className="text-base font-extrabold text-slate-900 dark:text-white flex items-center gap-2">
+                <Edit2 className="h-5 w-5 text-indigo-600" />
+                <span>{t('تعديل بيانات العميل / المريض', 'Edit Client / Patient')}</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowEditModal(false);
+                  setEditingParty(null);
+                }}
+                className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    {t('الاسم بالعربي *', 'Full Name (Arabic) *')}
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={editingParty.name}
+                    onChange={(e) => setEditingParty({ ...editingParty, name: e.target.value })}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2 outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    {t('الاسم بالإنجليزي', 'Full Name (English)')}
+                  </label>
+                  <input
+                    type="text"
+                    value={editingParty.nameEn || ''}
+                    onChange={(e) => setEditingParty({ ...editingParty, nameEn: e.target.value })}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2 outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    {t('الموبايل / الهاتف *', 'Phone *')}
+                  </label>
+                  <input
+                    type="tel"
+                    required
+                    value={editingParty.phone}
+                    onChange={(e) => setEditingParty({ ...editingParty, phone: e.target.value })}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2 font-mono outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    {t('الكود الورقي', 'Paper File #')}
+                  </label>
+                  <input
+                    type="text"
+                    value={editingParty.paperCode || ''}
+                    onChange={(e) => setEditingParty({ ...editingParty, paperCode: e.target.value })}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2 font-mono outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    {t('الحد الائتماني', 'Credit Limit')}
+                  </label>
+                  <input
+                    type="number"
+                    value={editingParty.creditLimit || 0}
+                    onChange={(e) => setEditingParty({ ...editingParty, creditLimit: Number(e.target.value) || 0 })}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2 font-mono outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  {t('مصدر العميل / الإعلان', 'Lead Source')}
+                </label>
+                <select
+                  value={editingParty.leadSource || 'Facebook Ads'}
+                  onChange={(e) => setEditingParty({ ...editingParty, leadSource: e.target.value })}
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2 outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                >
+                  <option value="Facebook Ads">Facebook Ads</option>
+                  <option value="Instagram">Instagram</option>
+                  <option value="TikTok">TikTok</option>
+                  <option value="Friend Referral">ترشيح صديق</option>
+                  <option value="Walk-in">زيارة مباشرة</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  {t('العنوان', 'Address')}
+                </label>
+                <input
+                  type="text"
+                  value={editingParty.address || ''}
+                  onChange={(e) => setEditingParty({ ...editingParty, address: e.target.value })}
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2 outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  {t('ملاحظات وتاريخ صحي', 'Medical / General Notes')}
+                </label>
+                <textarea
+                  rows={2}
+                  value={editingParty.medicalNotes || ''}
+                  onChange={(e) => setEditingParty({ ...editingParty, medicalNotes: e.target.value })}
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2 outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                />
+              </div>
+
+              <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowEditModal(false);
+                    setEditingParty(null);
+                  }}
+                  className="rounded-xl border border-slate-200 px-4 py-2 font-bold text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 cursor-pointer"
+                >
+                  {t('إلغاء', 'Cancel')}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveEditParty}
+                  className="rounded-xl bg-indigo-600 px-5 py-2 font-bold text-white hover:bg-indigo-700 cursor-pointer shadow-md shadow-indigo-600/20"
+                >
+                  {t('حفظ التعديلات', 'Save Changes')}
                 </button>
               </div>
             </div>

@@ -28,19 +28,40 @@ import { PayrollView } from './views/PayrollView';
 import { LaserDevicesView } from './views/LaserDevicesView';
 import { FiscalDocumentsView } from './views/FiscalDocumentsView';
 import { CashReceiptsView } from './views/CashReceiptsView';
+import { CollectionReceiptsView } from './views/CollectionReceiptsView';
 import { CashPaymentsView } from './views/CashPaymentsView';
 import { SpecializedTaxInvoicesView } from './views/SpecializedTaxInvoicesView';
 import { GoodsReceiptsView } from './views/GoodsReceiptsView';
 import { GoodsIssuesView } from './views/GoodsIssuesView';
+import { AttendanceManagementView } from './views/AttendanceManagementView';
+import { EmployeeDossierView } from './views/EmployeeDossierView';
+import { SmartNotificationsView } from './views/SmartNotificationsView';
 import { SystemManualView } from './views/SystemManualView';
 import { ShieldAlert, ArrowRight, ArrowLeft } from 'lucide-react';
+import { QuickActionsBar } from './components/QuickActionsBar';
+import { CommandPaletteModal } from './components/CommandPaletteModal';
+import { CustomizeQuickButtonsModal } from './components/CustomizeQuickButtonsModal';
+import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 
 const MainLayout: React.FC = () => {
-  const [currentView, setCurrentView] = useState<string>('dashboard');
-  const [mobileSidebarOpen, setMobileSidebarOpen] = useState<boolean>(false);
   const { language, t, canAccessView, currentUser, activeBranch } = usePlatform();
 
-  // If currentUser doesn't have access to the default dashboard, redirect to first allowed view
+  // Load preferred landing view from localStorage or user settings
+  const [currentView, setCurrentView] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem('erp_default_view');
+      if (saved) return saved;
+    } catch {}
+    return 'dashboard';
+  });
+
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState<boolean>(false);
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState<boolean>(false);
+  const [isCustomizeModalOpen, setIsCustomizeModalOpen] = useState<boolean>(false);
+  const [isShortcutsModalOpen, setIsShortcutsModalOpen] = useState<boolean>(false);
+  const [selectedStaffDossierId, setSelectedStaffDossierId] = useState<string | undefined>(undefined);
+
+  // If currentUser doesn't have access to the current view, redirect to first allowed view
   useEffect(() => {
     if (currentUser && !canAccessView(currentView)) {
       const candidateViews = [
@@ -82,16 +103,49 @@ const MainLayout: React.FC = () => {
     }
   }, [currentUser, currentView, canAccessView]);
 
-  // Keyboard shortcut listener (e.g. F2 for POS)
+  // Global Keyboard shortcuts listener (Ctrl+K, F1..F8, Esc)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'F2') {
+      // Ctrl+K or Cmd+K: Open Command Palette
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
-        if (canAccessView('pos')) {
-          setCurrentView('pos');
-        }
+        setIsCommandPaletteOpen((prev) => !prev);
+        return;
+      }
+
+      // Esc: Close open modals
+      if (e.key === 'Escape') {
+        setIsCommandPaletteOpen(false);
+        setIsCustomizeModalOpen(false);
+        setIsShortcutsModalOpen(false);
+        return;
+      }
+
+      // Direct Function Keys
+      if (e.key === 'F1') {
+        e.preventDefault();
+        if (canAccessView('system_manual')) setCurrentView('system_manual');
+      } else if (e.key === 'F2') {
+        e.preventDefault();
+        if (canAccessView('pos')) setCurrentView('pos');
+      } else if (e.key === 'F3') {
+        e.preventDefault();
+        if (canAccessView('reception_ops')) setCurrentView('reception_ops');
+      } else if (e.key === 'F4') {
+        e.preventDefault();
+        if (canAccessView('bookings')) setCurrentView('bookings');
+      } else if (e.key === 'F6') {
+        e.preventDefault();
+        if (canAccessView('parties')) setCurrentView('parties');
+      } else if (e.key === 'F7') {
+        e.preventDefault();
+        if (canAccessView('cash_receipts')) setCurrentView('cash_receipts');
+      } else if (e.key === 'F8') {
+        e.preventDefault();
+        if (canAccessView('staff')) setCurrentView('staff');
       }
     };
+
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [canAccessView]);
@@ -140,14 +194,28 @@ const MainLayout: React.FC = () => {
         return <PosView />;
       case 'invoices':
         return <InvoicesView />;
+      case 'collection_receipts':
+        return <CollectionReceiptsView />;
       case 'parties':
         return <PartiesView />;
       case 'suppliers':
         return <SuppliersView />;
       case 'staff':
-        return <StaffManagementView onNavigateToPayroll={() => setCurrentView('payroll')} />;
+        return (
+          <StaffManagementView
+            onNavigateToPayroll={() => setCurrentView('payroll')}
+            onNavigateToDossier={(staffId) => {
+              setSelectedStaffDossierId(staffId);
+              setCurrentView('employee_dossier');
+            }}
+          />
+        );
+      case 'attendance':
+        return <AttendanceManagementView />;
       case 'payroll':
         return <PayrollView />;
+      case 'employee_dossier':
+        return <EmployeeDossierView initialStaffId={selectedStaffDossierId} />;
       case 'products':
         return <ProductManagementView />;
       case 'inventory_mgmt':
@@ -188,6 +256,8 @@ const MainLayout: React.FC = () => {
         return <UsersRolesView />;
       case 'neon':
         return <NeonHubView />;
+      case 'notifications_config':
+        return <SmartNotificationsView onNavigate={(view) => setCurrentView(view)} />;
       case 'system_manual':
         return <SystemManualView />;
       default:
@@ -202,6 +272,31 @@ const MainLayout: React.FC = () => {
         onToggleSidebar={() => setMobileSidebarOpen(!mobileSidebarOpen)}
         onNavigate={(view) => setCurrentView(view)}
         currentView={currentView}
+      />
+
+      {/* User Custom Quick Actions & Speed Bar */}
+      <QuickActionsBar
+        onNavigate={(view) => setCurrentView(view)}
+        onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
+        onOpenCustomize={() => setIsCustomizeModalOpen(true)}
+        onOpenShortcuts={() => setIsShortcutsModalOpen(true)}
+      />
+
+      {/* Modals for Command Palette, Customization, and Keyboard Shortcuts */}
+      <CommandPaletteModal
+        isOpen={isCommandPaletteOpen}
+        onClose={() => setIsCommandPaletteOpen(false)}
+        onNavigate={(view) => setCurrentView(view)}
+      />
+
+      <CustomizeQuickButtonsModal
+        isOpen={isCustomizeModalOpen}
+        onClose={() => setIsCustomizeModalOpen(false)}
+      />
+
+      <KeyboardShortcutsModal
+        isOpen={isShortcutsModalOpen}
+        onClose={() => setIsShortcutsModalOpen(false)}
       />
 
       <div className="flex flex-1 overflow-hidden relative">

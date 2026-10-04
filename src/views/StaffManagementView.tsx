@@ -31,13 +31,15 @@ import {
   DollarSign,
   Activity,
   Layers,
+  Contact,
 } from 'lucide-react';
 
 interface StaffManagementViewProps {
   onNavigateToPayroll?: () => void;
+  onNavigateToDossier?: (staffId: string) => void;
 }
 
-export const StaffManagementView: React.FC<StaffManagementViewProps> = ({ onNavigateToPayroll }) => {
+export const StaffManagementView: React.FC<StaffManagementViewProps> = ({ onNavigateToPayroll, onNavigateToDossier }) => {
   const {
     language,
     t,
@@ -75,6 +77,7 @@ export const StaffManagementView: React.FC<StaffManagementViewProps> = ({ onNavi
   const [branchId, setBranchId] = useState('');
   const [isActive, setIsActive] = useState(true);
   const [isServiceProvider, setIsServiceProvider] = useState(true);
+  const [acceptsBookings, setAcceptsBookings] = useState(true);
   const [hireDate, setHireDate] = useState(new Date().toISOString().split('T')[0]);
 
   // Financial & Rates State
@@ -132,6 +135,7 @@ export const StaffManagementView: React.FC<StaffManagementViewProps> = ({ onNavi
     setBranchId(branches[0]?.id || '');
     setIsActive(true);
     setIsServiceProvider(true);
+    setAcceptsBookings(true);
     setHireDate(new Date().toISOString().split('T')[0]);
     setFixedMonthlySalary(15000);
     setFixedAllowances(1500);
@@ -163,6 +167,7 @@ export const StaffManagementView: React.FC<StaffManagementViewProps> = ({ onNavi
     setBranchId(staff.branchId || '');
     setIsActive(staff.isActive);
     setIsServiceProvider(staff.isServiceProvider ?? (staff.roleType === 'Doctor' || staff.roleType === 'Technician'));
+    setAcceptsBookings(staff.acceptsBookings ?? (staff.roleType === 'Doctor' || Boolean(staff.isServiceProvider)));
     setHireDate(staff.hireDate || new Date().toISOString().split('T')[0]);
     setFixedMonthlySalary(staff.fixedMonthlySalary ?? staff.monthlySalary ?? 0);
     setFixedAllowances(staff.fixedAllowances ?? 0);
@@ -254,6 +259,7 @@ export const StaffManagementView: React.FC<StaffManagementViewProps> = ({ onNavi
       branchId: branchId || undefined,
       isActive,
       isServiceProvider,
+      acceptsBookings,
       hireDate: hireDate || new Date().toISOString().split('T')[0],
       monthlySalary: Number(fixedMonthlySalary) || 0,
       fixedMonthlySalary: Number(fixedMonthlySalary) || 0,
@@ -550,19 +556,41 @@ export const StaffManagementView: React.FC<StaffManagementViewProps> = ({ onNavi
                       <p className="text-xs text-indigo-600 dark:text-indigo-400 font-semibold mt-0.5">
                         {language === 'ar' ? staff.jobTitleAr : staff.jobTitleEn}
                       </p>
-                      <span
-                        className={`inline-block mt-1 px-2 py-0.5 text-[10px] font-bold rounded-md ${
-                          staff.roleType === 'Doctor'
-                            ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300'
-                            : staff.roleType === 'Technician'
-                            ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300'
-                            : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
-                        }`}
-                      >
-                        {staff.roleType === 'Doctor' && t('طبيب', 'Doctor')}
-                        {staff.roleType === 'Technician' && t('تكنيشن / فني', 'Technician')}
-                        {staff.roleType === 'Employee' && t('موظف / إداري', 'Employee')}
-                      </span>
+                      <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                        <span
+                          className={`px-2 py-0.5 text-[10px] font-bold rounded-md ${
+                            staff.roleType === 'Doctor'
+                              ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300'
+                              : staff.roleType === 'Technician'
+                              ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300'
+                              : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                          }`}
+                        >
+                          {staff.roleType === 'Doctor' && t('طبيب', 'Doctor')}
+                          {staff.roleType === 'Technician' && t('تكنيشن / فني', 'Technician')}
+                          {staff.roleType === 'Employee' && t('موظف / إداري', 'Employee')}
+                        </span>
+
+                        {staff.isServiceProvider ? (
+                          <span className="px-2 py-0.5 text-[10px] font-bold rounded-md bg-purple-50 text-purple-700 dark:bg-purple-950/60 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
+                            {t('مؤدى خدمة ✓', 'Service Provider ✓')}
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 text-[10px] font-bold rounded-md bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                            {t('ليس مؤدى خدمة', 'Non-provider')}
+                          </span>
+                        )}
+
+                        {staff.acceptsBookings ? (
+                          <span className="px-2 py-0.5 text-[10px] font-bold rounded-md bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                            {t('يستقبل حجوزات ✓', 'Accepts Bookings ✓')}
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 text-[10px] font-bold rounded-md bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                            {t('لا يستقبل حجوزات', 'No Bookings')}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
 
@@ -712,6 +740,17 @@ export const StaffManagementView: React.FC<StaffManagementViewProps> = ({ onNavi
                 </div>
 
                 <div className="flex items-center gap-1.5">
+                  {onNavigateToDossier && (
+                    <button
+                      onClick={() => onNavigateToDossier(staff.id)}
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 text-[11px] font-bold transition cursor-pointer shadow-xs"
+                      title={t('عرض كشف حساب وملف الموظف الشامل (سلف، عهد، تشغيل، حضور)', 'View Comprehensive Dossier')}
+                    >
+                      <Contact className="h-3.5 w-3.5 text-indigo-600" />
+                      <span>{t('كشف الحساب والملف', 'Dossier')}</span>
+                    </button>
+                  )}
+
                   <button
                     onClick={() => handleOpenEdit(staff)}
                     className="p-1.5 text-slate-600 hover:text-indigo-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-indigo-400 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
@@ -897,8 +936,8 @@ export const StaffManagementView: React.FC<StaffManagementViewProps> = ({ onNavi
                 </div>
               </div>
 
-              {/* Phone, Linked Branch, Hire Date & Active Status Switch */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+              {/* Phone, Linked Branch, Hire Date */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                     {t('رقم الهاتف *', 'Phone *')}
@@ -943,49 +982,90 @@ export const StaffManagementView: React.FC<StaffManagementViewProps> = ({ onNavi
                     className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-indigo-600"
                   />
                 </div>
+              </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    {t('حالة التفعيل (تشغيل / تعطيل)', 'Active Status')}
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => setIsActive(!isActive)}
-                    className={`w-full py-2 px-3 text-xs font-bold rounded-xl border flex items-center justify-between transition-all cursor-pointer ${
-                      isActive
-                        ? 'bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800'
-                        : 'bg-slate-100 text-slate-600 border-slate-300 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700'
-                    }`}
-                  >
-                    <span>{isActive ? t('مفعل (نشط)', 'Active') : t('معطل (متوقف)', 'Inactive')}</span>
-                    {isActive ? (
-                      <ToggleRight className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
-                    ) : (
-                      <ToggleLeft className="h-5 w-5 text-slate-400" />
-                    )}
-                  </button>
-                </div>
+              {/* Operational Permissions: Active Status, Service Provider, Accepts Bookings */}
+              <div className="p-3.5 bg-indigo-50/50 dark:bg-indigo-950/20 rounded-xl border border-indigo-100 dark:border-indigo-900/50">
+                <h4 className="text-xs font-bold text-indigo-950 dark:text-indigo-200 mb-2.5 flex items-center gap-1.5">
+                  <UserCheck className="h-4 w-4 text-indigo-600" />
+                  <span>{t('الصلاحيات والخصائص التشغيلية للموظف', 'Operational Roles & Permissions')}</span>
+                </h4>
 
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    {t('مقدم خدمة (يظهر بشاشة التشغيل)', 'Service Provider (Operations)')}
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => setIsServiceProvider(!isServiceProvider)}
-                    className={`w-full py-2 px-3 text-xs font-bold rounded-xl border flex items-center justify-between transition-all cursor-pointer ${
-                      isServiceProvider
-                        ? 'bg-indigo-50 text-indigo-700 border-indigo-300 dark:bg-indigo-950/50 dark:text-indigo-300 dark:border-indigo-800'
-                        : 'bg-slate-100 text-slate-600 border-slate-300 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700'
-                    }`}
-                  >
-                    <span>{isServiceProvider ? t('مقدم خدمة (نعم)', 'Provider (Yes)') : t('غير مقدم خدمة (لا)', 'No')}</span>
-                    {isServiceProvider ? (
-                      <ToggleRight className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
-                    ) : (
-                      <ToggleLeft className="h-5 w-5 text-slate-400" />
-                    )}
-                  </button>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {/* Active / Inactive */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      {t('حالة التفعيل بالسيستم', 'Active Status')}
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setIsActive(!isActive)}
+                      className={`w-full py-2 px-3 text-xs font-bold rounded-xl border flex items-center justify-between transition-all cursor-pointer ${
+                        isActive
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800'
+                          : 'bg-slate-100 text-slate-600 border-slate-300 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700'
+                      }`}
+                    >
+                      <span>{isActive ? t('مفعل (نشط)', 'Active') : t('معطل', 'Inactive')}</span>
+                      {isActive ? (
+                        <ToggleRight className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+                      ) : (
+                        <ToggleLeft className="h-5 w-5 text-slate-400" />
+                      )}
+                    </button>
+                  </div>
+
+                  {/* Is Service Provider (مؤدى خدمة) */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      {t('هل مؤدى خدمة أم لا؟', 'Is Service Provider?')}
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setIsServiceProvider(!isServiceProvider)}
+                      className={`w-full py-2 px-3 text-xs font-bold rounded-xl border flex items-center justify-between transition-all cursor-pointer ${
+                        isServiceProvider
+                          ? 'bg-purple-50 text-purple-700 border-purple-300 dark:bg-purple-950/50 dark:text-purple-300 dark:border-purple-800'
+                          : 'bg-slate-100 text-slate-600 border-slate-300 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700'
+                      }`}
+                    >
+                      <span>{isServiceProvider ? t('مؤدى خدمة ✓', 'Yes (Provider)') : t('ليس مؤدى خدمة', 'No')}</span>
+                      {isServiceProvider ? (
+                        <ToggleRight className="h-5 w-5 text-purple-600 dark:text-purple-400" />
+                      ) : (
+                        <ToggleLeft className="h-5 w-5 text-slate-400" />
+                      )}
+                    </button>
+                    <span className="block text-[10px] text-slate-500 mt-1">
+                      {t('يظهر في حركات التشغيل والجلسات بالفرع', 'Appears in reception ops for active branch')}
+                    </span>
+                  </div>
+
+                  {/* Accepts Bookings (يستقبل حجوزات) */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      {t('هل يستقبل حجوزات أم لا؟', 'Accepts Bookings?')}
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setAcceptsBookings(!acceptsBookings)}
+                      className={`w-full py-2 px-3 text-xs font-bold rounded-xl border flex items-center justify-between transition-all cursor-pointer ${
+                        acceptsBookings
+                          ? 'bg-blue-50 text-blue-700 border-blue-300 dark:bg-blue-950/50 dark:text-blue-300 dark:border-blue-800'
+                          : 'bg-slate-100 text-slate-600 border-slate-300 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700'
+                      }`}
+                    >
+                      <span>{acceptsBookings ? t('يستقبل حجوزات ✓', 'Yes (Bookable)') : t('لا يستقبل حجوزات', 'No')}</span>
+                      {acceptsBookings ? (
+                        <ToggleRight className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                      ) : (
+                        <ToggleLeft className="h-5 w-5 text-slate-400" />
+                      )}
+                    </button>
+                    <span className="block text-[10px] text-slate-500 mt-1">
+                      {t('يظهر في شاشة حجز جديد بالفرع', 'Appears in new bookings for active branch')}
+                    </span>
+                  </div>
                 </div>
               </div>
 

@@ -252,7 +252,7 @@ export const ActivityLogsView: React.FC = () => {
             <option value="users">{t('المستخدمين والصلاحيات', 'Users & Roles')}</option>
             <option value="products">{t('إدارة المنتجات والخدمات', 'Products & Services')}</option>
             <option value="reception_ops">{t('شاشة التشغيل', 'Operations')}</option>
-            <option value="bookings">{t('الحجوزات والمتابعة', 'Bookings')}</option>
+            <option value="bookings">{t('إدارة الحجوزات', 'Bookings Management')}</option>
             <option value="pos">{t('نقطة البيع السريعة', 'POS')}</option>
             <option value="invoices">{t('فواتير المبيعات', 'Invoices')}</option>
             <option value="payment_methods">{t('طرق السداد', 'Payment Methods')}</option>

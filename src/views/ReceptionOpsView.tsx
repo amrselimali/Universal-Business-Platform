@@ -13,6 +13,7 @@ import {
   Sparkles,
   Zap,
   CheckCircle,
+  CheckCircle2,
   AlertTriangle,
   Receipt,
   Search,
@@ -35,7 +36,117 @@ import {
   Building2,
   ChevronDown,
   X,
+  ShoppingBag,
 } from 'lucide-react';
+import {
+  ExcelDataTransferModal,
+  ExcelColumnConfig,
+  CellValidationError,
+  ExcelValidationResult,
+} from '../components/ExcelDataTransferModal';
+
+const sessionPulsesExcelColumns: ExcelColumnConfig[] = [
+  {
+    key: 'customerName',
+    labelAr: 'اسم العميل / المريض',
+    labelEn: 'Customer / Patient Name',
+    required: true,
+    type: 'text',
+    sampleValue: 'ندى عادل مصطفى',
+    instructions: 'الاسم الكامل للعميل أو المريض متلقي الجلسة',
+  },
+  {
+    key: 'patientPhone',
+    labelAr: 'رقم الهاتف',
+    labelEn: 'Phone',
+    required: false,
+    type: 'phone',
+    sampleValue: '01123456789',
+    instructions: 'رقم هاتف العميل لمطابقة ملف المريض والتواصل',
+  },
+  {
+    key: 'serviceName',
+    labelAr: 'الخدمة / الجلسة',
+    labelEn: 'Service / Session Name',
+    required: true,
+    type: 'text',
+    sampleValue: 'جلسة ليزر ساقين وبكيني',
+    instructions: 'نوع الجلسة أو الخدمة المؤداة في الشيفت',
+  },
+  {
+    key: 'laserDevice',
+    labelAr: 'جهاز الليزر المستخدم',
+    labelEn: 'Laser Device Used',
+    required: false,
+    type: 'text',
+    sampleValue: 'كانديلا برو ماكس GentleMax',
+    instructions: 'اسم جهاز الليزر المستخدم لتحديث عداد نبضاته',
+  },
+  {
+    key: 'pulsesCount',
+    labelAr: 'عدد البلصات المستهلكة (النبضات)',
+    labelEn: 'Consumed Pulses Count',
+    required: true,
+    type: 'number',
+    sampleValue: 850,
+    instructions: 'عدد نبضات الليزر المستهلكة في هذه الجلسة (رقم موجب أو 0)',
+  },
+  {
+    key: 'totalRevenue',
+    labelAr: 'المبلغ المطلوب / الإيراد',
+    labelEn: 'Total Revenue',
+    required: true,
+    type: 'number',
+    sampleValue: 750,
+    instructions: 'إجمالي قيمة الجلسة بالجنيه (رقم موجب أكبر من 0)',
+  },
+  {
+    key: 'collectedAmount',
+    labelAr: 'المبلغ المحصل نقداً / إلكترونياً',
+    labelEn: 'Collected Amount',
+    required: true,
+    type: 'number',
+    sampleValue: 750,
+    instructions: 'المبلغ المحصل بالفعل وتوريده لخزينة الشيفت',
+  },
+  {
+    key: 'paymentMethod',
+    labelAr: 'طريقة السداد',
+    labelEn: 'Payment Method',
+    required: true,
+    type: 'select',
+    options: ['نقداً (كاش)', 'فيزا / بطاقة بنكية', 'فودافون كاش', 'إنستاباي', 'تحويل بنكي'],
+    sampleValue: 'نقداً (كاش)',
+    instructions: 'طريقة السداد المتبعة في تحصيل قيمة الجلسة',
+  },
+  {
+    key: 'doctorName',
+    labelAr: 'الطبيب / الإخصائي المعالج',
+    labelEn: 'Doctor / Specialist',
+    required: false,
+    type: 'text',
+    sampleValue: 'د. ياسمين خالد',
+    instructions: 'اسم الطبيب أو الإخصائية المنفذة للجلسة',
+  },
+  {
+    key: 'date',
+    labelAr: 'تاريخ الجلسة',
+    labelEn: 'Session Date',
+    required: true,
+    type: 'date',
+    sampleValue: '2026-10-01',
+    instructions: 'تاريخ تنفيذ الجلسة واستهلاك البلصات (YYYY-MM-DD)',
+  },
+  {
+    key: 'notes',
+    labelAr: 'ملاحظات الجلسة والنبضات',
+    labelEn: 'Notes',
+    required: false,
+    type: 'text',
+    sampleValue: 'جلسة إعادة ليزر سريعة',
+    instructions: 'أي ملاحظات تشغيلية أو طبية مدونة مع الجلسة',
+  },
+];
 
 interface ReceptionOpsViewProps {
   onNavigateToLaserDevices?: () => void;
@@ -69,6 +180,7 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
     updateShiftNotes,
     appointments,
     laserDevices,
+    canPerformAction,
   } = usePlatform();
 
   const isRtl = language === 'ar';
@@ -88,6 +200,7 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
   const [showAddRowModal, setShowAddRowModal] = useState(false);
   const [showAddExpenseModal, setShowAddExpenseModal] = useState(false);
   const [showPrintShiftModal, setShowPrintShiftModal] = useState(false);
+  const [showExcelModal, setShowExcelModal] = useState(false);
 
   // Open Shift Form
   const [openShiftReceptionist, setOpenShiftReceptionist] = useState(currentUser?.name || '');
@@ -107,7 +220,7 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
   const [serviceId, setServiceId] = useState('');
   const [serviceName, setServiceName] = useState('');
   const [pulsesCount, setPulsesCount] = useState<number>(0);
-  const [consumedQty, setConsumedQty] = useState(1);
+  const [consumedQty, setConsumedQty] = useState(0);
   const [unitPrice, setUnitPrice] = useState(0);
   const [paymentMethodName, setPaymentMethodName] = useState(paymentMethods[0]?.nameAr || 'نقداً (كاش)');
   const [collectedAmount, setCollectedAmount] = useState(0);
@@ -133,6 +246,14 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
   const [supplierName, setSupplierName] = useState('');
   const [supplierSearchTerm, setSupplierSearchTerm] = useState('');
   const [isSupplierDropdownOpen, setIsSupplierDropdownOpen] = useState(false);
+  const [expenseItemRows, setExpenseItemRows] = useState<Array<{
+    id: string;
+    itemId: string;
+    itemName: string;
+    quantity: number;
+    unitPrice: number;
+    amount: number;
+  }>>([]);
 
   // Filter warehouse/stock items only (البنود المخزنية المضافة للمخزن فقط)
   const stockItems = React.useMemo(() => {
@@ -170,6 +291,49 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
     );
   }, [suppliersList]);
 
+  // Filter customers only (without suppliers) and strictly coded in the active branch
+  const branchCustomers = React.useMemo(() => {
+    const currentBranchId = activeBranch?.id || activeShift?.branchId || (branches.length > 0 ? branches[0].id : 'branch-cairo');
+    return parties.filter((p) => {
+      // 1. Must be a Customer (not Supplier only)
+      const isCustomer = p.type === 'Customer' || p.type === 'Both';
+      if (!isCustomer) return false;
+
+      // 2. Must be coded in active branch
+      if (currentBranchId) {
+        const matchesBranch =
+          p.branchId === currentBranchId ||
+          (activeBranch?.name && p.branchId === activeBranch.name) ||
+          (activeBranch?.code && p.branchId === activeBranch.code) ||
+          (Array.isArray(p.branchIds) && (p.branchIds.includes(currentBranchId) || (activeBranch?.name && p.branchIds.includes(activeBranch.name)))) ||
+          (!p.branchId && (!p.branchIds || p.branchIds.length === 0) && currentBranchId === (branches[0]?.id || 'branch-cairo'));
+        return Boolean(matchesBranch);
+      }
+      return true;
+    });
+  }, [parties, activeBranch?.id, activeBranch?.name, activeBranch?.code, activeShift?.branchId, branches]);
+
+  // Filter Service Providers strictly: active branch and isServiceProvider === true (مؤدى الخدمة للفرع المفعل فقط)
+  const branchServiceProviders = React.useMemo(() => {
+    const currentBranchId = activeBranch?.id || activeShift?.branchId || (branches.length > 0 ? branches[0].id : 'branch-cairo');
+    return staffMembers.filter((s) => {
+      if (!s.isActive || s.isArchived) return false;
+      // Must be marked as service provider (مؤدى خدمة فقط)
+      if (s.isServiceProvider !== true) return false;
+
+      // Must be linked to active branch
+      if (currentBranchId) {
+        const matchesBranch =
+          s.branchId === currentBranchId ||
+          (activeBranch?.name && s.branchId === activeBranch.name) ||
+          (activeBranch?.code && s.branchId === activeBranch.code) ||
+          (Array.isArray(s.branchIds) && (s.branchIds.includes(currentBranchId) || (activeBranch?.name && s.branchIds.includes(activeBranch.name))));
+        return Boolean(matchesBranch);
+      }
+      return true;
+    });
+  }, [staffMembers, activeBranch, activeShift?.branchId, branches]);
+
   // Filtered suppliers based on search query
   const filteredSuppliers = React.useMemo(() => {
     if (!supplierSearchTerm.trim()) return suppliersList;
@@ -204,14 +368,24 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
     setExpenseTransactionType('receipt_and_payment');
     const firstStockItem = stockItems[0];
     if (firstStockItem) {
-      setExpenseItemId(firstStockItem.id);
       const name = language === 'ar' ? firstStockItem.nameAr : firstStockItem.nameEn;
+      const cost = firstStockItem.purchasePrice || 0;
+      setExpenseItemId(firstStockItem.id);
       setExpenseItemName(name);
       setExpenseCategory(name);
-      const cost = firstStockItem.purchasePrice || 0;
       setExpenseUnitPrice(cost);
       setExpenseQty(1);
       setExpenseAmount(cost * 1);
+      setExpenseItemRows([
+        {
+          id: `exp-row-${Date.now()}-1`,
+          itemId: firstStockItem.id,
+          itemName: name,
+          quantity: 1,
+          unitPrice: cost,
+          amount: cost,
+        },
+      ]);
     } else {
       setExpenseItemId('');
       setExpenseItemName('');
@@ -219,11 +393,73 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
       setExpenseUnitPrice(0);
       setExpenseQty(1);
       setExpenseAmount(0);
+      setExpenseItemRows([
+        {
+          id: `exp-row-${Date.now()}-1`,
+          itemId: '',
+          itemName: '',
+          quantity: 1,
+          unitPrice: 0,
+          amount: 0,
+        },
+      ]);
     }
 
     setExpenseReason('');
     setExpenseDate(todayIso);
     setShowAddExpenseModal(true);
+  };
+
+  const handleAddExpenseItemRow = () => {
+    const firstStockItem = stockItems[0];
+    const name = firstStockItem ? (language === 'ar' ? firstStockItem.nameAr : firstStockItem.nameEn) : '';
+    const cost = firstStockItem ? (firstStockItem.purchasePrice || 0) : 0;
+    setExpenseItemRows((prev) => [
+      ...prev,
+      {
+        id: `exp-row-${Date.now()}-${prev.length + 1}`,
+        itemId: firstStockItem ? firstStockItem.id : '',
+        itemName: name,
+        quantity: 1,
+        unitPrice: cost,
+        amount: cost,
+      },
+    ]);
+  };
+
+  const handleUpdateExpenseItemRow = (
+    rowId: string,
+    updates: Partial<{ itemId: string; itemName: string; quantity: number; unitPrice: number; amount: number }>
+  ) => {
+    setExpenseItemRows((prev) =>
+      prev.map((r) => {
+        if (r.id !== rowId) return r;
+        const next = { ...r, ...updates };
+        if (updates.itemId !== undefined) {
+          const itm = stockItems.find((p) => p.id === updates.itemId);
+          if (itm) {
+            next.itemName = language === 'ar' ? itm.nameAr : itm.nameEn;
+            next.unitPrice = itm.purchasePrice || 0;
+            next.amount = (next.quantity || 1) * (itm.purchasePrice || 0);
+          } else {
+            next.itemName = '';
+            next.unitPrice = 0;
+            next.amount = 0;
+          }
+        }
+        if (updates.quantity !== undefined || updates.unitPrice !== undefined) {
+          const q = next.quantity ?? 1;
+          const p = next.unitPrice ?? 0;
+          next.amount = q * p;
+        }
+        return next;
+      })
+    );
+  };
+
+  const handleRemoveExpenseItemRow = (rowId: string) => {
+    if (expenseItemRows.length <= 1) return;
+    setExpenseItemRows((prev) => prev.filter((r) => r.id !== rowId));
   };
 
   // Manual Shift Notes State
@@ -292,11 +528,21 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
 
   const handleSelectService = (id: string) => {
     setServiceId(id);
+    if (!id) {
+      setServiceName('');
+      setUnitPrice(0);
+      setCollectedAmount(0);
+      return;
+    }
     const prod = products.find((p) => p.id === id);
     if (prod) {
       setServiceName(language === 'ar' ? prod.nameAr : prod.nameEn);
       setUnitPrice(prod.sellingPrice);
-      setCollectedAmount(prod.sellingPrice * consumedQty);
+      setCollectedAmount(prod.sellingPrice * (consumedQty ?? 0));
+    } else {
+      setServiceName('');
+      setUnitPrice(0);
+      setCollectedAmount(0);
     }
   };
 
@@ -305,6 +551,8 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
     const p = parties.find((party) => party.id === id);
     if (p) {
       setPatientName(p.name);
+    } else {
+      setPatientName('');
     }
   };
 
@@ -312,26 +560,36 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
     e.preventDefault();
     if (!activeShift) return;
 
+    if (!patientId) {
+      alert(t('يرجى اختيار العميل من القائمة أولاً!', 'Please select a client from the list first!'));
+      return;
+    }
+
     const selectedParty = parties.find((p) => p.id === patientId);
-    const finalPatientName = selectedParty?.name || patientName || 'عميل نقدي';
+    const finalPatientName = selectedParty?.name || patientName.trim() || 'عميل نقدي';
     const doc = staffMembers.find((s) => s.id === doctorId);
 
+    const qty = Number(consumedQty) > 0 ? Number(consumedQty) : 1;
+    const price = Number(unitPrice) || 0;
+    const rev = qty * price;
+    const coll = collectedAmount !== undefined && collectedAmount !== null ? Number(collectedAmount) : rev;
+
     addShiftRunRow(activeShift.id, {
-      customerId: selectedParty?.id || patientId || undefined,
-      patientId: selectedParty?.id || patientId || undefined,
+      customerId: selectedParty?.id || patientId,
+      patientId: selectedParty?.id || patientId,
       systemCode: selectedParty?.systemCode,
       customerName: finalPatientName,
       patientName: finalPatientName,
       patientPhone: selectedParty?.phone,
       doctorId: doctorId || undefined,
       doctorName: doc ? doc.nameAr : undefined,
-      serviceName: serviceName || 'جلسة علاجية / خدمة',
+      serviceName: (serviceName && serviceName.trim()) ? serviceName.trim() : (pulsesCount > 0 ? 'جلسة ليزر' : 'جلسة تشغيل'),
       pulsesCount: pulsesCount > 0 ? pulsesCount : undefined,
-      consumedQuantity: consumedQty,
-      unitPrice,
-      totalRevenue: consumedQty * unitPrice,
+      consumedQuantity: qty,
+      unitPrice: price,
+      totalRevenue: rev,
       paymentMethod: paymentMethodName,
-      collectedAmount,
+      collectedAmount: coll,
       laserDevice: laserDevice || undefined,
       notes: notes.trim() || undefined,
     });
@@ -339,6 +597,13 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
     // Reset Form
     setPatientId('');
     setPatientName('');
+    setDoctorId('');
+    setTechnicianId('');
+    setServiceId('');
+    setServiceName('');
+    setConsumedQty(0);
+    setUnitPrice(0);
+    setCollectedAmount(0);
     setPulsesCount(0);
     setNotes('');
     setShowAddRowModal(false);
@@ -349,9 +614,9 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
     setEditingRowId(row.id);
     setEditRowData({
       patientName: row.patientName || row.customerName || '',
-      serviceName: row.serviceName,
+      serviceName: row.serviceName || '',
       pulsesCount: row.pulsesCount,
-      consumedQuantity: row.consumedQuantity,
+      consumedQuantity: row.consumedQuantity ?? 0,
       unitPrice: row.unitPrice,
       laserDevice: row.laserDevice,
       paymentMethod: row.paymentMethod,
@@ -363,7 +628,7 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
   // Save inline edit of run row
   const handleSaveEditRow = (rowId: string) => {
     if (!activeShift) return;
-    const qty = editRowData.consumedQuantity ?? 1;
+    const qty = editRowData.consumedQuantity ?? 0;
     const price = editRowData.unitPrice ?? 0;
     const rev = qty * price;
     const pName = editRowData.patientName || editRowData.customerName || 'عميل / مريض نقدي';
@@ -372,6 +637,8 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
       ...editRowData,
       patientName: pName,
       customerName: pName,
+      serviceName: editRowData.serviceName || '',
+      consumedQuantity: qty,
       totalRevenue: rev,
       collectedAmount: editRowData.collectedAmount !== undefined ? editRowData.collectedAmount : rev,
       notes: editRowData.notes,
@@ -383,10 +650,7 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
   const handleAddExpenseSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeShift) return;
-    if (expenseAmount <= 0) {
-      alert(t('يرجى تحديد كمية وسعر أو إدخال مبلغ صحيح أكبر من الصفر', 'Please specify quantity and price or valid amount'));
-      return;
-    }
+
     if (!supplierName.trim()) {
       alert(t('برجاء اختيار اسم المورد أولاً (إجباري)', 'Please select a supplier name (mandatory)'));
       return;
@@ -395,18 +659,6 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
     const isBalancePay = expenseTransactionType === 'balance_payment';
     const isCreditReceipt = expenseTransactionType === 'receipt_only';
 
-    const finalCategory = isBalancePay
-      ? 'سداد دفعات ومستلزمات موردين'
-      : (expenseItemName || expenseCategory || 'مستلزمات وبنود مخزنية');
-
-    const defaultReason = isBalancePay
-      ? `سداد دفعة للمورد: ${supplierName}`
-      : isCreditReceipt
-      ? `استلام أصناف آجل: ${finalCategory} (${supplierName})`
-      : `استلام وسداد أصناف: ${finalCategory} (${supplierName})`;
-
-    const finalDesc = expenseReason.trim() || defaultReason;
-
     const activePMs = paymentMethods.filter((pm) => !pm.isArchived);
     const resolvedMethod =
       expenseMethod ||
@@ -414,25 +666,66 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
       activePMs[0]?.nameAr ||
       'الخزينة الرئيسية (نقداً)';
 
-    addShiftExpense(activeShift.id, {
-      category: finalCategory,
-      itemId: isBalancePay ? undefined : (expenseItemId || undefined),
-      itemName: isBalancePay ? undefined : (expenseItemName || undefined),
-      quantity: isBalancePay ? undefined : expenseQty,
-      unitPrice: isBalancePay ? undefined : expenseUnitPrice,
-      expenseType: expenseTransactionType,
-      amount: expenseAmount,
-      reason: finalDesc,
-      description: finalDesc,
-      disbursementMethod: isCreditReceipt ? 'آجل (حساب المورد)' : resolvedMethod,
-      disbursedBy: currentUser?.name || 'الريسيبشن',
-      date: expenseDate,
-      timestamp: expenseDate
-        ? `${expenseDate}T${new Date().toTimeString().split(' ')[0]}`
-        : new Date().toISOString(),
-      supplierId: supplierId || undefined,
-      supplierName: supplierName || undefined,
-    });
+    if (isBalancePay) {
+      if (expenseAmount <= 0) {
+        alert(t('يرجى إدخال مبلغ صحيح أكبر من الصفر لسداد المورد', 'Please enter a valid amount'));
+        return;
+      }
+      const finalCategory = 'سداد دفعات ومستلزمات موردين';
+      const defaultReason = `سداد دفعة للمورد: ${supplierName}`;
+      const finalDesc = expenseReason.trim() || defaultReason;
+
+      addShiftExpense(activeShift.id, {
+        category: finalCategory,
+        expenseType: 'balance_payment',
+        amount: expenseAmount,
+        reason: finalDesc,
+        description: finalDesc,
+        disbursementMethod: resolvedMethod,
+        disbursedBy: currentUser?.name || 'الريسيبشن',
+        date: expenseDate,
+        timestamp: expenseDate
+          ? `${expenseDate}T${new Date().toTimeString().split(' ')[0]}`
+          : new Date().toISOString(),
+        supplierId: supplierId || undefined,
+        supplierName: supplierName || undefined,
+      });
+    } else {
+      // Multi-item rows submission: save each item line as a separate expense
+      const validRows = expenseItemRows.filter((r) => r.itemId && (r.amount > 0 || r.quantity > 0));
+      if (validRows.length === 0) {
+        alert(t('يرجى اختيار صنف واحد على الأقل وتحديد كمية وسعر صحيحين', 'Please select at least one item with valid quantity and price'));
+        return;
+      }
+
+      validRows.forEach((row) => {
+        const itemDesc = expenseReason.trim()
+          ? `${expenseReason.trim()} (${row.itemName})`
+          : isCreditReceipt
+          ? `استلام أصناف آجل: ${row.itemName} (${supplierName})`
+          : `استلام وسداد: ${row.itemName} (${supplierName})`;
+
+        addShiftExpense(activeShift.id, {
+          category: row.itemName || 'مستلزمات وبنود مخزنية',
+          itemId: row.itemId,
+          itemName: row.itemName,
+          quantity: row.quantity,
+          unitPrice: row.unitPrice,
+          expenseType: expenseTransactionType,
+          amount: row.amount,
+          reason: itemDesc,
+          description: itemDesc,
+          disbursementMethod: isCreditReceipt ? 'آجل (حساب المورد)' : resolvedMethod,
+          disbursedBy: currentUser?.name || 'الريسيبشن',
+          date: expenseDate,
+          timestamp: expenseDate
+            ? `${expenseDate}T${new Date().toTimeString().split(' ')[0]}`
+            : new Date().toISOString(),
+          supplierId: supplierId || undefined,
+          supplierName: supplierName || undefined,
+        });
+      });
+    }
 
     setExpenseAmount(0);
     setExpenseReason('');
@@ -457,6 +750,201 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
   const totalConsumedQty = activeShift?.runRows.reduce((sum, r) => sum + (r.consumedQuantity || 0), 0) || 0;
   const totalRunRevenue = activeShift?.runRows.reduce((sum, r) => sum + (r.totalRevenue || 0), 0) || 0;
   const totalRunCollected = activeShift?.runRows.reduce((sum, r) => sum + (r.collectedAmount || 0), 0) || 0;
+
+  // Excel Import Validator & Handler for Shift Sessions & Consumed Pulses
+  const validateSessionPulsesRows = (rawRows: any[]): ExcelValidationResult<any> => {
+    const errors: CellValidationError[] = [];
+    const validRows: any[] = [];
+    const allowedPaymentMethods = [
+      'نقداً (كاش)',
+      'فيزا / بطاقة بنكية',
+      'فودافون كاش',
+      'إنستاباي',
+      'تحويل بنكي',
+    ];
+
+    rawRows.forEach((row, idx) => {
+      const rowNum = idx + 2;
+
+      const customerName = String(
+        row['اسم العميل / المريض'] || row['اسم العميل'] || row['المريض'] || row.customerName || ''
+      ).trim();
+
+      const patientPhone = String(
+        row['رقم الهاتف'] || row['الهاتف'] || row['الموبايل'] || row.patientPhone || row.phone || ''
+      ).trim();
+
+      const serviceName = String(
+        row['الخدمة / الجلسة'] || row['الخدمة'] || row['نوع الجلسة'] || row.serviceName || ''
+      ).trim();
+
+      const laserDeviceUsed = String(
+        row['جهاز الليزر المستخدم'] || row['جهاز الليزر'] || row['الجهاز'] || row.laserDevice || ''
+      ).trim();
+
+      const pulsesRaw =
+        row['عدد البلصات المستهلكة (النبضات)'] ??
+        row['عدد البلصات'] ??
+        row['البلصات'] ??
+        row.pulsesCount ??
+        0;
+      const pulsesNum = Number(pulsesRaw);
+
+      const totalRevenueRaw =
+        row['المبلغ المطلوب / الإيراد'] ??
+        row['المبلغ المطلوب'] ??
+        row['الإيراد'] ??
+        row.totalRevenue ??
+        0;
+      const totalRevenueNum = Number(totalRevenueRaw);
+
+      const collectedRaw =
+        row['المبلغ المحصل نقداً / إلكترونياً'] ??
+        row['المبلغ المحصل'] ??
+        row.collectedAmount ??
+        totalRevenueNum;
+      const collectedNum = Number(collectedRaw);
+
+      const paymentMethodRaw = String(
+        row['طريقة السداد'] || row['طريقة الدفع'] || row.paymentMethod || 'نقداً (كاش)'
+      ).trim();
+
+      const doctorName = String(
+        row['الطبيب / الإخصائي المعالج'] || row['الطبيب'] || row['الإخصائي'] || row.doctorName || ''
+      ).trim();
+
+      const dateRaw = String(
+        row['تاريخ الجلسة'] || row['التاريخ'] || row.date || ''
+      ).trim();
+
+      const notes = String(
+        row['ملاحظات الجلسة والنبضات'] || row['ملاحظات'] || row.notes || ''
+      ).trim();
+
+      // 1. Validation for Customer Name
+      if (!customerName) {
+        errors.push({
+          rowNumber: rowNum,
+          columnKey: 'customerName',
+          columnLabelAr: 'اسم العميل / المريض',
+          enteredValue: row['اسم العميل / المريض'] || '',
+          reasonAr: 'اسم العميل أو المريض إلزامي في قاعدة البيانات ولا يمكن تركه فارغاً',
+        });
+      }
+
+      // 2. Validation for Service Name
+      if (!serviceName) {
+        errors.push({
+          rowNumber: rowNum,
+          columnKey: 'serviceName',
+          columnLabelAr: 'الخدمة / الجلسة',
+          enteredValue: row['الخدمة / الجلسة'] || '',
+          reasonAr: 'بيان الخدمة أو الجلسة إلزامي لتسجيل حركة التشغيل',
+        });
+      }
+
+      // 3. Validation for Pulses Count
+      if (isNaN(pulsesNum) || pulsesNum < 0) {
+        errors.push({
+          rowNumber: rowNum,
+          columnKey: 'pulsesCount',
+          columnLabelAr: 'عدد البلصات المستهلكة (النبضات)',
+          enteredValue: pulsesRaw,
+          reasonAr: 'عدد البلصات يجب أن يكون رقماً صحيحاً يساوي 0 أو أكثر',
+        });
+      }
+
+      // 4. Validation for Total Revenue
+      if (isNaN(totalRevenueNum) || totalRevenueNum <= 0) {
+        errors.push({
+          rowNumber: rowNum,
+          columnKey: 'totalRevenue',
+          columnLabelAr: 'المبلغ المطلوب / الإيراد',
+          enteredValue: totalRevenueRaw,
+          reasonAr: 'قيمة الإيراد يجب أن تكون رقماً موجباً أكبر من الصفر (بالجنيه)',
+        });
+      }
+
+      // 5. Validation for Date
+      let cleanDate = dateRaw;
+      if (!cleanDate) {
+        cleanDate = todayIso;
+      } else {
+        const parsed = new Date(cleanDate);
+        if (isNaN(parsed.getTime())) {
+          errors.push({
+            rowNumber: rowNum,
+            columnKey: 'date',
+            columnLabelAr: 'تاريخ الجلسة',
+            enteredValue: dateRaw,
+            reasonAr: 'تاريخ الجلسة غير صالح. الصيغة المعتمدة بالداتا بيز هي YYYY-MM-DD',
+          });
+        } else {
+          cleanDate = parsed.toISOString().split('T')[0];
+        }
+      }
+
+      const matchedMethod = allowedPaymentMethods.find(
+        (m) => m === paymentMethodRaw || paymentMethodRaw.includes(m) || m.includes(paymentMethodRaw)
+      );
+
+      validRows.push({
+        customerName,
+        patientPhone,
+        serviceName,
+        laserDevice: laserDeviceUsed || (laserDevices[0]?.name || 'جهاز ليزر رئيسي'),
+        pulsesCount: isNaN(pulsesNum) ? 0 : pulsesNum,
+        totalRevenue: isNaN(totalRevenueNum) ? 0 : totalRevenueNum,
+        collectedAmount: isNaN(collectedNum) ? totalRevenueNum : collectedNum,
+        paymentMethod: matchedMethod || 'نقداً (كاش)',
+        doctorName: doctorName || (currentUser?.name || 'الاستقبال'),
+        date: cleanDate,
+        notes,
+      });
+    });
+
+    return {
+      totalRows: rawRows.length,
+      errors,
+      validRows: errors.length === 0 ? validRows : [],
+    };
+  };
+
+  const handleConfirmSessionPulsesImport = (validRows: any[]) => {
+    if (!activeShift) {
+      alert(t('يجب فتح شيفت تشغيل أولاً لإدراج حركات الجلسات والبلصات فيه لحظياً!', 'Please open an active shift first to append session run rows!'));
+      return;
+    }
+
+    const dayNames = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+    const dayName = dayNames[new Date().getDay()] || 'اليوم';
+
+    validRows.forEach((row, idx) => {
+      addShiftRunRow(activeShift.id, {
+        date: row.date,
+        dayName,
+        customerId: `cust-imp-${Date.now()}-${idx}`,
+        patientId: `cust-imp-${Date.now()}-${idx}`,
+        systemCode: `CUST-IMP-${idx + 1}`,
+        customerName: row.customerName,
+        patientName: row.customerName,
+        patientPhone: row.patientPhone,
+        roomNumber: 'غرفة 1 (الليزر)',
+        serviceName: row.serviceName,
+        pulsesCount: row.pulsesCount > 0 ? row.pulsesCount : undefined,
+        consumedQuantity: 1,
+        unitPrice: row.totalRevenue,
+        totalRevenue: row.totalRevenue,
+        paymentMethod: row.paymentMethod,
+        collectedAmount: row.collectedAmount,
+        laserDevice: row.laserDevice,
+        doctorName: row.doctorName,
+        notes: row.notes ? `استيراد إكسيل - ${row.notes}` : 'استيراد جلسات وبلصات من إكسيل',
+      });
+    });
+
+    alert(t(`تم استيراد ${validRows.length} جلسة بنجاح وتحديث عدادات البلصات وخزينة الشيفت!`, `Imported ${validRows.length} sessions successfully!`));
+  };
 
   return (
     <div className="flex flex-col h-full overflow-y-auto p-4 md:p-6 space-y-6 bg-slate-50 dark:bg-slate-950">
@@ -499,37 +987,65 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
           </div>
 
           {/* Shift Actions */}
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => setShowExcelModal(true)}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/40 px-3.5 py-2.5 text-xs font-bold text-emerald-800 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-all cursor-pointer shadow-xs"
+              title={t('استيراد وتصدير بيانات الجلسات والبلصات المستهلكة وفحص الأخطاء', 'Import & Export Shift Sessions & Pulses Excel')}
+            >
+              <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
+              <span>{t('استيراد وتصدير الجلسات والبلصات (إكسل)', 'Sessions & Pulses Excel')}</span>
+            </button>
+
             {!activeShift ? (
-              <button
-                onClick={() => {
-                  setOpenShiftReceptionist(currentUser?.name || 'موظف الاستقبال');
-                  setOpenShiftNotes('');
-                  setShowOpenShiftModal(true);
-                }}
-                className="inline-flex items-center gap-2 px-5 py-2.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-md shadow-emerald-600/20 transition-all cursor-pointer"
-              >
-                <Play className="h-4 w-4 fill-current" />
-                <span>{t('فتح شيفت تشغيل جديد', 'Open New Shift')}</span>
-              </button>
+              canPerformAction('reception_ops.open_shift') && (
+                <button
+                  onClick={() => {
+                    setOpenShiftReceptionist(currentUser?.name || 'موظف الاستقبال');
+                    setOpenShiftNotes('');
+                    setShowOpenShiftModal(true);
+                  }}
+                  className="inline-flex items-center gap-2 px-5 py-2.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-md shadow-emerald-600/20 transition-all cursor-pointer"
+                >
+                  <Play className="h-4 w-4 fill-current" />
+                  <span>{t('فتح شيفت تشغيل جديد', 'Open New Shift')}</span>
+                </button>
+              )
             ) : (
               <>
-                <button
-                  onClick={() => setShowAddRowModal(true)}
-                  className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-md shadow-indigo-600/20 transition-all cursor-pointer"
-                >
-                  <Plus className="h-4 w-4" />
-                  <span>{t('إضافة حركة تشغيل', 'Add Operation Entry')}</span>
-                </button>
+                {canPerformAction('reception_ops.add_run_row') && (
+                  <button
+                    onClick={() => {
+                      setPatientId('');
+                      setPatientName('');
+                      setDoctorId('');
+                      setTechnicianId('');
+                      setConsumedQty(1);
+                      setServiceId('');
+                      setServiceName('');
+                      setUnitPrice(0);
+                      setCollectedAmount(0);
+                      setPulsesCount(0);
+                      setNotes('');
+                      setShowAddRowModal(true);
+                    }}
+                    className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-md shadow-indigo-600/20 transition-all cursor-pointer"
+                  >
+                    <Plus className="h-4 w-4" />
+                    <span>{t('إضافة حركة تشغيل', 'Add Operation Entry')}</span>
+                  </button>
+                )}
 
-                <button
-                  onClick={() => setShowPrintShiftModal(true)}
-                  className="inline-flex items-center gap-2 px-3.5 py-2.5 text-xs font-bold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl transition-all cursor-pointer"
-                  title={t('طباعة ومعاينة تقرير الشيفت', 'Print Shift Report')}
-                >
-                  <Printer className="h-4 w-4 text-indigo-600" />
-                  <span>{t('طباعة تقرير الشيفت', 'Print Shift')}</span>
-                </button>
+                {canPerformAction('reception_ops.print_shift') && (
+                  <button
+                    onClick={() => setShowPrintShiftModal(true)}
+                    className="inline-flex items-center gap-2 px-3.5 py-2.5 text-xs font-bold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl transition-all cursor-pointer"
+                    title={t('طباعة ومعاينة تقرير الشيفت', 'Print Shift Report')}
+                  >
+                    <Printer className="h-4 w-4 text-indigo-600" />
+                    <span>{t('طباعة تقرير الشيفت', 'Print Shift')}</span>
+                  </button>
+                )}
 
                 <button
                   onClick={() => {
@@ -708,10 +1224,13 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
                               type="text"
                               value={editRowData.serviceName || ''}
                               onChange={(e) => setEditRowData({ ...editRowData, serviceName: e.target.value })}
+                              placeholder={t('بدون خدمة (فارغ)', 'Empty')}
                               className="w-36 px-2 py-1 text-xs rounded-lg border border-indigo-300 bg-white dark:bg-slate-800"
                             />
                           ) : (
-                            <span className="font-semibold text-slate-800 dark:text-slate-200">{row.serviceName}</span>
+                            <span className="font-semibold text-slate-800 dark:text-slate-200">
+                              {row.serviceName && row.serviceName.trim() ? row.serviceName : ''}
+                            </span>
                           )}
                         </td>
 
@@ -739,13 +1258,13 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
                           {isEditing ? (
                             <input
                               type="number"
-                              min="1"
-                              value={editRowData.consumedQuantity ?? 1}
+                              min="0"
+                              value={editRowData.consumedQuantity ?? 0}
                               onChange={(e) => setEditRowData({ ...editRowData, consumedQuantity: Number(e.target.value) })}
                               className="w-16 px-2 py-1 text-xs rounded-lg border border-indigo-300 bg-white dark:bg-slate-800 font-bold"
                             />
                           ) : (
-                            <span className="font-bold">{row.consumedQuantity}</span>
+                            <span className="font-bold">{row.consumedQuantity ?? 0}</span>
                           )}
                         </td>
 
@@ -1723,23 +2242,47 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
             <form onSubmit={handleAddRunRowSubmit} className="space-y-4">
               {/* Select Client (اختيار العميل) */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  <span className="text-rose-500 font-bold ml-1">*</span>
-                  {t('اختيار العميل', 'Select Client')}
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                    <span className="text-rose-500 font-bold ml-1">*</span>
+                    {t('اختيار العميل', 'Select Client')}
+                    <span className="text-indigo-600 dark:text-indigo-400 font-semibold mr-1.5">
+                      ({t('عملاء فرع:', 'Branch Customers:')} {language === 'ar' ? (activeBranch?.name || 'الفرع المفعل') : (activeBranch?.nameEn || 'Active Branch')})
+                    </span>
+                  </label>
+                  <span className="text-[11px] font-medium text-slate-500">
+                    {branchCustomers.length} {t('عميل متاح', 'available')}
+                  </span>
+                </div>
                 <select
                   required
                   value={patientId}
                   onChange={(e) => handleSelectPatient(e.target.value)}
-                  className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-indigo-600"
+                  className="w-full px-3 py-2 text-xs font-bold text-slate-800 dark:text-white rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-indigo-600 cursor-pointer"
                 >
-                  <option value="">{t('اختر العميل من السجل...', 'Select client from records...')}</option>
-                  {parties.map((p) => (
+                  <option value="">{t('اختر العميل من السجل (عملاء هذا الفرع فقط)...', 'Select client (branch customers only)...')}</option>
+                  {branchCustomers.map((p) => (
                     <option key={p.id} value={p.id}>
-                      {p.name} ({p.systemCode || p.phone || t('عميل مسجل', 'Client')})
+                      {p.name} {p.systemCode ? `(${p.systemCode})` : ''} {p.phone ? `- ${p.phone}` : ''}
                     </option>
                   ))}
                 </select>
+
+                {branchCustomers.length === 0 && (
+                  <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-1 font-semibold">
+                    {t(
+                      'تنبيه: لا يوجد عملاء مكودين لهذا الفرع حتى الآن. يرجى إضافة عملاء لهذا الفرع أولاً من شاشة إدارة العملاء.',
+                      'Notice: No customers found for this branch yet. Please add customers from the Customer Management screen first.'
+                    )}
+                  </p>
+                )}
+
+                {patientName && (
+                  <p className="text-[11px] text-emerald-600 dark:text-emerald-400 mt-1 font-semibold flex items-center gap-1">
+                    <CheckCircle2 className="h-3 w-3" />
+                    <span>{t('تم تحديد العميل:', 'Selected Client:')} {patientName}</span>
+                  </p>
+                )}
               </div>
 
               {/* Service Provider / Doctor (مقدم الخدمة / الطبيب المعالج) */}
@@ -1752,14 +2295,12 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
                   onChange={(e) => setDoctorId(e.target.value)}
                   className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-indigo-600"
                 >
-                  <option value="">{t('اختر مقدم الخدمة المكود...', 'Select Service Provider...')}</option>
-                  {staffMembers
-                    .filter((s) => s.isActive && !s.isArchived && (s.isServiceProvider ?? (s.roleType === 'Doctor' || s.roleType === 'Technician')))
-                    .map((d) => (
-                      <option key={d.id} value={d.id}>
-                        {d.nameAr} {d.jobTitleAr ? `(${d.jobTitleAr})` : ''}
-                      </option>
-                    ))}
+                  <option value="">{t('اختر مقدم الخدمة المكود بالفرع...', 'Select Service Provider...')}</option>
+                  {branchServiceProviders.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.nameAr} {d.jobTitleAr ? `(${d.jobTitleAr})` : ''}
+                    </option>
+                  ))}
                 </select>
               </div>
 
@@ -1767,14 +2308,14 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
               <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    {t('الخدمة أو الجلسة *', 'Service *')}
+                    {t('الخدمة أو الجلسة (اختياري)', 'Service (Optional)')}
                   </label>
                   <select
                     value={serviceId}
                     onChange={(e) => handleSelectService(e.target.value)}
                     className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-indigo-600"
                   >
-                    <option value="">{t('اختر الخدمة...', 'Select...')}</option>
+                    <option value="">{t('-- بدون خدمة / جلسة (فارغ) --', '-- None / Empty --')}</option>
                     {products.map((prod) => (
                       <option key={prod.id} value={prod.id}>
                         {language === 'ar' ? prod.nameAr : prod.nameEn}
@@ -1804,14 +2345,15 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
                   </label>
                   <input
                     type="number"
-                    min="1"
+                    min="0"
+                    step="any"
                     value={consumedQty}
                     onChange={(e) => {
-                      const q = Number(e.target.value);
+                      const q = Number(e.target.value) || 0;
                       setConsumedQty(q);
                       setCollectedAmount(q * unitPrice);
                     }}
-                    className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
+                    className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-mono"
                   />
                 </div>
 
@@ -2083,7 +2625,7 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
       {/* Add Expense Modal */}
       {showAddExpenseModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
-          <div className="w-full max-w-lg bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl p-5 max-h-[90vh] overflow-y-auto">
+          <div className="w-full max-w-3xl bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl p-5 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-3 mb-4 border-b border-slate-100 dark:border-slate-800">
               <div className="flex items-center gap-2">
                 <div className="p-2 rounded-xl bg-rose-50 dark:bg-rose-950/50 text-rose-600">
@@ -2093,6 +2635,9 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
                   <h3 className="text-base font-bold text-slate-900 dark:text-white">
                     {t('تسجيل مصروف جديد', 'Add Expense')}
                   </h3>
+                  <p className="text-[11px] text-slate-500">
+                    {t('إدراج أصناف المشتريات والمصروفات - يدعم إضافة عدة أصناف في عملية واحدة', 'Multi-item expense registration in a single voucher')}
+                  </p>
                 </div>
               </div>
               <button
@@ -2310,95 +2855,137 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
                 })()}
               </div>
 
-              {/* بند المصروف محصور في البنود المخزنية المضافة للمخزن فقط + الكمية + سعر الوحدة (في حالتي استلام وسداد أو استلام فقط) */}
+              {/* أصناف وبنود المصروف - دعم أكثر من صنف في عملية واحدة كل صنف في سطر منفصل */}
               {expenseTransactionType !== 'balance_payment' ? (
                 <div className="space-y-3 p-3.5 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-slate-200 dark:border-slate-700">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                      <span className="text-rose-600 font-black ml-1">*</span>
-                      {t('بند المصروف (الأصناف المخزنية المضافة للمخزن فقط)', 'Stock Item (Warehouse Items Only)')}
-                    </label>
-                    <select
-                      value={expenseItemId}
-                      required
-                      onChange={(e) => {
-                        const id = e.target.value;
-                        setExpenseItemId(id);
-                        const itm = stockItems.find((p) => p.id === id);
-                        if (itm) {
-                          const name = language === 'ar' ? itm.nameAr : itm.nameEn;
-                          setExpenseItemName(name);
-                          setExpenseCategory(name);
-                          const cost = itm.purchasePrice || 0;
-                          setExpenseUnitPrice(cost);
-                          setExpenseAmount(expenseQty * cost);
-                        }
-                      }}
-                      className="w-full px-3 py-2 text-xs font-bold rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 focus:outline-indigo-600 text-slate-900 dark:text-white"
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="text-xs font-black text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                        <ShoppingBag className="h-4 w-4 text-indigo-600" />
+                        <span>{t('أصناف وبنود المصروف (أكثر من صنف في عملية واحدة)', 'Expense Items (Multi-Item Lines)')}</span>
+                      </h4>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        {t('يمكنك إدراج عدة أصناف في نفس العملية، وسيتم تسجيل كل صنف في سطر منفصل بسجل المصروفات', 'Add multiple items; each item will be recorded on a separate row')}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleAddExpenseItemRow}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:text-indigo-300 rounded-xl border border-indigo-200 dark:border-indigo-800 cursor-pointer shadow-xs transition-colors"
                     >
-                      <option value="">{t('-- اختر الصنف المخزني --', '-- Select Stock Item --')}</option>
-                      {stockItems.map((item) => (
-                        <option key={item.id} value={item.id}>
-                          {language === 'ar' ? item.nameAr : item.nameEn} ({item.sku || item.category}) - {formatMoney(item.purchasePrice || 0)}
-                        </option>
-                      ))}
-                    </select>
+                      <Plus className="h-3.5 w-3.5" />
+                      <span>{t('إضافة صنف آخر +', 'Add Another Item +')}</span>
+                    </button>
                   </div>
 
-                  {/* Quantity and Unit Price and Computed Total Amount */}
-                  <div className="grid grid-cols-3 gap-3">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                        <span className="text-rose-600 font-black ml-1">*</span>
-                        {t('الكمية', 'Qty')}
-                      </label>
-                      <input
-                        type="number"
-                        required
-                        min="1"
-                        value={expenseQty}
-                        onChange={(e) => {
-                          const q = Math.max(1, Number(e.target.value) || 1);
-                          setExpenseQty(q);
-                          setExpenseAmount(q * expenseUnitPrice);
-                        }}
-                        className="w-full px-3 py-2 text-xs font-bold rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 font-mono"
-                      />
-                    </div>
+                  <div className="space-y-2">
+                    {expenseItemRows.map((row, idx) => (
+                      <div
+                        key={row.id}
+                        className="p-3 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-2xs space-y-2"
+                      >
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-bold text-slate-600 dark:text-slate-300">
+                            {t('سطر الصنف #', 'Item Line #')}{idx + 1}
+                          </span>
+                          {expenseItemRows.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveExpenseItemRow(row.id)}
+                              className="text-rose-500 hover:text-rose-700 p-1 rounded-md hover:bg-rose-50 dark:hover:bg-rose-950/50 cursor-pointer transition-colors"
+                              title={t('حذف هذا السطر', 'Delete Line')}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                        </div>
 
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                        <span className="text-rose-600 font-black ml-1">*</span>
-                        {t('سعر الوحدة', 'Unit Price')}
-                      </label>
-                      <input
-                        type="number"
-                        required
-                        min="0"
-                        step="any"
-                        value={expenseUnitPrice}
-                        onChange={(e) => {
-                          const p = Number(e.target.value) || 0;
-                          setExpenseUnitPrice(p);
-                          setExpenseAmount(expenseQty * p);
-                        }}
-                        className="w-full px-3 py-2 text-xs font-bold rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 font-mono"
-                      />
-                    </div>
+                        <div className="grid grid-cols-1 md:grid-cols-12 gap-2.5 items-end">
+                          <div className="md:col-span-6">
+                            <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                              {t('الصنف المخزني / البند *', 'Stock Item *')}
+                            </label>
+                            <select
+                              value={row.itemId}
+                              required
+                              onChange={(e) => handleUpdateExpenseItemRow(row.id, { itemId: e.target.value })}
+                              className="w-full px-2.5 py-1.5 text-xs font-bold rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-600 focus:outline-indigo-600 text-slate-900 dark:text-white"
+                            >
+                              <option value="">{t('-- اختر الصنف المخزني --', '-- Select Stock Item --')}</option>
+                              {stockItems.map((item) => (
+                                <option key={item.id} value={item.id}>
+                                  {language === 'ar' ? item.nameAr : item.nameEn} ({item.sku || item.category}) - {formatMoney(item.purchasePrice || 0)}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
 
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                        {t('المبلغ (الكمية × السعر)', 'Total')}
-                      </label>
-                      <div className="w-full px-3 py-2 text-xs font-black text-rose-600 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 flex items-center font-mono">
-                        {formatMoney(expenseAmount)}
+                          <div className="md:col-span-2">
+                            <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                              {t('الكمية', 'Qty')}
+                            </label>
+                            <input
+                              type="number"
+                              required
+                              min="1"
+                              value={row.quantity}
+                              onChange={(e) => handleUpdateExpenseItemRow(row.id, { quantity: Math.max(1, Number(e.target.value) || 1) })}
+                              className="w-full px-2 py-1.5 text-xs font-bold rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-600 font-mono text-center"
+                            />
+                          </div>
+
+                          <div className="md:col-span-2">
+                            <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                              {t('سعر الوحدة', 'Price')}
+                            </label>
+                            <input
+                              type="number"
+                              required
+                              min="0"
+                              step="any"
+                              value={row.unitPrice}
+                              onChange={(e) => handleUpdateExpenseItemRow(row.id, { unitPrice: Number(e.target.value) || 0 })}
+                              className="w-full px-2 py-1.5 text-xs font-bold rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-600 font-mono text-center"
+                            />
+                          </div>
+
+                          <div className="md:col-span-2">
+                            <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                              {t('الإجمالي', 'Total')}
+                            </label>
+                            <div className="w-full px-2.5 py-1.5 text-xs font-black text-rose-600 rounded-lg bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 flex items-center justify-center font-mono">
+                              {formatMoney(row.amount)}
+                            </div>
+                          </div>
+                        </div>
                       </div>
+                    ))}
+                  </div>
+
+                  {/* Summary Bar */}
+                  <div className="p-3 bg-rose-50/70 dark:bg-rose-950/30 rounded-xl border border-rose-200 dark:border-rose-900/50 flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-slate-700 dark:text-slate-300">
+                        {t('عدد الأصناف في المعاملة:', 'Items Count:')}
+                      </span>
+                      <span className="font-black text-slate-900 dark:text-white bg-white dark:bg-slate-800 px-2 py-0.5 rounded-md border border-slate-200 dark:border-slate-700 font-mono">
+                        {expenseItemRows.length} {t('أصناف', 'items')}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-rose-800 dark:text-rose-300">
+                        {t('إجمالي قيمة المصروف:', 'Total Expense:')}
+                      </span>
+                      <span className="text-sm font-black text-rose-600 dark:text-rose-400 font-mono">
+                        {formatMoney(expenseItemRows.reduce((sum, r) => sum + (r.amount || 0), 0))}
+                      </span>
                     </div>
                   </div>
 
                   {expenseTransactionType === 'receipt_only' && (
                     <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-[11px] font-bold text-amber-800 dark:text-amber-300">
-                      {t('📌 استلام فقط (آجل): القيمة تُضاف لحساب المورد في شجرة الحسابات ولا تُخصم من نقدية أو مصروفات الشيفت.', '📌 Credit receipt: Value added to supplier account and NOT deducted from shift cash/expenses.')}
+                      {t('📌 استلام فقط (آجل): سيتم إضافة إجمالي الأصناف لحساب المورد في شجرة الحسابات دون خصمها من نقدية أو عهدة الشيفت.', '📌 Credit receipt: Value added to supplier account and NOT deducted from shift cash/expenses.')}
                     </div>
                   )}
                 </div>
@@ -2510,6 +3097,33 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
           </div>
         </div>
       )}
+
+      {/* EXCEL DATA TRANSFER & VALIDATION MODAL FOR SHIFT SESSIONS & CONSUMED PULSES */}
+      <ExcelDataTransferModal
+        isOpen={showExcelModal}
+        onClose={() => setShowExcelModal(false)}
+        entityTitleAr="حركات التشغيل وجلسات الليزر والبلصات"
+        entityTitleEn="Shift Sessions & Consumed Pulses"
+        descriptionAr="استيراد وتصدير حركات التشغيل وجلسات الليزر مع الفحص الخلوي الذكي لمطابقة أعداد النبضات والعملاء والمبالغ"
+        columns={sessionPulsesExcelColumns}
+        currentDataForExport={(activeShift?.runRows || []).map((row) => ({
+          customerName: row.customerName || row.patientName,
+          patientPhone: row.patientPhone || '',
+          serviceName: row.serviceName,
+          laserDevice: row.laserDevice || '',
+          pulsesCount: row.pulsesCount || 0,
+          totalRevenue: row.totalRevenue,
+          collectedAmount: row.collectedAmount || row.totalRevenue,
+          paymentMethod: row.paymentMethod,
+          doctorName: row.doctorName || '',
+          date: row.date,
+          notes: row.notes || row.description || '',
+        }))}
+        exportFileNamePrefix="سجل_حركات_التشغيل_والبلصات_المستهلكة"
+        validator={validateSessionPulsesRows}
+        onConfirmImport={handleConfirmSessionPulsesImport}
+        branchName={activeBranch?.name || 'الفرع الحالي'}
+      />
     </div>
   );
 };

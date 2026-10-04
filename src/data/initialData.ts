@@ -49,8 +49,8 @@ export const INITIAL_MODULES: ModuleDefinition[] = [
   },
   {
     id: 'appointments',
-    nameAr: 'شاشة الحجز والمتابعة',
-    nameEn: 'Bookings & Follow-ups',
+    nameAr: 'إدارة الحجوزات',
+    nameEn: 'Bookings Management',
     descriptionAr: 'جدولة الحجوزات والمتابعات وملف العميل الشامل (Call Center 360)',
     descriptionEn: 'Booking schedule, follow-up log & client 360 dossiers',
     category: 'Operations',
@@ -309,6 +309,8 @@ export const INITIAL_STAFF: StaffMember[] = [
     dermatologyRevenueRate: 20,
     commissionRate: 20,
     isActive: true,
+    acceptsBookings: true,
+    isServiceProvider: true,
     createdAt: '2024-01-10T08:00:00Z',
   },
   {
@@ -338,6 +340,8 @@ export const INITIAL_STAFF: StaffMember[] = [
     dermatologyRevenueRate: 25,
     commissionRate: 15,
     isActive: true,
+    acceptsBookings: true,
+    isServiceProvider: true,
     createdAt: '2024-06-01T08:00:00Z',
   },
   {
@@ -367,6 +371,8 @@ export const INITIAL_STAFF: StaffMember[] = [
     dermatologyRevenueRate: 5,
     commissionRate: 5,
     isActive: true,
+    isServiceProvider: true,
+    acceptsBookings: true,
     createdAt: '2025-02-15T08:00:00Z',
   },
   {
@@ -396,6 +402,8 @@ export const INITIAL_STAFF: StaffMember[] = [
     dermatologyRevenueRate: 2,
     commissionRate: 2,
     isActive: true,
+    isServiceProvider: false,
+    acceptsBookings: false,
     createdAt: '2026-01-05T08:00:00Z',
   },
   {
@@ -425,6 +433,8 @@ export const INITIAL_STAFF: StaffMember[] = [
     dermatologyRevenueRate: 18,
     commissionRate: 18,
     isActive: true,
+    isServiceProvider: true,
+    acceptsBookings: true,
     createdAt: '2024-03-20T08:00:00Z',
   },
 ];

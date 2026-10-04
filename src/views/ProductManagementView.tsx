@@ -2,7 +2,6 @@ import React, { useState, useMemo } from 'react';
 import { usePlatform } from '../context/PlatformContext';
 import { Product, ItemCategory } from '../types';
 import { PackageDashboardWidget } from '../components/PackageDashboardWidget';
-import { LowStockAlertWidget } from '../components/LowStockAlertWidget';
 import {
   Package,
   Plus,
@@ -740,7 +739,7 @@ export const ProductManagementView: React.FC = () => {
       )}
 
       {/* KPI Stats Row */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
           <div>
             <p className="text-xs font-medium text-slate-500">{t('إجمالي الأصناف البيعية', 'Total Sales Items')}</p>
@@ -786,26 +785,7 @@ export const ProductManagementView: React.FC = () => {
             <Package className="w-6 h-6" />
           </div>
         </div>
-
-        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
-          <div>
-            <p className="text-xs font-medium text-slate-500">{t('متوسط سعر البيع', 'Average Price')}</p>
-            <h3 className="text-2xl font-bold text-slate-800 mt-1">{formatMoney(avgSellingPrice)}</h3>
-            <span className="text-xs text-slate-400 mt-0.5 inline-block">{t('عبر كافة الخدمات والمنتجات', 'Across sales catalog')}</span>
-          </div>
-          <div className="w-12 h-12 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
-            <DollarSign className="w-6 h-6" />
-          </div>
-        </div>
       </div>
-
-      {/* Automated Low Stock & Reorder Point Alerts Widget */}
-      <LowStockAlertWidget
-        onFilterProduct={(productName) => {
-          setActiveTab('sales_items');
-          setSearchQuery(productName);
-        }}
-      />
 
       {/* Package Performance & Completion Rate Dashboard Widget */}
       <PackageDashboardWidget
@@ -925,30 +905,6 @@ export const ProductManagementView: React.FC = () => {
                     </option>
                   ))}
                 </select>
-
-                {/* Low Stock Alert Filter Button */}
-                <button
-                  type="button"
-                  onClick={() => setOnlyLowStock(!onlyLowStock)}
-                  className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer ${
-                    onlyLowStock
-                      ? 'bg-rose-600 text-white shadow-sm shadow-rose-600/20'
-                      : 'bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200'
-                  }`}
-                  title={t('تصفية وعرض الأصناف التي اقترب رصيدها من النفاذ أو نفذت فقط', 'Filter items near depletion or out of stock')}
-                >
-                  <AlertTriangle className="w-3.5 h-3.5" />
-                  <span>{t('تنبيهات نقص المخزون', 'Low Stock')}</span>
-                  {lowStockAlertItemsCount > 0 && (
-                    <span
-                      className={`px-1.5 py-0.5 rounded-full text-[10px] font-black ${
-                        onlyLowStock ? 'bg-white text-rose-700' : 'bg-rose-600 text-white'
-                      }`}
-                    >
-                      {lowStockAlertItemsCount}
-                    </span>
-                  )}
-                </button>
               </div>
             </div>
 

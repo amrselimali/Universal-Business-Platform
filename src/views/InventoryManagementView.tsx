@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { usePlatform } from '../context/PlatformContext';
+import { LowStockAlertWidget } from '../components/LowStockAlertWidget';
 import {
   InventoryAudit,
   InventoryAuditItem,
@@ -460,6 +461,7 @@ export const InventoryManagementView: React.FC = () => {
       initialStock: 500,
       initialWarehouseId: branchWarehouses[0]?.id || warehouses[0]?.id || '',
       notes: '',
+      linkToAllSales: false,
       linkedSalesProductIds: [],
       consumptionBasis: 'units_sold',
       consumptionRate: 1,
@@ -478,6 +480,11 @@ export const InventoryManagementView: React.FC = () => {
     const chosenExpense = accounts.find((a) => a.id === stockItemForm.expenseAccountId);
     const chosenInv = accounts.find((a) => a.id === stockItemForm.inventoryAccountId);
 
+    const finalLinkedIds = stockItemForm.linkToAllSales
+      ? salesItems.map((s) => s.id)
+      : stockItemForm.linkedSalesProductIds;
+    const finalBasis = stockItemForm.linkToAllSales ? 'revenue_ratio' : stockItemForm.consumptionBasis;
+
     addProduct(
       {
         nameAr: stockItemForm.nameAr.trim(),
@@ -494,9 +501,11 @@ export const InventoryManagementView: React.FC = () => {
         isSalesItem: false,
         isStockItem: true,
         isActive: true,
-        notes: stockItemForm.notes,
-        linkedSalesProductIds: stockItemForm.linkedSalesProductIds,
-        consumptionBasis: stockItemForm.consumptionBasis,
+        notes: stockItemForm.linkToAllSales
+          ? `${stockItemForm.notes ? `${stockItemForm.notes} - ` : ''}تم الربط مع جميع الأصناف البيعية وتقسيم التكلفة على كل المبيعات بالقيمة`
+          : stockItemForm.notes,
+        linkedSalesProductIds: finalLinkedIds,
+        consumptionBasis: finalBasis,
         consumptionRate: Number(stockItemForm.consumptionRate) || 1,
         expenseAccountId: stockItemForm.expenseAccountId || chosenExpense?.id || undefined,
         expenseAccountNameAr: chosenExpense?.nameAr || stockItemForm.expenseAccountNameAr || undefined,
@@ -846,7 +855,7 @@ export const InventoryManagementView: React.FC = () => {
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-2xl font-bold text-slate-800">
-                  {t('إدارة المخازن والأصناف المخزنية', 'Warehouse & Stock Items Management')}
+                  {t('إدارة المخازن', 'Warehouse Management')}
                 </h1>
                 <span className="px-2.5 py-0.5 text-xs font-semibold bg-blue-100 text-blue-800 rounded-full">
                   {t('خامات ومستهلكات فقط', 'Raw & Stock Only')}
@@ -976,6 +985,14 @@ export const InventoryManagementView: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Automated Stock Alert System restricted to Warehouses Screen */}
+      <LowStockAlertWidget
+        onFilterProduct={(productName) => {
+          setActiveTab('stock_items');
+          setSearchQuery(productName);
+        }}
+      />
 
       {/* Main Tabs Navigation */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
@@ -1932,60 +1949,98 @@ export const InventoryManagementView: React.FC = () => {
                   </span>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">
-                      {t('اختر صنف بيعي لربطه فوراً:', 'Select Sales Item:')}
-                    </label>
-                    <select
-                      multiple
-                      value={stockItemForm.linkedSalesProductIds}
+                {/* Option to Link with ALL sales items and divide cost across all sales by value */}
+                <div className="p-3 bg-white rounded-xl border border-blue-200 shadow-xs">
+                  <label className="flex items-start gap-2.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(stockItemForm.linkToAllSales)}
                       onChange={(e) => {
-                        const selected = Array.from(e.target.selectedOptions, (option: HTMLOptionElement) => option.value);
-                        setStockItemForm({ ...stockItemForm, linkedSalesProductIds: selected });
+                        const checked = e.target.checked;
+                        setStockItemForm({
+                          ...stockItemForm,
+                          linkToAllSales: checked,
+                          linkedSalesProductIds: checked ? salesItems.map((s) => s.id) : [],
+                          consumptionBasis: checked ? 'revenue_ratio' : 'units_sold',
+                        });
                       }}
-                      className="w-full h-24 px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
-                      {salesItems.map((sp) => (
-                        <option key={sp.id} value={sp.id}>
-                          {sp.nameAr} ({sp.unit || 'جلسة'})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                      className="mt-0.5 rounded text-blue-600 focus:ring-blue-500 w-4 h-4 cursor-pointer"
+                    />
+                    <div className="text-xs">
+                      <span className="font-bold text-blue-950 block">
+                        {t('الربط مع جميع الأصناف البيعية وتقسيم تكلفته على كل المبيعات بالقيمة', 'Link with all sales items & divide cost across all sales by value')}
+                      </span>
+                      <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
+                        {t(
+                          'تفعيل هذا الخيار يقوم بربط هذا الصنف المخزني تلقائياً بكافة الخدمات والمنتجات البيعية في العيادة، وتحميل تكلفتها كنسبة موزعة على القيمة البيعية لكل جلسة أو فاتورة مباعة.',
+                          'Allocates this raw material cost across all clinical sales items proportionally based on invoice revenue value.'
+                        )}
+                      </p>
+                    </div>
+                  </label>
+                </div>
 
-                  <div className="space-y-3">
+                {!stockItemForm.linkToAllSales ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs font-medium text-slate-700 mb-1">
-                        {t('آلية الاستهلاك:', 'Consumption Basis:')}
+                        {t('اختر صنف بيعي لربطه فوراً:', 'Select Sales Item:')}
                       </label>
                       <select
-                        value={stockItemForm.consumptionBasis}
-                        onChange={(e) => setStockItemForm({ ...stockItemForm, consumptionBasis: e.target.value as any })}
-                        className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        multiple
+                        value={stockItemForm.linkedSalesProductIds}
+                        onChange={(e) => {
+                          const selected = Array.from(e.target.selectedOptions, (option: HTMLOptionElement) => option.value);
+                          setStockItemForm({ ...stockItemForm, linkedSalesProductIds: selected });
+                        }}
+                        className="w-full h-24 px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
                       >
-                        <option value="units_sold">{t('بعد الوحدات / الجلسات المباعة', 'Per Unit / Session Sold')}</option>
-                        <option value="revenue_ratio">{t('بنسبة مئوية من قيمة الإيراد', 'Revenue Ratio %')}</option>
-                        <option value="monthly_period">{t('استهلاك دوري شهرياً', 'Monthly Period')}</option>
-                        <option value="client_count">{t('بعدد العملاء والزيارات', 'Per Client Visit')}</option>
+                        {salesItems.map((sp) => (
+                          <option key={sp.id} value={sp.id}>
+                            {sp.nameAr} ({sp.unit || 'جلسة'})
+                          </option>
+                        ))}
                       </select>
                     </div>
 
-                    <div>
-                      <label className="block text-xs font-medium text-slate-700 mb-1">
-                        {t('معدل الاستهلاك لكل وحدة بيع:', 'Consumption Rate:')}
-                      </label>
-                      <input
-                        type="number"
-                        step="any"
-                        min={0}
-                        value={stockItemForm.consumptionRate}
-                        onChange={(e) => setStockItemForm({ ...stockItemForm, consumptionRate: parseFloat(e.target.value) || 1 })}
-                        className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      />
+                    <div className="space-y-3">
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">
+                          {t('آلية الاستهلاك:', 'Consumption Basis:')}
+                        </label>
+                        <select
+                          value={stockItemForm.consumptionBasis}
+                          onChange={(e) => setStockItemForm({ ...stockItemForm, consumptionBasis: e.target.value as any })}
+                          className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                          <option value="units_sold">{t('بعد الوحدات / الجلسات المباعة', 'Per Unit / Session Sold')}</option>
+                          <option value="revenue_ratio">{t('بنسبة مئوية من قيمة الإيراد', 'Revenue Ratio %')}</option>
+                          <option value="monthly_period">{t('استهلاك دوري شهرياً', 'Monthly Period')}</option>
+                          <option value="client_count">{t('بعدد العملاء والزيارات', 'Per Client Visit')}</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">
+                          {t('معدل الاستهلاك لكل وحدة بيع:', 'Consumption Rate:')}
+                        </label>
+                        <input
+                          type="number"
+                          step="any"
+                          min={0}
+                          value={stockItemForm.consumptionRate}
+                          onChange={(e) => setStockItemForm({ ...stockItemForm, consumptionRate: parseFloat(e.target.value) || 1 })}
+                          className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                      </div>
                     </div>
                   </div>
-                </div>
+                ) : (
+                  <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200 text-xs text-emerald-800 flex items-center gap-2">
+                    <span className="font-bold">✓ {t('تم تفعيل الربط التلقائي الشامل:', 'Global Allocation Active:')}</span>
+                    <span>{t(`مربوط بكافة الأصناف البيعية (${salesItems.length} صنف وخدمة)، وسيتم احتساب التكلفة وفق القيمة المالية لكل حركة بيع.`, `Linked to all (${salesItems.length}) sales items, cost is apportioned by revenue value.`)}</span>
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">

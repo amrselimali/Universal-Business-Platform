@@ -18,6 +18,7 @@ import {
   PatientFollowUp,
   TreatmentPlan,
   JournalEntry,
+  JournalLine,
   Language,
   NeonDbState,
   AppUser,
@@ -44,7 +45,31 @@ import {
   SpecializedTaxInvoice,
   GoodsReceiptVoucher,
   GoodsIssueVoucher,
+  AccountingPeriodLock,
+  ServiceComponent,
+  AttendanceRecord,
+  BiometricDeviceConfig,
+  NotificationRule,
+  AppNotification,
+  NotificationSeverity,
+  NotificationCategory,
 } from '../types';
+import { INITIAL_NOTIFICATION_RULES, INITIAL_NOTIFICATIONS_HISTORY } from '../data/notificationRulesData';
+import { playNotificationSound } from '../utils/audioAlert';
+import {
+  buildJournalEntry,
+  buildCombinedReversalAndNewEntry,
+  buildRevenueJournalLines,
+  buildCostJournalLines,
+  calculateItemCostAndDeductions,
+  buildCashReceiptJournalLines,
+  buildCashPaymentJournalLines,
+  buildGoodsReceiptJournalLines,
+  buildGoodsIssueJournalLines,
+  isDateLockedInPeriod,
+  resolveAccount,
+  createJournalLine,
+} from '../services/accountingEngine';
 import {
   INITIAL_CASH_RECEIPTS,
   INITIAL_CASH_PAYMENTS,
@@ -52,6 +77,7 @@ import {
   INITIAL_GOODS_RECEIPTS,
   INITIAL_GOODS_ISSUES,
 } from '../data/fiscalData';
+import { INITIAL_ATTENDANCE_RECORDS, INITIAL_BIOMETRIC_DEVICES } from '../data/attendanceData';
 import { generateZatcaTlvBase64, generateQrDataUrl } from '../utils/fiscalUtils';
 import {
   INITIAL_MODULES,
@@ -298,6 +324,18 @@ interface PlatformContextType {
   addShiftRunRow: (shiftId: string, row: Omit<ShiftRunRow, 'id'>) => void;
   updateShiftRunRow: (shiftId: string, rowId: string, data: Partial<ShiftRunRow>) => void;
   removeShiftRunRow: (shiftId: string, rowId: string) => void;
+  editCollectionReceipt: (params: {
+    receiptId: string;
+    sourceShiftId: string;
+    newCollectedAmount: number;
+    newPaymentMethod?: string;
+    reason: string;
+  }) => { success: boolean; error?: string };
+  cancelCollectionReceipt: (params: {
+    receiptId: string;
+    sourceShiftId: string;
+    reason: string;
+  }) => { success: boolean; error?: string };
   addShiftExpense: (shiftId: string, expense: Omit<ShiftExpense, 'id'>) => void;
   removeShiftExpense: (shiftId: string, expenseId: string) => void;
   updateShiftBalancing: (
@@ -344,6 +382,36 @@ interface PlatformContextType {
   allInvoices: SalesInvoice[];
   processCheckout: (payload: CheckoutPayload) => { success: boolean; invoice?: SalesInvoice; error?: string };
   refundInvoice: (invoiceId: string, reason: string, restockItems?: boolean) => { success: boolean; error?: string };
+  createOfficialTaxInvoice: (payload: {
+    customerId: string;
+    customerName: string;
+    items: Array<{
+      productId: string;
+      productNameAr: string;
+      productNameEn?: string;
+      quantity: number;
+      unitPrice: number;
+      discount?: number;
+      taxRate?: number;
+    }>;
+    paymentMethod: string;
+    taxRate?: number;
+    notes?: string;
+    cashPaid?: number;
+    cardPaid?: number;
+  }) => { success: boolean; invoice?: SalesInvoice; error?: string };
+  editSalesInvoice: (params: {
+    invoiceId: string;
+    newNetAmount: number;
+    reason: string;
+    newPaymentMethod?: string;
+    newItems?: SalesInvoiceItem[];
+  }) => { success: boolean; error?: string };
+  cancelSalesInvoice: (params: {
+    invoiceId: string;
+    reason: string;
+  }) => { success: boolean; error?: string };
+  importSalesInvoices: (importedList: SalesInvoice[]) => void;
   closeShift: (actualCash: number, notes?: string, shiftIdParam?: string) => void;
   openShift: (openingFloat: number, branchIdParam?: string) => { success: boolean; message?: string } | void;
 
@@ -358,6 +426,7 @@ interface PlatformContextType {
     branchId?: string;
     lines: { accountId: string; debit: number; credit: number; memo?: string }[];
   }) => { success: boolean; error?: string };
+  deleteJournalEntry: (entryId: string) => void;
 
   // Audit Trail & User Activity Logs (سجل التعديلات، المحذوفات، ونشاطات المستخدمين)
   auditRecords: AuditRecord[];
@@ -394,6 +463,63 @@ interface PlatformContextType {
   allGoodsIssues: GoodsIssueVoucher[];
   addGoodsIssue: (data: Omit<GoodsIssueVoucher, 'id' | 'ginNumber' | 'createdAt'>) => GoodsIssueVoucher;
   deleteGoodsIssue: (id: string) => void;
+
+  // Accounting Period Locks (إقفال الفترات المحاسبية)
+  periodLocks: AccountingPeriodLock[];
+  allPeriodLocks: AccountingPeriodLock[];
+  closedPeriodDate: string | null;
+  lockAccountingPeriod: (lockDate: string, reason?: string) => { success: boolean; message: string };
+  unlockAccountingPeriod: (lockId: string) => { success: boolean; message: string };
+  isDateInClosedPeriod: (date: string, branchId?: string) => { isLocked: boolean; lockInfo?: AccountingPeriodLock };
+  validatePeriodDate: (date: string, branchId?: string, overrideAsAdmin?: boolean) => { allowed: boolean; message?: string };
+
+  // Advanced Operation Edit with Reversal (التعديل بعكس القيد القديم وإنشاء جديد في قيد واحد)
+  replaceShiftRunRowWithReversal: (
+    shiftId: string,
+    oldRowId: string,
+    newRowData: Omit<ShiftRunRow, 'id'>
+  ) => { success: boolean; error?: string; combinedJournalEntryId?: string };
+
+  // Staff Attendance & Biometrics (الحضور والانصراف والربط بالبصمة)
+  attendanceRecords: AttendanceRecord[];
+  allAttendanceRecords: AttendanceRecord[];
+  biometricDevices: BiometricDeviceConfig[];
+  addAttendanceRecord: (data: Omit<AttendanceRecord, 'id' | 'createdAt'>) => AttendanceRecord;
+  updateAttendanceRecord: (id: string, data: Partial<AttendanceRecord>) => void;
+  deleteAttendanceRecord: (id: string) => void;
+  syncBiometricDeviceLogs: (branchIdOrDeviceId?: string) => Promise<{ success: boolean; message: string; count: number }>;
+
+  // Notification Engine & Dynamic Rules (نظام التنبيهات الفورية وقواعد التشغيل)
+  notificationRules: NotificationRule[];
+  notifications: AppNotification[];
+  allNotifications: AppNotification[];
+  unreadNotificationsCount: number;
+  toggleNotificationRule: (ruleId: string, isEnabled?: boolean) => void;
+  updateNotificationRule: (ruleId: string, updates: Partial<NotificationRule>) => void;
+  addNotificationRule: (rule: Omit<NotificationRule, 'id' | 'updatedAt'>) => NotificationRule;
+  deleteNotificationRule: (ruleId: string) => void;
+  resetNotificationRulesToDefaults: () => void;
+  sendInstantNotification: (ruleCode: string, payload: Record<string, any>) => void;
+  broadcastCustomNotification: (params: {
+    titleAr: string;
+    titleEn?: string;
+    messageAr: string;
+    messageEn?: string;
+    severity?: NotificationSeverity;
+    category?: NotificationCategory;
+    targetRoles?: string[];
+    targetUserIds?: string[];
+    targetBranchId?: string;
+    soundAlert?: boolean;
+    showToast?: boolean;
+    actionUrl?: string;
+  }) => void;
+  markNotificationAsRead: (notificationId: string) => void;
+  markAllNotificationsAsRead: () => void;
+  deleteNotification: (notificationId: string) => void;
+  clearAllNotifications: () => void;
+  activeToastNotification: AppNotification | null;
+  dismissToastNotification: () => void;
 
   // Neon PostgreSQL
   neonDb: NeonDbState;
@@ -816,6 +942,152 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const accounts = allAccounts.filter((a) => a.tenantId === tenant?.id);
   const journalEntries = allJournals.filter((j) => j.tenantId === tenant?.id);
 
+  // Accounting Period Locks (إقفال الفترات المحاسبية)
+  const [allPeriodLocks, setAllPeriodLocks] = useState<AccountingPeriodLock[]>(() => {
+    try {
+      const saved = localStorage.getItem('erp_period_locks');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {
+      console.error('Failed to load period locks:', e);
+    }
+    return [
+      {
+        id: 'lock-aug-2026',
+        tenantId: 'tenant-eg-001',
+        branchId: 'all',
+        lockDate: '2026-08-31',
+        lockedAt: '2026-09-01T00:00:00Z',
+        lockedBy: 'المدير المالي (Super Admin)',
+        reason: 'إقفال حسابات ومطابقة شهر أغسطس 2026',
+        status: 'locked',
+      },
+    ];
+  });
+
+  useEffect(() => {
+    localStorage.setItem('erp_period_locks', JSON.stringify(allPeriodLocks));
+  }, [allPeriodLocks]);
+
+  const periodLocks = allPeriodLocks.filter((l) => l.tenantId === tenant?.id);
+
+  const closedPeriodDate = useMemo(() => {
+    const active = periodLocks.filter((l) => l.status === 'locked');
+    if (active.length === 0) return null;
+    const sorted = [...active].sort((a, b) => b.lockDate.localeCompare(a.lockDate));
+    return sorted[0]?.lockDate || null;
+  }, [periodLocks]);
+
+  const lockAccountingPeriod = (lockDate: string, reason?: string) => {
+    const newLock: AccountingPeriodLock = {
+      id: `lock-${Date.now()}`,
+      tenantId: tenant?.id || INITIAL_TENANT.id,
+      branchId: activeBranch?.id || 'all',
+      lockDate,
+      lockedAt: new Date().toISOString(),
+      lockedBy: currentUser?.name || 'مدير النظام',
+      reason: reason || 'إقفال دوري معتمد للحسابات',
+      status: 'locked',
+    };
+    const updated = [newLock, ...allPeriodLocks];
+    setAllPeriodLocks(updated);
+    recordAudit({
+      branchId: activeBranch?.id,
+      entityType: 'PeriodLock' as any,
+      entityId: newLock.id,
+      entityName: `إقفال حتى ${lockDate}`,
+      actionType: 'CREATE',
+      diffSummary: `إقفال الفترة المحاسبية حتى تاريخ ${lockDate} - السبب: ${newLock.reason}`,
+      newState: newLock,
+    });
+    logUserActivity(
+      'accounting',
+      'الحسابات العامة',
+      'General Ledger',
+      'إقفال فترة محاسبية',
+      'Lock Accounting Period',
+      `تم إقفال الفترة المحاسبية حتى تاريخ ${lockDate} بواسطة ${currentUser?.name || 'مدير النظام'}`
+    );
+    return { success: true, message: `تم إقفال الفترة المحاسبية بنجاح حتى تاريخ ${lockDate}` };
+  };
+
+  const unlockAccountingPeriod = (lockId: string) => {
+    const updated = allPeriodLocks.map((l) => (l.id === lockId ? { ...l, status: 'unlocked' as const } : l));
+    setAllPeriodLocks(updated);
+    logUserActivity(
+      'accounting',
+      'الحسابات العامة',
+      'General Ledger',
+      'فتح فترة محاسبية',
+      'Unlock Accounting Period',
+      `تم إلغاء إقفال الفترة المحاسبية بواسطة ${currentUser?.name || 'مدير النظام'}`
+    );
+    return { success: true, message: 'تم فتح الفترة المحاسبية وإلغاء القفل بنجاح' };
+  };
+
+  const isDateInClosedPeriod = (date: string, branchId?: string) => {
+    return isDateLockedInPeriod(date, periodLocks, tenant?.id || INITIAL_TENANT.id, branchId || activeBranch?.id);
+  };
+
+  const validatePeriodDate = (date: string, branchId?: string, overrideAsAdmin?: boolean) => {
+    const lockCheck = isDateInClosedPeriod(date, branchId);
+    if (!lockCheck.isLocked) return { allowed: true };
+    const isAdminUser = !!currentUser?.isAdmin || currentUser?.role === 'SuperAdmin';
+    if (isAdminUser || overrideAsAdmin) {
+      return { allowed: true, message: 'تم التجاوز بصلاحية المدير العام' };
+    }
+    return {
+      allowed: false,
+      message: `الفترة المحاسبية مقفلة حتى تاريخ (${lockCheck.lockInfo?.lockDate}). لا يمكن إجراء أي تعديل أو مسح أو إضافة بتاريخ يقع في الفترة المقفلة بدون موافقة وصلاحية الأدمن.`,
+    };
+  };
+
+  // Synchronization of Journal Lines with Chart of Accounts Balances
+  const applyJournalLinesToAccounts = (lines: JournalLine[], reverse: boolean = false) => {
+    if (!lines || lines.length === 0) return;
+    setAllAccounts((prev) =>
+      prev.map((acc) => {
+        const matchingLines = lines.filter((l) => l.accountId === acc.id || l.accountCode === acc.code);
+        if (matchingLines.length === 0) return acc;
+        let delta = 0;
+        matchingLines.forEach((l) => {
+          const debit = Number(l.debit) || 0;
+          const credit = Number(l.credit) || 0;
+          if (acc.isDebitNormal) {
+            delta += (debit - credit);
+          } else {
+            delta += (credit - debit);
+          }
+        });
+        if (reverse) delta = -delta;
+        return {
+          ...acc,
+          balance: Number(((acc.balance || 0) + delta).toFixed(2)),
+        };
+      })
+    );
+  };
+
+  const deleteJournalEntry = (entryId: string) => {
+    const entry = allJournals.find((j) => j.id === entryId);
+    if (!entry) return;
+    applyJournalLinesToAccounts(entry.lines, true);
+    setAllJournals((prev) => prev.filter((j) => j.id !== entryId));
+  };
+
+  const postJournalEntryWithSync = (entry: Omit<JournalEntry, 'id' | 'createdAt'>): JournalEntry => {
+    const newEntry: JournalEntry = {
+      ...entry,
+      id: `jv-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      createdAt: new Date().toISOString(),
+    };
+    applyJournalLinesToAccounts(newEntry.lines, false);
+    setAllJournals((prev) => [newEntry, ...prev]);
+    return newEntry;
+  };
+
   const addPaymentMethod = (data: Omit<PaymentMethod, 'id' | 'tenantId'>): PaymentMethod => {
     const nameEn = data.nameEn || autoTranslateArabic(data.nameAr);
     const newMethod: PaymentMethod = {
@@ -1056,15 +1328,24 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               balance: 0,
               createdAt: '2026-01-01T08:00:00Z',
             };
-            return [cashSupplier, ...parsed];
+            return [cashSupplier, ...parsed].map((p: Party) => ({
+              ...p,
+              branchId: p.branchId || 'branch-cairo',
+            }));
           }
-          return parsed;
+          return parsed.map((p: Party) => ({
+            ...p,
+            branchId: p.branchId || 'branch-cairo',
+          }));
         }
       }
     } catch (e) {
       console.error('Failed to load parties:', e);
     }
-    return INITIAL_PARTIES;
+    return INITIAL_PARTIES.map((p) => ({
+      ...p,
+      branchId: p.branchId || 'branch-cairo',
+    }));
   });
 
   useEffect(() => {
@@ -1094,10 +1375,12 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const addParty = (partyData: Omit<Party, 'id' | 'tenantId'>): Party => {
     const nameEn = partyData.nameEn || autoTranslateArabic(partyData.name);
-    const systemCode = partyData.systemCode || getNextCustomerSystemCode(partyData.branchId);
+    const branchId = partyData.branchId || activeBranch?.id || branches[0]?.id || 'branch-cairo';
+    const systemCode = partyData.systemCode || getNextCustomerSystemCode(branchId);
 
     const newParty: Party = {
       ...partyData,
+      branchId,
       nameEn,
       systemCode,
       id: `party-${Date.now()}`,
@@ -2118,15 +2401,10 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const activeReceptionShift = useMemo(() => {
     try {
       const currentBranchId = activeBranch?.id;
-      // 1. Look for open shift in current branch
-      let rawShift = receptionShifts.find(
-        (s) => s && s.status === 'Open' && (!currentBranchId || s.branchId === currentBranchId)
+      // Look strictly for open shift in the active branch
+      const rawShift = receptionShifts.find(
+        (s) => s && s.status === 'Open' && (currentBranchId ? s.branchId === currentBranchId : true)
       ) || null;
-
-      // 2. If not found and activeBranch is set, check if any open shift belongs to this tenant
-      if (!rawShift) {
-        rawShift = receptionShifts.find((s) => s && s.status === 'Open') || null;
-      }
 
       if (!rawShift) return null;
 
@@ -2248,7 +2526,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       console.error('Error evaluating activeReceptionShift:', err);
       // Safe fallback: return rawShift if available with defaults of 0
       const currentBranchId = activeBranch?.id;
-      const rawShift = receptionShifts.find((s) => s && s.status === 'Open' && (!currentBranchId || s.branchId === currentBranchId)) || receptionShifts.find((s) => s && s.status === 'Open');
+      const rawShift = receptionShifts.find((s) => s && s.status === 'Open' && (currentBranchId ? s.branchId === currentBranchId : true));
       return rawShift || null;
     }
   }, [receptionShifts, activeBranch?.id, accounts, paymentMethods]);
@@ -2664,16 +2942,89 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const addShiftRunRow = (shiftId: string, rowData: Omit<ShiftRunRow, 'id'>) => {
+    // 1. Period Lock Check
+    const rowDate = rowData.date || new Date().toISOString().split('T')[0];
+    const periodCheck = validatePeriodDate(rowDate, activeBranch?.id);
+    if (!periodCheck.allowed) {
+      alert(periodCheck.message);
+      return;
+    }
+
     const pName = rowData.patientName || rowData.customerName || 'عميل / مريض نقدي';
+    const newRowId = `run-row-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`;
     const newRow: ShiftRunRow = {
       ...rowData,
       patientName: pName,
       customerName: pName,
       customerId: rowData.customerId || rowData.patientId || `cust-${Date.now().toString().slice(-4)}`,
       patientId: rowData.patientId || rowData.customerId || `cust-${Date.now().toString().slice(-4)}`,
-      id: `run-row-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
-      totalRevenue: Number(((rowData.consumedQuantity ?? 1) * (rowData.unitPrice ?? 0)).toFixed(2)),
+      id: newRowId,
+      totalRevenue: rowData.totalRevenue !== undefined ? rowData.totalRevenue : Number(((rowData.consumedQuantity ?? 0) * (rowData.unitPrice ?? 0)).toFixed(2)),
     };
+
+    // 2. Real-time Accounting Entry for Revenue
+    const pm = allPaymentMethods.find(
+      (p) => p.nameAr === rowData.paymentMethod || p.id === rowData.paymentMethod || p.nameEn === rowData.paymentMethod
+    );
+    const cust = allParties.find((p) => p.id === newRow.customerId || p.id === newRow.patientId);
+    const prod = allProducts.find((p) => p.id === newRow.serviceId || p.nameAr === newRow.serviceName);
+
+    const revLines = buildRevenueJournalLines({
+      accounts: allAccounts,
+      paymentMethod: pm,
+      customer: cust,
+      productOrService: prod,
+      totalRevenue: newRow.totalRevenue,
+      collectedAmount: newRow.collectedAmount || 0,
+      memo: `جلسة/خدمة: ${newRow.serviceName} (${pName})`,
+    });
+
+    if (revLines.length > 0) {
+      const revJv = postJournalEntryWithSync({
+        tenantId: tenant?.id || INITIAL_TENANT.id,
+        branchId: activeBranch?.id || '',
+        entryNumber: `JV-REV-${Date.now().toString().slice(-5)}`,
+        date: rowDate,
+        description: `إيراد جلسة تشغيل: ${newRow.serviceName} للعميل ${pName}`,
+        isPosted: true,
+        sourceDocument: `شاشة التشغيل - سطر #${newRow.id.slice(-5)}`,
+        lines: revLines,
+      });
+      newRow.journalEntryId = revJv.id;
+    }
+
+    // 3. Real-time Inventory Depletion & Direct Cost Accounting Entry
+    const { totalCost, stockDeductions } = calculateItemCostAndDeductions(prod, newRow.consumedQuantity || 1, allProducts);
+    const targetWhId = activeWarehouse?.id || allWarehouses.find((w) => w.branchId === activeBranch?.id)?.id || allWarehouses[0]?.id || 'wh-1';
+
+    if (stockDeductions.length > 0) {
+      stockDeductions.forEach((ded) => {
+        adjustStock(ded.productId, targetWhId, -ded.quantity, `استهلاك جلسة تشغيل: ${newRow.serviceName} (${ded.productNameAr})`);
+      });
+    }
+
+    if (totalCost > 0) {
+      const costLines = buildCostJournalLines({
+        accounts: allAccounts,
+        productOrService: prod,
+        quantity: newRow.consumedQuantity || 1,
+        totalCost,
+        memo: `تكلفة خدمة: ${newRow.serviceName}`,
+      });
+      if (costLines.length > 0) {
+        const costJv = postJournalEntryWithSync({
+          tenantId: tenant?.id || INITIAL_TENANT.id,
+          branchId: activeBranch?.id || '',
+          entryNumber: `JV-CST-${Date.now().toString().slice(-5)}`,
+          date: rowDate,
+          description: `إثبات تكلفة تشغيل ومستلزمات جلسة: ${newRow.serviceName}`,
+          isPosted: true,
+          sourceDocument: `شاشة التشغيل - تكلفة سطر #${newRow.id.slice(-5)}`,
+          lines: costLines,
+        });
+        newRow.costJournalEntryId = costJv.id;
+      }
+    }
 
     setAllReceptionShifts((prev) =>
       prev.map((shift) => {
@@ -2753,6 +3104,17 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const updateShiftRunRow = (shiftId: string, rowId: string, data: Partial<ShiftRunRow>) => {
+    const targetShift = allReceptionShifts.find((s) => s.id === shiftId);
+    const existingRow = targetShift?.runRows.find((r) => r.id === rowId);
+    if (existingRow) {
+      const checkDate = data.date || existingRow.date || new Date().toISOString().split('T')[0];
+      const periodCheck = validatePeriodDate(checkDate, activeBranch?.id);
+      if (!periodCheck.allowed) {
+        alert(periodCheck.message);
+        return;
+      }
+    }
+
     setAllReceptionShifts((prev) =>
       prev.map((shift) => {
         if (shift.id === shiftId) {
@@ -2784,6 +3146,47 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const removeShiftRunRow = (shiftId: string, rowId: string) => {
+    const targetShift = allReceptionShifts.find((s) => s.id === shiftId);
+    const targetRow = targetShift?.runRows.find((r) => r.id === rowId);
+
+    if (targetRow) {
+      // 1. Period Lock Check
+      const checkDate = targetRow.date || new Date().toISOString().split('T')[0];
+      const periodCheck = validatePeriodDate(checkDate, activeBranch?.id);
+      if (!periodCheck.allowed) {
+        alert(periodCheck.message);
+        return;
+      }
+
+      // 2. Clear all accounting entries created for this row
+      if (targetRow.journalEntryId) {
+        deleteJournalEntry(targetRow.journalEntryId);
+      }
+      if (targetRow.costJournalEntryId) {
+        deleteJournalEntry(targetRow.costJournalEntryId);
+      }
+
+      // 3. Reverse inventory stock deduction (return materials to warehouse)
+      const prod = allProducts.find((p) => p.id === targetRow.serviceId || p.nameAr === targetRow.serviceName);
+      const { stockDeductions } = calculateItemCostAndDeductions(prod, targetRow.consumedQuantity || 1, allProducts);
+      if (stockDeductions.length > 0) {
+        const targetWhId = activeWarehouse?.id || allWarehouses.find((w) => w.branchId === activeBranch?.id)?.id || allWarehouses[0]?.id || 'wh-1';
+        stockDeductions.forEach((ded) => {
+          adjustStock(ded.productId, targetWhId, ded.quantity, `استرجاع وإلغاء استهلاك حركة تشغيل محذوفة #${targetRow.id.slice(-5)} (${ded.productNameAr})`);
+        });
+      }
+
+      recordAudit({
+        branchId: activeBranch?.id,
+        entityType: 'Shift' as any,
+        entityId: targetRow.id,
+        entityName: targetRow.serviceName,
+        actionType: 'DELETE',
+        diffSummary: `مسح حركة تشغيل (#${targetRow.id.slice(-5)} - ${targetRow.serviceName}) وإلغاء أثرها المحاسبي والمخزني بالكامل`,
+        previousState: targetRow,
+      });
+    }
+
     setAllReceptionShifts((prev) =>
       prev.map((shift) => {
         if (shift.id === shiftId) {
@@ -2801,6 +3204,526 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         return shift;
       })
     );
+  };
+
+  // Reversal & Adjustment in ONE compound transaction
+  // أوبشن: التعديل على العمليات يسيب العملية القديمة ويعكسها في الحسابات ويعمل عملية جديدة كله في قيد واحد
+  const replaceShiftRunRowWithReversal = (
+    shiftId: string,
+    oldRowId: string,
+    newRowData: Omit<ShiftRunRow, 'id'>
+  ): { success: boolean; error?: string; combinedJournalEntryId?: string } => {
+    const targetShift = allReceptionShifts.find((s) => s.id === shiftId);
+    if (!targetShift) return { success: false, error: 'شيفت التشغيل غير موجود' };
+
+    const oldRow = targetShift.runRows.find((r) => r.id === oldRowId);
+    if (!oldRow) return { success: false, error: 'حركة التشغيل السابقة غير موجودة' };
+
+    const opDate = newRowData.date || oldRow.date || new Date().toISOString().split('T')[0];
+    const periodCheck = validatePeriodDate(opDate, activeBranch?.id);
+    if (!periodCheck.allowed) {
+      return { success: false, error: periodCheck.message };
+    }
+
+    // 1. Build Old Lines for Reversal
+    let oldJvLines: JournalLine[] = [];
+    if (oldRow.journalEntryId) {
+      const oldJv = allJournals.find((j) => j.id === oldRow.journalEntryId);
+      if (oldJv) oldJvLines.push(...oldJv.lines);
+    }
+    if (oldRow.costJournalEntryId) {
+      const oldCostJv = allJournals.find((j) => j.id === oldRow.costJournalEntryId);
+      if (oldCostJv) oldJvLines.push(...oldCostJv.lines);
+    }
+
+    // If old row had no saved journal, reconstruct old lines
+    if (oldJvLines.length === 0) {
+      const oldPm = allPaymentMethods.find(
+        (p) => p.nameAr === oldRow.paymentMethod || p.id === oldRow.paymentMethod
+      );
+      const oldCust = allParties.find((p) => p.id === oldRow.customerId);
+      const oldProd = allProducts.find((p) => p.id === oldRow.serviceId || p.nameAr === oldRow.serviceName);
+      oldJvLines = buildRevenueJournalLines({
+        accounts: allAccounts,
+        paymentMethod: oldPm,
+        customer: oldCust,
+        productOrService: oldProd,
+        totalRevenue: oldRow.totalRevenue,
+        collectedAmount: oldRow.collectedAmount || 0,
+        memo: `عكس حركة سابقة: ${oldRow.serviceName}`,
+      });
+    }
+
+    // 2. Build New Lines for the updated row
+    const newPm = allPaymentMethods.find(
+      (p) => p.nameAr === newRowData.paymentMethod || p.id === newRowData.paymentMethod
+    );
+    const newCust = allParties.find((p) => p.id === newRowData.customerId || p.id === newRowData.patientId);
+    const newProd = allProducts.find((p) => p.id === newRowData.serviceId || p.nameAr === newRowData.serviceName);
+    const newRev = newRowData.totalRevenue !== undefined ? newRowData.totalRevenue : (newRowData.consumedQuantity || 0) * (newRowData.unitPrice || 0);
+
+    const newRevLines = buildRevenueJournalLines({
+      accounts: allAccounts,
+      paymentMethod: newPm,
+      customer: newCust,
+      productOrService: newProd,
+      totalRevenue: newRev,
+      collectedAmount: newRowData.collectedAmount || 0,
+      memo: `الحركة الجديدة المعدلة: ${newRowData.serviceName}`,
+    });
+
+    const { totalCost: newCost, stockDeductions: newStockDeductions } = calculateItemCostAndDeductions(newProd, newRowData.consumedQuantity || 1, allProducts);
+    const newCostLines = newCost > 0 ? buildCostJournalLines({
+      accounts: allAccounts,
+      productOrService: newProd,
+      quantity: newRowData.consumedQuantity || 1,
+      totalCost: newCost,
+      memo: `تكلفة الحركة المعدلة: ${newRowData.serviceName}`,
+    }) : [];
+
+    const finalNewLines = [...newRevLines, ...newCostLines];
+
+    // 3. Create ONE Compound Balanced Journal Entry (Reversal + New Entry)
+    const combinedEntry = buildCombinedReversalAndNewEntry({
+      tenantId: tenant?.id || INITIAL_TENANT.id,
+      branchId: activeBranch?.id || '',
+      date: opDate,
+      sourceDocument: `تعديل حركة تشغيل #${oldRow.id.slice(-5)}`,
+      oldReferenceNumber: `حركة سابقة #${oldRow.id.slice(-5)}`,
+      oldLines: oldJvLines,
+      newLines: finalNewLines,
+      description: `تسوية وتعديل عملية: عكس العملية القديمة رقم #${oldRow.id.slice(-5)} وإثبات العملية الجديدة (${newRowData.serviceName})`,
+    });
+
+    applyJournalLinesToAccounts(combinedEntry.lines, false);
+    setAllJournals((prev) => [combinedEntry, ...prev]);
+
+    // 4. Reverse old stock deductions and apply new stock deductions
+    const targetWhId = activeWarehouse?.id || allWarehouses.find((w) => w.branchId === activeBranch?.id)?.id || allWarehouses[0]?.id || 'wh-1';
+    const oldProd = allProducts.find((p) => p.id === oldRow.serviceId || p.nameAr === oldRow.serviceName);
+    const { stockDeductions: oldStockDeductions } = calculateItemCostAndDeductions(oldProd, oldRow.consumedQuantity || 1, allProducts);
+
+    if (oldStockDeductions.length > 0) {
+      oldStockDeductions.forEach((ded) => {
+        adjustStock(ded.productId, targetWhId, ded.quantity, `عكس استهلاك بعد تعديل الحركة #${oldRow.id.slice(-5)}`);
+      });
+    }
+
+    if (newStockDeductions.length > 0) {
+      newStockDeductions.forEach((ded) => {
+        adjustStock(ded.productId, targetWhId, -ded.quantity, `استهلاك الحركة المعدلة #${oldRow.id.slice(-5)} (${newRowData.serviceName})`);
+      });
+    }
+
+    // 5. Create new row and link old row as replaced
+    const newRowId = `run-row-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`;
+    const newCreatedRow: ShiftRunRow = {
+      ...newRowData,
+      id: newRowId,
+      totalRevenue: newRev,
+      journalEntryId: combinedEntry.id,
+      costJournalEntryId: combinedEntry.id,
+      notes: `${newRowData.notes || ''} [معدلة بديلة عن الحركة #${oldRow.id.slice(-5)}]`.trim(),
+    };
+
+    setAllReceptionShifts((prev) =>
+      prev.map((shift) => {
+        if (shift.id === shiftId) {
+          const nextRows = shift.runRows.map((r) => {
+            if (r.id === oldRowId) {
+              return {
+                ...r,
+                isReplaced: true,
+                replacedByRunRowId: newRowId,
+                reversalJournalEntryId: combinedEntry.id,
+                notes: `${r.notes || ''} [تم تعديلها وعكسها بالقيد ${combinedEntry.entryNumber} واستبدالها بحركة جديدة]`.trim(),
+              };
+            }
+            return r;
+          });
+
+          const withNew = [...nextRows, newCreatedRow];
+          // Recalculate totals excluding replaced rows from revenue if desired, or factoring active only
+          const activeRows = withNew.filter((r) => !r.isReplaced);
+          const totalRev = activeRows.reduce((sum, r) => sum + r.totalRevenue, 0);
+          const totalColl = activeRows.reduce((sum, r) => sum + (r.collectedAmount || 0), 0);
+
+          return {
+            ...shift,
+            runRows: withNew,
+            totalRevenue: totalRev,
+            totalCollected: totalColl,
+            netShiftCash: totalColl - shift.totalExpenses,
+          };
+        }
+        return shift;
+      })
+    );
+
+    recordAudit({
+      branchId: activeBranch?.id,
+      entityType: 'Shift' as any,
+      entityId: oldRowId,
+      entityName: oldRow.serviceName,
+      actionType: 'UPDATE',
+      diffSummary: `تعديل مع عكس القيد القديم: عكس حركة #${oldRow.id.slice(-5)} وإنشاء حركة بديلة (${newRowData.serviceName}) في قيد تسوية مركب واحد (${combinedEntry.entryNumber})`,
+      newState: newCreatedRow,
+      previousState: oldRow,
+    });
+
+    return { success: true, combinedJournalEntryId: combinedEntry.id };
+  };
+
+  const editCollectionReceipt = (params: {
+    receiptId: string;
+    sourceShiftId: string;
+    newCollectedAmount: number;
+    newPaymentMethod?: string;
+    reason: string;
+  }): { success: boolean; error?: string } => {
+    const targetBranchId = activeBranch?.id;
+    // 1. Verify that there is an active open shift currently for this branch
+    const currentOpenShift = allReceptionShifts.find(
+      (s) => s.status === 'Open' && s.tenantId === tenant?.id && (!targetBranchId || s.branchId === targetBranchId)
+    );
+
+    if (!currentOpenShift) {
+      return {
+        success: false,
+        error: 'لا يمكن إتمام التعديل! يجب وجود شيفت تشغيل مفتوح حالياً للفرع لتسجيل أثر المعاملة.',
+      };
+    }
+
+    const sourceShift = allReceptionShifts.find((s) => s.id === params.sourceShiftId);
+    if (!sourceShift) {
+      return { success: false, error: 'الشيفت المرتبط بالإيصال غير موجود!' };
+    }
+
+    const targetRow = sourceShift.runRows.find((r) => r.id === params.receiptId);
+    if (!targetRow) {
+      return { success: false, error: 'الإيصال المطلوب غير موجود في سجلات التشغيل!' };
+    }
+
+    const oldAmount = targetRow.collectedAmount || 0;
+    const newAmount = Number(params.newCollectedAmount) || 0;
+    const diff = Number((newAmount - oldAmount).toFixed(2));
+
+    // Case A: The source shift is STILL OPEN -> Update the row directly in the open shift!
+    if (sourceShift.status === 'Open') {
+      setAllReceptionShifts((prev) =>
+        prev.map((s) => {
+          if (s.id === sourceShift.id) {
+            const nextRows = s.runRows.map((r) => {
+              if (r.id === params.receiptId) {
+                return {
+                  ...r,
+                  collectedAmount: newAmount,
+                  paymentMethod: params.newPaymentMethod || r.paymentMethod,
+                  description: `${r.description || ''} (معدل: من ${oldAmount} إلى ${newAmount} - السبب: ${params.reason})`.trim(),
+                  notes: `${r.notes || ''} [تعديل تحصيل: ${params.reason}]`.trim(),
+                };
+              }
+              return r;
+            });
+
+            const totalRev = nextRows.reduce((sum, r) => sum + r.totalRevenue, 0);
+            const totalColl = nextRows.reduce((sum, r) => sum + (r.collectedAmount || 0), 0);
+            const nextBalancing = s.balancing.map((b) => {
+              const methodRows = nextRows.filter(
+                (r) => r.paymentMethod.includes(b.paymentMethodName) || b.paymentMethodName.includes(r.paymentMethod)
+              );
+              const methodColl = methodRows.reduce((sum, r) => sum + (r.collectedAmount || 0), 0);
+              return {
+                ...b,
+                totalCollected: methodColl,
+                closingBalance: b.openingBalance + methodColl - b.totalDisbursed + b.adjustments,
+              };
+            });
+
+            return {
+              ...s,
+              runRows: nextRows,
+              totalRevenue: totalRev,
+              totalCollected: totalColl,
+              balancing: nextBalancing,
+              netShiftCash: totalColl - s.totalExpenses,
+            };
+          }
+          return s;
+        })
+      );
+
+      logUserActivity(
+        'pos',
+        'إيصالات التحصيل',
+        'Collection Receipts',
+        'تعديل إيصال تحصيل',
+        'Edit Receipt',
+        `تعديل مباشر لإيصال تحصيل #${params.receiptId.slice(-6)} في الشيفت المفتوح ${sourceShift.shiftNumber} من ${oldAmount} إلى ${newAmount} ج.م`
+      );
+
+      return { success: true };
+    }
+
+    // Case B: The source shift is CLOSED -> Add an adjustment row in the CURRENT OPEN SHIFT!
+    const dayNames = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+    const dayName = dayNames[new Date().getDay()] || 'اليوم';
+
+    const adjustmentRow: ShiftRunRow = {
+      id: `run-row-adj-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
+      date: new Date().toISOString().split('T')[0],
+      dayName,
+      customerId: targetRow.customerId,
+      patientId: targetRow.patientId,
+      systemCode: targetRow.systemCode,
+      customerName: targetRow.customerName,
+      patientName: targetRow.patientName,
+      patientPhone: targetRow.patientPhone,
+      roomNumber: 'تسوية تحصيل',
+      serviceName: `تعديل إيصال تحصيل سابق (إيصال #${targetRow.id.slice(-6)} - شيفت ${sourceShift.shiftNumber})`,
+      pulsesCount: 0,
+      consumedQuantity: 0,
+      unitPrice: 0,
+      totalRevenue: 0,
+      paymentMethod: params.newPaymentMethod || targetRow.paymentMethod,
+      collectedAmount: diff,
+      laserDevice: 'تسوية تحصيل',
+      doctorName: currentUser?.name || 'الكاشير',
+      description: `فرق تعديل إيصال تحصيل سابق ${targetRow.id.slice(-6)} من ${oldAmount} إلى ${newAmount} ج.م (الفرق: ${diff > 0 ? `+${diff}` : diff}) - السبب: ${params.reason}`,
+      notes: `تعديل إيصال تحصيل شيفت سابق ${sourceShift.shiftNumber}`,
+    };
+
+    setAllReceptionShifts((prev) =>
+      prev.map((s) => {
+        // In the current open shift, add the adjustment row and recalculate
+        if (s.id === currentOpenShift.id) {
+          const nextRows = [...s.runRows, adjustmentRow];
+          const totalRev = nextRows.reduce((sum, r) => sum + r.totalRevenue, 0);
+          const totalColl = nextRows.reduce((sum, r) => sum + (r.collectedAmount || 0), 0);
+          const nextBalancing = s.balancing.map((b) => {
+            const methodRows = nextRows.filter(
+              (r) => r.paymentMethod.includes(b.paymentMethodName) || b.paymentMethodName.includes(r.paymentMethod)
+            );
+            const methodColl = methodRows.reduce((sum, r) => sum + (r.collectedAmount || 0), 0);
+            return {
+              ...b,
+              totalCollected: methodColl,
+              closingBalance: b.openingBalance + methodColl - b.totalDisbursed + b.adjustments,
+            };
+          });
+
+          return {
+            ...s,
+            runRows: nextRows,
+            totalRevenue: totalRev,
+            totalCollected: totalColl,
+            balancing: nextBalancing,
+            netShiftCash: totalColl - s.totalExpenses,
+          };
+        }
+
+        // In the closed source shift, annotate the row for historical clarity
+        if (s.id === sourceShift.id) {
+          const updatedRows = s.runRows.map((r) => {
+            if (r.id === params.receiptId) {
+              return {
+                ...r,
+                notes: `${r.notes || ''} [تم تعديله بفرق ${diff > 0 ? `+${diff}` : diff} ج.م في شيفت مفتوح ${currentOpenShift.shiftNumber}]`.trim(),
+              };
+            }
+            return r;
+          });
+          return { ...s, runRows: updatedRows };
+        }
+
+        return s;
+      })
+    );
+
+    logUserActivity(
+      'pos',
+      'إيصالات التحصيل',
+      'Collection Receipts',
+      'تعديل إيصال تحصيل شيفت مغلق',
+      'Adjust Closed Receipt',
+      `تسجيل فرق تعديل تحصيل (${diff > 0 ? `+${diff}` : diff} ج.م) في الشيفت المفتوح ${currentOpenShift.shiftNumber} عن شيفت مغلق ${sourceShift.shiftNumber}`
+    );
+
+    return { success: true };
+  };
+
+  const cancelCollectionReceipt = (params: {
+    receiptId: string;
+    sourceShiftId: string;
+    reason: string;
+  }): { success: boolean; error?: string } => {
+    const targetBranchId = activeBranch?.id;
+    // 1. Verify that there is an active open shift currently for this branch
+    const currentOpenShift = allReceptionShifts.find(
+      (s) => s.status === 'Open' && s.tenantId === tenant?.id && (!targetBranchId || s.branchId === targetBranchId)
+    );
+
+    if (!currentOpenShift) {
+      return {
+        success: false,
+        error: 'لا يمكن إلغاء الإيصال! يجب وجود شيفت تشغيل مفتوح حالياً للفرع لتسجيل أثر الإلغاء.',
+      };
+    }
+
+    const sourceShift = allReceptionShifts.find((s) => s.id === params.sourceShiftId);
+    if (!sourceShift) {
+      return { success: false, error: 'الشيفت المرتبط بالإيصال غير موجود!' };
+    }
+
+    const targetRow = sourceShift.runRows.find((r) => r.id === params.receiptId);
+    if (!targetRow) {
+      return { success: false, error: 'الإيصال المطلوب غير موجود في سجلات التشغيل!' };
+    }
+
+    const collectedToCancel = targetRow.collectedAmount || 0;
+
+    // Case A: The source shift is STILL OPEN -> cancel the receipt directly in the open shift!
+    if (sourceShift.status === 'Open') {
+      setAllReceptionShifts((prev) =>
+        prev.map((s) => {
+          if (s.id === sourceShift.id) {
+            const nextRows = s.runRows.map((r) => {
+              if (r.id === params.receiptId) {
+                return {
+                  ...r,
+                  collectedAmount: 0,
+                  serviceName: `(ملغي) ${r.serviceName}`,
+                  description: `ملغي - الأصل: ${collectedToCancel} ج.م - السبب: ${params.reason}`,
+                  notes: `${r.notes || ''} [تم إلغاء الإيصال بواسطة ${currentUser?.name || 'المستخدم'} - السبب: ${params.reason}]`.trim(),
+                };
+              }
+              return r;
+            });
+
+            const totalRev = nextRows.reduce((sum, r) => sum + r.totalRevenue, 0);
+            const totalColl = nextRows.reduce((sum, r) => sum + (r.collectedAmount || 0), 0);
+            const nextBalancing = s.balancing.map((b) => {
+              const methodRows = nextRows.filter(
+                (r) => r.paymentMethod.includes(b.paymentMethodName) || b.paymentMethodName.includes(r.paymentMethod)
+              );
+              const methodColl = methodRows.reduce((sum, r) => sum + (r.collectedAmount || 0), 0);
+              return {
+                ...b,
+                totalCollected: methodColl,
+                closingBalance: b.openingBalance + methodColl - b.totalDisbursed + b.adjustments,
+              };
+            });
+
+            return {
+              ...s,
+              runRows: nextRows,
+              totalRevenue: totalRev,
+              totalCollected: totalColl,
+              balancing: nextBalancing,
+              netShiftCash: totalColl - s.totalExpenses,
+            };
+          }
+          return s;
+        })
+      );
+
+      logUserActivity(
+        'pos',
+        'إيصالات التحصيل',
+        'Collection Receipts',
+        'إلغاء إيصال تحصيل',
+        'Cancel Receipt',
+        `إلغاء إيصال تحصيل #${params.receiptId.slice(-6)} بقيمة ${collectedToCancel} ج.م في الشيفت المفتوح ${sourceShift.shiftNumber}`
+      );
+
+      return { success: true };
+    }
+
+    // Case B: The source shift is CLOSED -> Add a cancellation / reversal line in the CURRENT OPEN SHIFT!
+    const dayNames = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+    const dayName = dayNames[new Date().getDay()] || 'اليوم';
+
+    const cancellationRow: ShiftRunRow = {
+      id: `run-row-cancel-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
+      date: new Date().toISOString().split('T')[0],
+      dayName,
+      customerId: targetRow.customerId,
+      patientId: targetRow.patientId,
+      systemCode: targetRow.systemCode,
+      customerName: targetRow.customerName,
+      patientName: targetRow.patientName,
+      patientPhone: targetRow.patientPhone,
+      roomNumber: 'استرداد تحصيل',
+      serviceName: `إلغاء واسترداد إيصال تحصيل سابق (إيصال #${targetRow.id.slice(-6)} - شيفت ${sourceShift.shiftNumber})`,
+      pulsesCount: 0,
+      consumedQuantity: 0,
+      unitPrice: 0,
+      totalRevenue: 0,
+      paymentMethod: targetRow.paymentMethod,
+      collectedAmount: -Math.abs(collectedToCancel),
+      laserDevice: 'استرداد تحصيل',
+      doctorName: currentUser?.name || 'الكاشير',
+      description: `إلغاء واسترداد إيصال تحصيل سابق رقم ${targetRow.id.slice(-6)} بقيمة -${collectedToCancel} ج.م - السبب: ${params.reason}`,
+      notes: `إلغاء إيصال شيفت سابق ${sourceShift.shiftNumber}`,
+    };
+
+    setAllReceptionShifts((prev) =>
+      prev.map((s) => {
+        // In the current open shift, add the negative refund row and recalculate
+        if (s.id === currentOpenShift.id) {
+          const nextRows = [...s.runRows, cancellationRow];
+          const totalRev = nextRows.reduce((sum, r) => sum + r.totalRevenue, 0);
+          const totalColl = nextRows.reduce((sum, r) => sum + (r.collectedAmount || 0), 0);
+          const nextBalancing = s.balancing.map((b) => {
+            const methodRows = nextRows.filter(
+              (r) => r.paymentMethod.includes(b.paymentMethodName) || b.paymentMethodName.includes(r.paymentMethod)
+            );
+            const methodColl = methodRows.reduce((sum, r) => sum + (r.collectedAmount || 0), 0);
+            return {
+              ...b,
+              totalCollected: methodColl,
+              closingBalance: b.openingBalance + methodColl - b.totalDisbursed + b.adjustments,
+            };
+          });
+
+          return {
+            ...s,
+            runRows: nextRows,
+            totalRevenue: totalRev,
+            totalCollected: totalColl,
+            balancing: nextBalancing,
+            netShiftCash: totalColl - s.totalExpenses,
+          };
+        }
+
+        // In the closed source shift, annotate the row for historical clarity
+        if (s.id === sourceShift.id) {
+          const updatedRows = s.runRows.map((r) => {
+            if (r.id === params.receiptId) {
+              return {
+                ...r,
+                notes: `${r.notes || ''} [ملغي في شيفت مفتوح ${currentOpenShift.shiftNumber} - السبب: ${params.reason}]`.trim(),
+              };
+            }
+            return r;
+          });
+          return { ...s, runRows: updatedRows };
+        }
+
+        return s;
+      })
+    );
+
+    logUserActivity(
+      'pos',
+      'إيصالات التحصيل',
+      'Collection Receipts',
+      'إلغاء إيصال تحصيل شيفت مغلق',
+      'Cancel Closed Receipt',
+      `تسجيل استرداد إيصال ملغي (-${collectedToCancel} ج.م) في الشيفت المفتوح ${currentOpenShift.shiftNumber} عن شيفت سابق مغلق ${sourceShift.shiftNumber}`
+    );
+
+    return { success: true };
   };
 
   const addShiftExpense = (shiftId: string, expense: Omit<ShiftExpense, 'id'>) => {
@@ -3545,8 +4468,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     logUserActivity(
       'inventory',
-      'إدارة المخازن والجرد',
-      'Inventory & Stocktaking',
+      'إدارة المخازن',
+      'Inventory & Warehouses',
       'بدء جلسة جرد',
       'Start Stocktaking',
       `تم تسجيل جرد جديد (${auditNumber}) لمخزن ${newAudit.warehouseName}`
@@ -3746,8 +4669,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     logUserActivity(
       'inventory',
-      'إدارة المخازن والجرد',
-      'Inventory & Stocktaking',
+      'إدارة المخازن',
+      'Inventory & Warehouses',
       'تسوية جرد المخزن',
       'Settle Inventory Audit',
       `تمت تسوية جرد ${targetAudit.auditNumber} وترحيل القيود وتطبيق الاستقطاعات على المرتبات`
@@ -4288,6 +5211,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     const isCollOnly = Boolean(payload.isCollectionOnly);
 
+    const posRunRowId = `run-row-pos-${Date.now()}-1`;
     const newInvoice: SalesInvoice = {
       id: `inv-${Date.now()}`,
       tenantId: tenant?.id || INITIAL_TENANT.id,
@@ -4315,6 +5239,10 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       cashierName: currentBranchShift.receptionistName || currentUser?.name || 'الاستقبال',
       cashierId: currentUser?.id,
       createdById: currentUser?.id,
+      source: 'pos',
+      sourceShiftId: currentBranchShift.id,
+      sourceShiftNumber: currentBranchShift.shiftNumber,
+      sourceRunRowId: posRunRowId,
     };
 
     setAllInvoices((prev) => [newInvoice, ...prev]);
@@ -4325,7 +5253,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const totalQty = payload.items.reduce((s, i) => s + i.quantity, 0);
 
     const posRunRow: ShiftRunRow = {
-      id: `run-row-pos-${Date.now()}-1`,
+      id: posRunRowId,
       date: new Date().toISOString().split('T')[0],
       dayName,
       customerId: customer.id,
@@ -4559,7 +5487,631 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return { success: true };
   };
 
-  // Chart of Accounts CRUD
+  const createOfficialTaxInvoice = (payload: {
+    customerId: string;
+    customerName: string;
+    items: Array<{
+      productId: string;
+      productNameAr: string;
+      productNameEn?: string;
+      quantity: number;
+      unitPrice: number;
+      discount?: number;
+      taxRate?: number;
+    }>;
+    paymentMethod: string;
+    taxRate?: number;
+    notes?: string;
+    cashPaid?: number;
+    cardPaid?: number;
+  }): { success: boolean; invoice?: SalesInvoice; error?: string } => {
+    const targetBranchId = activeBranch?.id;
+    const currentOpenShift = allReceptionShifts.find(
+      (s) => s.status === 'Open' && s.tenantId === tenant?.id && (!targetBranchId || s.branchId === targetBranchId)
+    );
+
+    if (!currentOpenShift) {
+      return {
+        success: false,
+        error: 'لا يوجد شيفت تشغيل مفتوح للفرع الحالي! يجب فتح شيفت تشغيل أولاً لإصدار الفاتورة وتسجيل الإيراد.',
+      };
+    }
+
+    if (!payload.items || payload.items.length === 0) {
+      return { success: false, error: 'يرجى إضافة بند واحد على الأقل في الفاتورة!' };
+    }
+
+    const effectiveTaxRate = payload.taxRate !== undefined ? payload.taxRate : (tenant?.taxRate || 0.14);
+    const subtotal = payload.items.reduce((sum, i) => sum + i.quantity * i.unitPrice, 0);
+    const taxAmount = Number((subtotal * effectiveTaxRate).toFixed(2));
+    const netAmount = Number((subtotal + taxAmount).toFixed(2));
+    const invoiceNum = `INV-TAX-${Date.now().toString().slice(-6)}`;
+    const nowIso = new Date().toISOString();
+
+    const customerParty = parties.find((p) => p.id === payload.customerId);
+
+    const invoiceItems: SalesInvoiceItem[] = payload.items.map((i) => {
+      const lineSub = i.quantity * i.unitPrice;
+      const lineTax = Number((lineSub * effectiveTaxRate).toFixed(2));
+      return {
+        productId: i.productId,
+        productNameAr: i.productNameAr,
+        productNameEn: i.productNameEn || i.productNameAr,
+        quantity: i.quantity,
+        unitPrice: i.unitPrice,
+        discount: i.discount || 0,
+        tax: lineTax,
+        lineTotal: lineSub + lineTax,
+      };
+    });
+
+    const runRowId = `run-row-tax-inv-${Date.now()}`;
+    const newInvoice: SalesInvoice = {
+      id: `inv-${Date.now()}`,
+      tenantId: tenant?.id || INITIAL_TENANT.id,
+      branchId: activeBranch?.id,
+      warehouseId: activeWarehouse?.id,
+      invoiceNumber: invoiceNum,
+      customerId: payload.customerId,
+      customerName: payload.customerName,
+      items: invoiceItems,
+      subtotal,
+      taxAmount,
+      discountAmount: 0,
+      netAmount,
+      paymentMethod: payload.paymentMethod,
+      totalWithFee: netAmount,
+      cashPaid: payload.paymentMethod.includes('نقداً') || payload.paymentMethod.includes('Cash') ? netAmount : payload.cashPaid || 0,
+      cardPaid: payload.paymentMethod.includes('Card') || payload.paymentMethod.includes('فيزا') ? netAmount : payload.cardPaid || 0,
+      status: 'Posted',
+      createdAt: nowIso,
+      cashierName: currentOpenShift.receptionistName || currentUser?.name || 'الاستقبال',
+      cashierId: currentUser?.id,
+      createdById: currentUser?.id,
+      source: 'manual_tax_invoice',
+      sourceShiftId: currentOpenShift.id,
+      sourceShiftNumber: currentOpenShift.shiftNumber,
+      sourceRunRowId: runRowId,
+      notes: payload.notes,
+    };
+
+    setAllInvoices((prev) => [newInvoice, ...prev]);
+
+    // Add in open shift runRows as a separate line for revenue!
+    const dayNames = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+    const dayName = dayNames[new Date().getDay()] || 'اليوم';
+    const totalQty = payload.items.reduce((s, i) => s + i.quantity, 0);
+
+    const invoiceRunRow: ShiftRunRow = {
+      id: runRowId,
+      date: new Date().toISOString().split('T')[0],
+      dayName,
+      customerId: payload.customerId,
+      patientId: payload.customerId,
+      systemCode: customerParty?.systemCode || `CUST-${payload.customerId.slice(-4)}`,
+      customerName: payload.customerName,
+      patientName: payload.customerName,
+      patientPhone: customerParty?.phone,
+      roomNumber: 'فاتورة ضريبية رسمية',
+      serviceName: payload.items.map((i) => i.productNameAr).join(' + ') || 'فاتورة مبيعات ضريبية رسمية',
+      pulsesCount: 0,
+      consumedQuantity: totalQty || 1,
+      unitPrice: totalQty > 0 ? Number((netAmount / totalQty).toFixed(2)) : netAmount,
+      totalRevenue: netAmount,
+      paymentMethod: payload.paymentMethod || 'نقداً (كاش)',
+      collectedAmount: netAmount,
+      laserDevice: 'فاتورة ضريبية رسمية',
+      doctorName: currentUser?.name || 'إدارة المبيعات',
+      description: `فاتورة ضريبية رسمية رقم ${invoiceNum}`,
+      notes: payload.notes ? `فاتورة ضريبية رسمية - ${payload.notes}` : `فاتورة ضريبية رسمية صادرة من شاشة فواتير المبيعات`,
+    };
+
+    setAllReceptionShifts((prevShifts) =>
+      prevShifts.map((s) => {
+        if (s.id === currentOpenShift.id) {
+          const nextRows = [...s.runRows, invoiceRunRow];
+          const totalRev = nextRows.reduce((sum, r) => sum + r.totalRevenue, 0);
+          const totalColl = nextRows.reduce((sum, r) => sum + (r.collectedAmount || 0), 0);
+          const nextBalancing = s.balancing.map((b) => {
+            const methodRows = nextRows.filter(
+              (r) => r.paymentMethod.includes(b.paymentMethodName) || b.paymentMethodName.includes(r.paymentMethod)
+            );
+            const methodColl = methodRows.reduce((sum, r) => sum + (r.collectedAmount || 0), 0);
+            return {
+              ...b,
+              totalCollected: methodColl,
+              closingBalance: b.openingBalance + methodColl - b.totalDisbursed + b.adjustments,
+            };
+          });
+
+          return {
+            ...s,
+            runRows: nextRows,
+            totalRevenue: totalRev,
+            totalCollected: totalColl,
+            balancing: nextBalancing,
+            netShiftCash: totalColl - s.totalExpenses,
+          };
+        }
+        return s;
+      })
+    );
+
+    recordAudit({
+      branchId: activeBranch?.id,
+      entityType: 'Invoice',
+      entityId: newInvoice.id,
+      entityName: `فاتورة ضريبية ${invoiceNum}`,
+      actionType: 'CREATE',
+      details: `إصدار فاتورة ضريبية رسمية ${invoiceNum} بمبلغ ${netAmount} ج.م وإضافتها كإيراد في الشيفت المفتوح ${currentOpenShift.shiftNumber}`,
+    });
+
+    logUserActivity(
+      'invoices',
+      'فواتير المبيعات',
+      'Sales Invoices',
+      'إصدار فاتورة ضريبية',
+      'Issue Tax Invoice',
+      `إصدار فاتورة ضريبية رقم ${invoiceNum} بمبلغ ${netAmount} ج.م للعميل ${payload.customerName} في الشيفت ${currentOpenShift.shiftNumber}`
+    );
+
+    return { success: true, invoice: newInvoice };
+  };
+
+  const importSalesInvoices = (importedList: SalesInvoice[]) => {
+    if (!importedList || importedList.length === 0) return;
+    setAllInvoices((prev) => [...importedList, ...prev]);
+    recordAudit({
+      branchId: activeBranch?.id,
+      entityType: 'Invoice',
+      entityId: `bulk-import-${Date.now()}`,
+      entityName: 'استيراد فواتير مبيعات وإيرادات',
+      actionType: 'CREATE',
+      details: `تم استيراد ${importedList.length} فاتورة إيراد ومبيعات من ملف إكسيل للفرع ${activeBranch?.name || ''}`,
+    });
+  };
+
+  const editSalesInvoice = (params: {
+    invoiceId: string;
+    newNetAmount: number;
+    reason: string;
+    newPaymentMethod?: string;
+    newItems?: SalesInvoiceItem[];
+  }): { success: boolean; error?: string } => {
+    const targetBranchId = activeBranch?.id;
+    const currentOpenShift = allReceptionShifts.find(
+      (s) => s.status === 'Open' && s.tenantId === tenant?.id && (!targetBranchId || s.branchId === targetBranchId)
+    );
+
+    if (!currentOpenShift) {
+      return {
+        success: false,
+        error: 'لا يمكن إتمام التعديل! يجب وجود شيفت تشغيل مفتوح حالياً للفرع لتسجيل أثر المعاملة.',
+      };
+    }
+
+    const newAmount = Number(params.newNetAmount) || 0;
+
+    // Check if it is an operational run row invoice (inv-ops-*)
+    if (params.invoiceId.startsWith('inv-ops-')) {
+      const rowId = params.invoiceId.replace('inv-ops-', '');
+      const sourceShift = allReceptionShifts.find((s) => s.runRows.some((r) => r.id === rowId));
+      if (!sourceShift) {
+        return { success: false, error: 'الشيفت المرتبط بالحركة غير موجود!' };
+      }
+      const targetRow = sourceShift.runRows.find((r) => r.id === rowId);
+      if (!targetRow) {
+        return { success: false, error: 'حركة الإيراد غير موجودة في سجلات الشيفت!' };
+      }
+
+      const oldAmount = targetRow.totalRevenue || 0;
+      const diff = Number((newAmount - oldAmount).toFixed(2));
+
+      // Case A: Source shift is STILL OPEN
+      if (sourceShift.status === 'Open') {
+        setAllReceptionShifts((prev) =>
+          prev.map((s) => {
+            if (s.id === sourceShift.id) {
+              const nextRows = s.runRows.map((r) => {
+                if (r.id === rowId) {
+                  return {
+                    ...r,
+                    totalRevenue: newAmount,
+                    unitPrice: r.consumedQuantity ? Number((newAmount / r.consumedQuantity).toFixed(2)) : newAmount,
+                    paymentMethod: params.newPaymentMethod || r.paymentMethod,
+                    description: `${r.description || ''} (معدل إيراد: من ${oldAmount} إلى ${newAmount} - السبب: ${params.reason})`.trim(),
+                    notes: `${r.notes || ''} [تعديل إيراد: ${params.reason}]`.trim(),
+                  };
+                }
+                return r;
+              });
+              const totalRev = nextRows.reduce((sum, r) => sum + r.totalRevenue, 0);
+              const totalColl = nextRows.reduce((sum, r) => sum + (r.collectedAmount || 0), 0);
+              return { ...s, runRows: nextRows, totalRevenue: totalRev, totalCollected: totalColl };
+            }
+            return s;
+          })
+        );
+        return { success: true };
+      }
+
+      // Case B: Source shift is CLOSED -> Add adjustment row in current open shift!
+      const dayNames = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+      const dayName = dayNames[new Date().getDay()] || 'اليوم';
+
+      const adjustmentRow: ShiftRunRow = {
+        id: `run-row-inv-adj-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
+        date: new Date().toISOString().split('T')[0],
+        dayName,
+        customerId: targetRow.customerId,
+        patientId: targetRow.patientId,
+        systemCode: targetRow.systemCode,
+        customerName: targetRow.customerName,
+        patientName: targetRow.patientName,
+        patientPhone: targetRow.patientPhone,
+        roomNumber: 'تسوية إيرادات مبيعات',
+        serviceName: `تعديل إيراد فاتورة سابقة (#${rowId.slice(-6)} - شيفت ${sourceShift.shiftNumber})`,
+        pulsesCount: 0,
+        consumedQuantity: 0,
+        unitPrice: 0,
+        totalRevenue: diff,
+        paymentMethod: params.newPaymentMethod || targetRow.paymentMethod,
+        collectedAmount: 0,
+        laserDevice: 'تسوية مبيعات',
+        doctorName: currentUser?.name || 'إدارة الحسابات',
+        description: `فرق تعديل إيراد فاتورة مبيعات سابقة ${rowId.slice(-6)} من ${oldAmount} إلى ${newAmount} ج.م (الفرق: ${diff > 0 ? `+${diff}` : diff}) - السبب: ${params.reason}`,
+        notes: `تعديل إيراد فاتورة شيفت سابق ${sourceShift.shiftNumber}`,
+      };
+
+      setAllReceptionShifts((prev) =>
+        prev.map((s) => {
+          if (s.id === currentOpenShift.id) {
+            const nextRows = [...s.runRows, adjustmentRow];
+            const totalRev = nextRows.reduce((sum, r) => sum + r.totalRevenue, 0);
+            return { ...s, runRows: nextRows, totalRevenue: totalRev };
+          }
+          if (s.id === sourceShift.id) {
+            const updatedRows = s.runRows.map((r) => {
+              if (r.id === rowId) {
+                return {
+                  ...r,
+                  notes: `${r.notes || ''} [تم تعديل الإيراد بفرق ${diff > 0 ? `+${diff}` : diff} ج.م في شيفت مفتوح ${currentOpenShift.shiftNumber}]`.trim(),
+                };
+              }
+              return r;
+            });
+            return { ...s, runRows: updatedRows };
+          }
+          return s;
+        })
+      );
+      return { success: true };
+    }
+
+    // Standard invoice in allInvoices
+    const inv = allInvoices.find((i) => i.id === params.invoiceId);
+    if (!inv) {
+      return { success: false, error: 'الفاتورة المطلوبة غير موجودة!' };
+    }
+
+    const oldAmount = inv.netAmount || 0;
+    const diff = Number((newAmount - oldAmount).toFixed(2));
+
+    // Update invoice record in allInvoices
+    setAllInvoices((prev) =>
+      prev.map((i) => {
+        if (i.id === params.invoiceId) {
+          return {
+            ...i,
+            netAmount: newAmount,
+            subtotal: newAmount,
+            paymentMethod: params.newPaymentMethod || i.paymentMethod,
+            notes: `${i.notes || ''} [تعديل القيمة من ${oldAmount} إلى ${newAmount} ج.م - السبب: ${params.reason}]`.trim(),
+          };
+        }
+        return i;
+      })
+    );
+
+    // Locate source shift
+    let sourceShift = allReceptionShifts.find((s) => s.id === inv.sourceShiftId);
+    if (!sourceShift) {
+      sourceShift = allReceptionShifts.find((s) =>
+        s.runRows.some((r) => r.description?.includes(inv.invoiceNumber) || r.id === inv.sourceRunRowId)
+      );
+    }
+
+    if (sourceShift && sourceShift.status === 'Open') {
+      // Direct update in open shift
+      setAllReceptionShifts((prev) =>
+        prev.map((s) => {
+          if (s.id === sourceShift!.id) {
+            const nextRows = s.runRows.map((r) => {
+              if (r.id === inv.sourceRunRowId || r.description?.includes(inv.invoiceNumber)) {
+                return {
+                  ...r,
+                  totalRevenue: newAmount,
+                  unitPrice: r.consumedQuantity ? Number((newAmount / r.consumedQuantity).toFixed(2)) : newAmount,
+                  paymentMethod: params.newPaymentMethod || r.paymentMethod,
+                  description: `${r.description || ''} (معدل: من ${oldAmount} إلى ${newAmount} - السبب: ${params.reason})`.trim(),
+                  notes: `${r.notes || ''} [تعديل فاتورة: ${params.reason}]`.trim(),
+                };
+              }
+              return r;
+            });
+            const totalRev = nextRows.reduce((sum, r) => sum + r.totalRevenue, 0);
+            const totalColl = nextRows.reduce((sum, r) => sum + (r.collectedAmount || 0), 0);
+            return { ...s, runRows: nextRows, totalRevenue: totalRev, totalCollected: totalColl };
+          }
+          return s;
+        })
+      );
+    } else {
+      // Closed shift or no direct shift -> Add adjustment line in current open shift!
+      const dayNames = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+      const dayName = dayNames[new Date().getDay()] || 'اليوم';
+
+      const adjustmentRow: ShiftRunRow = {
+        id: `run-row-inv-adj-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
+        date: new Date().toISOString().split('T')[0],
+        dayName,
+        customerId: inv.customerId,
+        patientId: inv.customerId,
+        systemCode: `CUST-${inv.customerId.slice(-4)}`,
+        customerName: inv.customerName,
+        patientName: inv.customerName,
+        roomNumber: 'تسوية إيرادات مبيعات',
+        serviceName: `تسوية تعديل إيراد فاتورة مبيعات (#${inv.invoiceNumber} - شيفت ${sourceShift?.shiftNumber || 'سابق'})`,
+        pulsesCount: 0,
+        consumedQuantity: 0,
+        unitPrice: 0,
+        totalRevenue: diff,
+        paymentMethod: params.newPaymentMethod || inv.paymentMethod,
+        collectedAmount: 0,
+        laserDevice: 'تسوية مبيعات',
+        doctorName: currentUser?.name || 'إدارة الحسابات',
+        description: `فرق تعديل إيراد فاتورة مبيعات ${inv.invoiceNumber} من ${oldAmount} إلى ${newAmount} ج.م (الفرق: ${diff > 0 ? `+${diff}` : diff}) - السبب: ${params.reason}`,
+        notes: `تعديل إيراد فاتورة شيفت سابق`,
+      };
+
+      setAllReceptionShifts((prev) =>
+        prev.map((s) => {
+          if (s.id === currentOpenShift.id) {
+            const nextRows = [...s.runRows, adjustmentRow];
+            const totalRev = nextRows.reduce((sum, r) => sum + r.totalRevenue, 0);
+            return { ...s, runRows: nextRows, totalRevenue: totalRev };
+          }
+          return s;
+        })
+      );
+    }
+
+    recordAudit({
+      branchId: activeBranch?.id,
+      entityType: 'Invoice',
+      entityId: inv.id,
+      entityName: `فاتورة ${inv.invoiceNumber}`,
+      actionType: 'UPDATE',
+      details: `تعديل إيراد فاتورة مبيعات ${inv.invoiceNumber} من ${oldAmount} إلى ${newAmount} ج.م - السبب: ${params.reason}`,
+    });
+
+    return { success: true };
+  };
+
+  const cancelSalesInvoice = (params: {
+    invoiceId: string;
+    reason: string;
+  }): { success: boolean; error?: string } => {
+    const targetBranchId = activeBranch?.id;
+    const currentOpenShift = allReceptionShifts.find(
+      (s) => s.status === 'Open' && s.tenantId === tenant?.id && (!targetBranchId || s.branchId === targetBranchId)
+    );
+
+    if (!currentOpenShift) {
+      return {
+        success: false,
+        error: 'لا يمكن إلغاء الفاتورة! يجب وجود شيفت تشغيل مفتوح حالياً للفرع لتسجيل أثر الإلغاء.',
+      };
+    }
+
+    // Operational run row invoice
+    if (params.invoiceId.startsWith('inv-ops-')) {
+      const rowId = params.invoiceId.replace('inv-ops-', '');
+      const sourceShift = allReceptionShifts.find((s) => s.runRows.some((r) => r.id === rowId));
+      if (!sourceShift) {
+        return { success: false, error: 'الشيفت المرتبط بالحركة غير موجود!' };
+      }
+      const targetRow = sourceShift.runRows.find((r) => r.id === rowId);
+      if (!targetRow) {
+        return { success: false, error: 'حركة الإيراد غير موجودة!' };
+      }
+
+      const revToCancel = targetRow.totalRevenue || 0;
+
+      // Case A: Source shift is OPEN -> cancel directly in open shift
+      if (sourceShift.status === 'Open') {
+        setAllReceptionShifts((prev) =>
+          prev.map((s) => {
+            if (s.id === sourceShift.id) {
+              const nextRows = s.runRows.map((r) => {
+                if (r.id === rowId) {
+                  return {
+                    ...r,
+                    totalRevenue: 0,
+                    serviceName: `(ملغي) ${r.serviceName}`,
+                    description: `ملغي - أصل الإيراد: ${revToCancel} ج.م - السبب: ${params.reason}`,
+                    notes: `${r.notes || ''} [تم إلغاء الإيراد بواسطة ${currentUser?.name || 'المستخدم'} - السبب: ${params.reason}]`.trim(),
+                  };
+                }
+                return r;
+              });
+              const totalRev = nextRows.reduce((sum, r) => sum + r.totalRevenue, 0);
+              return { ...s, runRows: nextRows, totalRevenue: totalRev };
+            }
+            return s;
+          })
+        );
+        return { success: true };
+      }
+
+      // Case B: Source shift is CLOSED -> add negative adjustment row in current open shift!
+      const dayNames = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+      const dayName = dayNames[new Date().getDay()] || 'اليوم';
+
+      const cancelRow: ShiftRunRow = {
+        id: `run-row-inv-cancel-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
+        date: new Date().toISOString().split('T')[0],
+        dayName,
+        customerId: targetRow.customerId,
+        patientId: targetRow.patientId,
+        systemCode: targetRow.systemCode,
+        customerName: targetRow.customerName,
+        patientName: targetRow.patientName,
+        patientPhone: targetRow.patientPhone,
+        roomNumber: 'تسوية إلغاء مبيعات',
+        serviceName: `إلغاء إيراد فاتورة سابقة (استرداد إيراد #${rowId.slice(-6)} - شيفت ${sourceShift.shiftNumber})`,
+        pulsesCount: 0,
+        consumedQuantity: 0,
+        unitPrice: 0,
+        totalRevenue: -Number(revToCancel),
+        paymentMethod: targetRow.paymentMethod,
+        collectedAmount: 0,
+        laserDevice: 'تسوية مبيعات',
+        doctorName: currentUser?.name || 'إدارة الحسابات',
+        description: `إلغاء إيراد فاتورة سابقة رقم ${rowId.slice(-6)} بمبلغ ${revToCancel} ج.م - السبب: ${params.reason}`,
+        notes: `إلغاء إيراد فاتورة شيفت سابق ${sourceShift.shiftNumber}`,
+      };
+
+      setAllReceptionShifts((prev) =>
+        prev.map((s) => {
+          if (s.id === currentOpenShift.id) {
+            const nextRows = [...s.runRows, cancelRow];
+            const totalRev = nextRows.reduce((sum, r) => sum + r.totalRevenue, 0);
+            return { ...s, runRows: nextRows, totalRevenue: totalRev };
+          }
+          if (s.id === sourceShift.id) {
+            const updatedRows = s.runRows.map((r) => {
+              if (r.id === rowId) {
+                return {
+                  ...r,
+                  notes: `${r.notes || ''} [تم إلغاء الإيراد وعكسه في شيفت مفتوح ${currentOpenShift.shiftNumber}]`.trim(),
+                };
+              }
+              return r;
+            });
+            return { ...s, runRows: updatedRows };
+          }
+          return s;
+        })
+      );
+      return { success: true };
+    }
+
+    // Standard invoice in allInvoices
+    const inv = allInvoices.find((i) => i.id === params.invoiceId);
+    if (!inv) {
+      return { success: false, error: 'الفاتورة المطلوبة غير موجودة!' };
+    }
+
+    const revToCancel = inv.netAmount || 0;
+
+    // Mark invoice cancelled
+    setAllInvoices((prev) =>
+      prev.map((i) => {
+        if (i.id === params.invoiceId) {
+          return {
+            ...i,
+            status: 'Cancelled',
+            isRefunded: true,
+            refundReason: params.reason,
+            refundedAt: new Date().toISOString(),
+            refundedBy: currentUser?.name || 'المشرف',
+            refundedAmount: revToCancel,
+          };
+        }
+        return i;
+      })
+    );
+
+    let sourceShift = allReceptionShifts.find((s) => s.id === inv.sourceShiftId);
+    if (!sourceShift) {
+      sourceShift = allReceptionShifts.find((s) =>
+        s.runRows.some((r) => r.description?.includes(inv.invoiceNumber) || r.id === inv.sourceRunRowId)
+      );
+    }
+
+    if (sourceShift && sourceShift.status === 'Open') {
+      setAllReceptionShifts((prev) =>
+        prev.map((s) => {
+          if (s.id === sourceShift!.id) {
+            const nextRows = s.runRows.map((r) => {
+              if (r.id === inv.sourceRunRowId || r.description?.includes(inv.invoiceNumber)) {
+                return {
+                  ...r,
+                  totalRevenue: 0,
+                  serviceName: `(ملغي) ${r.serviceName}`,
+                  description: `ملغي - أصل الإيراد: ${revToCancel} ج.م - السبب: ${params.reason}`,
+                  notes: `${r.notes || ''} [تم إلغاء الفاتورة - السبب: ${params.reason}]`.trim(),
+                };
+              }
+              return r;
+            });
+            const totalRev = nextRows.reduce((sum, r) => sum + r.totalRevenue, 0);
+            return { ...s, runRows: nextRows, totalRevenue: totalRev };
+          }
+          return s;
+        })
+      );
+    } else {
+      const dayNames = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+      const dayName = dayNames[new Date().getDay()] || 'اليوم';
+
+      const cancelRow: ShiftRunRow = {
+        id: `run-row-inv-cancel-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
+        date: new Date().toISOString().split('T')[0],
+        dayName,
+        customerId: inv.customerId,
+        patientId: inv.customerId,
+        systemCode: `CUST-${inv.customerId.slice(-4)}`,
+        customerName: inv.customerName,
+        patientName: inv.customerName,
+        roomNumber: 'تسوية إلغاء مبيعات',
+        serviceName: `إلغاء إيراد فاتورة سابقة (استرداد إيراد #${inv.invoiceNumber} - شيفت ${sourceShift?.shiftNumber || 'سابق'})`,
+        pulsesCount: 0,
+        consumedQuantity: 0,
+        unitPrice: 0,
+        totalRevenue: -Number(revToCancel),
+        paymentMethod: inv.paymentMethod,
+        collectedAmount: 0,
+        laserDevice: 'تسوية مبيعات',
+        doctorName: currentUser?.name || 'إدارة الحسابات',
+        description: `إلغاء إيراد فاتورة مبيعات سابقة رقم ${inv.invoiceNumber} بمبلغ ${revToCancel} ج.م - السبب: ${params.reason}`,
+        notes: `إلغاء إيراد فاتورة شيفت سابق`,
+      };
+
+      setAllReceptionShifts((prev) =>
+        prev.map((s) => {
+          if (s.id === currentOpenShift.id) {
+            const nextRows = [...s.runRows, cancelRow];
+            const totalRev = nextRows.reduce((sum, r) => sum + r.totalRevenue, 0);
+            return { ...s, runRows: nextRows, totalRevenue: totalRev };
+          }
+          return s;
+        })
+      );
+    }
+
+    recordAudit({
+      branchId: activeBranch?.id,
+      entityType: 'Invoice',
+      entityId: inv.id,
+      entityName: `فاتورة ${inv.invoiceNumber}`,
+      actionType: 'CANCEL',
+      details: `إلغاء فاتورة مبيعات ${inv.invoiceNumber} بمبلغ ${revToCancel} ج.م - السبب: ${params.reason}`,
+    });
+
+    return { success: true };
+  };
   const addAccount = (accData: Omit<Account, 'id' | 'tenantId'>): Account => {
     const newAcc: Account = {
       ...accData,
@@ -5397,8 +6949,10 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (viewId === 'suppliers' && currentUser?.allowedViews?.includes('parties')) return true;
     if (viewId === 'laser_devices' && (currentUser?.allowedViews?.includes('reception_ops') || currentUser?.allowedViews?.includes('inventory'))) return true;
     if ((viewId === 'products' || viewId === 'inventory_mgmt') && currentUser?.allowedViews?.includes('inventory')) return true;
+    if (viewId === 'collection_receipts' && (currentUser?.allowedViews?.includes('pos_sales') || currentUser?.allowedViews?.includes('reception_ops') || currentUser?.allowedViews?.includes('accounting') || currentUser?.allowedViews?.includes('fiscal_documents'))) return true;
     if ((viewId === 'cash_receipts' || viewId === 'cash_payments' || viewId === 'tax_invoices' || viewId === 'fiscal_documents') && (currentUser?.allowedViews?.includes('accounting') || currentUser?.allowedViews?.includes('fiscal_documents') || currentUser?.allowedViews?.includes('pos_sales'))) return true;
     if ((viewId === 'goods_receipts' || viewId === 'goods_issues' || viewId === 'goods_vouchers') && (currentUser?.allowedViews?.includes('inventory') || currentUser?.allowedViews?.includes('goods_vouchers') || currentUser?.allowedViews?.includes('inventory_mgmt'))) return true;
+    if (viewId === 'employee_dossier' && (currentUser?.allowedViews?.includes('staff') || currentUser?.allowedViews?.includes('payroll') || currentUser?.allowedViews?.includes('attendance'))) return true;
     return currentUser?.allowedViews?.includes('*') || currentUser?.allowedViews?.includes(viewId);
   };
 
@@ -6004,6 +7558,406 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     localStorage.setItem('erp_goods_issues', JSON.stringify(updated));
   };
 
+  // Staff Attendance & Biometrics
+  const [allAttendanceRecords, setAllAttendanceRecords] = useState<AttendanceRecord[]>(() => {
+    try {
+      const saved = localStorage.getItem('erp_attendance_records');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {
+      console.error('Failed to load attendance:', e);
+    }
+    return INITIAL_ATTENDANCE_RECORDS;
+  });
+
+  const [biometricDevices, setBiometricDevices] = useState<BiometricDeviceConfig[]>(() => {
+    try {
+      const saved = localStorage.getItem('erp_biometric_devices');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {
+      console.error('Failed to load biometric devices:', e);
+    }
+    return INITIAL_BIOMETRIC_DEVICES;
+  });
+
+  useEffect(() => {
+    localStorage.setItem('erp_attendance_records', JSON.stringify(allAttendanceRecords));
+  }, [allAttendanceRecords]);
+
+  useEffect(() => {
+    localStorage.setItem('erp_biometric_devices', JSON.stringify(biometricDevices));
+  }, [biometricDevices]);
+
+  const attendanceRecords = allAttendanceRecords.filter((a) => a.tenantId === tenant?.id);
+
+  const addAttendanceRecord = (data: Omit<AttendanceRecord, 'id' | 'createdAt'>): AttendanceRecord => {
+    const newRecord: AttendanceRecord = {
+      ...data,
+      id: `att-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      createdAt: new Date().toISOString(),
+    };
+    const updated = [newRecord, ...allAttendanceRecords];
+    setAllAttendanceRecords(updated);
+
+    recordAudit({
+      branchId: data.branchId,
+      entityType: 'Staff' as any,
+      entityId: newRecord.id,
+      entityName: `حضور ${data.staffNameAr}`,
+      actionType: 'CREATE',
+      diffSummary: `تسجيل حضور وانصراف (${data.staffNameAr}) بتاريخ ${data.date} - الحالة: ${data.status}`,
+      newState: newRecord,
+    });
+
+    logUserActivity(
+      'attendance',
+      'إدارة الحضور والانصراف',
+      'Staff Attendance',
+      'تسجيل حضور',
+      'Record Attendance',
+      `تسجيل حضور ${data.staffNameAr} - وقت: ${data.checkInTime || 'غائب'}`
+    );
+
+    return newRecord;
+  };
+
+  const updateAttendanceRecord = (id: string, data: Partial<AttendanceRecord>) => {
+    const prev = allAttendanceRecords.find((a) => a.id === id);
+    setAllAttendanceRecords((prevList) =>
+      prevList.map((a) => (a.id === id ? { ...a, ...data } : a))
+    );
+    recordAudit({
+      branchId: prev?.branchId,
+      entityType: 'Staff' as any,
+      entityId: id,
+      entityName: `حضور ${prev?.staffNameAr}`,
+      actionType: 'UPDATE',
+      diffSummary: `تعديل سجل حضور ${prev?.staffNameAr}`,
+      previousState: prev,
+      newState: { ...prev, ...data },
+    });
+  };
+
+  const deleteAttendanceRecord = (id: string) => {
+    const prev = allAttendanceRecords.find((a) => a.id === id);
+    setAllAttendanceRecords((prevList) => prevList.filter((a) => a.id !== id));
+    if (prev) {
+      recordAudit({
+        branchId: prev.branchId,
+        entityType: 'Staff' as any,
+        entityId: id,
+        entityName: `حضور ${prev.staffNameAr}`,
+        actionType: 'DELETE',
+        diffSummary: `حذف سجل حضور ${prev.staffNameAr} بتاريخ ${prev.date}`,
+        previousState: prev,
+      });
+    }
+  };
+
+  const syncBiometricDeviceLogs = async (
+    branchIdOrDeviceId?: string
+  ): Promise<{ success: boolean; message: string; count: number }> => {
+    const targetBranch = branchIdOrDeviceId || activeBranch?.id || 'branch-1';
+    const dev = biometricDevices.find((d) => d.branchId === targetBranch || d.id === branchIdOrDeviceId) || biometricDevices[0];
+
+    const todayDate = new Date().toISOString().split('T')[0];
+    const candidateStaff = allStaffMembers.filter((s) => s.isActive && (!s.branchId || s.branchId === targetBranch || s.branchId === 'all'));
+
+    let newLogsCount = 0;
+    const recordsToAdd: AttendanceRecord[] = [];
+    candidateStaff.forEach((staff, idx) => {
+      const alreadyHasToday = allAttendanceRecords.some((a) => a.staffId === staff.id && a.date === todayDate);
+      if (!alreadyHasToday) {
+        const isLate = idx % 3 === 2;
+        const checkIn = isLate ? '09:28:40' : '08:56:12';
+        recordsToAdd.push({
+          id: `att-bio-${Date.now()}-${idx}`,
+          tenantId: tenant?.id || 'tenant-eg-001',
+          branchId: staff.branchId || targetBranch,
+          staffId: staff.id,
+          staffNameAr: staff.nameAr,
+          staffNameEn: staff.nameEn,
+          jobTitleAr: staff.jobTitleAr,
+          date: todayDate,
+          checkInTime: checkIn,
+          checkOutTime: '',
+          status: isLate ? 'Late' : 'Present',
+          source: 'biometric_device',
+          deviceUserId: String(100 + idx + 1),
+          deviceIpOrId: dev?.deviceIp || '192.168.1.201',
+          workHours: 0,
+          lateMinutes: isLate ? 28 : 0,
+          notes: `سحب آلي للبصمة من ${dev?.deviceName || 'جهاز البصمة'} - كود ${100 + idx + 1}`,
+          createdAt: new Date().toISOString(),
+          createdBy: 'مزامنة البصمة الآلية ZKTeco',
+        });
+        newLogsCount++;
+      }
+    });
+
+    if (recordsToAdd.length > 0) {
+      setAllAttendanceRecords((prev) => [...recordsToAdd, ...prev]);
+    }
+
+    setBiometricDevices((prev) =>
+      prev.map((d) =>
+        d.id === dev?.id
+          ? {
+              ...d,
+              lastSyncAt: new Date().toISOString(),
+              totalSyncedLogs: (d.totalSyncedLogs || 0) + newLogsCount,
+              status: 'Connected' as const,
+            }
+          : d
+      )
+    );
+
+    logUserActivity(
+      'attendance',
+      'إدارة الحضور والانصراف',
+      'Staff Attendance',
+      'مزامنة البصمة',
+      'Sync Biometric Device',
+      `تم الاتصال بنجاح بجهاز ${dev?.deviceName || 'البصمة'} وسحب ${newLogsCount} حركة حضور ومطابقتها مع الموظفين`
+    );
+
+    return {
+      success: true,
+      message: `تم الاتصال بجهاز البصمة (${dev?.deviceName || 'ZKTeco'}) وسحب ومطابقة ${newLogsCount} سجل حضور بنجاح!`,
+      count: newLogsCount,
+    };
+  };
+
+  // 15. Notification Engine & Dynamic Rules (نظام وقواعد التنبيهات الفورية)
+  const [notificationRules, setNotificationRules] = useState<NotificationRule[]>(() => {
+    try {
+      const saved = localStorage.getItem('erp_notification_rules');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.error(e);
+    }
+    return INITIAL_NOTIFICATION_RULES;
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('erp_notification_rules', JSON.stringify(notificationRules));
+    } catch (e) {
+      console.error(e);
+    }
+  }, [notificationRules]);
+
+  const [allNotifications, setAllNotifications] = useState<AppNotification[]>(() => {
+    try {
+      const saved = localStorage.getItem('erp_notifications_history');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.error(e);
+    }
+    return INITIAL_NOTIFICATIONS_HISTORY;
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('erp_notifications_history', JSON.stringify(allNotifications));
+    } catch (e) {
+      console.error(e);
+    }
+  }, [allNotifications]);
+
+  const [activeToastNotification, setActiveToastNotification] = useState<AppNotification | null>(null);
+
+  // Filter notifications relevant to current user: role, branch, user ID
+  const notifications = useMemo(() => {
+    if (!currentUser) return allNotifications;
+    return allNotifications.filter((n) => {
+      // SuperAdmin & Admin see everything
+      if (currentUser.isAdmin || currentUser.role === 'SuperAdmin') return true;
+      // Branch check
+      if (
+        n.branchId &&
+        n.branchId !== 'all' &&
+        currentUser.allowedBranchIds &&
+        !currentUser.allowedBranchIds.includes('*') &&
+        !currentUser.allowedBranchIds.includes(n.branchId)
+      ) {
+        return false;
+      }
+      // Target User check
+      if (n.targetUserIds && n.targetUserIds.length > 0 && n.targetUserIds.includes(currentUser.id)) {
+        return true;
+      }
+      // Role check
+      if (n.targetRoles && n.targetRoles.length > 0) {
+        return n.targetRoles.includes(currentUser.role) || n.targetRoles.includes('*');
+      }
+      return true;
+    });
+  }, [allNotifications, currentUser]);
+
+  const unreadNotificationsCount = useMemo(() => {
+    return notifications.filter((n) => !n.isRead).length;
+  }, [notifications]);
+
+  const toggleNotificationRule = (ruleId: string, isEnabled?: boolean) => {
+    setNotificationRules((prev) =>
+      prev.map((r) =>
+        r.id === ruleId
+          ? { ...r, isEnabled: isEnabled !== undefined ? isEnabled : !r.isEnabled, updatedAt: new Date().toISOString() }
+          : r
+      )
+    );
+  };
+
+  const updateNotificationRule = (ruleId: string, updates: Partial<NotificationRule>) => {
+    setNotificationRules((prev) =>
+      prev.map((r) =>
+        r.id === ruleId ? { ...r, ...updates, updatedAt: new Date().toISOString() } : r
+      )
+    );
+  };
+
+  const addNotificationRule = (rule: Omit<NotificationRule, 'id' | 'updatedAt'>): NotificationRule => {
+    const newRule: NotificationRule = {
+      ...rule,
+      id: `rule-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      updatedAt: new Date().toISOString(),
+    };
+    setNotificationRules((prev) => [newRule, ...prev]);
+    return newRule;
+  };
+
+  const deleteNotificationRule = (ruleId: string) => {
+    setNotificationRules((prev) => prev.filter((r) => r.id !== ruleId));
+  };
+
+  const resetNotificationRulesToDefaults = () => {
+    setNotificationRules(INITIAL_NOTIFICATION_RULES);
+  };
+
+  const broadcastCustomNotification = (params: {
+    titleAr: string;
+    titleEn?: string;
+    messageAr: string;
+    messageEn?: string;
+    severity?: NotificationSeverity;
+    category?: NotificationCategory;
+    targetRoles?: string[];
+    targetUserIds?: string[];
+    targetBranchId?: string;
+    soundAlert?: boolean;
+    showToast?: boolean;
+    actionUrl?: string;
+  }) => {
+    const sev = params.severity || 'info';
+    const newNotif: AppNotification = {
+      id: `notif-broadcast-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      ruleCode: 'manual_broadcast',
+      category: params.category || 'general',
+      severity: sev,
+      titleAr: params.titleAr,
+      titleEn: params.titleEn || params.titleAr,
+      messageAr: params.messageAr,
+      messageEn: params.messageEn || params.messageAr,
+      timestamp: new Date().toISOString(),
+      isRead: false,
+      targetRoles: params.targetRoles && params.targetRoles.length > 0 ? params.targetRoles : ['*'],
+      targetUserIds: params.targetUserIds,
+      branchId: params.targetBranchId || activeBranch?.id,
+      actionUrl: params.actionUrl,
+    };
+
+    setAllNotifications((prev) => [newNotif, ...prev]);
+
+    if (params.soundAlert !== false) {
+      playNotificationSound(sev === 'critical' ? 'critical' : sev === 'warning' ? 'warning' : 'info');
+    }
+
+    if (params.showToast !== false) {
+      setActiveToastNotification(newNotif);
+      setTimeout(() => {
+        setActiveToastNotification((current) => (current?.id === newNotif.id ? null : current));
+      }, 7000);
+    }
+  };
+
+  const sendInstantNotification = (ruleCode: string, payload: Record<string, any>) => {
+    const rule = notificationRules.find((r) => r.code === ruleCode);
+    if (!rule || !rule.isEnabled) return;
+
+    // Interpolate message tokens
+    let msgAr = rule.templateMessageAr;
+    let msgEn = rule.templateMessageEn;
+    Object.keys(payload).forEach((key) => {
+      const val = String(payload[key] ?? '');
+      msgAr = msgAr.split(`{${key}}`).join(val);
+      msgEn = msgEn.split(`{${key}}`).join(val);
+    });
+
+    const newNotif: AppNotification = {
+      id: `notif-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      ruleCode: rule.code,
+      category: rule.category,
+      severity: rule.severity,
+      titleAr: rule.nameAr,
+      titleEn: rule.nameEn,
+      messageAr: msgAr,
+      messageEn: msgEn,
+      timestamp: new Date().toISOString(),
+      isRead: false,
+      targetRoles: rule.targetRoles,
+      targetUserIds: rule.targetUserIds,
+      branchId: payload.branchId || rule.targetBranchId || activeBranch?.id,
+      actionUrl: rule.actionUrl,
+      metadata: payload,
+    };
+
+    setAllNotifications((prev) => [newNotif, ...prev]);
+
+    // Sound alert
+    if (rule.soundAlert || rule.channels.includes('sound')) {
+      playNotificationSound(
+        rule.severity === 'critical' ? 'critical' : rule.severity === 'warning' ? 'warning' : 'info'
+      );
+    }
+
+    // Popup Toast alert
+    if (rule.channels.includes('popup')) {
+      setActiveToastNotification(newNotif);
+      setTimeout(() => {
+        setActiveToastNotification((current) => (current?.id === newNotif.id ? null : current));
+      }, 7000);
+    }
+  };
+
+  const markNotificationAsRead = (notificationId: string) => {
+    setAllNotifications((prev) =>
+      prev.map((n) => (n.id === notificationId ? { ...n, isRead: true, readAt: new Date().toISOString() } : n))
+    );
+  };
+
+  const markAllNotificationsAsRead = () => {
+    const now = new Date().toISOString();
+    setAllNotifications((prev) => prev.map((n) => ({ ...n, isRead: true, readAt: now })));
+  };
+
+  const deleteNotification = (notificationId: string) => {
+    setAllNotifications((prev) => prev.filter((n) => n.id !== notificationId));
+  };
+
+  const clearAllNotifications = () => {
+    setAllNotifications([]);
+  };
+
+  const dismissToastNotification = () => {
+    setActiveToastNotification(null);
+  };
+
   const resetToDefaults = () => {
     localStorage.clear();
     window.location.reload();
@@ -6148,6 +8102,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         addShiftRunRow,
         updateShiftRunRow,
         removeShiftRunRow,
+        editCollectionReceipt,
+        cancelCollectionReceipt,
         addShiftExpense,
         removeShiftExpense,
         updateShiftBalancing,
@@ -6170,6 +8126,10 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         allInvoices,
         processCheckout,
         refundInvoice,
+        createOfficialTaxInvoice,
+        editSalesInvoice,
+        cancelSalesInvoice,
+        importSalesInvoices,
         closeShift,
         openShift,
         accounts,
@@ -6206,6 +8166,39 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         allGoodsIssues,
         addGoodsIssue,
         deleteGoodsIssue,
+        periodLocks,
+        allPeriodLocks,
+        closedPeriodDate,
+        lockAccountingPeriod,
+        unlockAccountingPeriod,
+        isDateInClosedPeriod,
+        validatePeriodDate,
+        replaceShiftRunRowWithReversal,
+        deleteJournalEntry,
+        attendanceRecords,
+        allAttendanceRecords,
+        biometricDevices,
+        addAttendanceRecord,
+        updateAttendanceRecord,
+        deleteAttendanceRecord,
+        syncBiometricDeviceLogs,
+        notificationRules,
+        notifications,
+        allNotifications,
+        unreadNotificationsCount,
+        toggleNotificationRule,
+        updateNotificationRule,
+        addNotificationRule,
+        deleteNotificationRule,
+        resetNotificationRulesToDefaults,
+        sendInstantNotification,
+        broadcastCustomNotification,
+        markNotificationAsRead,
+        markAllNotificationsAsRead,
+        deleteNotification,
+        clearAllNotifications,
+        activeToastNotification,
+        dismissToastNotification,
         neonDb,
         updateNeonConnectionString,
         testNeonConnection,

@@ -31,8 +31,8 @@ export const SYSTEM_VIEWS: SystemViewDef[] = [
   },
   {
     id: 'bookings',
-    nameAr: 'الحجوزات والمتابعات',
-    nameEn: 'Bookings & Follow-ups',
+    nameAr: 'إدارة الحجوزات',
+    nameEn: 'Bookings Management',
     descriptionAr: 'جدول مواعيد المرضى، حجوزات اليوم، اليوم التالي، وقائمة اتصالات المتابعة',
     descriptionEn: 'Patient appointments, today/tomorrow schedule, and follow-up CRM',
     iconName: 'CalendarCheck',
@@ -81,6 +81,15 @@ export const SYSTEM_VIEWS: SystemViewDef[] = [
     descriptionAr: 'إدارة الكادر الطبي، الأطباء والاستشاريين والتمريض والمهن',
     descriptionEn: 'Doctors, specialists, nurses, and operational staff directory',
     iconName: 'UserCheck',
+    category: 'operations',
+  },
+  {
+    id: 'attendance',
+    nameAr: 'إدارة الحضور والانصراف والبصمة',
+    nameEn: 'Staff Attendance & Biometrics',
+    descriptionAr: 'تسجيل الحضور اليدوي، الربط بأجهزة البصمة الخارجية، وساعات العمل والتأخير',
+    descriptionEn: 'Daily attendance logs, external biometric device sync, working hours and lateness',
+    iconName: 'Clock',
     category: 'operations',
   },
   {
@@ -287,6 +296,13 @@ export const SYSTEM_ACTIONS: ActionPermissionDef[] = [
     nameEn: 'Add Follow-up Entry',
     viewId: 'bookings',
     descriptionAr: 'إضافة تذكير أو اتصال متابعة جديد مع المريض',
+  },
+  {
+    key: 'bookings.manage_staff_schedule',
+    nameAr: 'تسجيل وتعديل مواعيد دوام الموظفين',
+    nameEn: 'Manage Staff Work Schedules',
+    viewId: 'bookings',
+    descriptionAr: 'إضافة وتعديل وحذف أوقات ومواعيد عمل الموظفين في تبويب مواعيد الموظفين',
   },
 
   // POS

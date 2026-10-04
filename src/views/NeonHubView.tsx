@@ -12,11 +12,16 @@ import {
   Server,
   Layers,
   Sparkles,
+  FileSpreadsheet,
+  Download,
+  X,
 } from 'lucide-react';
+import { exportDatabaseToMultiSheetExcel } from '../utils/fullDatabaseExcelBackup';
 
 export const NeonHubView: React.FC = () => {
   const {
     t,
+    tenant,
     neonDb,
     updateNeonConnectionString,
     testNeonConnection,
@@ -26,9 +31,45 @@ export const NeonHubView: React.FC = () => {
     fetchRemoteCounts,
     getPostgresSchemaSql,
     pullLatestFromNeon,
+    branches,
+    allBranches,
+    warehouses,
+    allWarehouses,
+    users,
+    allUsers,
+    parties,
+    allParties,
     products,
+    allProducts,
+    stockLevels,
+    stockMovements,
+    allStockMovements,
     accounts,
+    allAccounts,
+    journalEntries,
+    allJournals,
     invoices,
+    allInvoices,
+    cashReceipts,
+    allCashReceipts,
+    cashPayments,
+    allCashPayments,
+    goodsReceipts,
+    allGoodsReceipts,
+    goodsIssues,
+    allGoodsIssues,
+    receptionShifts,
+    allReceptionShifts,
+    attendanceRecords,
+    allAttendanceRecords,
+    staffMembers,
+    allStaffMembers,
+    appointments,
+    allAppointments,
+    paymentMethods,
+    allPaymentMethods,
+    laserDevices,
+    allLaserDevices,
     patients,
   } = usePlatform();
 
@@ -40,6 +81,48 @@ export const NeonHubView: React.FC = () => {
   });
   const [remoteCounts, setRemoteCounts] = useState<{ [key: string]: number } | null>(null);
   const [checkingCounts, setCheckingCounts] = useState<boolean>(false);
+  const [isExportingExcel, setIsExportingExcel] = useState<boolean>(false);
+  const [backupFeedback, setBackupFeedback] = useState<string | null>(null);
+
+  const handleBackupToExcel = () => {
+    setIsExportingExcel(true);
+    setBackupFeedback(null);
+    try {
+      const res = exportDatabaseToMultiSheetExcel({
+        tenantName: tenant?.nameAr || 'المؤسسة الطبية',
+        branches: allBranches || branches,
+        warehouses: allWarehouses || warehouses,
+        users: allUsers || users,
+        parties: allParties || parties,
+        products: allProducts || products,
+        stockLevels: stockLevels,
+        stockMovements: allStockMovements || stockMovements,
+        accounts: allAccounts || accounts,
+        journalEntries: allJournals || journalEntries,
+        invoices: allInvoices || invoices,
+        cashReceipts: allCashReceipts || cashReceipts,
+        cashPayments: allCashPayments || cashPayments,
+        goodsReceipts: allGoodsReceipts || goodsReceipts,
+        goodsIssues: allGoodsIssues || goodsIssues,
+        receptionShifts: allReceptionShifts || receptionShifts,
+        attendanceRecords: allAttendanceRecords || attendanceRecords,
+        staffMembers: allStaffMembers || staffMembers,
+        appointments: allAppointments || appointments,
+        paymentMethods: allPaymentMethods || paymentMethods,
+        laserDevices: allLaserDevices || laserDevices,
+      });
+
+      if (res.success) {
+        setBackupFeedback(t(`تم تصدير النسخة الاحتياطية بنجاح إلى ملف: ${res.filename} (يحتوي على 23 جدول منفصل)`, `Database backup exported successfully to: ${res.filename} with 23 separate sheets!`));
+      } else {
+        setBackupFeedback(t('فشل في تصدير النسخة الاحتياطية: ' + res.filename, 'Failed to export backup: ' + res.filename));
+      }
+    } catch (err: any) {
+      setBackupFeedback(t('حدث خطأ أثناء النسخ الاحتياطي: ' + err.message, 'Error: ' + err.message));
+    } finally {
+      setIsExportingExcel(false);
+    }
+  };
 
   const handleCopySql = () => {
     navigator.clipboard.writeText(getPostgresSchemaSql());
@@ -117,7 +200,19 @@ export const NeonHubView: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Requested Backup to Excel Button */}
+          <button
+            onClick={handleBackupToExcel}
+            disabled={isExportingExcel}
+            className="flex items-center gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 px-4 py-2 text-xs font-black text-white shadow-xs transition-all cursor-pointer disabled:opacity-50"
+            title={t('نسخ احتياطي شامل لجميع جداول قاعدة البيانات في ملف إكسل واحد', 'Backup all database tables to a single multi-sheet Excel file')}
+          >
+            <Download className="h-4 w-4" />
+            <FileSpreadsheet className="h-4 w-4" />
+            <span>{isExportingExcel ? t('جاري إنشاء النسخة الاحتياطية...', 'Creating Backup...') : t('نسخة احتياطية (إكسل شامل)', 'Backup to Excel')}</span>
+          </button>
+
           <a
             href="https://console.neon.tech"
             target="_blank"
@@ -129,6 +224,19 @@ export const NeonHubView: React.FC = () => {
           </a>
         </div>
       </div>
+
+      {/* Backup Success Feedback Banner */}
+      {backupFeedback && (
+        <div className="flex items-center justify-between p-4 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-2xl text-xs font-bold text-emerald-800 dark:text-emerald-200">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+            <span>{backupFeedback}</span>
+          </div>
+          <button onClick={() => setBackupFeedback(null)} className="text-emerald-600 hover:text-emerald-800">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* Connection Box */}
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs dark:border-slate-800 dark:bg-slate-900 space-y-4">

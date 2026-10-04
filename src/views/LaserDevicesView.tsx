@@ -35,7 +35,109 @@ import {
   Building2,
   FileText,
   Clock,
+  FileSpreadsheet,
+  Download,
 } from 'lucide-react';
+import {
+  ExcelDataTransferModal,
+  ExcelColumnConfig,
+  CellValidationError,
+  ExcelValidationResult,
+} from '../components/ExcelDataTransferModal';
+
+const laserDeviceExcelColumns: ExcelColumnConfig[] = [
+  {
+    key: 'name',
+    labelAr: 'اسم الجهاز / الموديل',
+    labelEn: 'Device Name / Model',
+    required: true,
+    type: 'text',
+    sampleValue: 'جهاز كانديلا برو ماكس GentleMax Pro',
+    instructions: 'الاسم التجاري أو نوع وموديل جهاز الليزر',
+  },
+  {
+    key: 'serialNumber',
+    labelAr: 'الرقم التسلسلي (Serial Number)',
+    labelEn: 'Serial Number',
+    required: true,
+    type: 'text',
+    sampleValue: 'SN-CAN-98421',
+    instructions: 'الرقم التسلسلي الفريد للجهاز المثبت من الشركة المصنعة',
+  },
+  {
+    key: 'room',
+    labelAr: 'الغرفة / العيادة',
+    labelEn: 'Room / Clinic',
+    required: true,
+    type: 'text',
+    sampleValue: 'غرفة ليزر 1',
+    instructions: 'اسم أو رقم الغرفة المتواجد بها الجهاز داخل الفرع',
+  },
+  {
+    key: 'totalShotsCounter',
+    labelAr: 'عداد النبضات التراكمي (البلصات المستهلكة)',
+    labelEn: 'Lifetime Consumed Pulses',
+    required: true,
+    type: 'number',
+    sampleValue: 350000,
+    instructions: 'إجمالي عدد النبضات المستهلكة على الجهاز منذ بداية تشغيله',
+  },
+  {
+    key: 'currentLampShots',
+    labelAr: 'نبضات اللمبة الحالية المستهلكة',
+    labelEn: 'Current Lamp Consumed Pulses',
+    required: true,
+    type: 'number',
+    sampleValue: 45000,
+    instructions: 'عدد النبضات المستهلكة من الفلاش / اللمبة الحالية',
+  },
+  {
+    key: 'warningLimitShots',
+    labelAr: 'حد إنذار اللمبة',
+    labelEn: 'Lamp Warning Pulses Limit',
+    required: true,
+    type: 'number',
+    sampleValue: 200000,
+    instructions: 'الحد الذي يظهر عنده إنذار اقتراب انتهاء عمر اللمبة',
+  },
+  {
+    key: 'maxCapacityShots',
+    labelAr: 'السعة القصوى للنبضات',
+    labelEn: 'Max Lamp Pulses Capacity',
+    required: true,
+    type: 'number',
+    sampleValue: 500000,
+    instructions: 'العمر الافتراضي الأقصى لنبضات اللمبة قبل الاستبدال',
+  },
+  {
+    key: 'costPerShot',
+    labelAr: 'تكلفة النبضة (ج.م)',
+    labelEn: 'Cost Per Pulse',
+    required: true,
+    type: 'number',
+    sampleValue: 0.08,
+    instructions: 'تكلفة استهلاك النبضة الواحدة على المركز الطبي بالجنيه',
+  },
+  {
+    key: 'pricePerShot',
+    labelAr: 'سعر بيع النبضة للعميل (ج.م)',
+    labelEn: 'Price Per Pulse',
+    required: true,
+    type: 'number',
+    sampleValue: 0.50,
+    instructions: 'سعر محاسبة العميل على النبضة الواحدة بالجنيه',
+  },
+  {
+    key: 'status',
+    labelAr: 'حالة الجهاز التشغيلية',
+    labelEn: 'Device Status',
+    required: true,
+    type: 'select',
+    options: ['Active', 'Maintenance', 'Out of Service'],
+    sampleValue: 'Active',
+    instructions: 'حالة الجهاز: Active (يعمل)، Maintenance (صيانة)، Out of Service (خارج الخدمة)',
+  },
+];
 
 interface LaserDevicesViewProps {
   onNavigateToReception?: () => void;
@@ -72,6 +174,7 @@ export const LaserDevicesView: React.FC<LaserDevicesViewProps> = ({ onNavigateTo
 
   // Modals
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showExcelModal, setShowExcelModal] = useState(false);
   const [editingDevice, setEditingDevice] = useState<LaserDevice | null>(null);
   const [showResetLampModal, setShowResetLampModal] = useState<LaserDevice | null>(null);
   const [deviceToDelete, setDeviceToDelete] = useState<LaserDevice | null>(null);
@@ -239,6 +342,191 @@ export const LaserDevicesView: React.FC<LaserDevicesViewProps> = ({ onNavigateTo
     updateLaserDevice(dev.id, { status: nextStatus });
   };
 
+  // Excel Import Validator & Handler for Laser Devices & Pulses
+  const validateLaserDeviceRows = (rawRows: any[]): ExcelValidationResult<any> => {
+    const errors: CellValidationError[] = [];
+    const validRows: any[] = [];
+    const allowedStatuses = ['Active', 'Maintenance', 'Out of Service'];
+
+    rawRows.forEach((row, idx) => {
+      const rowNum = idx + 2; // Row 1 is header
+
+      const name = String(row['اسم الجهاز / الموديل'] || row['اسم الجهاز'] || row.name || '').trim();
+      const serialNumber = String(
+        row['الرقم التسلسلي (Serial Number)'] || row['الرقم التسلسلي'] || row.serialNumber || ''
+      ).trim();
+      const room = String(row['الغرفة / العيادة'] || row['الغرفة'] || row.room || 'غرفة ليزر 1').trim();
+
+      const totalShotsRaw =
+        row['عداد النبضات التراكمي (البلصات المستهلكة)'] ??
+        row['عداد النبضات التراكمي'] ??
+        row.totalShotsCounter ??
+        0;
+      const totalShotsNum = Number(totalShotsRaw);
+
+      const lampShotsRaw =
+        row['نبضات اللمبة الحالية المستهلكة'] ??
+        row['نبضات اللمبة'] ??
+        row.currentLampShots ??
+        0;
+      const lampShotsNum = Number(lampShotsRaw);
+
+      const warnShotsRaw = row['حد إنذار اللمبة'] ?? row.warningLimitShots ?? 200000;
+      const warnShotsNum = Number(warnShotsRaw);
+
+      const maxShotsRaw = row['السعة القصوى للنبضات'] ?? row.maxCapacityShots ?? 500000;
+      const maxShotsNum = Number(maxShotsRaw);
+
+      const costRaw = row['تكلفة النبضة (ج.م)'] ?? row['تكلفة النبضة'] ?? row.costPerShot ?? 0.08;
+      const costNum = Number(costRaw);
+
+      const priceRaw =
+        row['سعر بيع النبضة للعميل (ج.م)'] ??
+        row['سعر بيع النبضة للعميل'] ??
+        row['سعر النبضة'] ??
+        row.pricePerShot ??
+        0.5;
+      const priceNum = Number(priceRaw);
+
+      const statusRaw = String(row['حالة الجهاز التشغيلية'] || row['الحالة'] || row.status || 'Active').trim();
+
+      // 1. Validate Name
+      if (!name) {
+        errors.push({
+          rowNumber: rowNum,
+          columnKey: 'name',
+          columnLabelAr: 'اسم الجهاز / الموديل',
+          enteredValue: row['اسم الجهاز / الموديل'] || '',
+          reasonAr: 'اسم الجهاز إلزامي في قاعدة البيانات ولا يمكن أن يكون فارغاً',
+        });
+      }
+
+      // 2. Validate Serial Number
+      if (!serialNumber) {
+        errors.push({
+          rowNumber: rowNum,
+          columnKey: 'serialNumber',
+          columnLabelAr: 'الرقم التسلسلي (Serial Number)',
+          enteredValue: row['الرقم التسلسلي (Serial Number)'] || '',
+          reasonAr: 'الرقم التسلسلي للجهاز إلزامي لضمان عدم تكرار الأجهزة والعدادات',
+        });
+      }
+
+      // 3. Validate Total Pulses Counter
+      if (isNaN(totalShotsNum) || totalShotsNum < 0) {
+        errors.push({
+          rowNumber: rowNum,
+          columnKey: 'totalShotsCounter',
+          columnLabelAr: 'عداد النبضات التراكمي (البلصات المستهلكة)',
+          enteredValue: totalShotsRaw,
+          reasonAr: 'عداد النبضات التراكمي يجب أن يكون رقماً صحيحاً يساوي 0 أو أكثر',
+        });
+      }
+
+      // 4. Validate Current Lamp Pulses
+      if (isNaN(lampShotsNum) || lampShotsNum < 0) {
+        errors.push({
+          rowNumber: rowNum,
+          columnKey: 'currentLampShots',
+          columnLabelAr: 'نبضات اللمبة الحالية المستهلكة',
+          enteredValue: lampShotsRaw,
+          reasonAr: 'نبضات اللمبة الحالية يجب أن تكون رقماً يساوي 0 أو أكثر',
+        });
+      }
+
+      // 5. Validate Warning Limit
+      if (isNaN(warnShotsNum) || warnShotsNum <= 0) {
+        errors.push({
+          rowNumber: rowNum,
+          columnKey: 'warningLimitShots',
+          columnLabelAr: 'حد إنذار اللمبة',
+          enteredValue: warnShotsRaw,
+          reasonAr: 'حد إنذار اللمبة يجب أن يكون رقماً موجباً أكبر من الصفر',
+        });
+      }
+
+      // 6. Validate Max Capacity
+      if (isNaN(maxShotsNum) || maxShotsNum <= 0) {
+        errors.push({
+          rowNumber: rowNum,
+          columnKey: 'maxCapacityShots',
+          columnLabelAr: 'السعة القصوى للنبضات',
+          enteredValue: maxShotsRaw,
+          reasonAr: 'السعة القصوى للنبضات يجب أن تكون رقماً موجباً أكبر من الصفر',
+        });
+      }
+
+      // 7. Validate Cost Per Pulse
+      if (isNaN(costNum) || costNum < 0) {
+        errors.push({
+          rowNumber: rowNum,
+          columnKey: 'costPerShot',
+          columnLabelAr: 'تكلفة النبضة (ج.م)',
+          enteredValue: costRaw,
+          reasonAr: 'تكلفة النبضة يجب أن تكون رقماً موجباً أو صفراً',
+        });
+      }
+
+      // 8. Validate Price Per Pulse
+      if (isNaN(priceNum) || priceNum <= 0) {
+        errors.push({
+          rowNumber: rowNum,
+          columnKey: 'pricePerShot',
+          columnLabelAr: 'سعر بيع النبضة للعميل (ج.م)',
+          enteredValue: priceRaw,
+          reasonAr: 'سعر النبضة للعميل يجب أن يكون رقماً موجباً أكبر من الصفر',
+        });
+      }
+
+      const matchedStatus = allowedStatuses.includes(statusRaw) ? statusRaw : 'Active';
+
+      validRows.push({
+        name,
+        serialNumber,
+        room: room || 'غرفة ليزر 1',
+        totalShotsCounter: isNaN(totalShotsNum) ? 0 : totalShotsNum,
+        currentLampShots: isNaN(lampShotsNum) ? 0 : lampShotsNum,
+        warningLimitShots: isNaN(warnShotsNum) ? 200000 : warnShotsNum,
+        maxCapacityShots: isNaN(maxShotsNum) ? 500000 : maxShotsNum,
+        costPerShot: isNaN(costNum) ? 0.08 : costNum,
+        pricePerShot: isNaN(priceNum) ? 0.5 : priceNum,
+        status: matchedStatus,
+      });
+    });
+
+    return {
+      totalRows: rawRows.length,
+      errors,
+      validRows: errors.length === 0 ? validRows : [],
+    };
+  };
+
+  const handleConfirmLaserDeviceImport = (validRows: any[]) => {
+    const branchToUse = activeBranch?.id || branches[0]?.id || 'branch-cairo';
+
+    validRows.forEach((row, idx) => {
+      addLaserDevice({
+        name: row.name,
+        nameEn: row.name,
+        code: `LSR-IMP-${allLaserDevices.length + idx + 1}`,
+        model: row.name,
+        serialNumber: row.serialNumber,
+        room: row.room,
+        branchId: branchToUse,
+        status: row.status as any,
+        totalShotsCounter: row.totalShotsCounter,
+        currentLampShots: row.currentLampShots,
+        warningLimitShots: row.warningLimitShots,
+        maxCapacityShots: row.maxCapacityShots,
+        costPerShot: row.costPerShot,
+        pricePerShot: row.pricePerShot,
+        lastMaintenanceDate: new Date().toISOString().split('T')[0],
+      });
+    });
+
+    setToastFeedback(`تم استيراد وحفظ ${validRows.length} جهاز ليزر مع تحديث عدادات البلصات المستهلكة بنجاح.`);
+  };
+
   return (
     <div className="space-y-6 pb-12">
       {/* 1. Header & Quick Actions */}
@@ -266,6 +554,15 @@ export const LaserDevicesView: React.FC<LaserDevicesViewProps> = ({ onNavigateTo
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => setShowExcelModal(true)}
+            className="flex items-center gap-1.5 rounded-xl border border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-950/40 px-3.5 py-2 text-xs font-bold text-emerald-800 dark:text-emerald-300 hover:bg-emerald-100 transition-all cursor-pointer shadow-xs"
+            title={t('استيراد وتصدير أجهزة الليزر والبلصات المستهلكة وفحص الأخطاء', 'Import & Export Laser Pulses Excel')}
+          >
+            <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
+            <span>{t('استيراد وتصدير البلصات والأجهزة (إكسل)', 'Pulses Excel')}</span>
+          </button>
+
           {onNavigateToReception && (
             <button
               onClick={onNavigateToReception}
@@ -1157,6 +1454,32 @@ export const LaserDevicesView: React.FC<LaserDevicesViewProps> = ({ onNavigateTo
           onOpenAddMaintenance={handleOpenAddMaintenance}
         />
       )}
+
+      {/* EXCEL DATA TRANSFER & VALIDATION MODAL FOR LASER DEVICES & PULSES */}
+      <ExcelDataTransferModal
+        isOpen={showExcelModal}
+        onClose={() => setShowExcelModal(false)}
+        entityTitleAr="أجهزة الليزر والبلصات المستهلكة"
+        entityTitleEn="Laser Devices & Pulses Directory"
+        descriptionAr="استيراد وتصدير أجهزة ومعدات الليزر مع الفحص الخلوي الذكي لعدادات البلصات المستهلكة واللمبات والتكاليف"
+        columns={laserDeviceExcelColumns}
+        currentDataForExport={laserDevices.map((dev) => ({
+          name: dev.name,
+          serialNumber: dev.serialNumber,
+          room: dev.room,
+          totalShotsCounter: dev.totalShotsCounter,
+          currentLampShots: dev.currentLampShots,
+          warningLimitShots: dev.warningLimitShots,
+          maxCapacityShots: dev.maxCapacityShots,
+          costPerShot: dev.costPerShot ?? 0.08,
+          pricePerShot: dev.pricePerShot ?? 0.5,
+          status: dev.status,
+        }))}
+        exportFileNamePrefix="سجل_أجهزة_الليزر_والبلصات_المستهلكة"
+        validator={validateLaserDeviceRows}
+        onConfirmImport={handleConfirmLaserDeviceImport}
+        branchName={activeBranch?.name || 'الفرع الحالي'}
+      />
     </div>
   );
 };

@@ -92,6 +92,13 @@ export interface ProductRecipeItem {
   notes?: string;
 }
 
+export interface ServiceComponent {
+  productId: string; // معرف الصنف المخزني المستهلك
+  productNameAr?: string;
+  quantity: number; // الكمية المستهلكة من الصنف في كل عملية / جلسة
+  unitCost?: number; // التكلفة التقديرية للوحدة
+}
+
 export interface Product {
   id: string;
   tenantId: string;
@@ -119,13 +126,18 @@ export interface Product {
   defaultCollectionOnly?: boolean; // الوضع الافتراضي عند إضافة هذا المنتج/الخدمة في نقطة البيع: تحصيل فقط
   isActive?: boolean;
 
-  // الربط المحاسبي بشجرة الحسابات (Sales, Expense, and Inventory Accounts)
+  // الربط المحاسبي بشجرة الحسابات (Sales, COGS, Expense, and Inventory Accounts)
   salesAccountId?: string; // حساب المبيعات / الإيرادات بالدليل المحاسبي (للمنتجات والخدمات البيعية)
   salesAccountNameAr?: string;
+  cogsAccountId?: string; // حساب تكلفة البضاعة المباعة / تكلفة التشغيل المباشرة
+  cogsAccountNameAr?: string;
   expenseAccountId?: string; // حساب المصروفات / الاستهلاك بالدليل المحاسبي (للأصناف المخزنية والخامات)
   expenseAccountNameAr?: string;
   inventoryAccountId?: string; // حساب المخزون / الأصول المتداولة
   inventoryAccountNameAr?: string;
+
+  // المواد المخزنية المستهلكة في الجلسة أو الخدمة (Recipe / BOM)
+  linkedComponents?: ServiceComponent[];
 
   // ربط الصنف المخزني بالمنتجات البيعية ومقاييس الاستهلاك وتكلفة البيع
   linkedSalesProductIds?: string[]; // ربطه بالمنتجات أو الخدمات البيعية
@@ -324,6 +336,10 @@ export interface Party {
   balance: number; // positive = debit, negative = credit
   creditLimit?: number;
 
+  // Accounting Link (الربط بشجرة الحسابات)
+  accountId?: string; // حساب العميل / المورد بالدليل المحاسبي
+  accountNameAr?: string;
+
   // Medical / Patient specifics (العملاء هما المرضى)
   dateOfBirth?: string;
   gender?: 'Male' | 'Female';
@@ -381,6 +397,7 @@ export interface StaffMember {
   dermatologyRevenueRate?: number; // نسبته من إيراد الجلدية %
   commissionRate?: number; // نسبة العمولة العامة %
   isServiceProvider?: boolean; // مقدم خدمة (يظهر في شاشة التشغيل والجلسات)
+  acceptsBookings?: boolean; // استقبال حجوزات (يظهر في شاشة إدارة الحجوزات)
   isActive: boolean; // اختيار مفعل لتعطيله أو تشغيله
   isArchived?: boolean;
   archivedAt?: string;
@@ -478,6 +495,15 @@ export interface SalesInvoice {
   cashierId?: string;
   createdById?: string;
   journalEntryId?: string;
+  costJournalEntryId?: string;
+  isReplaced?: boolean;
+  replacedByInvoiceId?: string;
+  reversalJournalEntryId?: string;
+  source?: 'pos' | 'reception_ops' | 'manual_tax_invoice' | string;
+  sourceShiftId?: string;
+  sourceShiftNumber?: string;
+  sourceRunRowId?: string;
+  notes?: string;
 }
 
 // Appointments & Bookings (شاشة الحجز والمتابعة)
@@ -528,6 +554,59 @@ export interface PatientFollowUp {
   leadSource?: string;
   createdAt: string;
   createdBy?: string;
+}
+
+// جدول مواعيد عمل ودوام الموظفين ومقدمي الخدمة
+export interface StaffWorkSchedule {
+  id: string;
+  tenantId?: string;
+  branchId: string;
+  date: string; // تاريخ العمل YYYY-MM-DD
+  staffId: string; // معرف الموظف المسجل
+  staffName: string; // اسم الموظف
+  jobTitle: string; // الوظيفة (تعبأ آلياً عند اختيار الموظف)
+  startTime: string; // وقت بداية العمل
+  endTime: string; // وقت انتهاء العمل
+  notes?: string; // ملاحظات الدوام
+  createdAt?: string;
+}
+
+// سجلات الحضور والانصراف والبصمة الإلكترونية
+export interface AttendanceRecord {
+  id: string;
+  tenantId: string;
+  branchId: string;
+  staffId: string;
+  staffNameAr: string;
+  staffNameEn?: string;
+  jobTitleAr?: string;
+  date: string; // YYYY-MM-DD
+  checkInTime?: string; // HH:mm:ss
+  checkOutTime?: string; // HH:mm:ss
+  status: 'Present' | 'Late' | 'Absent' | 'Leave' | 'Excused';
+  source: 'manual' | 'biometric_device' | 'mobile';
+  deviceUserId?: string; // كود الموظف بجهاز البصمة
+  deviceIpOrId?: string; // عنوان أو كود جهاز البصمة
+  workHours?: number; // ساعات العمل المحسوبة
+  lateMinutes?: number; // دقائق التأخير عن موعد العمل
+  earlyLeaveMinutes?: number; // دقائق الانصراف المبكر
+  notes?: string;
+  createdAt: string;
+  createdBy?: string;
+}
+
+export interface BiometricDeviceConfig {
+  id: string;
+  tenantId: string;
+  branchId: string;
+  branchNameAr?: string;
+  deviceName: string;
+  deviceIp: string;
+  devicePort: number;
+  deviceType: 'ZKTeco' | 'Hikvision' | 'Anviz' | 'Realand' | 'VirtualCloud';
+  status: 'Connected' | 'Disconnected' | 'Syncing';
+  lastSyncAt?: string;
+  totalSyncedLogs?: number;
 }
 
 export interface TreatmentPlan {
@@ -582,6 +661,13 @@ export interface ShiftRunRow {
   description?: string; // الشرح
   appointmentId?: string;
   notes?: string;
+
+  // الربط المحاسبي وعكس القيود
+  journalEntryId?: string; // قيد الإيراد
+  costJournalEntryId?: string; // قيد التكلفة المباشرة
+  isReplaced?: boolean; // تم تعديله واستبداله بقيد تسوية
+  replacedByRunRowId?: string; // معرف الحركة الجديدة المستبدلة
+  reversalJournalEntryId?: string; // معرف قيد العكس
 }
 
 export interface ShiftExpense {
@@ -604,6 +690,13 @@ export interface ShiftExpense {
   receiptNumber?: string;
   timestamp?: string;
   disbursementTime?: string; // وقت الصرف الآلي
+
+  // الربط المحاسبي
+  expenseAccountId?: string; // حساب المصروف في شجرة الحسابات
+  journalEntryId?: string;
+  isReplaced?: boolean;
+  replacedByExpenseId?: string;
+  reversalJournalEntryId?: string;
 }
 
 export interface DeviceMaintenancePart {
@@ -857,6 +950,8 @@ export interface AppUser {
   allowedWarehouseIds: string[];
   allowedViews: string[];
   allowedActions: string[];
+  defaultLandingView?: string;
+  customQuickButtons?: string[];
 }
 
 // ==========================================
@@ -885,6 +980,10 @@ export interface CashReceiptVoucher {
   receiverName: string;
   clientSignature?: string;
   status: 'active' | 'cancelled';
+  journalEntryId?: string;
+  isReplaced?: boolean;
+  replacedByVoucherId?: string;
+  reversalJournalEntryId?: string;
   createdAt: string;
 }
 
@@ -911,6 +1010,10 @@ export interface CashPaymentVoucher {
   approvedBy?: string;
   receiverName?: string;
   status: 'active' | 'cancelled';
+  journalEntryId?: string;
+  isReplaced?: boolean;
+  replacedByVoucherId?: string;
+  reversalJournalEntryId?: string;
   createdAt: string;
 }
 
@@ -1009,6 +1112,10 @@ export interface GoodsReceiptVoucher {
   inspectorName?: string;
   notes?: string;
   status: 'received' | 'cancelled';
+  journalEntryId?: string;
+  isReplaced?: boolean;
+  replacedByGrnId?: string;
+  reversalJournalEntryId?: string;
   createdAt: string;
 }
 
@@ -1047,6 +1154,74 @@ export interface GoodsIssueVoucher {
   issuedBy?: string;
   notes?: string;
   status: 'issued' | 'cancelled';
+  journalEntryId?: string;
+  isReplaced?: boolean;
+  replacedByGinId?: string;
+  reversalJournalEntryId?: string;
   createdAt: string;
 }
+
+// Accounting Period Closing & Locking (إقفال الفترات المحاسبية)
+export interface AccountingPeriodLock {
+  id: string;
+  tenantId: string;
+  branchId?: string; // لفرع محدد أو كل الفروع
+  lockDate: string; // تاريخ الإقفال: الحركات في هذا التاريخ أو قبله تصبح مقفلة
+  lockedAt: string;
+  lockedBy: string; // اسم المدير القائم بالإقفال
+  reason?: string;
+  status: 'locked' | 'unlocked';
+}
+
+// Notification System Types (نظام التنبيهات الفورية وقواعد التشغيل)
+export type NotificationChannel = 'in_app' | 'popup' | 'sound' | 'whatsapp';
+export type NotificationSeverity = 'info' | 'success' | 'warning' | 'critical';
+export type NotificationCategory =
+  | 'laser_devices'
+  | 'reception_ops'
+  | 'financial'
+  | 'staff_hr'
+  | 'inventory'
+  | 'general';
+
+export interface NotificationRule {
+  id: string;
+  code: string;
+  category: NotificationCategory;
+  nameAr: string;
+  nameEn: string;
+  descriptionAr: string;
+  isEnabled: boolean;
+  severity: NotificationSeverity;
+  channels: NotificationChannel[];
+  targetRoles: string[]; // e.g. ['Admin', 'SuperAdmin', 'BranchManager', 'Receptionist', 'Doctor', 'Accountant', 'Inventory']
+  targetUserIds?: string[];
+  targetBranchId?: string; // 'all' or branchId
+  templateMessageAr: string;
+  templateMessageEn: string;
+  thresholdValue?: number;
+  soundAlert: boolean;
+  actionUrl?: string; // view ID to navigate
+  updatedAt?: string;
+}
+
+export interface AppNotification {
+  id: string;
+  ruleCode: string;
+  category: NotificationCategory;
+  severity: NotificationSeverity;
+  titleAr: string;
+  titleEn: string;
+  messageAr: string;
+  messageEn: string;
+  timestamp: string;
+  isRead: boolean;
+  readAt?: string;
+  targetRoles: string[];
+  targetUserIds?: string[];
+  branchId?: string;
+  actionUrl?: string;
+  metadata?: Record<string, any>;
+}
+
 

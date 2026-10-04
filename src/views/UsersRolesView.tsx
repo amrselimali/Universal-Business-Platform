@@ -78,6 +78,8 @@ export const UsersRolesView: React.FC = () => {
   const [role, setRole] = useState<UserRole>('Cashier');
   const [isActive, setIsActive] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [assignedBranchId, setAssignedBranchId] = useState('');
+  const [defaultLandingView, setDefaultLandingView] = useState('dashboard');
 
   // Granular RBAC Permissions State
   const [allowedTenantIds, setAllowedTenantIds] = useState<string[]>([]);
@@ -159,6 +161,8 @@ export const UsersRolesView: React.FC = () => {
     setRole('Receptionist');
     setIsActive(true);
     setIsAdmin(false);
+    setAssignedBranchId(safeBranches[0]?.id || '');
+    setDefaultLandingView('dashboard');
 
     const defaults = getRoleDefaults('Receptionist');
     setAllowedTenantIds(safeTenant ? [safeTenant.id] : []);
@@ -182,6 +186,8 @@ export const UsersRolesView: React.FC = () => {
     setRole(u.role);
     setIsActive(u.isActive);
     setIsAdmin(!!u.isAdmin || u.username === 'admin');
+    setAssignedBranchId(u.branchId || (u.allowedBranchIds?.[0] !== '*' ? u.allowedBranchIds?.[0] : '') || '');
+    setDefaultLandingView(u.defaultLandingView || 'dashboard');
 
     const roleDefs = getRoleDefaults(u.role);
     setAllowedTenantIds(u.allowedTenantIds || (u.isAdmin ? safeTenants.map((t) => t.id) : [safeTenant.id]));
@@ -238,7 +244,8 @@ export const UsersRolesView: React.FC = () => {
         isActive,
         isAdmin,
         tenantId: primaryTenantId,
-        branchId: primaryBranchId,
+        branchId: assignedBranchId || primaryBranchId,
+        defaultLandingView: defaultLandingView || 'dashboard',
         allowedTenantIds: finalTenantIds,
         allowedBranchIds: finalBranchIds,
         allowedWarehouseIds: finalWarehouseIds,
@@ -263,7 +270,8 @@ export const UsersRolesView: React.FC = () => {
         isActive,
         isAdmin,
         tenantId: primaryTenantId,
-        branchId: primaryBranchId,
+        branchId: assignedBranchId || primaryBranchId,
+        defaultLandingView: defaultLandingView || 'dashboard',
         allowedTenantIds: finalTenantIds,
         allowedBranchIds: finalBranchIds,
         allowedWarehouseIds: finalWarehouseIds,
@@ -1086,6 +1094,45 @@ export const UsersRolesView: React.FC = () => {
                         placeholder="010XXXXXXXX"
                         className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-xs font-mono text-slate-800 outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
                       />
+                    </div>
+
+                    {/* Assigned Primary Branch */}
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        {t('الفرع الأساسي المخصص للمستخدم:', 'Assigned Primary Branch:')}
+                      </label>
+                      <select
+                        value={assignedBranchId}
+                        onChange={(e) => setAssignedBranchId(e.target.value)}
+                        className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-xs font-bold text-slate-800 outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 cursor-pointer"
+                      >
+                        <option value="">{t('-- افتراضي / كل الفروع المسموحة --', '-- Default / All Allowed --')}</option>
+                        {safeBranches.map((b) => (
+                          <option key={b.id} value={b.id}>
+                            {language === 'ar' ? b.name : b.nameEn}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Default Landing View on Login */}
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        {t('الشاشة الافتراضية عند تسجيل الدخول:', 'Default Landing Screen on Login:')}
+                      </label>
+                      <select
+                        value={defaultLandingView}
+                        onChange={(e) => setDefaultLandingView(e.target.value)}
+                        className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-xs font-bold text-slate-800 outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 cursor-pointer"
+                      >
+                        <option value="dashboard">{t('لوحة التحكم والتحليلات', 'Dashboard & Analytics')}</option>
+                        <option value="reception_ops">{t('شاشة التشغيل (الريسيبشن والنبضات)', 'Reception Operations')}</option>
+                        <option value="bookings">{t('إدارة ومتابعة الحجوزات', 'Bookings Management')}</option>
+                        <option value="pos">{t('نقطة البيع السريعة (POS)', 'Fast POS Terminal')}</option>
+                        <option value="parties">{t('دليل المرضى والعملاء 360', 'Patients & Customers')}</option>
+                        <option value="cash_receipts">{t('سندات القبض النقدية', 'Cash Receipt Vouchers')}</option>
+                        <option value="staff">{t('إدارة الموظفين والأطباء', 'Staff & Doctors')}</option>
+                      </select>
                     </div>
                   </div>
 
