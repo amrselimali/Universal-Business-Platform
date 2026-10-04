@@ -54,6 +54,7 @@ import {
   NotificationSeverity,
   NotificationCategory,
 } from '../types';
+import { safeLocalStorageSet, safeLocalStorageGet, idbSet, idbGet } from '../utils/safeStorage';
 import { INITIAL_NOTIFICATION_RULES, INITIAL_NOTIFICATIONS_HISTORY } from '../data/notificationRulesData';
 import { playNotificationSound } from '../utils/audioAlert';
 import {
@@ -267,6 +268,7 @@ interface PlatformContextType {
   archiveParty: (id: string, reason?: string) => void;
   restoreParty: (id: string) => void;
   deleteParty: (id: string) => void;
+  importPartiesBulk: (partiesList: Omit<Party, 'id' | 'tenantId'>[]) => Promise<{ count: number; success: boolean }>;
   importPartiesFromExcel: (rows: Array<{
     paperCode?: string;
     systemCode?: string;
@@ -824,11 +826,11 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   });
 
   useEffect(() => {
-    localStorage.setItem('erp_audit_records', JSON.stringify(allAuditRecords));
+    safeLocalStorageSet('erp_audit_records', JSON.stringify(allAuditRecords));
   }, [allAuditRecords]);
 
   useEffect(() => {
-    localStorage.setItem('erp_user_activity_logs', JSON.stringify(allUserActivityLogs));
+    safeLocalStorageSet('erp_user_activity_logs', JSON.stringify(allUserActivityLogs));
   }, [allUserActivityLogs]);
 
   const auditRecords = allAuditRecords.filter((a) => a.tenantId === tenant?.id);
@@ -1349,7 +1351,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   });
 
   useEffect(() => {
-    localStorage.setItem('erp_parties', JSON.stringify(allParties));
+    safeLocalStorageSet('erp_parties', JSON.stringify(allParties));
   }, [allParties]);
 
   const parties = allParties.filter((p) => p.tenantId === tenant?.id);
@@ -1371,6 +1373,85 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     // Default: Per company
     const totalCustomers = parties.filter((p) => p.type === 'Customer' || p.type === 'Both').length;
     return `CUST-${startNum + totalCustomers}`;
+  };
+
+  const importPartiesBulk = async (
+    partiesList: Omit<Party, 'id' | 'tenantId'>[]
+  ): Promise<{ count: number; success: boolean }> => {
+    if (!partiesList || partiesList.length === 0) return { count: 0, success: true };
+
+    const currentTenant = tenant || INITIAL_TENANT;
+    const defaultBranchId = activeBranch?.id || branches[0]?.id || 'branch-cairo';
+    const startNum = currentTenant.customerStartNumber || 1000;
+    const existingCount = allParties.filter((p) => p.type === 'Customer' || p.type === 'Both').length;
+    const nowIso = new Date().toISOString();
+    const batchId = Date.now();
+
+    const newParties: Party[] = partiesList.map((p, idx) => {
+      const branchId = p.branchId || defaultBranchId;
+      const nameEn = p.nameEn || autoTranslateArabic(p.name);
+      const systemCode = p.systemCode || `CUST-${startNum + existingCount + idx + 1}`;
+      const uniqueId = `party-${batchId}-${idx}-${Math.random().toString(36).substring(2, 7)}`;
+
+      return {
+        ...p,
+        branchId,
+        nameEn,
+        systemCode,
+        id: uniqueId,
+        tenantId: currentTenant.id,
+        createdAt: nowIso,
+        balance: p.balance || 0,
+        isArchived: false,
+      };
+    });
+
+    // Single atomic state update to prevent UI freezes
+    setAllParties((prev) => [...newParties, ...prev]);
+
+    // Asynchronously backup to IndexedDB
+    setTimeout(() => {
+      idbSet('erp_parties_backup', newParties);
+    }, 100);
+
+    // Single consolidated audit entry
+    recordAudit({
+      entityType: 'Party',
+      entityId: `batch-${batchId}`,
+      entityName: `استيراد مجمع للعملاء (${newParties.length})`,
+      actionType: 'CREATE',
+      diffSummary: `استيراد مجمع لعدد ${newParties.length} عميل/مريض من ملف إكسيل بنجاح`,
+      newState: { count: newParties.length },
+    });
+
+    // Single consolidated user activity log
+    logUserActivity(
+      'parties',
+      'العملاء والمرضى والموردين',
+      'Parties Directory',
+      'استيراد إكسيل مجمع',
+      'Bulk Excel Import',
+      `تم استيراد ${newParties.length} عميل/مريض بنجاح دفعة واحدة`
+    );
+
+    // If Neon is connected, sync asynchronously in chunks to prevent connection choking
+    if (neonDb.connected && neonDb.connectionString && currentTenant.id) {
+      setTimeout(async () => {
+        try {
+          const chunkSize = 100;
+          for (let i = 0; i < newParties.length; i += chunkSize) {
+            const chunk = newParties.slice(i, i + chunkSize);
+            for (const item of chunk) {
+              await NeonService.insertPartyDirect(neonDb.connectionString!, currentTenant.id, item);
+            }
+          }
+        } catch (err) {
+          console.warn('[Neon] Background bulk sync warning:', err);
+        }
+      }, 500);
+    }
+
+    return { count: newParties.length, success: true };
   };
 
   const addParty = (partyData: Omit<Party, 'id' | 'tenantId'>): Party => {
@@ -1742,15 +1823,15 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   });
 
   useEffect(() => {
-    localStorage.setItem('erp_appointments', JSON.stringify(allAppointments));
+    safeLocalStorageSet('erp_appointments', JSON.stringify(allAppointments));
   }, [allAppointments]);
 
   useEffect(() => {
-    localStorage.setItem('erp_treatment_plans', JSON.stringify(allTreatmentPlans));
+    safeLocalStorageSet('erp_treatment_plans', JSON.stringify(allTreatmentPlans));
   }, [allTreatmentPlans]);
 
   useEffect(() => {
-    localStorage.setItem('erp_patient_follow_ups', JSON.stringify(allPatientFollowUps));
+    safeLocalStorageSet('erp_patient_follow_ups', JSON.stringify(allPatientFollowUps));
   }, [allPatientFollowUps]);
 
   const appointments = allAppointments.filter((a) => a.tenantId === tenant?.id);
@@ -5084,7 +5165,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   });
 
   useEffect(() => {
-    localStorage.setItem('erp_invoices', JSON.stringify(allInvoices));
+    safeLocalStorageSet('erp_invoices', JSON.stringify(allInvoices));
   }, [allInvoices]);
 
   const invoices = allInvoices.filter((i) => i.tenantId === tenant?.id);
@@ -8072,6 +8153,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         archiveParty,
         restoreParty,
         deleteParty,
+        importPartiesBulk,
         importPartiesFromExcel,
         importCustomersFromExcel,
         getNextCustomerSystemCode,

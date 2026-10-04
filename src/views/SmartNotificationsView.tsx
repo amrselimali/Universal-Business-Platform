@@ -67,7 +67,6 @@ export const SmartNotificationsView: React.FC<SmartNotificationsViewProps> = ({ 
     broadcastCustomNotification,
     activeBranch,
     branches,
-    roles,
     staffMembers,
     currentUser,
   } = usePlatform();

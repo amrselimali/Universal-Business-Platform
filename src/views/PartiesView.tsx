@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { usePlatform } from '../context/PlatformContext';
 import { Party } from '../types';
 import { autoTranslateArabic } from '../utils/translator';
@@ -27,6 +27,13 @@ import {
   GitBranch,
   Edit2,
   Trash2,
+  ChevronRight,
+  ChevronLeft,
+  ChevronsRight,
+  ChevronsLeft,
+  LayoutGrid,
+  Table,
+  Zap,
 } from 'lucide-react';
 import { PartyStatementModal } from '../components/PartyStatementModal';
 import { exportToCsv, shareViaWhatsApp } from '../utils/exportUtils';
@@ -138,6 +145,7 @@ export const PartiesView: React.FC = () => {
     addParty,
     updateParty,
     deleteParty,
+    importPartiesBulk,
     importCustomersFromExcel,
     language,
     tenant,
@@ -203,20 +211,39 @@ export const PartiesView: React.FC = () => {
     return currentBranchId === (branches[0]?.id || 'branch-cairo');
   });
 
-  const filteredParties = customers.filter((p) => {
-    if (activeFilter === 'WITH_BALANCE' && p.balance === 0) return false;
-    if (activeFilter === 'ZERO_BALANCE' && p.balance !== 0) return false;
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [itemsPerPage, setItemsPerPage] = useState<number>(50);
+  const [viewMode, setViewMode] = useState<'GRID' | 'TABLE'>('GRID');
 
+  // Reset page when search or filter changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, activeFilter, itemsPerPage]);
+
+  const filteredParties = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
-    const matchesSearch =
-      !q ||
-      p.name.toLowerCase().includes(q) ||
-      (p.nameEn && p.nameEn.toLowerCase().includes(q)) ||
-      p.phone.includes(q) ||
-      (p.systemCode && p.systemCode.toLowerCase().includes(q)) ||
-      (p.paperCode && p.paperCode.toLowerCase().includes(q));
-    return matchesSearch;
-  });
+    return customers.filter((p) => {
+      if (activeFilter === 'WITH_BALANCE' && p.balance === 0) return false;
+      if (activeFilter === 'ZERO_BALANCE' && p.balance !== 0) return false;
+
+      if (!q) return true;
+      return (
+        p.name.toLowerCase().includes(q) ||
+        (p.nameEn && p.nameEn.toLowerCase().includes(q)) ||
+        p.phone.includes(q) ||
+        (p.systemCode && p.systemCode.toLowerCase().includes(q)) ||
+        (p.paperCode && p.paperCode.toLowerCase().includes(q))
+      );
+    });
+  }, [customers, activeFilter, searchQuery]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredParties.length / itemsPerPage));
+  const safeCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
+
+  const paginatedParties = useMemo(() => {
+    const start = (safeCurrentPage - 1) * itemsPerPage;
+    return filteredParties.slice(start, start + itemsPerPage);
+  }, [filteredParties, safeCurrentPage, itemsPerPage]);
 
   const handleAutoTranslateName = () => {
     if (newParty.name.trim()) {
@@ -394,24 +421,24 @@ export const PartiesView: React.FC = () => {
     };
   };
 
-  const handleConfirmPartyImport = (validRows: any[]) => {
+  const handleConfirmPartyImport = async (validRows: any[]) => {
     const branchToUse = activeBranch?.id || currentBranchId;
-    validRows.forEach((row) => {
-      addParty({
-        name: row.name,
-        nameEn: row.nameEn,
-        phone: row.phone,
-        type: 'Customer',
-        branchId: branchToUse,
-        paperCode: row.paperCode || undefined,
-        nationalId: row.nationalId || undefined,
-        leadSource: row.leadSource || 'Excel Import',
-        balance: row.balance || 0,
-        creditLimit: row.creditLimit || 10000,
-        address: row.address || undefined,
-        medicalNotes: row.medicalNotes || undefined,
-      });
-    });
+    const mapped = validRows.map((row) => ({
+      name: row.name,
+      nameEn: row.nameEn,
+      phone: row.phone,
+      type: 'Customer' as const,
+      branchId: branchToUse,
+      paperCode: row.paperCode || undefined,
+      nationalId: row.nationalId || undefined,
+      leadSource: row.leadSource || 'Excel Import',
+      balance: row.balance || 0,
+      creditLimit: row.creditLimit || 10000,
+      address: row.address || undefined,
+      medicalNotes: row.medicalNotes || undefined,
+    }));
+    await importPartiesBulk(mapped);
+    setShowExcelModal(false);
   };
 
   return (
@@ -543,135 +570,417 @@ export const PartiesView: React.FC = () => {
         </div>
       </div>
 
-      {/* Grid of Parties */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-        {filteredParties.map((party) => (
-          <div
-            key={party.id}
-            className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs dark:border-slate-800 dark:bg-slate-900 space-y-3 flex flex-col justify-between"
-          >
-            <div>
-              <div className="flex items-start justify-between">
-                <div>
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className="rounded-md px-2 py-0.5 text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">
-                      {t('مريض / عميل', 'Patient / Client')}
-                    </span>
-                    {party.systemCode && (
-                      <span className="rounded-md px-1.5 py-0.5 text-[10px] font-mono font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
-                        {party.systemCode}
-                      </span>
-                    )}
-                    {(() => {
-                      const branchObj = branches.find((b) => b.id === party.branchId) || activeBranch;
-                      return branchObj ? (
-                        <span className="rounded-md px-1.5 py-0.5 text-[10px] font-semibold bg-violet-50 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300 border border-violet-200 dark:border-violet-800 inline-flex items-center gap-1">
-                          <GitBranch className="h-2.5 w-2.5" />
-                          {branchObj.name}
-                        </span>
-                      ) : null;
-                    })()}
-                  </div>
-                  <h3 className="text-sm font-extrabold text-slate-900 dark:text-white mt-1.5">{party.name}</h3>
-                  {party.nameEn && <p className="text-xs text-slate-400">{party.nameEn}</p>}
-                </div>
+      {/* Performance Bar & View Mode Switcher */}
+      <div className="flex flex-wrap items-center justify-between gap-3 px-1 text-xs">
+        <div className="flex items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 font-bold border border-emerald-200 dark:border-emerald-800 text-[11px]">
+            <Zap className="h-3.5 w-3.5 text-amber-500" />
+            <span>
+              {t(
+                `عرض ${filteredParties.length === 0 ? 0 : (safeCurrentPage - 1) * itemsPerPage + 1} - ${Math.min(
+                  safeCurrentPage * itemsPerPage,
+                  filteredParties.length
+                )} من إجمالي ${filteredParties.length} عميل`,
+                `Showing ${filteredParties.length === 0 ? 0 : (safeCurrentPage - 1) * itemsPerPage + 1} - ${Math.min(
+                  safeCurrentPage * itemsPerPage,
+                  filteredParties.length
+                )} of ${filteredParties.length} clients`
+              )}
+            </span>
+          </span>
 
-                <div className="text-end">
-                  <span className="text-[10px] text-slate-400 block">{t('الرصيد:', 'Balance:')}</span>
-                  <span
-                    className={`text-xs font-black font-mono ${
-                      party.balance > 0 ? 'text-rose-600' : party.balance < 0 ? 'text-emerald-600' : 'text-slate-500'
-                    }`}
-                  >
-                    {formatMoney(party.balance)}
-                  </span>
-                </div>
-              </div>
+          {filteredParties.length > 500 && (
+            <span className="hidden sm:inline-block text-[11px] text-slate-400 font-medium">
+              ⚡ {t('نظام تقسيم الصفحات عالي الأداء مفعل لمنع تعليق المتصفح', 'High-performance pagination active')}
+            </span>
+          )}
+        </div>
 
-              <div className="rounded-xl bg-slate-50 p-2.5 text-xs text-slate-600 dark:bg-slate-800/50 dark:text-slate-300 space-y-1 mt-3">
-                <div className="flex items-center gap-2">
-                  <Phone className="h-3.5 w-3.5 text-slate-400" />
-                  <span className="font-mono font-semibold">{party.phone}</span>
-                </div>
-
-                {party.paperCode && (
-                  <div className="flex items-center gap-2 text-[11px] text-slate-500">
-                    <Hash className="h-3.5 w-3.5 text-slate-400" />
-                    <span>{t('الكود الورقي:', 'Paper File:')} {party.paperCode}</span>
-                  </div>
-                )}
-
-                {party.medicalNotes && (
-                  <div className="flex items-center gap-2 text-[11px] text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 p-1.5 rounded-lg mt-1">
-                    <HeartPulse className="h-3.5 w-3.5 shrink-0" />
-                    <span className="truncate">{party.medicalNotes}</span>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="pt-2.5 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-1.5">
-              <div className="text-[10px] text-slate-400 truncate">
-                {party.leadSource && <span>{party.leadSource} • </span>}
-                <span>{formatMoney(party.creditLimit)} {t('ائتمان', 'limit')}</span>
-              </div>
-
-              <div className="flex items-center gap-1.5">
-                {party.phone && (
-                  <button
-                    onClick={() =>
-                      shareViaWhatsApp(
-                        party.phone,
-                        `مرحباً ${party.name}، نتواصل معكم بخصوص مواعيدكم وحسابكم في ${tenant?.name || 'المركز'}...`
-                      )
-                    }
-                    title={t('مراسلة عبر واتساب', 'Chat on WhatsApp')}
-                    className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 text-emerald-600 hover:bg-emerald-100 cursor-pointer"
-                  >
-                    <MessageCircle className="h-3.5 w-3.5" />
-                  </button>
-                )}
-
-                <button
-                  onClick={() => setSelectedPackageParty(party)}
-                  title={t('إدارة باقات وعروض واشتراكات المريض', 'Client Packages & Sessions')}
-                  className="inline-flex items-center gap-1 rounded-lg bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800/60 px-2 py-1 text-[11px] font-bold text-purple-700 dark:text-purple-300 hover:bg-purple-100 cursor-pointer"
-                >
-                  <Package className="h-3.5 w-3.5 text-purple-600" />
-                  <span>{t('الباقات', 'Packages')}</span>
-                </button>
-
-                <button
-                  onClick={() => {
-                    setStatementPartyId(party.id);
-                    setShowStatementModal(true);
-                  }}
-                  className="inline-flex items-center gap-1 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800/60 px-2.5 py-1 text-[11px] font-bold text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors cursor-pointer shrink-0"
-                >
-                  <FileText className="h-3.5 w-3.5 text-indigo-600" />
-                  <span>{t('كشف الحساب', 'Statement')}</span>
-                </button>
-
-                <button
-                  onClick={() => handleEditClick(party)}
-                  title={t('تعديل بيانات العميل', 'Edit Customer')}
-                  className="p-1 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition-colors cursor-pointer"
-                >
-                  <Edit2 className="h-3.5 w-3.5" />
-                </button>
-
-                <button
-                  onClick={() => handleDeleteParty(party.id, party.name)}
-                  title={t('حذف العميل', 'Delete Customer')}
-                  className="p-1 rounded-lg border border-rose-200 dark:border-rose-900/50 hover:bg-rose-50 dark:hover:bg-rose-950/30 text-rose-600 dark:text-rose-400 transition-colors cursor-pointer"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            </div>
+        <div className="flex items-center gap-2">
+          {/* Items Per Page */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-[11px] text-slate-400 font-bold">{t('لكل صفحة:', 'Per page:')}</span>
+            <select
+              value={itemsPerPage}
+              onChange={(e) => setItemsPerPage(Number(e.target.value))}
+              className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1 text-xs font-bold text-slate-700 dark:text-slate-300 outline-none"
+            >
+              <option value={25}>25</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+              <option value={200}>200</option>
+            </select>
           </div>
-        ))}
+
+          {/* Grid / Table Toggle */}
+          <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-0.5 rounded-xl border border-slate-200 dark:border-slate-700">
+            <button
+              onClick={() => setViewMode('GRID')}
+              title={t('عرض كروت', 'Cards View')}
+              className={`p-1.5 rounded-lg transition-all cursor-pointer ${
+                viewMode === 'GRID'
+                  ? 'bg-white dark:bg-slate-900 text-indigo-600 shadow-xs'
+                  : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-200'
+              }`}
+            >
+              <LayoutGrid className="h-4 w-4" />
+            </button>
+            <button
+              onClick={() => setViewMode('TABLE')}
+              title={t('عرض جدول سريع', 'Compact Table View')}
+              className={`p-1.5 rounded-lg transition-all cursor-pointer ${
+                viewMode === 'TABLE'
+                  ? 'bg-white dark:bg-slate-900 text-indigo-600 shadow-xs'
+                  : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-200'
+              }`}
+            >
+              <Table className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
       </div>
+
+      {/* Main Display: Grid or Table */}
+      {filteredParties.length === 0 ? (
+        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-12 text-center text-slate-400 space-y-2">
+          <Users className="h-12 w-12 mx-auto text-slate-300 dark:text-slate-600" />
+          <p className="text-sm font-bold text-slate-700 dark:text-slate-300">
+            {t('لم يتم العثور على أي عملاء يطابقون البحث أو الفلتر', 'No clients match your filter or search query')}
+          </p>
+          <p className="text-xs text-slate-400">
+            {t('تأكد من كتابة الاسم أو رقم الهاتف بشكل صحيح، أو اضغط مسح البحث', 'Check spelling or clear search filter')}
+          </p>
+        </div>
+      ) : viewMode === 'GRID' ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+          {paginatedParties.map((party) => (
+            <div
+              key={party.id}
+              className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs dark:border-slate-800 dark:bg-slate-900 space-y-3 flex flex-col justify-between"
+            >
+              <div>
+                <div className="flex items-start justify-between">
+                  <div>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="rounded-md px-2 py-0.5 text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">
+                        {t('مريض / عميل', 'Patient / Client')}
+                      </span>
+                      {party.systemCode && (
+                        <span className="rounded-md px-1.5 py-0.5 text-[10px] font-mono font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                          {party.systemCode}
+                        </span>
+                      )}
+                      {(() => {
+                        const branchObj = branches.find((b) => b.id === party.branchId) || activeBranch;
+                        return branchObj ? (
+                          <span className="rounded-md px-1.5 py-0.5 text-[10px] font-semibold bg-violet-50 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300 border border-violet-200 dark:border-violet-800 inline-flex items-center gap-1">
+                            <GitBranch className="h-2.5 w-2.5" />
+                            {branchObj.name}
+                          </span>
+                        ) : null;
+                      })()}
+                    </div>
+                    <h3 className="text-sm font-extrabold text-slate-900 dark:text-white mt-1.5">{party.name}</h3>
+                    {party.nameEn && <p className="text-xs text-slate-400">{party.nameEn}</p>}
+                  </div>
+
+                  <div className="text-end">
+                    <span className="text-[10px] text-slate-400 block">{t('الرصيد:', 'Balance:')}</span>
+                    <span
+                      className={`text-xs font-black font-mono ${
+                        party.balance > 0 ? 'text-rose-600' : party.balance < 0 ? 'text-emerald-600' : 'text-slate-500'
+                      }`}
+                    >
+                      {formatMoney(party.balance)}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="rounded-xl bg-slate-50 p-2.5 text-xs text-slate-600 dark:bg-slate-800/50 dark:text-slate-300 space-y-1 mt-3">
+                  <div className="flex items-center gap-2">
+                    <Phone className="h-3.5 w-3.5 text-slate-400" />
+                    <span className="font-mono font-semibold">{party.phone}</span>
+                  </div>
+
+                  {party.paperCode && (
+                    <div className="flex items-center gap-2 text-[11px] text-slate-500">
+                      <Hash className="h-3.5 w-3.5 text-slate-400" />
+                      <span>{t('الكود الورقي:', 'Paper File:')} {party.paperCode}</span>
+                    </div>
+                  )}
+
+                  {party.medicalNotes && (
+                    <div className="flex items-center gap-2 text-[11px] text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 p-1.5 rounded-lg mt-1">
+                      <HeartPulse className="h-3.5 w-3.5 shrink-0" />
+                      <span className="truncate">{party.medicalNotes}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="pt-2.5 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-1.5">
+                <div className="text-[10px] text-slate-400 truncate">
+                  {party.leadSource && <span>{party.leadSource} • </span>}
+                  <span>{formatMoney(party.creditLimit)} {t('ائتمان', 'limit')}</span>
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  {party.phone && (
+                    <button
+                      onClick={() =>
+                        shareViaWhatsApp(
+                          party.phone,
+                          `مرحباً ${party.name}، نتواصل معكم بخصوص مواعيدكم وحسابكم في ${tenant?.name || 'المركز'}...`
+                        )
+                      }
+                      title={t('مراسلة عبر واتساب', 'Chat on WhatsApp')}
+                      className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 text-emerald-600 hover:bg-emerald-100 cursor-pointer"
+                    >
+                      <MessageCircle className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+
+                  <button
+                    onClick={() => setSelectedPackageParty(party)}
+                    title={t('إدارة باقات وعروض واشتراكات المريض', 'Client Packages & Sessions')}
+                    className="inline-flex items-center gap-1 rounded-lg bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800/60 px-2 py-1 text-[11px] font-bold text-purple-700 dark:text-purple-300 hover:bg-purple-100 cursor-pointer"
+                  >
+                    <Package className="h-3.5 w-3.5 text-purple-600" />
+                    <span>{t('الباقات', 'Packages')}</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setStatementPartyId(party.id);
+                      setShowStatementModal(true);
+                    }}
+                    className="inline-flex items-center gap-1 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800/60 px-2.5 py-1 text-[11px] font-bold text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors cursor-pointer shrink-0"
+                  >
+                    <FileText className="h-3.5 w-3.5 text-indigo-600" />
+                    <span>{t('كشف الحساب', 'Statement')}</span>
+                  </button>
+
+                  <button
+                    onClick={() => handleEditClick(party)}
+                    title={t('تعديل بيانات العميل', 'Edit Customer')}
+                    className="p-1 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition-colors cursor-pointer"
+                  >
+                    <Edit2 className="h-3.5 w-3.5" />
+                  </button>
+
+                  <button
+                    onClick={() => handleDeleteParty(party.id, party.name)}
+                    title={t('حذف العميل', 'Delete Customer')}
+                    className="p-1 rounded-lg border border-rose-200 dark:border-rose-900/50 hover:bg-rose-50 dark:hover:bg-rose-950/30 text-rose-600 dark:text-rose-400 transition-colors cursor-pointer"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        /* Compact Table View */
+        <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs">
+          <table className="w-full text-right text-xs">
+            <thead className="bg-slate-50 dark:bg-slate-850 text-slate-600 dark:text-slate-400 font-bold border-b border-slate-200 dark:border-slate-800">
+              <tr>
+                <th className="p-3">#</th>
+                <th className="p-3">{t('كود النظام', 'Code')}</th>
+                <th className="p-3">{t('اسم العميل / المريض', 'Name')}</th>
+                <th className="p-3">{t('الموبايل', 'Phone')}</th>
+                <th className="p-3">{t('الفرع', 'Branch')}</th>
+                <th className="p-3">{t('الرصيد المالي', 'Balance')}</th>
+                <th className="p-3">{t('الكود الورقي', 'Paper Code')}</th>
+                <th className="p-3">{t('المصدر', 'Lead Source')}</th>
+                <th className="p-3 text-center">{t('الإجراءات', 'Actions')}</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+              {paginatedParties.map((party, idx) => {
+                const branchObj = branches.find((b) => b.id === party.branchId) || activeBranch;
+                return (
+                  <tr key={party.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition">
+                    <td className="p-3 text-slate-400 font-mono">
+                      {(safeCurrentPage - 1) * itemsPerPage + idx + 1}
+                    </td>
+                    <td className="p-3 font-mono font-bold text-slate-700 dark:text-slate-300">
+                      {party.systemCode || '—'}
+                    </td>
+                    <td className="p-3 font-extrabold text-slate-900 dark:text-white">
+                      <div>{party.name}</div>
+                      {party.nameEn && <div className="text-[10px] text-slate-400 font-normal">{party.nameEn}</div>}
+                    </td>
+                    <td className="p-3 font-mono text-slate-700 dark:text-slate-300">
+                      {party.phone}
+                    </td>
+                    <td className="p-3 text-slate-500">
+                      {branchObj?.name || '—'}
+                    </td>
+                    <td className="p-3 font-mono font-bold">
+                      <span
+                        className={
+                          party.balance > 0
+                            ? 'text-rose-600'
+                            : party.balance < 0
+                            ? 'text-emerald-600'
+                            : 'text-slate-400'
+                        }
+                      >
+                        {formatMoney(party.balance)}
+                      </span>
+                    </td>
+                    <td className="p-3 font-mono text-slate-500">
+                      {party.paperCode || '—'}
+                    </td>
+                    <td className="p-3 text-slate-500 text-[11px]">
+                      {party.leadSource || '—'}
+                    </td>
+                    <td className="p-3">
+                      <div className="flex items-center justify-center gap-1.5">
+                        {party.phone && (
+                          <button
+                            onClick={() => shareViaWhatsApp(party.phone, `مرحباً ${party.name}`)}
+                            title={t('واتساب', 'WhatsApp')}
+                            className="p-1 rounded-md bg-emerald-50 text-emerald-600 hover:bg-emerald-100 cursor-pointer"
+                          >
+                            <MessageCircle className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                        <button
+                          onClick={() => {
+                            setStatementPartyId(party.id);
+                            setShowStatementModal(true);
+                          }}
+                          title={t('كشف الحساب', 'Statement')}
+                          className="p-1 rounded-md bg-indigo-50 text-indigo-600 hover:bg-indigo-100 cursor-pointer"
+                        >
+                          <FileText className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleEditClick(party)}
+                          title={t('تعديل', 'Edit')}
+                          className="p-1 rounded-md bg-slate-100 text-slate-600 hover:bg-slate-200 cursor-pointer"
+                        >
+                          <Edit2 className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteParty(party.id, party.name)}
+                          title={t('حذف', 'Delete')}
+                          className="p-1 rounded-md bg-rose-50 text-rose-600 hover:bg-rose-100 cursor-pointer"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Modern Comprehensive Pagination Navigation Bar */}
+      {totalPages > 1 && (
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900 shadow-xs text-xs">
+          <div className="text-slate-500 dark:text-slate-400 font-medium">
+            {t(
+              `صفحة ${safeCurrentPage} من إجمالي ${totalPages} صفحة (${filteredParties.length} عميل)`,
+              `Page ${safeCurrentPage} of ${totalPages} (${filteredParties.length} clients)`
+            )}
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            {/* First Page */}
+            <button
+              onClick={() => setCurrentPage(1)}
+              disabled={safeCurrentPage === 1}
+              title={t('الصفحة الأولى', 'First Page')}
+              className="p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+            >
+              <ChevronsRight className="h-4 w-4" />
+            </button>
+
+            {/* Previous Page */}
+            <button
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              disabled={safeCurrentPage === 1}
+              title={t('الصفحة السابقة', 'Previous Page')}
+              className="p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+
+            {/* Page Number Pills Window */}
+            {(() => {
+              const pages: number[] = [];
+              const maxButtons = 5;
+              let startPage = Math.max(1, safeCurrentPage - 2);
+              let endPage = Math.min(totalPages, startPage + maxButtons - 1);
+              if (endPage - startPage + 1 < maxButtons) {
+                startPage = Math.max(1, endPage - maxButtons + 1);
+              }
+              for (let i = startPage; i <= endPage; i++) {
+                pages.push(i);
+              }
+
+              return pages.map((pageNum) => (
+                <button
+                  key={pageNum}
+                  onClick={() => setCurrentPage(pageNum)}
+                  className={`min-w-8 h-8 rounded-xl font-bold transition-all cursor-pointer ${
+                    safeCurrentPage === pageNum
+                      ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
+                      : 'border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
+                  }`}
+                >
+                  {pageNum}
+                </button>
+              ));
+            })()}
+
+            {/* Next Page */}
+            <button
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              disabled={safeCurrentPage === totalPages}
+              title={t('الصفحة التالية', 'Next Page')}
+              className="p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+
+            {/* Last Page */}
+            <button
+              onClick={() => setCurrentPage(totalPages)}
+              disabled={safeCurrentPage === totalPages}
+              title={t('الصفحة الأخيرة', 'Last Page')}
+              className="p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+            >
+              <ChevronsLeft className="h-4 w-4" />
+            </button>
+          </div>
+
+          {/* Quick Jump Input */}
+          <div className="flex items-center gap-2">
+            <span className="text-slate-400 text-[11px]">{t('انتقال:', 'Go to:')}</span>
+            <input
+              type="number"
+              min={1}
+              max={totalPages}
+              value={safeCurrentPage}
+              onChange={(e) => {
+                const val = Number(e.target.value);
+                if (val >= 1 && val <= totalPages) {
+                  setCurrentPage(val);
+                }
+              }}
+              className="w-16 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2 py-1 text-center font-bold text-xs outline-none focus:border-indigo-500"
+            />
+          </div>
+        </div>
+      )}
 
       {/* ADD PARTY / PATIENT MODAL */}
       {showAddModal && (
