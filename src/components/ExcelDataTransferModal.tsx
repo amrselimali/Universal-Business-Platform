@@ -37,6 +37,7 @@ export interface CellValidationError {
 export interface ExcelValidationResult<T> {
   totalRows: number;
   errors: CellValidationError[];
+  totalErrorsCount?: number;
   validRows: T[];
   warnings?: string[];
 }
@@ -50,7 +51,10 @@ interface ExcelDataTransferModalProps<T> {
   columns: ExcelColumnConfig[];
   currentDataForExport: any[];
   exportFileNamePrefix: string;
-  validator: (rawRows: any[]) => ExcelValidationResult<T>;
+  validator: (
+    rawRows: any[],
+    onProgress?: (current: number, total: number, msg: string) => void
+  ) => ExcelValidationResult<T> | Promise<ExcelValidationResult<T>>;
   onConfirmImport: (validRows: T[]) => Promise<boolean | void> | boolean | void;
   branchName?: string;
   extraExportColumns?: { [key: string]: (item: any) => any };
@@ -73,6 +77,8 @@ export function ExcelDataTransferModal<T>({
   const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
   const [validationResult, setValidationResult] = useState<ExcelValidationResult<T> | null>(null);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
+  const [progressMsg, setProgressMsg] = useState<string>('جاري قراءة وتحليل ملف الإكسيل...');
+  const [progressPercent, setProgressPercent] = useState<number>(0);
   const [isConfirming, setIsConfirming] = useState<boolean>(false);
   const [importSuccessMessage, setImportSuccessMessage] = useState<string | null>(null);
 
@@ -155,33 +161,60 @@ export function ExcelDataTransferModal<T>({
 
     setSelectedFileName(file.name);
     setIsProcessing(true);
+    setProgressPercent(10);
+    setProgressMsg('جاري قراءة واستخراج أوراق العمل من الملف...');
     setValidationResult(null);
     setImportSuccessMessage(null);
 
     const reader = new FileReader();
     reader.onload = (evt) => {
-      try {
-        const bstr = evt.target?.result;
-        const wb = XLSX.read(bstr, { type: 'binary', cellDates: true });
-        const sheetName = wb.SheetNames[0];
-        const ws = wb.Sheets[sheetName];
-        const rawJson: any[] = XLSX.utils.sheet_to_json(ws, { defval: '' });
+      // Yield to let React paint the modal and progress UI immediately
+      setTimeout(async () => {
+        try {
+          setProgressPercent(20);
+          setProgressMsg('جاري قراءة وفك تشفير ملف الإكسيل...');
+          await new Promise((resolve) => setTimeout(resolve, 0));
 
-        // Filter out instruction guide rows if user kept them
-        const cleanedRows = rawJson.filter((r) => {
-          const firstVal = String(Object.values(r)[0] || '');
-          return !firstVal.startsWith('[إلزامي') && !firstVal.startsWith('[اختياري') && !firstVal.includes('قواعد التحقق');
-        });
+          const buffer = evt.target?.result as ArrayBuffer;
+          const wb = XLSX.read(buffer, { type: 'array', cellDates: true });
+          const sheetName = wb.SheetNames[0];
+          const ws = wb.Sheets[sheetName];
+          const rawJson: any[] = XLSX.utils.sheet_to_json(ws, { defval: '', raw: false, dateNF: 'yyyy-mm-dd' });
 
-        const testResult = validator(cleanedRows);
-        setValidationResult(testResult);
-      } catch (err: any) {
-        alert('فشل في قراءة ملف الإكسل: ' + err.message);
-      } finally {
-        setIsProcessing(false);
-      }
+          // Filter out instruction guide rows AND empty blank rows
+          const cleanedRows = rawJson.filter((r) => {
+            const values = Object.values(r);
+            if (values.length === 0) return false;
+            const firstVal = String(values[0] || '').trim();
+            if (firstVal.startsWith('[إلزامي') || firstVal.startsWith('[اختياري') || firstVal.includes('قواعد التحقق')) {
+              return false;
+            }
+            // Ignore completely blank rows (e.g. empty rows at end of Excel sheet)
+            return values.some((v) => v !== null && v !== undefined && String(v).trim() !== '');
+          });
+
+          setProgressPercent(40);
+          setProgressMsg(`تم استخراج ${cleanedRows.length.toLocaleString('ar-EG')} صف بياني نشط. جاري فحص ومطابقة البيانات...`);
+          await new Promise((resolve) => setTimeout(resolve, 0));
+
+          const onProg = (current: number, total: number, msg: string) => {
+            const pct = Math.min(98, 40 + Math.round((current / (total || 1)) * 58));
+            setProgressPercent(pct);
+            setProgressMsg(msg);
+          };
+
+          const testResult = await Promise.resolve(validator(cleanedRows, onProg));
+          setProgressPercent(100);
+          setProgressMsg('اكتملت المطابقة والفحص بنجاح!');
+          setValidationResult(testResult);
+        } catch (err: any) {
+          alert('فشل في قراءة ملف الإكسل: ' + err.message);
+        } finally {
+          setIsProcessing(false);
+        }
+      }, 60);
     };
-    reader.readAsBinaryString(file);
+    reader.readAsArrayBuffer(file);
   };
 
   // 4. Confirm Import
@@ -343,13 +376,24 @@ export function ExcelDataTransferModal<T>({
                 </div>
               )}
 
-              {/* Processing Spinner */}
+              {/* Processing Progress Bar & Spinner */}
               {isProcessing && (
-                <div className="p-8 text-center space-y-3">
+                <div className="p-8 text-center space-y-4 bg-slate-50/50 dark:bg-slate-800/40 rounded-2xl border border-slate-200 dark:border-slate-700">
                   <RefreshCw className="w-8 h-8 text-emerald-600 animate-spin mx-auto" />
-                  <p className="text-xs font-bold text-slate-600 dark:text-slate-300">
-                    جاري مطابقة خلايا الإكسيل مع قواعد بيانات السيستم والتحقق من التوافق...
-                  </p>
+                  <div className="space-y-1.5">
+                    <p className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                      {progressMsg}
+                    </p>
+                    <div className="w-full max-w-md mx-auto bg-slate-200 dark:bg-slate-700 rounded-full h-2.5 overflow-hidden">
+                      <div
+                        className="bg-emerald-600 h-2.5 rounded-full transition-all duration-200 ease-out"
+                        style={{ width: `${progressPercent}%` }}
+                      />
+                    </div>
+                    <p className="text-[11px] font-mono text-emerald-600 font-bold">
+                      {progressPercent}%
+                    </p>
+                  </div>
                 </div>
               )}
 
@@ -367,55 +411,67 @@ export function ExcelDataTransferModal<T>({
                   {/* Case 1: ERRORS FOUND */}
                   {validationResult.errors.length > 0 ? (
                     <div className="space-y-3">
-                      <div className="p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-800 text-rose-800 dark:text-rose-200 space-y-1">
-                        <div className="flex items-center gap-2 font-black text-sm">
-                          <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0" />
-                          <span>
-                            تم فحص الملف واكتشاف ({validationResult.errors.length}) خطأ في خلايا البيانات!
-                          </span>
-                        </div>
-                        <p className="text-xs text-rose-700 dark:text-rose-300">
-                          يرجى تصحيح الخلايا الموضحة بالجدول أدناه في ملف الإكسيل وإعادة رفعه، لضمان سلامة قاعدة البيانات وعدم حدوث تداخلات أو خلل في الترحيل.
-                        </p>
-                      </div>
+                      {(() => {
+                        const displayErrorCount = validationResult.totalErrorsCount ?? validationResult.errors.length;
+                        return (
+                          <>
+                            <div className="p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-800 text-rose-800 dark:text-rose-200 space-y-1">
+                              <div className="flex items-center gap-2 font-black text-sm">
+                                <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0" />
+                                <span>
+                                  تم فحص الملف واكتشاف ({displayErrorCount.toLocaleString('ar-EG')}) خطأ في خلايا البيانات!
+                                </span>
+                              </div>
+                              <p className="text-xs text-rose-700 dark:text-rose-300">
+                                يرجى تصحيح الخلايا الموضحة بالجدول أدناه في ملف الإكسيل وإعادة رفعه، لضمان سلامة قاعدة البيانات وعدم حدوث تداخلات أو خلل في الترحيل.
+                              </p>
+                            </div>
 
-                      {/* Error Table */}
-                      <div className="rounded-2xl border border-rose-200 dark:border-rose-900/60 overflow-hidden shadow-xs">
-                        <div className="bg-rose-100/70 dark:bg-rose-950/60 px-4 py-2.5 font-bold text-xs text-rose-900 dark:text-rose-200 flex items-center justify-between">
-                          <span>جدول تفصيل الخلايا غير المتوافقة وسبب عدم التوافق:</span>
-                          <span className="font-mono text-[11px]">{validationResult.errors.length} خلية معيبة</span>
-                        </div>
-                        <div className="max-h-60 overflow-y-auto">
-                          <table className="w-full text-right text-xs">
-                            <thead className="bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 sticky top-0 border-b border-slate-200 dark:border-slate-700">
-                              <tr>
-                                <th className="p-2.5 font-bold">رقم الصف بالإكسيل</th>
-                                <th className="p-2.5 font-bold">اسم الحقل / العمود</th>
-                                <th className="p-2.5 font-bold">القيمة الحالية بالخلية</th>
-                                <th className="p-2.5 font-bold text-rose-600">سبب عدم التوافق للتصحيح</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-medium">
-                              {validationResult.errors.map((err, idx) => (
-                                <tr key={idx} className="hover:bg-rose-50/40 dark:hover:bg-rose-950/20">
-                                  <td className="p-2.5 font-mono font-bold text-slate-800 dark:text-white">
-                                    صف #{err.rowNumber}
-                                  </td>
-                                  <td className="p-2.5 font-bold text-slate-700 dark:text-slate-200">
-                                    {err.columnLabelAr}
-                                  </td>
-                                  <td className="p-2.5 font-mono text-slate-500 bg-slate-50/50 dark:bg-slate-800/40 rounded">
-                                    {String(err.enteredValue || '«فارغ»')}
-                                  </td>
-                                  <td className="p-2.5 text-rose-600 dark:text-rose-400 font-bold">
-                                    {err.reasonAr}
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
+                            {/* Error Table */}
+                            <div className="rounded-2xl border border-rose-200 dark:border-rose-900/60 overflow-hidden shadow-xs">
+                              <div className="bg-rose-100/70 dark:bg-rose-950/60 px-4 py-2.5 font-bold text-xs text-rose-900 dark:text-rose-200 flex items-center justify-between">
+                                <span>جدول تفصيل الخلايا غير المتوافقة وسبب عدم التوافق:</span>
+                                <span className="font-mono text-[11px]">{displayErrorCount.toLocaleString('ar-EG')} خلية معيبة</span>
+                              </div>
+                              <div className="max-h-60 overflow-y-auto">
+                                <table className="w-full text-right text-xs">
+                                  <thead className="bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 sticky top-0 border-b border-slate-200 dark:border-slate-700">
+                                    <tr>
+                                      <th className="p-2.5 font-bold">رقم الصف بالإكسيل</th>
+                                      <th className="p-2.5 font-bold">اسم الحقل / العمود</th>
+                                      <th className="p-2.5 font-bold">القيمة الحالية بالخلية</th>
+                                      <th className="p-2.5 font-bold text-rose-600">سبب عدم التوافق للتصحيح</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-medium">
+                                    {validationResult.errors.slice(0, 100).map((err, idx) => (
+                                      <tr key={idx} className="hover:bg-rose-50/40 dark:hover:bg-rose-950/20">
+                                        <td className="p-2.5 font-mono font-bold text-slate-800 dark:text-white">
+                                          صف #{err.rowNumber}
+                                        </td>
+                                        <td className="p-2.5 font-bold text-slate-700 dark:text-slate-200">
+                                          {err.columnLabelAr}
+                                        </td>
+                                        <td className="p-2.5 font-mono text-slate-500 bg-slate-50/50 dark:bg-slate-800/40 rounded">
+                                          {String(err.enteredValue || '«فارغ»')}
+                                        </td>
+                                        <td className="p-2.5 text-rose-600 dark:text-rose-400 font-bold">
+                                          {err.reasonAr}
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                                {displayErrorCount > 100 && (
+                                  <div className="p-2.5 text-center text-xs font-bold text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/40 border-t border-rose-200 dark:border-rose-900">
+                                    يتم عرض أول {Math.min(100, validationResult.errors.length)} خطأ لتسريع الواجهة بسلاسة من إجمالي ({displayErrorCount.toLocaleString('ar-EG')}) خطأ مكتشف في الملف.
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </>
+                        );
+                      })()}
 
                       <div className="flex justify-end gap-2 pt-2">
                         <button

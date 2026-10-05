@@ -3,13 +3,126 @@
 import { Appointment } from '../types';
 
 /**
- * Parses any time string (12-hour or 24-hour) into minutes from midnight (0 to 1439).
- * Supports: "14:30", "02:30 PM", "10:00 AM", "10:00", "02:30 م", "10:00 ص"
+ * Universally normalizes any date input from Excel / user into a clean ISO string "YYYY-MM-DD".
+ * Handles:
+ * 1. JavaScript Date objects (e.g. from XLSX cellDates: true)
+ * 2. Excel numeric serial dates (e.g. 44298 -> "2021-04-12")
+ * 3. Text in "YYYY-MM-DD", "YYYY/MM/DD", "YYYY.MM.DD"
+ * 4. Text in "DD-MM-YYYY", "DD/MM/YYYY", "DD.MM.YYYY"
+ * 5. ISO strings like "2021-04-12T00:00:00.000Z"
+ * 6. Date strings like "Mon Apr 12 2021 ..."
+ * 7. Eastern Arabic numerals (٠-٩)
+ * 8. Hidden unicode directional marks (\u200E, \u200F, \uFEFF)
  */
-export const parseTimeToMinutes = (timeStr?: string | null): number | null => {
-  if (!timeStr) return null;
-  const clean = String(timeStr).trim();
+export const parseExcelDate = (val: any): string | null => {
+  if (val === null || val === undefined || val === '') return null;
+
+  // 1. If it's already a Date instance
+  if (val instanceof Date) {
+    if (isNaN(val.getTime())) return null;
+    const y = val.getFullYear();
+    const m = String(val.getMonth() + 1).padStart(2, '0');
+    const d = String(val.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  // 2. If it's a number (Excel serial date, e.g. 46300 -> 2026-10-05, with or without time decimals)
+  if (typeof val === 'number') {
+    if (isNaN(val) || val <= 0) return null;
+    // Excel epoch: Dec 30, 1899
+    const utcDays = Math.floor(val - 25569);
+    const dateObj = new Date(utcDays * 86400 * 1000);
+    if (isNaN(dateObj.getTime())) return null;
+    const y = dateObj.getUTCFullYear();
+    const m = String(dateObj.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(dateObj.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  let str = String(val);
+
+  // 3. Normalize Eastern Arabic numerals: ٠-٩ -> 0-9
+  str = str.replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d).toString());
+
+  // 4. Strip hidden unicode formatting characters, quotes, and trim
+  str = str
+    .replace(/[\u200B-\u200D\uFEFF\u200E\u200F]/g, '')
+    .replace(/^['"`]+|['"`]+$/g, '')
+    .trim();
+  if (!str) return null;
+
+  // 5. If it's a numeric string like "46300" or "46300.41666"
+  if (/^\d{4,6}(\.\d+)?$/.test(str)) {
+    const num = parseFloat(str);
+    const utcDays = Math.floor(num - 25569);
+    const dateObj = new Date(utcDays * 86400 * 1000);
+    if (!isNaN(dateObj.getTime())) {
+      const y = dateObj.getUTCFullYear();
+      const m = String(dateObj.getUTCMonth() + 1).padStart(2, '0');
+      const d = String(dateObj.getUTCDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    }
+  }
+
+  // 6. Direct Regex Match for YYYY-MM-DD or YYYY/MM/DD or YYYY.MM.DD (at beginning of string)
+  const ymdMatch = str.match(/(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+  if (ymdMatch) {
+    const y = parseInt(ymdMatch[1], 10);
+    const m = parseInt(ymdMatch[2], 10);
+    const d = parseInt(ymdMatch[3], 10);
+    if (y >= 1900 && y <= 2100 && m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+      return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    }
+  }
+
+  // 7. Regex Match for DD-MM-YYYY or DD/MM/YYYY or DD.MM.YYYY
+  const dmyMatch = str.match(/(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})/);
+  if (dmyMatch) {
+    const d = parseInt(dmyMatch[1], 10);
+    const m = parseInt(dmyMatch[2], 10);
+    const y = parseInt(dmyMatch[3], 10);
+    if (y >= 1900 && y <= 2100 && m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+      return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    }
+  }
+
+  // 8. Try Date.parse fallback (e.g. "Mon Oct 05 2026 ...")
+  const parsed = new Date(str);
+  if (!isNaN(parsed.getTime()) && parsed.getFullYear() >= 1900 && parsed.getFullYear() <= 2100) {
+    const y = parsed.getFullYear();
+    const m = String(parsed.getMonth() + 1).padStart(2, '0');
+    const d = String(parsed.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  return null;
+};
+
+/**
+ * Parses any time string (12-hour or 24-hour) or Excel fractional number into minutes from midnight (0 to 1439).
+ * Supports: "14:30", "02:30 PM", "10:00 AM", "10:00", "02:30 م", "10:00 ص", 0.4166667
+ */
+export const parseTimeToMinutes = (timeVal?: any): number | null => {
+  if (timeVal === null || timeVal === undefined || timeVal === '') return null;
+
+  // If number between 0 and 1 (Excel fractional time)
+  if (typeof timeVal === 'number' && timeVal >= 0 && timeVal < 1) {
+    return Math.round(timeVal * 1440) % 1440;
+  }
+
+  let clean = String(timeVal)
+    .replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d).toString())
+    .replace(/[\u200B-\u200D\uFEFF\u200E\u200F]/g, '')
+    .trim();
   if (!clean) return null;
+
+  // Decimal string e.g. "0.4166667"
+  if (/^0\.\d+$/.test(clean)) {
+    const num = parseFloat(clean);
+    if (!isNaN(num) && num >= 0 && num < 1) {
+      return Math.round(num * 1440) % 1440;
+    }
+  }
 
   // 12-hour format e.g. "02:30 PM", "10:00 AM", "2:30pm", "02:30 م", "10:00 ص"
   const match12 = clean.match(/^(\d{1,2}):(\d{2})\s*(AM|PM|am|pm|ص|م)$/i);

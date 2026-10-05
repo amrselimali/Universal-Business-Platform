@@ -530,6 +530,7 @@ export interface Appointment {
   startTime?: string; // وقت بداية الجلسة (من)
   endTime?: string; // وقت نهاية الجلسة (إلى)
   customerCode?: string; // كود العميل للربط مع كشف الحساب والتقارير
+  paperCode?: string; // كود الملف الورقي للعميل
   status: 'Scheduled' | 'Confirmed' | 'Completed' | 'Cancelled' | 'Attended' | 'NotAttended';
   notAttendedReason?: string; // سبب عدم الحضور
   cancellationReason?: string;
@@ -549,6 +550,7 @@ export interface PatientFollowUp {
   patientPhone: string;
   systemCode?: string;
   customerCode?: string; // كود العميل للربط بالسجل والتقارير
+  paperCode?: string; // كود الملف الورقي للعميل
   followUpDate: string; // تاريخ المتابعة
   followUpTime?: string; // وقت المتابعة والتذكير
   notes?: string; // الملاحظة المسجلة وقت المتابعة

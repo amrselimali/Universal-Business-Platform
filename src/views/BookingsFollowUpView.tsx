@@ -53,6 +53,7 @@ import {
   ExcelValidationResult,
 } from '../components/ExcelDataTransferModal';
 import {
+  parseExcelDate,
   parseTimeToMinutes,
   formatMinutesTo24h,
   formatMinutesTo12h,
@@ -63,13 +64,22 @@ import {
 
 const bookingsExcelColumns: ExcelColumnConfig[] = [
   {
+    key: 'paperCode',
+    labelAr: 'الكود الورقي',
+    labelEn: 'Paper File Code',
+    required: false,
+    type: 'text',
+    sampleValue: 'MED-1042',
+    instructions: 'كود الملف الورقي للعميل. من خلاله يتم البحث آلياً في قاعدة بيانات العملاء وربط كود العميل على السيستم تلقائياً، وسيتم إصدار خطأ فوري إذا كان الكود الورقي غير مسجل بداتا العملاء.',
+  },
+  {
     key: 'customerCode',
-    labelAr: 'كود العميل',
-    labelEn: 'Customer Code',
+    labelAr: 'كود العميل (السيستم)',
+    labelEn: 'System Customer Code',
     required: false,
     type: 'text',
     sampleValue: 'CUST-1001',
-    instructions: 'كود العميل المسجل في النظام للربط المباشر مع ملف المريض والتقارير وسجل الحسابات (موصى به)',
+    instructions: 'كود العميل الرقمي المسجل في النظام للربط المباشر مع ملف المريض والتقارير وسجل الحسابات (اختياري في حال استخدام الكود الورقي)',
   },
   {
     key: 'patientName',
@@ -174,13 +184,22 @@ const bookingsExcelColumns: ExcelColumnConfig[] = [
 
 const followUpsExcelColumns: ExcelColumnConfig[] = [
   {
+    key: 'paperCode',
+    labelAr: 'الكود الورقي',
+    labelEn: 'Paper File Code',
+    required: false,
+    type: 'text',
+    sampleValue: 'MED-1042',
+    instructions: 'كود الملف الورقي للعميل. من خلاله يتم البحث آلياً في قاعدة بيانات العملاء وربط كود العميل على السيستم تلقائياً، وسيتم إصدار خطأ فوري إذا كان الكود الورقي غير مسجل بداتا العملاء.',
+  },
+  {
     key: 'customerCode',
-    labelAr: 'كود العميل',
-    labelEn: 'Customer Code',
+    labelAr: 'كود العميل (السيستم)',
+    labelEn: 'System Customer Code',
     required: false,
     type: 'text',
     sampleValue: 'CUST-1001',
-    instructions: 'كود العميل المسجل في النظام للربط المباشر مع ملف وسجل المريض (اختياري / موصى به)',
+    instructions: 'كود العميل الرقمي المسجل في النظام للربط المباشر مع ملف وسجل المريض (اختياري في حال استخدام الكود الورقي)',
   },
   {
     key: 'patientName',
@@ -1225,277 +1244,440 @@ export const BookingsFollowUpView: React.FC = () => {
     }
   };
 
-  // Validator for Bookings Excel with Overlap Check & Customer Code
-  const validateBookingRows = (rawRows: any[]): ExcelValidationResult<any> => {
+  // High-Performance O(N) Validator for Bookings Excel with Paper Code Verification & Ultra-Fast Processing
+  const validateBookingRows = async (
+    rawRows: any[],
+    onProgress?: (current: number, total: number, msg: string) => void
+  ): Promise<ExcelValidationResult<any>> => {
     const errors: CellValidationError[] = [];
     const validRows: any[] = [];
+    const totalCount = rawRows.length;
+    const MAX_RECORDED_ERRORS = 200;
+    let totalErrorsCount = 0;
 
-    rawRows.forEach((row, index) => {
-      const rowNum = index + 2;
+    // 1. Pre-index existing customers in HashMaps for instant O(1) lookups
+    const partiesByPaperCode = new Map<string, Party>();
+    const partiesBySystemCode = new Map<string, Party>();
+    const partiesByPhone = new Map<string, Party>();
+    const partiesByName = new Map<string, Party>();
 
-      const customerCode = String(row['كود العميل'] || row['كود المريض'] || row['Customer Code'] || row['Code'] || '').trim();
-      const patientName = String(row['اسم العميل / المريض'] || row['اسم المريض'] || row['الاسم'] || row['Patient Name'] || '').trim();
-      const patientPhone = String(row['رقم الهاتف'] || row['الموبايل'] || row['الهاتف'] || row['Phone Number'] || row['Phone'] || '').trim();
-      const rawDate = String(row['تاريخ الحجز'] || row['التاريخ'] || row['Booking Date'] || row['Date'] || '').trim();
-      const doctorName = String(row['الطبيب المعالج / الأخصائي'] || row['الطبيب / الأخصائي'] || row['الطبيب'] || row['Doctor'] || row['Doctor / Specialist'] || '').trim();
-
-      // Extract Start and End times
-      let startTime = String(row['وقت بدء الجلسة (من)'] || row['وقت البدء'] || row['من'] || row['Start Time'] || row['Start Time (From)'] || '').trim();
-      let endTime = String(row['وقت انتهاء الجلسة (إلى)'] || row['وقت الانتهاء'] || row['إلى'] || row['End Time'] || row['End Time (To)'] || '').trim();
-      const rawTime = String(row['وقت الحجز'] || row['الوقت'] || row['Booking Time'] || row['Time'] || '').trim();
-
-      if (!startTime && rawTime) {
-        if (rawTime.includes(' - ')) {
-          const parts = rawTime.split(' - ');
-          startTime = parts[0].trim();
-          endTime = parts[1].trim();
-        } else {
-          startTime = rawTime;
-          const sM = parseTimeToMinutes(rawTime);
-          if (sM !== null) endTime = formatMinutesTo24h(sM + 45);
-        }
+    parties.forEach((p) => {
+      if (p.paperCode) partiesByPaperCode.set(p.paperCode.trim().toLowerCase(), p);
+      if (p.systemCode) partiesBySystemCode.set(p.systemCode.trim().toLowerCase(), p);
+      if (p.id) partiesBySystemCode.set(p.id.trim().toLowerCase(), p);
+      if (p.phone) {
+        const clean = p.phone.replace(/[^0-9]/g, '');
+        if (clean) partiesByPhone.set(clean, p);
       }
+      if (p.name) partiesByName.set(p.name.trim().toLowerCase(), p);
+    });
 
-      if (!startTime) startTime = '10:00';
-      if (!endTime) {
-        const sM = parseTimeToMinutes(startTime);
-        endTime = sM !== null ? formatMinutesTo24h(sM + 45) : '10:45';
+    // 2. Pre-index existing system appointments by `${date}__${doctorName}`
+    const sysAppointmentsMap = new Map<string, Array<{ startMin: number; endMin: number; patientName: string; aptId: string }>>();
+    appointments.forEach((apt) => {
+      if (apt.status === 'Cancelled') return;
+      if (!apt.date || !apt.doctorName) return;
+      const { startMin, endMin } = getAppointmentTimeRange(apt);
+      if (startMin === null || endMin === null) return;
+      const key = `${apt.date}__${apt.doctorName.trim().toLowerCase()}`;
+      let list = sysAppointmentsMap.get(key);
+      if (!list) {
+        list = [];
+        sysAppointmentsMap.set(key, list);
       }
+      list.push({ startMin, endMin, patientName: apt.patientName, aptId: apt.id });
+    });
 
-      const serviceNameAr = String(row['الخدمة / الجلسة'] || row['الخدمة'] || row['اسم الخدمة'] || row['Service Name'] || '').trim();
-      const rawPrice = row['سعر الخدمة'] !== undefined && row['سعر الخدمة'] !== '' ? row['سعر الخدمة'] : (row['Price'] || 0);
-      const rawDeposit = row['العربون أو المدفوع'] !== undefined && row['العربون أو المدفوع'] !== '' ? row['العربون أو المدفوع'] : (row['Deposit Paid'] || 0);
-      const status = String(row['حالة الحجز'] || row['الحالة'] || row['Status'] || 'Confirmed').trim();
-      const notes = String(row['ملاحظات الحجز'] || row['ملاحظات'] || row['Notes'] || '').trim();
+    // 3. Map to track sessions within the file for duplicate/overlap detection
+    const fileSessionsMap = new Map<string, Array<{ startMin: number; endMin: number; patientName: string; rowNum: number; startTime: string; endTime: string }>>();
 
-      // Validate patient name
-      if (!patientName || patientName.length < 2) {
-        errors.push({
-          rowNumber: rowNum,
-          columnKey: 'patientName',
-          columnLabelAr: 'اسم العميل / المريض',
-          enteredValue: patientName,
-          reasonAr: 'اسم العميل أو المريض حقل إلزامي لا يمكن تركه فارغاً',
-        });
+    // 4. Process in chunks to maintain UI responsiveness and update progress
+    const CHUNK_SIZE = 5000;
+    for (let i = 0; i < totalCount; i += CHUNK_SIZE) {
+      const sliceEnd = Math.min(i + CHUNK_SIZE, totalCount);
+
+      if (onProgress) {
+        onProgress(i, totalCount, `جاري مطابقة وفحص صفوف الحجوزات: ${i.toLocaleString('ar-EG')} من ${totalCount.toLocaleString('ar-EG')}...`);
       }
+      await new Promise((resolve) => setTimeout(resolve, 0));
 
-      // Validate phone
-      const cleanPhone = patientPhone.replace(/[^0-9+]/g, '');
-      if (!patientPhone) {
-        errors.push({
-          rowNumber: rowNum,
-          columnKey: 'patientPhone',
-          columnLabelAr: 'رقم الهاتف',
-          enteredValue: patientPhone,
-          reasonAr: 'رقم هاتف العميل حقل إلزامي لتأكيد الحجز والتواصل',
-        });
-      } else if (cleanPhone.length < 7) {
-        errors.push({
-          rowNumber: rowNum,
-          columnKey: 'patientPhone',
-          columnLabelAr: 'رقم الهاتف',
-          enteredValue: patientPhone,
-          reasonAr: 'رقم الهاتف غير صالح، يجب أن يحتوي على أرقام ولا يقل عن 7 أرقام',
-        });
-      }
+      for (let index = i; index < sliceEnd; index++) {
+        const row = rawRows[index];
+        const rowNum = index + 2;
 
-      // Validate Date
-      let cleanDate = rawDate;
-      if (rawDate.includes('T')) cleanDate = rawDate.split('T')[0];
-      const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
-      if (!cleanDate || !dateRegex.test(cleanDate)) {
-        errors.push({
-          rowNumber: rowNum,
-          columnKey: 'date',
-          columnLabelAr: 'تاريخ الحجز',
-          enteredValue: rawDate,
-          reasonAr: 'تاريخ الحجز غير صحيح، يجب أن يكون بصيغة YYYY-MM-DD (مثال: 2026-10-05)',
-        });
-      }
+        const paperCode = String(
+          row['الكود الورقي'] ??
+          row['كود الملف الورقي'] ??
+          row['الكود الورقي للعميل'] ??
+          row['كود الورقي'] ??
+          row['Paper Code'] ??
+          row['PaperCode'] ??
+          ''
+        ).trim();
 
-      // Validate Doctor
-      if (!doctorName) {
-        errors.push({
-          rowNumber: rowNum,
-          columnKey: 'doctorName',
-          columnLabelAr: 'الطبيب المعالج / الأخصائي',
-          enteredValue: doctorName,
-          reasonAr: 'اسم الطبيب المعالج إلزامي للتحقق من عدم تداخل الجلسات',
-        });
-      }
+        const customerCode = String(
+          row['كود العميل (السيستم)'] ??
+          row['كود العميل'] ??
+          row['كود المريض'] ??
+          row['Customer Code'] ??
+          row['System Code'] ??
+          row['Code'] ??
+          ''
+        ).trim();
 
-      // Validate Start and End Time
-      const startMin = parseTimeToMinutes(startTime);
-      const endMin = parseTimeToMinutes(endTime);
+        let patientName = String(
+          row['اسم العميل / المريض'] ??
+          row['اسم المريض'] ??
+          row['الاسم'] ??
+          row['Patient Name'] ??
+          ''
+        ).trim();
 
-      if (startMin === null) {
-        errors.push({
-          rowNumber: rowNum,
-          columnKey: 'startTime',
-          columnLabelAr: 'وقت بدء الجلسة (من)',
-          enteredValue: startTime,
-          reasonAr: 'صيغة وقت بدء الجلسة غير صحيحة (مثال: 10:00 أو 10:00 AM)',
-        });
-      }
+        let patientPhone = String(
+          row['رقم الهاتف'] ??
+          row['الموبايل'] ??
+          row['الهاتف'] ??
+          row['Phone Number'] ??
+          row['Phone'] ??
+          ''
+        ).trim();
 
-      if (endMin === null) {
-        errors.push({
-          rowNumber: rowNum,
-          columnKey: 'endTime',
-          columnLabelAr: 'وقت انتهاء الجلسة (إلى)',
-          enteredValue: endTime,
-          reasonAr: 'صيغة وقت انتهاء الجلسة غير صحيحة (مثال: 10:45 أو 10:45 AM)',
-        });
-      }
+        const rawDateVal =
+          row['تاريخ الحجز'] ??
+          row['التاريخ'] ??
+          row['تاريخ الموعد'] ??
+          row['تاريخ الجلسة'] ??
+          row['موعد الحجز'] ??
+          row['Booking Date'] ??
+          row['Date'] ??
+          row['Appointment Date'] ??
+          '';
 
-      if (startMin !== null && endMin !== null && endMin <= startMin) {
-        errors.push({
-          rowNumber: rowNum,
-          columnKey: 'endTime',
-          columnLabelAr: 'وقت انتهاء الجلسة (إلى)',
-          enteredValue: `${startTime} - ${endTime}`,
-          reasonAr: 'وقت نهاية الجلسة (إلى) يجب أن يكون بعد وقت بدايتها (من)',
-        });
-      }
+        const doctorName = String(
+          row['الطبيب المعالج / الأخصائي'] ??
+          row['الطبيب / الأخصائي'] ??
+          row['الطبيب'] ??
+          row['Doctor'] ??
+          row['Doctor / Specialist'] ??
+          ''
+        ).trim();
 
-      // Check Session Overlap for Same Doctor on Same Date within Excel file
-      if (startMin !== null && endMin !== null && doctorName && cleanDate) {
-        const fileConflict = validRows.find(
-          (vr) =>
-            vr.date === cleanDate &&
-            vr.doctorName.toLowerCase() === doctorName.toLowerCase() &&
-            vr.startMin < endMin &&
-            startMin < vr.endMin
-        );
+        // Extract Start and End times with full support for formats and Excel times
+        const rawStartVal = row['وقت بدء الجلسة (من)'] ?? row['وقت البدء'] ?? row['من'] ?? row['Start Time'] ?? row['Start Time (From)'] ?? '';
+        const rawEndVal = row['وقت انتهاء الجلسة (إلى)'] ?? row['وقت الانتهاء'] ?? row['إلى'] ?? row['End Time'] ?? row['End Time (To)'] ?? '';
+        const rawTimeVal = row['وقت الحجز'] ?? row['الوقت'] ?? row['Booking Time'] ?? row['Time'] ?? '';
 
-        if (fileConflict) {
-          errors.push({
-            rowNumber: rowNum,
-            columnKey: 'startTime',
-            columnLabelAr: 'وقت بدء الجلسة (من)',
-            enteredValue: `${startTime} - ${endTime}`,
-            reasonAr: `تعارض جلسات داخل الملف: الطبيب (${doctorName}) لديه حجز في نفس اليوم مع (${fileConflict.patientName}) في نفس التوقيت (${fileConflict.startTime} - ${fileConflict.endTime}).`,
-          });
+        let startMin = parseTimeToMinutes(rawStartVal);
+        let endMin = parseTimeToMinutes(rawEndVal);
+
+        if (startMin === null && rawTimeVal) {
+          const rawTimeStr = String(rawTimeVal).trim();
+          if (rawTimeStr.includes(' - ')) {
+            const parts = rawTimeStr.split(' - ');
+            startMin = parseTimeToMinutes(parts[0]);
+            endMin = parseTimeToMinutes(parts[1]);
+          } else {
+            startMin = parseTimeToMinutes(rawTimeStr);
+            if (startMin !== null && endMin === null) {
+              endMin = (startMin + 45) % 1440;
+            }
+          }
         }
 
-        // Check Session Overlap with existing system appointments
-        const sysConflict = checkDoctorAppointmentConflict(
-          cleanDate,
-          undefined,
-          doctorName,
+        if (startMin === null) {
+          startMin = 600; // Default: 10:00 AM
+        }
+        if (endMin === null) {
+          endMin = (startMin + 45) % 1440;
+        }
+
+        const startTime = formatMinutesTo24h(startMin);
+        const endTime = formatMinutesTo24h(endMin);
+
+        const serviceNameAr = String(row['الخدمة / الجلسة'] ?? row['الخدمة'] ?? row['اسم الخدمة'] ?? row['Service Name'] ?? '').trim();
+        const rawPrice = row['سعر الخدمة'] !== undefined && row['سعر الخدمة'] !== '' ? row['سعر الخدمة'] : (row['Price'] || 0);
+        const rawDeposit = row['العربون أو المدفوع'] !== undefined && row['العربون أو المدفوع'] !== '' ? row['العربون أو المدفوع'] : (row['Deposit Paid'] || 0);
+        const status = String(row['حالة الحجز'] ?? row['الحالة'] ?? row['Status'] ?? 'Confirmed').trim();
+        const notes = String(row['ملاحظات الحجز'] ?? row['ملاحظات'] ?? row['Notes'] ?? '').trim();
+
+        // Paper Code Matching & Strict Error Check (شرط إلزامي: خطأ إذا كان الكود الورقي غير مسجل)
+        let matchedParty: Party | undefined = undefined;
+        let hasPaperCodeError = false;
+
+        if (paperCode) {
+          matchedParty = partiesByPaperCode.get(paperCode.toLowerCase());
+          if (!matchedParty) {
+            hasPaperCodeError = true;
+            totalErrorsCount++;
+            if (errors.length < MAX_RECORDED_ERRORS) {
+              errors.push({
+                rowNumber: rowNum,
+                columnKey: 'paperCode',
+                columnLabelAr: 'الكود الورقي',
+                enteredValue: paperCode,
+                reasonAr: `الكود الورقي (${paperCode}) غير مسجل في قاعدة بيانات العملاء بالسيستم! يرجى تسجيل العميل أولاً بسجل العملاء أو تصحيح الكود الورقي.`,
+              });
+            }
+          } else {
+            // Auto-fill customer details from database automatically
+            if (!patientName) patientName = matchedParty.name;
+            if (!patientPhone) patientPhone = matchedParty.phone || '';
+          }
+        } else if (customerCode) {
+          matchedParty = partiesBySystemCode.get(customerCode.toLowerCase());
+          if (matchedParty) {
+            if (!patientName) patientName = matchedParty.name;
+            if (!patientPhone) patientPhone = matchedParty.phone || '';
+          }
+        } else if (patientPhone) {
+          const clean = patientPhone.replace(/[^0-9]/g, '');
+          if (clean) {
+            matchedParty = partiesByPhone.get(clean);
+            if (matchedParty && !patientName) {
+              patientName = matchedParty.name;
+            }
+          }
+        } else if (patientName) {
+          matchedParty = partiesByName.get(patientName.toLowerCase());
+        }
+
+        const resolvedCustomerCode = matchedParty?.systemCode || customerCode || (matchedParty ? matchedParty.systemCode || matchedParty.id : '');
+        const resolvedPatientId = matchedParty?.id;
+
+        // Validate patient name
+        if (!patientName || patientName.length < 2) {
+          totalErrorsCount++;
+          if (errors.length < MAX_RECORDED_ERRORS) {
+            errors.push({
+              rowNumber: rowNum,
+              columnKey: 'patientName',
+              columnLabelAr: 'اسم العميل / المريض',
+              enteredValue: patientName,
+              reasonAr: 'اسم العميل أو المريض مطلوب، ولم يتم التعرف عليه من الكود الورقي',
+            });
+          }
+        }
+
+        // Validate phone
+        const cleanPhone = patientPhone.replace(/[^0-9+]/g, '');
+        if (!patientPhone) {
+          totalErrorsCount++;
+          if (errors.length < MAX_RECORDED_ERRORS) {
+            errors.push({
+              rowNumber: rowNum,
+              columnKey: 'patientPhone',
+              columnLabelAr: 'رقم الهاتف',
+              enteredValue: patientPhone,
+              reasonAr: 'رقم هاتف العميل مطلوب لتأكيد الحجز والتواصل',
+            });
+          }
+        } else if (cleanPhone.length < 7) {
+          totalErrorsCount++;
+          if (errors.length < MAX_RECORDED_ERRORS) {
+            errors.push({
+              rowNumber: rowNum,
+              columnKey: 'patientPhone',
+              columnLabelAr: 'رقم الهاتف',
+              enteredValue: patientPhone,
+              reasonAr: 'رقم الهاتف غير صالح، يجب ألا يقل عن 7 أرقام',
+            });
+          }
+        }
+
+        // Validate Date Universally with parseExcelDate (يدعم كل الصيغ والأرقام وسلاسل إكسيل)
+        const cleanDate = parseExcelDate(rawDateVal);
+        if (!cleanDate) {
+          const enteredStr = rawDateVal instanceof Date ? rawDateVal.toLocaleDateString('en-CA') : String(rawDateVal || '').trim();
+          totalErrorsCount++;
+          if (errors.length < MAX_RECORDED_ERRORS) {
+            errors.push({
+              rowNumber: rowNum,
+              columnKey: 'date',
+              columnLabelAr: 'تاريخ الحجز',
+              enteredValue: enteredStr || '«فارغ»',
+              reasonAr: !enteredStr
+                ? 'تاريخ الحجز مطلوب وإلزامي في ملف الحجوزات'
+                : `تاريخ الحجز (${enteredStr}) غير صالح، يرجى كتابة التاريخ بصيغة يوم/شهر/سنة أو سنة-شهر-يوم (مثال: 2026-10-05 أو 05/10/2026)`,
+            });
+          }
+        }
+
+        // Validate Doctor
+        if (!doctorName) {
+          totalErrorsCount++;
+          if (errors.length < MAX_RECORDED_ERRORS) {
+            errors.push({
+              rowNumber: rowNum,
+              columnKey: 'doctorName',
+              columnLabelAr: 'الطبيب المعالج / الأخصائي',
+              enteredValue: doctorName,
+              reasonAr: 'اسم الطبيب المعالج إلزامي للتحقق من عدم تداخل الجلسات',
+            });
+          }
+        }
+
+        // Validate Start and End Time order
+        if (rawStartVal && rawEndVal && endMin <= startMin) {
+          totalErrorsCount++;
+          if (errors.length < MAX_RECORDED_ERRORS) {
+            errors.push({
+              rowNumber: rowNum,
+              columnKey: 'endTime',
+              columnLabelAr: 'وقت انتهاء الجلسة (إلى)',
+              enteredValue: `${startTime} - ${endTime}`,
+              reasonAr: 'وقت نهاية الجلسة (إلى) يجب أن يكون بعد وقت بدايتها (من)',
+            });
+          }
+        }
+
+        // Check Session Overlap for Same Doctor on Same Date in O(1)
+        if (startMin !== null && endMin !== null && doctorName && cleanDate && !hasPaperCodeError) {
+          const docKey = `${cleanDate}__${doctorName.toLowerCase().trim()}`;
+          let hasConflict = false;
+
+          // 1. Check against file sessions for this doctor
+          const fileSessions = fileSessionsMap.get(docKey);
+          if (fileSessions) {
+            for (const s of fileSessions) {
+              if (startMin < s.endMin && s.startMin < endMin) {
+                hasConflict = true;
+                totalErrorsCount++;
+                if (errors.length < MAX_RECORDED_ERRORS) {
+                  errors.push({
+                    rowNumber: rowNum,
+                    columnKey: 'startTime',
+                    columnLabelAr: 'وقت بدء الجلسة (من)',
+                    enteredValue: `${startTime} - ${endTime}`,
+                    reasonAr: `تعارض جلسات داخل الملف: الطبيب (${doctorName}) لديه حجز في نفس اليوم مع (${s.patientName}) في نفس التوقيت (${s.startTime} - ${s.endTime}).`,
+                  });
+                }
+                break;
+              }
+            }
+          }
+
+          // 2. Check against system appointments for this doctor
+          if (!hasConflict) {
+            const sysSessions = sysAppointmentsMap.get(docKey);
+            if (sysSessions) {
+              for (const s of sysSessions) {
+                if (startMin < s.endMin && s.startMin < endMin) {
+                  hasConflict = true;
+                  totalErrorsCount++;
+                  if (errors.length < MAX_RECORDED_ERRORS) {
+                    errors.push({
+                      rowNumber: rowNum,
+                      columnKey: 'startTime',
+                      columnLabelAr: 'وقت بدء الجلسة (من)',
+                      enteredValue: `${startTime} - ${endTime}`,
+                      reasonAr: `تعارض مع حجز مسجل مسبقاً في النظام: الطبيب (${doctorName}) لديه موعد مع المريض (${s.patientName}) في نفس اليوم والتوقيت.`,
+                    });
+                  }
+                  break;
+                }
+              }
+            }
+          }
+
+          // Register in fileSessionsMap for subsequent rows if no conflict
+          let list = fileSessionsMap.get(docKey);
+          if (!list) {
+            list = [];
+            fileSessionsMap.set(docKey, list);
+          }
+          list.push({ startMin, endMin, patientName, rowNum, startTime, endTime });
+        }
+
+        // Validate service
+        if (!serviceNameAr) {
+          totalErrorsCount++;
+          if (errors.length < MAX_RECORDED_ERRORS) {
+            errors.push({
+              rowNumber: rowNum,
+              columnKey: 'serviceNameAr',
+              columnLabelAr: 'الخدمة / الجلسة',
+              enteredValue: serviceNameAr,
+              reasonAr: 'اسم الخدمة أو الجلسة مطلوب لتحديد نوع الموعد الطبي',
+            });
+          }
+        }
+
+        const priceNum = Number(rawPrice);
+        const depositNum = Number(rawDeposit);
+
+        validRows.push({
+          paperCode,
+          customerCode: resolvedCustomerCode,
+          patientId: resolvedPatientId,
+          patientName,
+          patientPhone: cleanPhone || patientPhone,
+          date: cleanDate || '2026-10-05',
           startTime,
           endTime,
-          appointments
-        );
-
-        if (sysConflict.hasConflict) {
-          errors.push({
-            rowNumber: rowNum,
-            columnKey: 'startTime',
-            columnLabelAr: 'وقت بدء الجلسة (من)',
-            enteredValue: `${startTime} - ${endTime}`,
-            reasonAr: sysConflict.reasonAr || 'تعارض مع حجز مسجل مسبقاً لنفس الطبيب في النظام',
-          });
-        }
-      }
-
-      // Validate service
-      if (!serviceNameAr) {
-        errors.push({
-          rowNumber: rowNum,
-          columnKey: 'serviceNameAr',
-          columnLabelAr: 'الخدمة / الجلسة',
-          enteredValue: serviceNameAr,
-          reasonAr: 'اسم الخدمة أو الجلسة مطلوب لتحديد نوع الموعد الطبي',
+          startMin,
+          endMin,
+          time: `${startTime} - ${endTime}`,
+          serviceNameAr,
+          doctorName: doctorName || 'الأخصائي المناوب',
+          price: isNaN(priceNum) ? 0 : priceNum,
+          deposit: isNaN(depositNum) ? 0 : depositNum,
+          remainingBalance: Math.max(0, (isNaN(priceNum) ? 0 : priceNum) - (isNaN(depositNum) ? 0 : depositNum)),
+          status: status === 'Scheduled' || status === 'Completed' || status === 'Cancelled' ? status : 'Confirmed',
+          notes,
         });
       }
+    }
 
-      // Validate price
-      const priceNum = Number(rawPrice);
-      if (isNaN(priceNum) || priceNum < 0) {
-        errors.push({
-          rowNumber: rowNum,
-          columnKey: 'price',
-          columnLabelAr: 'سعر الخدمة',
-          enteredValue: rawPrice,
-          reasonAr: 'سعر الخدمة يجب أن يكون رقماً موجباً أو صفراً',
-        });
-      }
-
-      // Validate deposit
-      const depositNum = Number(rawDeposit);
-      if (isNaN(depositNum) || depositNum < 0) {
-        errors.push({
-          rowNumber: rowNum,
-          columnKey: 'deposit',
-          columnLabelAr: 'العربون أو المدفوع',
-          enteredValue: rawDeposit,
-          reasonAr: 'قيمة العربون يجب أن تكون رقماً موجباً أو صفراً',
-        });
-      }
-
-      validRows.push({
-        customerCode,
-        patientName,
-        patientPhone: cleanPhone || patientPhone,
-        date: cleanDate,
-        startTime,
-        endTime,
-        startMin,
-        endMin,
-        time: `${startTime} - ${endTime}`,
-        serviceNameAr,
-        doctorName: doctorName || 'الأخصائي المناوب',
-        price: isNaN(priceNum) ? 0 : priceNum,
-        deposit: isNaN(depositNum) ? 0 : depositNum,
-        remainingBalance: Math.max(0, (isNaN(priceNum) ? 0 : priceNum) - (isNaN(depositNum) ? 0 : depositNum)),
-        status: status === 'Scheduled' || status === 'Completed' || status === 'Cancelled' ? status : 'Confirmed',
-        notes,
-      });
-    });
+    if (onProgress) {
+      onProgress(totalCount, totalCount, 'اكتملت مطابقة وفحص ملف الحجوزات بنجاح!');
+    }
 
     return {
       totalRows: rawRows.length,
       errors,
-      validRows: errors.length === 0 ? validRows : [],
+      totalErrorsCount,
+      validRows: totalErrorsCount === 0 ? validRows : [],
     };
   };
 
-  // Safe Bulk Import for Bookings: Auto-links customer code, creates missing parties, atomic bulk update
+  // Safe High-Performance Bulk Import for Bookings: Auto-links customer code, creates missing parties in O(1)
   const handleConfirmBookingsImport = async (validRows: any[]) => {
     const branchToUse = activeBranch?.id || currentBranchId;
     const newPartiesList: Omit<Party, 'id' | 'tenantId'>[] = [];
     const appointmentsToCreate: Omit<Appointment, 'id' | 'tenantId'>[] = [];
+    const createdPartiesKeyMap = new Map<string, string>();
 
     validRows.forEach((row, idx) => {
-      // Find existing party by customer code, phone, or name
-      const party = parties.find(
-        (p) =>
-          (row.customerCode && (p.systemCode === row.customerCode || p.paperCode === row.customerCode || p.id === row.customerCode)) ||
-          (row.patientPhone && p.phone === row.patientPhone) ||
-          (p.name && p.name.trim().toLowerCase() === row.patientName.trim().toLowerCase())
-      );
+      let resolvedCustomerCode = row.customerCode;
+      let resolvedPartyId = row.patientId;
 
-      let resolvedCustomerCode = party?.systemCode || row.customerCode;
-      let resolvedPartyId = party?.id;
+      if (!resolvedPartyId) {
+        const partyKey = row.patientPhone ? row.patientPhone.replace(/[^0-9]/g, '') : row.patientName.toLowerCase();
+        if (createdPartiesKeyMap.has(partyKey)) {
+          resolvedPartyId = createdPartiesKeyMap.get(partyKey);
+        } else {
+          resolvedCustomerCode = row.customerCode || `CUST-${Date.now().toString().slice(-4)}-${idx + 1}`;
+          resolvedPartyId = `imported-party-${Date.now()}-${idx}`;
+          createdPartiesKeyMap.set(partyKey, resolvedPartyId);
 
-      if (!party) {
-        resolvedCustomerCode = row.customerCode || `CUST-${Date.now().toString().slice(-4)}-${idx + 1}`;
-        newPartiesList.push({
-          name: row.patientName,
-          phone: row.patientPhone,
-          systemCode: resolvedCustomerCode,
-          type: 'Customer',
-          branchId: branchToUse,
-          leadSource: 'استيراد إكسيل',
-          balance: 0,
-        });
+          newPartiesList.push({
+            name: row.patientName,
+            phone: row.patientPhone,
+            paperCode: row.paperCode || undefined,
+            systemCode: resolvedCustomerCode,
+            type: 'Customer',
+            branchId: branchToUse,
+            leadSource: 'استيراد إكسيل',
+            balance: 0,
+          });
+        }
       }
 
       appointmentsToCreate.push({
-        patientId: resolvedPartyId || `imported-party-${Date.now()}-${idx}`,
-        patientName: party?.name || row.patientName,
-        patientPhone: party?.phone || row.patientPhone,
+        patientId: resolvedPartyId,
+        patientName: row.patientName,
+        patientPhone: row.patientPhone,
+        paperCode: row.paperCode || undefined,
         systemCode: resolvedCustomerCode,
         customerCode: resolvedCustomerCode,
         date: row.date,
@@ -1523,132 +1705,279 @@ export const BookingsFollowUpView: React.FC = () => {
     setShowExcelModal(false);
   };
 
-  // Validator for Patient Follow-ups & Reminders Excel
-  const validateFollowUpRows = (rawRows: any[]): ExcelValidationResult<any> => {
+  // High-Performance O(N) Validator for Patient Follow-ups & Reminders Excel with Paper Code Verification
+  const validateFollowUpRows = async (
+    rawRows: any[],
+    onProgress?: (current: number, total: number, msg: string) => void
+  ): Promise<ExcelValidationResult<any>> => {
     const errors: CellValidationError[] = [];
     const validRows: any[] = [];
+    const totalCount = rawRows.length;
+    const MAX_RECORDED_ERRORS = 200;
+    let totalErrorsCount = 0;
 
-    rawRows.forEach((row, index) => {
-      const rowNum = index + 2;
+    // Pre-index existing customers in HashMaps for instant O(1) lookups
+    const partiesByPaperCode = new Map<string, Party>();
+    const partiesBySystemCode = new Map<string, Party>();
+    const partiesByPhone = new Map<string, Party>();
+    const partiesByName = new Map<string, Party>();
 
-      const customerCode = String(row['كود العميل'] || row['كود المريض'] || row['Customer Code'] || row['Code'] || '').trim();
-      const patientName = String(row['اسم العميل / المريض'] || row['اسم المريض'] || row['الاسم'] || row['Patient Name'] || '').trim();
-      const patientPhone = String(row['رقم الهاتف'] || row['الموبايل'] || row['الهاتف'] || row['Phone Number'] || row['Phone'] || '').trim();
-      const rawDate = String(row['تاريخ المتابعة والتذكير'] || row['تاريخ المتابعة'] || row['التاريخ'] || row['Follow-up Date'] || row['Date'] || '').trim();
-      const followUpTime = String(row['وقت المتابعة والتذكير'] || row['وقت المتابعة'] || row['الوقت'] || row['Follow-up Time'] || row['Time'] || '11:00 AM').trim();
-      const reason = String(row['موضوع وسبب المتابعة'] || row['موضوع المتابعة'] || row['السبب'] || row['Reason'] || row['Follow-up Reason'] || '').trim();
-      const type = String(row['نوع المتابعة'] || row['النوع'] || row['Type'] || 'Recall').trim();
-      const status = String(row['حالة المتابعة'] || row['الحالة'] || row['Status'] || 'Pending').trim();
-      const notes = String(row['ملاحظات المتابعة'] || row['ملاحظات'] || row['Notes'] || '').trim();
-      const createdBy = String(row['الموظف المسؤول'] || row['المسؤول'] || row['Created By'] || row['Responsible Staff'] || currentUser?.name || 'فريق المتابعة').trim();
-
-      if (!patientName || patientName.length < 2) {
-        errors.push({
-          rowNumber: rowNum,
-          columnKey: 'patientName',
-          columnLabelAr: 'اسم العميل / المريض',
-          enteredValue: patientName,
-          reasonAr: 'اسم العميل أو المريض حقل إلزامي',
-        });
+    parties.forEach((p) => {
+      if (p.paperCode) partiesByPaperCode.set(p.paperCode.trim().toLowerCase(), p);
+      if (p.systemCode) partiesBySystemCode.set(p.systemCode.trim().toLowerCase(), p);
+      if (p.id) partiesBySystemCode.set(p.id.trim().toLowerCase(), p);
+      if (p.phone) {
+        const clean = p.phone.replace(/[^0-9]/g, '');
+        if (clean) partiesByPhone.set(clean, p);
       }
-
-      const cleanPhone = patientPhone.replace(/[^0-9+]/g, '');
-      if (!patientPhone) {
-        errors.push({
-          rowNumber: rowNum,
-          columnKey: 'patientPhone',
-          columnLabelAr: 'رقم الهاتف',
-          enteredValue: patientPhone,
-          reasonAr: 'رقم هاتف العميل حقل إلزامي للتواصل والمتابعة',
-        });
-      } else if (cleanPhone.length < 7) {
-        errors.push({
-          rowNumber: rowNum,
-          columnKey: 'patientPhone',
-          columnLabelAr: 'رقم الهاتف',
-          enteredValue: patientPhone,
-          reasonAr: 'رقم الهاتف غير صالح، يجب ألا يقل عن 7 أرقام',
-        });
-      }
-
-      let cleanDate = rawDate;
-      if (rawDate.includes('T')) cleanDate = rawDate.split('T')[0];
-      const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
-      if (!cleanDate || !dateRegex.test(cleanDate)) {
-        errors.push({
-          rowNumber: rowNum,
-          columnKey: 'followUpDate',
-          columnLabelAr: 'تاريخ المتابعة والتذكير',
-          enteredValue: rawDate,
-          reasonAr: 'تاريخ المتابعة غير صحيح، يجب أن يكون بصيغة YYYY-MM-DD (مثال: 2026-10-06)',
-        });
-      }
-
-      if (!reason) {
-        errors.push({
-          rowNumber: rowNum,
-          columnKey: 'reason',
-          columnLabelAr: 'موضوع وسبب المتابعة',
-          enteredValue: reason,
-          reasonAr: 'موضوع وسبب المتابعة مطلوب لتوجيه فريق التواصل',
-        });
-      }
-
-      validRows.push({
-        customerCode,
-        patientName,
-        patientPhone: cleanPhone || patientPhone,
-        followUpDate: cleanDate,
-        followUpTime,
-        reason,
-        type: type === 'PostTreatment' || type === 'Recall' || type === 'Complaint' || type === 'General' ? type : 'Inquiry',
-        status: status === 'Contacted' || status === 'Booked' || status === 'Cancelled' || status === 'NoAnswer' ? status : 'Pending',
-        notes,
-        createdBy,
-      });
+      if (p.name) partiesByName.set(p.name.trim().toLowerCase(), p);
     });
+
+    const CHUNK_SIZE = 5000;
+    for (let i = 0; i < totalCount; i += CHUNK_SIZE) {
+      const sliceEnd = Math.min(i + CHUNK_SIZE, totalCount);
+
+      if (onProgress) {
+        onProgress(i, totalCount, `جاري مطابقة وفحص صفوف المتابعات: ${i.toLocaleString('ar-EG')} من ${totalCount.toLocaleString('ar-EG')}...`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      for (let index = i; index < sliceEnd; index++) {
+        const row = rawRows[index];
+        const rowNum = index + 2;
+
+        const paperCode = String(
+          row['الكود الورقي'] ??
+          row['كود الملف الورقي'] ??
+          row['الكود الورقي للعميل'] ??
+          row['كود الورقي'] ??
+          row['Paper Code'] ??
+          row['PaperCode'] ??
+          ''
+        ).trim();
+
+        const customerCode = String(
+          row['كود العميل (السيستم)'] ??
+          row['كود العميل'] ??
+          row['كود المريض'] ??
+          row['Customer Code'] ??
+          row['System Code'] ??
+          row['Code'] ??
+          ''
+        ).trim();
+
+        let patientName = String(
+          row['اسم العميل / المريض'] ??
+          row['اسم المريض'] ??
+          row['الاسم'] ??
+          row['Patient Name'] ??
+          ''
+        ).trim();
+
+        let patientPhone = String(
+          row['رقم الهاتف'] ??
+          row['الموبايل'] ??
+          row['الهاتف'] ??
+          row['Phone Number'] ??
+          row['Phone'] ??
+          ''
+        ).trim();
+
+        const rawDateVal =
+          row['تاريخ المتابعة والتذكير'] ??
+          row['تاريخ المتابعة'] ??
+          row['تاريخ التذكير'] ??
+          row['التاريخ'] ??
+          row['Follow-up Date'] ??
+          row['Followup Date'] ??
+          row['Date'] ??
+          row['Reminder Date'] ??
+          '';
+
+        const followUpTime = String(row['وقت المتابعة والتذكير'] ?? row['وقت المتابعة'] ?? row['الوقت'] ?? row['Follow-up Time'] ?? row['Time'] ?? '11:00 AM').trim();
+        const reason = String(row['موضوع وسبب المتابعة'] ?? row['موضوع المتابعة'] ?? row['السبب'] ?? row['Reason'] ?? row['Follow-up Reason'] ?? '').trim();
+        const type = String(row['نوع المتابعة'] ?? row['النوع'] ?? row['Type'] ?? 'Recall').trim();
+        const status = String(row['حالة المتابعة'] ?? row['الحالة'] ?? row['Status'] ?? 'Pending').trim();
+        const notes = String(row['ملاحظات المتابعة'] ?? row['ملاحظات'] ?? row['Notes'] ?? '').trim();
+        const createdBy = String(row['الموظف المسؤول'] ?? row['المسؤول'] ?? row['Created By'] ?? row['Responsible Staff'] ?? currentUser?.name ?? 'فريق المتابعة').trim();
+
+        // Paper Code Matching & Strict Error Check
+        let matchedParty: Party | undefined = undefined;
+
+        if (paperCode) {
+          matchedParty = partiesByPaperCode.get(paperCode.toLowerCase());
+          if (!matchedParty) {
+            totalErrorsCount++;
+            if (errors.length < MAX_RECORDED_ERRORS) {
+              errors.push({
+                rowNumber: rowNum,
+                columnKey: 'paperCode',
+                columnLabelAr: 'الكود الورقي',
+                enteredValue: paperCode,
+                reasonAr: `الكود الورقي (${paperCode}) غير مسجل في قاعدة بيانات العملاء بالسيستم! يرجى تسجيل العميل أولاً بسجل العملاء أو تصحيح الكود الورقي.`,
+              });
+            }
+          } else {
+            // Auto-fill customer details from database automatically
+            if (!patientName) patientName = matchedParty.name;
+            if (!patientPhone) patientPhone = matchedParty.phone || '';
+          }
+        } else if (customerCode) {
+          matchedParty = partiesBySystemCode.get(customerCode.toLowerCase());
+          if (matchedParty) {
+            if (!patientName) patientName = matchedParty.name;
+            if (!patientPhone) patientPhone = matchedParty.phone || '';
+          }
+        } else if (patientPhone) {
+          const clean = patientPhone.replace(/[^0-9]/g, '');
+          if (clean) {
+            matchedParty = partiesByPhone.get(clean);
+            if (matchedParty && !patientName) {
+              patientName = matchedParty.name;
+            }
+          }
+        } else if (patientName) {
+          matchedParty = partiesByName.get(patientName.toLowerCase());
+        }
+
+        const resolvedCustomerCode = matchedParty?.systemCode || customerCode || (matchedParty ? matchedParty.systemCode || matchedParty.id : '');
+        const resolvedPatientId = matchedParty?.id;
+
+        if (!patientName || patientName.length < 2) {
+          totalErrorsCount++;
+          if (errors.length < MAX_RECORDED_ERRORS) {
+            errors.push({
+              rowNumber: rowNum,
+              columnKey: 'patientName',
+              columnLabelAr: 'اسم العميل / المريض',
+              enteredValue: patientName,
+              reasonAr: 'اسم العميل أو المريض مطلوب، ولم يتم التعرف عليه من الكود الورقي',
+            });
+          }
+        }
+
+        const cleanPhone = patientPhone.replace(/[^0-9+]/g, '');
+        if (!patientPhone) {
+          totalErrorsCount++;
+          if (errors.length < MAX_RECORDED_ERRORS) {
+            errors.push({
+              rowNumber: rowNum,
+              columnKey: 'patientPhone',
+              columnLabelAr: 'رقم الهاتف',
+              enteredValue: patientPhone,
+              reasonAr: 'رقم هاتف العميل مطلوب للتواصل والمتابعة',
+            });
+          }
+        } else if (cleanPhone.length < 7) {
+          totalErrorsCount++;
+          if (errors.length < MAX_RECORDED_ERRORS) {
+            errors.push({
+              rowNumber: rowNum,
+              columnKey: 'patientPhone',
+              columnLabelAr: 'رقم الهاتف',
+              enteredValue: patientPhone,
+              reasonAr: 'رقم الهاتف غير صالح، يجب ألا يقل عن 7 أرقام',
+            });
+          }
+        }
+
+        const cleanDate = parseExcelDate(rawDateVal);
+        if (!cleanDate) {
+          const enteredStr = rawDateVal instanceof Date ? rawDateVal.toLocaleDateString('en-CA') : String(rawDateVal || '').trim();
+          totalErrorsCount++;
+          if (errors.length < MAX_RECORDED_ERRORS) {
+            errors.push({
+              rowNumber: rowNum,
+              columnKey: 'followUpDate',
+              columnLabelAr: 'تاريخ المتابعة والتذكير',
+              enteredValue: enteredStr || '«فارغ»',
+              reasonAr: !enteredStr
+                ? 'تاريخ المتابعة والتذكير مطلوب وإلزامي'
+                : `تاريخ المتابعة (${enteredStr}) غير صالح، يرجى كتابة التاريخ بصيغة يوم/شهر/سنة أو سنة-شهر-يوم (مثال: 2026-10-06 أو 06/10/2026)`,
+            });
+          }
+        }
+
+        if (!reason) {
+          totalErrorsCount++;
+          if (errors.length < MAX_RECORDED_ERRORS) {
+            errors.push({
+              rowNumber: rowNum,
+              columnKey: 'reason',
+              columnLabelAr: 'موضوع وسبب المتابعة',
+              enteredValue: reason,
+              reasonAr: 'موضوع وسبب المتابعة مطلوب لتوجيه فريق التواصل',
+            });
+          }
+        }
+
+        validRows.push({
+          paperCode,
+          customerCode: resolvedCustomerCode,
+          patientId: resolvedPatientId,
+          patientName,
+          patientPhone: cleanPhone || patientPhone,
+          followUpDate: cleanDate || '2026-10-06',
+          followUpTime,
+          reason,
+          type: type === 'PostTreatment' || type === 'Recall' || type === 'Complaint' || type === 'General' ? type : 'Inquiry',
+          status: status === 'Contacted' || status === 'Booked' || status === 'Cancelled' || status === 'NoAnswer' ? status : 'Pending',
+          notes,
+          createdBy,
+        });
+      }
+    }
+
+    if (onProgress) {
+      onProgress(totalCount, totalCount, 'اكتملت مطابقة وفحص ملف المتابعات والتذكير بنجاح!');
+    }
 
     return {
       totalRows: rawRows.length,
       errors,
-      validRows: errors.length === 0 ? validRows : [],
+      totalErrorsCount,
+      validRows: totalErrorsCount === 0 ? validRows : [],
     };
   };
 
-  // Safe Bulk Import for Follow-ups: Auto-links customer code, creates missing parties, atomic bulk update
+  // Safe High-Performance Bulk Import for Follow-ups in O(1)
   const handleConfirmFollowUpsImport = async (validRows: any[]) => {
     const branchToUse = activeBranch?.id || currentBranchId;
     const newPartiesList: Omit<Party, 'id' | 'tenantId'>[] = [];
     const fupsToCreate: Omit<PatientFollowUp, 'id' | 'tenantId' | 'createdAt'>[] = [];
+    const createdPartiesKeyMap = new Map<string, string>();
 
     validRows.forEach((row, idx) => {
-      const party = parties.find(
-        (p) =>
-          (row.customerCode && (p.systemCode === row.customerCode || p.paperCode === row.customerCode || p.id === row.customerCode)) ||
-          (row.patientPhone && p.phone === row.patientPhone) ||
-          (p.name && p.name.trim().toLowerCase() === row.patientName.trim().toLowerCase())
-      );
+      let resolvedCustomerCode = row.customerCode;
+      let resolvedPartyId = row.patientId;
 
-      let resolvedCustomerCode = party?.systemCode || row.customerCode;
-      let resolvedPartyId = party?.id;
+      if (!resolvedPartyId) {
+        const partyKey = row.patientPhone ? row.patientPhone.replace(/[^0-9]/g, '') : row.patientName.toLowerCase();
+        if (createdPartiesKeyMap.has(partyKey)) {
+          resolvedPartyId = createdPartiesKeyMap.get(partyKey);
+        } else {
+          resolvedCustomerCode = row.customerCode || `CUST-${Date.now().toString().slice(-4)}-${idx + 1}`;
+          resolvedPartyId = `imported-party-${Date.now()}-${idx}`;
+          createdPartiesKeyMap.set(partyKey, resolvedPartyId);
 
-      if (!party) {
-        resolvedCustomerCode = row.customerCode || `CUST-${Date.now().toString().slice(-4)}-${idx + 1}`;
-        newPartiesList.push({
-          name: row.patientName,
-          phone: row.patientPhone,
-          systemCode: resolvedCustomerCode,
-          type: 'Customer',
-          branchId: branchToUse,
-          leadSource: 'استيراد إكسيل للمتابعات',
-          balance: 0,
-        });
+          newPartiesList.push({
+            name: row.patientName,
+            phone: row.patientPhone,
+            paperCode: row.paperCode || undefined,
+            systemCode: resolvedCustomerCode,
+            type: 'Customer',
+            branchId: branchToUse,
+            leadSource: 'استيراد إكسيل للمتابعات',
+            balance: 0,
+          });
+        }
       }
 
       fupsToCreate.push({
         patientId: resolvedPartyId,
-        patientName: party?.name || row.patientName,
-        patientPhone: party?.phone || row.patientPhone,
+        patientName: row.patientName,
+        patientPhone: row.patientPhone,
+        paperCode: row.paperCode || undefined,
         systemCode: resolvedCustomerCode,
         customerCode: resolvedCustomerCode,
         branchId: branchToUse,
@@ -5299,8 +5628,10 @@ export const BookingsFollowUpView: React.FC = () => {
           const range = getAppointmentTimeRange(a);
           const sTime = a.startTime || (range.startMin !== null ? formatMinutesTo24h(range.startMin) : (a.time ? a.time.split(' - ')[0] : '10:00'));
           const eTime = a.endTime || (range.endMin !== null ? formatMinutesTo24h(range.endMin) : (a.time && a.time.includes(' - ') ? a.time.split(' - ')[1] : '10:45'));
+          const party = parties.find((p) => p.id === a.patientId || p.systemCode === a.systemCode || p.systemCode === a.customerCode);
           return {
-            customerCode: a.customerCode || a.systemCode || '',
+            paperCode: a.paperCode || party?.paperCode || '',
+            customerCode: a.customerCode || a.systemCode || party?.systemCode || '',
             patientName: a.patientName,
             patientPhone: a.patientPhone || '',
             date: a.date,
@@ -5328,18 +5659,22 @@ export const BookingsFollowUpView: React.FC = () => {
         entityTitleEn="Patient Follow-ups & Reminders"
         descriptionAr="استيراد وتصدير جدول المتابعات والتذكير مع الفحص الخلوي الذكي وربط كود العميل آلياً بدون تجميد المتصفح"
         columns={followUpsExcelColumns}
-        currentDataForExport={filteredFollowUps.map((f) => ({
-          customerCode: f.customerCode || f.systemCode || '',
-          patientName: f.patientName,
-          patientPhone: f.patientPhone || '',
-          followUpDate: f.followUpDate,
-          followUpTime: f.followUpTime || '11:00 AM',
-          reason: f.reason || '',
-          type: f.type || 'Recall',
-          status: f.status || 'Pending',
-          notes: f.notes || '',
-          createdBy: f.createdBy || '',
-        }))}
+        currentDataForExport={filteredFollowUps.map((f) => {
+          const party = parties.find((p) => p.id === f.patientId || p.systemCode === f.systemCode || p.systemCode === f.customerCode);
+          return {
+            paperCode: f.paperCode || party?.paperCode || '',
+            customerCode: f.customerCode || f.systemCode || party?.systemCode || '',
+            patientName: f.patientName,
+            patientPhone: f.patientPhone || '',
+            followUpDate: f.followUpDate,
+            followUpTime: f.followUpTime || '11:00 AM',
+            reason: f.reason || '',
+            type: f.type || 'Recall',
+            status: f.status || 'Pending',
+            notes: f.notes || '',
+            createdBy: f.createdBy || '',
+          };
+        })}
         exportFileNamePrefix="جدول_المتابعات_والتذكير"
         validator={validateFollowUpRows}
         onConfirmImport={handleConfirmFollowUpsImport}
