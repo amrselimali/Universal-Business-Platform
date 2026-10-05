@@ -417,7 +417,8 @@ export const PartiesView: React.FC = () => {
     return {
       totalRows: rawRows.length,
       errors,
-      validRows: errors.length === 0 ? validRows : [],
+      validRows,
+      allRowsWithFallback: validRows,
     };
   };
 

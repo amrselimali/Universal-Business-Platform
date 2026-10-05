@@ -334,6 +334,12 @@ export const BookingsFollowUpView: React.FC = () => {
   const [dateFrom, setDateFrom] = useState<string>(todayIso);
   const [dateTo, setDateTo] = useState<string>(todayIso);
 
+  // Pagination State for high-volume datasets (e.g. 62k+ records)
+  const [agendaPage, setAgendaPage] = useState<number>(1);
+  const [agendaRowsPerPage, setAgendaRowsPerPage] = useState<number>(50);
+  const [followUpPage, setFollowUpPage] = useState<number>(1);
+  const [followUpRowsPerPage, setFollowUpRowsPerPage] = useState<number>(50);
+
   // Quick Date Range Presets
   const setDatePreset = (preset: 'today' | 'week' | 'month' | 'all') => {
     const now = new Date();
@@ -683,18 +689,20 @@ export const BookingsFollowUpView: React.FC = () => {
       const q = searchQuery.toLowerCase().trim();
       const matchesSearch =
         !q ||
-        apt.patientName.toLowerCase().includes(q) ||
-        (apt.patientPhone && apt.patientPhone.includes(q)) ||
-        (apt.systemCode && apt.systemCode.toLowerCase().includes(q)) ||
-        apt.serviceNameAr.toLowerCase().includes(q) ||
-        (apt.doctorName && apt.doctorName.toLowerCase().includes(q));
+        Boolean(apt.patientName && apt.patientName.toLowerCase().includes(q)) ||
+        Boolean(apt.patientPhone && apt.patientPhone.includes(q)) ||
+        Boolean(apt.systemCode && apt.systemCode.toLowerCase().includes(q)) ||
+        Boolean(apt.customerCode && apt.customerCode.toLowerCase().includes(q)) ||
+        Boolean(apt.paperCode && apt.paperCode.toLowerCase().includes(q)) ||
+        Boolean(apt.serviceNameAr && apt.serviceNameAr.toLowerCase().includes(q)) ||
+        Boolean(apt.doctorName && apt.doctorName.toLowerCase().includes(q));
 
       const matchesStatus = statusFilter === 'All' || apt.status === statusFilter;
       const matchesDoctor = selectedDoctorId === 'All' || apt.doctorId === selectedDoctorId;
       
       const matchesDate =
         activeTab === 'agenda'
-          ? (!dateFrom || apt.date >= dateFrom) && (!dateTo || apt.date <= dateTo)
+          ? (!dateFrom || (apt.date && apt.date >= dateFrom)) && (!dateTo || (apt.date && apt.date <= dateTo))
           : true;
 
       return matchesSearch && matchesStatus && matchesDoctor && matchesDate;
@@ -703,6 +711,14 @@ export const BookingsFollowUpView: React.FC = () => {
     return sortAppointments(list);
   }, [branchAppointments, searchQuery, statusFilter, selectedDoctorId, activeTab, dateFrom, dateTo]);
 
+  // Pagination for Agenda Table
+  const totalAgendaPages = Math.ceil(filteredAppointments.length / (agendaRowsPerPage || 50)) || 1;
+  const paginatedAppointments = React.useMemo(() => {
+    if (agendaRowsPerPage === -1) return filteredAppointments;
+    const start = (agendaPage - 1) * agendaRowsPerPage;
+    return filteredAppointments.slice(start, start + agendaRowsPerPage);
+  }, [filteredAppointments, agendaPage, agendaRowsPerPage]);
+
   // Next Day Appointments (حجوزات اليوم التالي المستقلة للفرع المفعل) - Sorted by Date -> Doctor -> Start Time
   const nextDayAppointments = React.useMemo(() => {
     const list = branchAppointments.filter((apt) => {
@@ -710,11 +726,13 @@ export const BookingsFollowUpView: React.FC = () => {
       const q = searchQuery.toLowerCase().trim();
       const matchesSearch =
         !q ||
-        apt.patientName.toLowerCase().includes(q) ||
-        (apt.patientPhone && apt.patientPhone.includes(q)) ||
-        (apt.systemCode && apt.systemCode.toLowerCase().includes(q)) ||
-        apt.serviceNameAr.toLowerCase().includes(q) ||
-        (apt.doctorName && apt.doctorName.toLowerCase().includes(q));
+        Boolean(apt.patientName && apt.patientName.toLowerCase().includes(q)) ||
+        Boolean(apt.patientPhone && apt.patientPhone.includes(q)) ||
+        Boolean(apt.systemCode && apt.systemCode.toLowerCase().includes(q)) ||
+        Boolean(apt.customerCode && apt.customerCode.toLowerCase().includes(q)) ||
+        Boolean(apt.paperCode && apt.paperCode.toLowerCase().includes(q)) ||
+        Boolean(apt.serviceNameAr && apt.serviceNameAr.toLowerCase().includes(q)) ||
+        Boolean(apt.doctorName && apt.doctorName.toLowerCase().includes(q));
 
       return isTomorrow && matchesSearch;
     });
@@ -723,21 +741,33 @@ export const BookingsFollowUpView: React.FC = () => {
   }, [branchAppointments, tomorrowIso, searchQuery]);
 
   // Filtered Patient Follow-ups for active branch
-  const filteredFollowUps = branchFollowUps.filter((fup) => {
-    const q = searchQuery.toLowerCase().trim();
-    const matchesSearch =
-      !q ||
-      fup.patientName.toLowerCase().includes(q) ||
-      (fup.patientPhone && fup.patientPhone.includes(q)) ||
-      (fup.systemCode && fup.systemCode.toLowerCase().includes(q)) ||
-      (fup.reason && fup.reason.toLowerCase().includes(q)) ||
-      (fup.notes && fup.notes.toLowerCase().includes(q));
+  const filteredFollowUps = React.useMemo(() => {
+    return branchFollowUps.filter((fup) => {
+      const q = searchQuery.toLowerCase().trim();
+      const matchesSearch =
+        !q ||
+        Boolean(fup.patientName && fup.patientName.toLowerCase().includes(q)) ||
+        Boolean(fup.patientPhone && fup.patientPhone.includes(q)) ||
+        Boolean(fup.systemCode && fup.systemCode.toLowerCase().includes(q)) ||
+        Boolean(fup.customerCode && fup.customerCode.toLowerCase().includes(q)) ||
+        Boolean(fup.paperCode && fup.paperCode.toLowerCase().includes(q)) ||
+        Boolean(fup.reason && fup.reason.toLowerCase().includes(q)) ||
+        Boolean(fup.notes && fup.notes.toLowerCase().includes(q));
 
-    const matchesDate =
-      (!dateFrom || fup.followUpDate >= dateFrom) && (!dateTo || fup.followUpDate <= dateTo);
+      const matchesDate =
+        (!dateFrom || (fup.followUpDate && fup.followUpDate >= dateFrom)) && (!dateTo || (fup.followUpDate && fup.followUpDate <= dateTo));
 
-    return matchesSearch && matchesDate;
-  });
+      return matchesSearch && matchesDate;
+    });
+  }, [branchFollowUps, searchQuery, dateFrom, dateTo]);
+
+  // Pagination for Follow-ups Table
+  const totalFollowUpPages = Math.ceil(filteredFollowUps.length / (followUpRowsPerPage || 50)) || 1;
+  const paginatedFollowUps = React.useMemo(() => {
+    if (followUpRowsPerPage === -1) return filteredFollowUps;
+    const start = (followUpPage - 1) * followUpRowsPerPage;
+    return filteredFollowUps.slice(start, start + followUpRowsPerPage);
+  }, [filteredFollowUps, followUpPage, followUpRowsPerPage]);
 
   // Coded Sellable Products / Services only (without raw stock supplies)
   const sellableServices = React.useMemo(() => {
@@ -1251,6 +1281,8 @@ export const BookingsFollowUpView: React.FC = () => {
   ): Promise<ExcelValidationResult<any>> => {
     const errors: CellValidationError[] = [];
     const validRows: any[] = [];
+    const allRowsAsIs: any[] = [];
+    const allRowsWithFallback: any[] = [];
     const totalCount = rawRows.length;
     const MAX_RECORDED_ERRORS = 200;
     let totalErrorsCount = 0;
@@ -1605,7 +1637,15 @@ export const BookingsFollowUpView: React.FC = () => {
         const priceNum = Number(rawPrice);
         const depositNum = Number(rawDeposit);
 
-        validRows.push({
+        const isRowStrictValid =
+          cleanDate !== null &&
+          Boolean(doctorName) &&
+          Boolean(serviceNameAr) &&
+          Boolean(patientName && patientName.length >= 2) &&
+          Boolean(cleanPhone && cleanPhone.length >= 7) &&
+          !hasPaperCodeError;
+
+        const bookingRecord = {
           paperCode,
           customerCode: resolvedCustomerCode,
           patientId: resolvedPatientId,
@@ -1617,14 +1657,50 @@ export const BookingsFollowUpView: React.FC = () => {
           startMin,
           endMin,
           time: `${startTime} - ${endTime}`,
-          serviceNameAr,
+          serviceNameAr: serviceNameAr || 'جلسة علاجية',
           doctorName: doctorName || 'الأخصائي المناوب',
           price: isNaN(priceNum) ? 0 : priceNum,
           deposit: isNaN(depositNum) ? 0 : depositNum,
           remainingBalance: Math.max(0, (isNaN(priceNum) ? 0 : priceNum) - (isNaN(depositNum) ? 0 : depositNum)),
           status: status === 'Scheduled' || status === 'Completed' || status === 'Cancelled' ? status : 'Confirmed',
           notes,
-        });
+        };
+
+        if (isRowStrictValid) {
+          validRows.push(bookingRecord);
+        }
+
+        // AS-IS RECORD for forced upload (الرفع الإجباري كما هي بأخطائها دون أي تعديل أو استبدال)
+        // الفاضي يفضل فاضي ومفيش حاجة تتغير أو تروح
+        const enteredDateStr = rawDateVal instanceof Date 
+          ? rawDateVal.toLocaleDateString('en-CA') 
+          : String(rawDateVal || '').trim();
+        const dateAsIs = cleanDate || enteredDateStr || '';
+
+        const asIsBookingRecord = {
+          paperCode: paperCode || '',
+          customerCode: resolvedCustomerCode || customerCode || '',
+          patientId: resolvedPatientId || '',
+          patientName: patientName || '',
+          patientPhone: cleanPhone || patientPhone || '',
+          date: dateAsIs,
+          startTime: startTime || String(rawStartVal || '').trim(),
+          endTime: endTime || String(rawEndVal || '').trim(),
+          startMin,
+          endMin,
+          time: (startTime && endTime) ? `${startTime} - ${endTime}` : (String(rawTimeVal || '').trim() || startTime || endTime || ''),
+          serviceNameAr: serviceNameAr || '',
+          serviceNameEn: serviceNameAr ? autoTranslateArabic(serviceNameAr) : '',
+          doctorName: doctorName || '',
+          price: isNaN(priceNum) ? 0 : priceNum,
+          deposit: isNaN(depositNum) ? 0 : depositNum,
+          remainingBalance: Math.max(0, (isNaN(priceNum) ? 0 : priceNum) - (isNaN(depositNum) ? 0 : depositNum)),
+          status: status === 'Scheduled' || status === 'Completed' || status === 'Cancelled' ? status : 'Confirmed',
+          notes: notes || '',
+        };
+
+        allRowsAsIs.push(asIsBookingRecord);
+        allRowsWithFallback.push(asIsBookingRecord);
       }
     }
 
@@ -1636,11 +1712,13 @@ export const BookingsFollowUpView: React.FC = () => {
       totalRows: rawRows.length,
       errors,
       totalErrorsCount,
-      validRows: totalErrorsCount === 0 ? validRows : [],
+      validRows,
+      allRowsAsIs,
+      allRowsWithFallback: allRowsAsIs,
     };
   };
 
-  // Safe High-Performance Bulk Import for Bookings: Auto-links customer code, creates missing parties in O(1)
+  // Safe High-Performance Bulk Import for Bookings: Auto-links customer code, preserves raw data as-is without dummy fallbacks
   const handleConfirmBookingsImport = async (validRows: any[]) => {
     const branchToUse = activeBranch?.id || currentBranchId;
     const newPartiesList: Omit<Party, 'id' | 'tenantId'>[] = [];
@@ -1648,23 +1726,26 @@ export const BookingsFollowUpView: React.FC = () => {
     const createdPartiesKeyMap = new Map<string, string>();
 
     validRows.forEach((row, idx) => {
-      let resolvedCustomerCode = row.customerCode;
-      let resolvedPartyId = row.patientId;
+      let resolvedCustomerCode = row.customerCode || '';
+      let resolvedPartyId = row.patientId || '';
 
-      if (!resolvedPartyId) {
-        const partyKey = row.patientPhone ? row.patientPhone.replace(/[^0-9]/g, '') : row.patientName.toLowerCase();
-        if (createdPartiesKeyMap.has(partyKey)) {
-          resolvedPartyId = createdPartiesKeyMap.get(partyKey);
-        } else {
-          resolvedCustomerCode = row.customerCode || `CUST-${Date.now().toString().slice(-4)}-${idx + 1}`;
+      // Only create party in customers database if at least patientName or phone or paperCode is provided
+      if (!resolvedPartyId && (row.patientName || row.patientPhone || row.paperCode)) {
+        const partyKey = row.patientPhone 
+          ? row.patientPhone.replace(/[^0-9]/g, '') 
+          : (row.patientName ? row.patientName.toLowerCase().trim() : (row.paperCode ? `p-${row.paperCode.toLowerCase().trim()}` : ''));
+        
+        if (partyKey && createdPartiesKeyMap.has(partyKey)) {
+          resolvedPartyId = createdPartiesKeyMap.get(partyKey) || '';
+        } else if (partyKey) {
           resolvedPartyId = `imported-party-${Date.now()}-${idx}`;
           createdPartiesKeyMap.set(partyKey, resolvedPartyId);
 
           newPartiesList.push({
-            name: row.patientName,
-            phone: row.patientPhone,
+            name: row.patientName || '',
+            phone: row.patientPhone || '',
             paperCode: row.paperCode || undefined,
-            systemCode: resolvedCustomerCode,
+            systemCode: resolvedCustomerCode || undefined,
             type: 'Customer',
             branchId: branchToUse,
             leadSource: 'استيراد إكسيل',
@@ -1674,26 +1755,26 @@ export const BookingsFollowUpView: React.FC = () => {
       }
 
       appointmentsToCreate.push({
-        patientId: resolvedPartyId,
-        patientName: row.patientName,
-        patientPhone: row.patientPhone,
+        patientId: resolvedPartyId || '',
+        patientName: row.patientName || '',
+        patientPhone: row.patientPhone || '',
         paperCode: row.paperCode || undefined,
-        systemCode: resolvedCustomerCode,
-        customerCode: resolvedCustomerCode,
-        date: row.date,
-        time: `${row.startTime} - ${row.endTime}`,
-        startTime: row.startTime,
-        endTime: row.endTime,
-        serviceNameAr: row.serviceNameAr,
-        serviceNameEn: row.serviceNameAr,
-        doctorName: row.doctorName,
-        price: row.price,
-        deposit: row.deposit,
-        remainingBalance: row.remainingBalance,
-        status: row.status,
+        systemCode: resolvedCustomerCode || row.customerCode || '',
+        customerCode: resolvedCustomerCode || row.customerCode || '',
+        date: row.date || '',
+        time: row.time || (row.startTime && row.endTime ? `${row.startTime} - ${row.endTime}` : (row.startTime || row.endTime || '')),
+        startTime: row.startTime || '',
+        endTime: row.endTime || '',
+        serviceNameAr: row.serviceNameAr || '',
+        serviceNameEn: row.serviceNameEn || (row.serviceNameAr ? autoTranslateArabic(row.serviceNameAr) : ''),
+        doctorName: row.doctorName || '',
+        price: Number(row.price) || 0,
+        deposit: Number(row.deposit) || 0,
+        remainingBalance: Number(row.remainingBalance) || 0,
+        status: row.status || 'Confirmed',
         branchId: branchToUse,
         leadSource: 'استيراد إكسيل',
-        notes: row.notes,
+        notes: row.notes || '',
       });
     });
 
@@ -1702,6 +1783,10 @@ export const BookingsFollowUpView: React.FC = () => {
     }
 
     await importAppointmentsBulk(appointmentsToCreate);
+    // Reset date filter to all so newly imported rows are immediately shown in table
+    setDateFrom('');
+    setDateTo('');
+    setAgendaPage(1);
     setShowExcelModal(false);
   };
 
@@ -1712,6 +1797,8 @@ export const BookingsFollowUpView: React.FC = () => {
   ): Promise<ExcelValidationResult<any>> => {
     const errors: CellValidationError[] = [];
     const validRows: any[] = [];
+    const allRowsAsIs: any[] = [];
+    const allRowsWithFallback: any[] = [];
     const totalCount = rawRows.length;
     const MAX_RECORDED_ERRORS = 200;
     let totalErrorsCount = 0;
@@ -1911,7 +1998,14 @@ export const BookingsFollowUpView: React.FC = () => {
           }
         }
 
-        validRows.push({
+        const isRowStrictValid =
+          cleanDate !== null &&
+          Boolean(reason) &&
+          Boolean(patientName && patientName.length >= 2) &&
+          Boolean(cleanPhone && cleanPhone.length >= 7) &&
+          (!paperCode || matchedParty !== undefined);
+
+        const followUpRecord = {
           paperCode,
           customerCode: resolvedCustomerCode,
           patientId: resolvedPatientId,
@@ -1919,12 +2013,40 @@ export const BookingsFollowUpView: React.FC = () => {
           patientPhone: cleanPhone || patientPhone,
           followUpDate: cleanDate || '2026-10-06',
           followUpTime,
-          reason,
+          reason: reason || 'متابعة دورية',
           type: type === 'PostTreatment' || type === 'Recall' || type === 'Complaint' || type === 'General' ? type : 'Inquiry',
           status: status === 'Contacted' || status === 'Booked' || status === 'Cancelled' || status === 'NoAnswer' ? status : 'Pending',
           notes,
           createdBy,
-        });
+        };
+
+        if (isRowStrictValid) {
+          validRows.push(followUpRecord);
+        }
+
+        // AS-IS RECORD for forced upload (الرفع الإجباري كما هي بأخطائها دون أي تعديل أو استبدال)
+        const enteredDateStr = rawDateVal instanceof Date 
+          ? rawDateVal.toLocaleDateString('en-CA') 
+          : String(rawDateVal || '').trim();
+        const dateAsIs = cleanDate || enteredDateStr || '';
+
+        const asIsFollowUpRecord = {
+          paperCode: paperCode || '',
+          customerCode: resolvedCustomerCode || customerCode || '',
+          patientId: resolvedPatientId || '',
+          patientName: patientName || '',
+          patientPhone: cleanPhone || patientPhone || '',
+          followUpDate: dateAsIs,
+          followUpTime: followUpTime || '',
+          reason: reason || '',
+          type: type || 'General',
+          status: status || 'Pending',
+          notes: notes || '',
+          createdBy: createdBy || currentUser?.name || 'فريق المتابعة',
+        };
+
+        allRowsAsIs.push(asIsFollowUpRecord);
+        allRowsWithFallback.push(asIsFollowUpRecord);
       }
     }
 
@@ -1936,11 +2058,13 @@ export const BookingsFollowUpView: React.FC = () => {
       totalRows: rawRows.length,
       errors,
       totalErrorsCount,
-      validRows: totalErrorsCount === 0 ? validRows : [],
+      validRows,
+      allRowsAsIs,
+      allRowsWithFallback: allRowsAsIs,
     };
   };
 
-  // Safe High-Performance Bulk Import for Follow-ups in O(1)
+  // Safe High-Performance Bulk Import for Follow-ups in O(1): preserves raw data as-is without dummy fallbacks
   const handleConfirmFollowUpsImport = async (validRows: any[]) => {
     const branchToUse = activeBranch?.id || currentBranchId;
     const newPartiesList: Omit<Party, 'id' | 'tenantId'>[] = [];
@@ -1948,23 +2072,25 @@ export const BookingsFollowUpView: React.FC = () => {
     const createdPartiesKeyMap = new Map<string, string>();
 
     validRows.forEach((row, idx) => {
-      let resolvedCustomerCode = row.customerCode;
-      let resolvedPartyId = row.patientId;
+      let resolvedCustomerCode = row.customerCode || '';
+      let resolvedPartyId = row.patientId || '';
 
-      if (!resolvedPartyId) {
-        const partyKey = row.patientPhone ? row.patientPhone.replace(/[^0-9]/g, '') : row.patientName.toLowerCase();
-        if (createdPartiesKeyMap.has(partyKey)) {
-          resolvedPartyId = createdPartiesKeyMap.get(partyKey);
-        } else {
-          resolvedCustomerCode = row.customerCode || `CUST-${Date.now().toString().slice(-4)}-${idx + 1}`;
-          resolvedPartyId = `imported-party-${Date.now()}-${idx}`;
+      if (!resolvedPartyId && (row.patientName || row.patientPhone || row.paperCode)) {
+        const partyKey = row.patientPhone 
+          ? row.patientPhone.replace(/[^0-9]/g, '') 
+          : (row.patientName ? row.patientName.toLowerCase().trim() : (row.paperCode ? `p-${row.paperCode.toLowerCase().trim()}` : ''));
+        
+        if (partyKey && createdPartiesKeyMap.has(partyKey)) {
+          resolvedPartyId = createdPartiesKeyMap.get(partyKey) || '';
+        } else if (partyKey) {
+          resolvedPartyId = `imported-fup-party-${Date.now()}-${idx}`;
           createdPartiesKeyMap.set(partyKey, resolvedPartyId);
 
           newPartiesList.push({
-            name: row.patientName,
-            phone: row.patientPhone,
+            name: row.patientName || '',
+            phone: row.patientPhone || '',
             paperCode: row.paperCode || undefined,
-            systemCode: resolvedCustomerCode,
+            systemCode: resolvedCustomerCode || undefined,
             type: 'Customer',
             branchId: branchToUse,
             leadSource: 'استيراد إكسيل للمتابعات',
@@ -1974,19 +2100,19 @@ export const BookingsFollowUpView: React.FC = () => {
       }
 
       fupsToCreate.push({
-        patientId: resolvedPartyId,
-        patientName: row.patientName,
-        patientPhone: row.patientPhone,
+        patientId: resolvedPartyId || '',
+        patientName: row.patientName || '',
+        patientPhone: row.patientPhone || '',
         paperCode: row.paperCode || undefined,
-        systemCode: resolvedCustomerCode,
-        customerCode: resolvedCustomerCode,
+        systemCode: resolvedCustomerCode || row.customerCode || '',
+        customerCode: resolvedCustomerCode || row.customerCode || '',
         branchId: branchToUse,
-        followUpDate: row.followUpDate,
-        followUpTime: row.followUpTime || '11:00 AM',
-        reason: row.reason,
-        type: row.type || 'Recall',
+        followUpDate: row.followUpDate || '',
+        followUpTime: row.followUpTime || '',
+        reason: row.reason || '',
+        type: row.type || 'General',
         status: row.status || 'Pending',
-        notes: row.notes,
+        notes: row.notes || '',
         createdBy: row.createdBy || currentUser?.name || 'فريق المتابعة',
       });
     });
@@ -1996,6 +2122,10 @@ export const BookingsFollowUpView: React.FC = () => {
     }
 
     await importFollowUpsBulk(fupsToCreate);
+    // Reset date filter to all so newly imported follow-ups are immediately shown in table
+    setDateFrom('');
+    setDateTo('');
+    setFollowUpPage(1);
     setShowFollowUpExcelModal(false);
   };
 
@@ -2353,22 +2483,23 @@ export const BookingsFollowUpView: React.FC = () => {
                     </td>
                   </tr>
                 ) : (
-                  filteredAppointments.map((apt, idx) => {
+                  paginatedAppointments.map((apt, idx) => {
                     const party = getPartyForPatient(apt.patientId, apt.patientName);
                     const creationDate = party?.createdAt
                       ? party.createdAt.split('T')[0]
                       : apt.createdAt ? apt.createdAt.split('T')[0] : '2026-01-15';
                     const activeLeadSource = apt.leadSource || party?.leadSource || '';
-                    const custCode = apt.systemCode || party?.systemCode || `CUST-${1000 + idx}`;
+                    const rowNumber = agendaRowsPerPage === -1 ? idx + 1 : (agendaPage - 1) * agendaRowsPerPage + idx + 1;
+                    const custCode = apt.customerCode || apt.systemCode || party?.systemCode || (apt.paperCode ? `P-${apt.paperCode}` : '-');
                     const futureStatus = getCustomerFutureStatus(apt.patientName, apt.patientPhone, apt.patientId, apt.id);
 
                     const isTomorrowApt = apt.date === tomorrowIso;
                     const doctorScheduled = !isTomorrowApt || isDoctorScheduledForTomorrow(apt.doctorId, apt.doctorName);
-                    const isPastApt = apt.date < todayIso;
+                    const isPastApt = Boolean(apt.date && apt.date < todayIso);
 
                     const range = getAppointmentTimeRange(apt);
-                    const sTime = apt.startTime || (range.startMin !== null ? formatMinutesTo24h(range.startMin) : (apt.time ? apt.time.split(' - ')[0] : '10:00'));
-                    const eTime = apt.endTime || (range.endMin !== null ? formatMinutesTo24h(range.endMin) : (apt.time && apt.time.includes(' - ') ? apt.time.split(' - ')[1] : '10:45'));
+                    const sTime = apt.startTime || (range.startMin !== null ? formatMinutesTo24h(range.startMin) : (apt.time ? apt.time.split(' - ')[0] : ''));
+                    const eTime = apt.endTime || (range.endMin !== null ? formatMinutesTo24h(range.endMin) : (apt.time && apt.time.includes(' - ') ? apt.time.split(' - ')[1] : ''));
 
                     const statusBadge = {
                       Scheduled: 'bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 border-blue-200',
@@ -2387,7 +2518,7 @@ export const BookingsFollowUpView: React.FC = () => {
 
                     return (
                       <tr key={apt.id} className={rowClass}>
-                        <td className="p-3.5 font-semibold text-slate-400">{idx + 1}</td>
+                        <td className="p-3.5 font-semibold text-slate-400 font-mono">{rowNumber}</td>
 
                         {/* Patient Code, Name & Phone */}
                         <td className="p-3.5">
@@ -2396,7 +2527,7 @@ export const BookingsFollowUpView: React.FC = () => {
                               onClick={() => handleOpen360(apt)}
                               className="font-bold text-slate-900 dark:text-white hover:text-indigo-600 dark:hover:text-indigo-400 flex items-center gap-1.5 cursor-pointer text-right rtl:text-right"
                             >
-                              <span>{apt.patientName}</span>
+                              <span>{apt.patientName || <span className="text-slate-400 font-normal italic text-[11px]">— (فارغ)</span>}</span>
                               <Eye className="h-3.5 w-3.5 text-slate-400" />
                             </button>
                             <button
@@ -2409,13 +2540,18 @@ export const BookingsFollowUpView: React.FC = () => {
                               <span>{t('سجل المريض', 'History')}</span>
                             </button>
                           </div>
-                          <div className="text-[11px] text-slate-500 flex items-center gap-2 mt-0.5">
+                          <div className="text-[11px] text-slate-500 flex flex-wrap items-center gap-1.5 mt-0.5">
                             <span className="font-mono font-semibold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/50 px-1.5 py-0.2 rounded">
                               {custCode}
                             </span>
+                            {apt.paperCode && (
+                              <span className="font-mono text-[10px] font-bold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 px-1 py-0.2 rounded" title="كود الملف الورقي">
+                                ورقي: {apt.paperCode}
+                              </span>
+                            )}
                             <span className="flex items-center gap-1">
                               <Phone className="h-3 w-3" />
-                              {apt.patientPhone || '-'}
+                              {apt.patientPhone || <span className="text-slate-400 font-mono">-</span>}
                             </span>
                             {apt.patientPhone && (
                               <button
@@ -2471,7 +2607,9 @@ export const BookingsFollowUpView: React.FC = () => {
                         {/* Service / Session */}
                         <td className="p-3.5">
                           <div className="font-semibold text-slate-800 dark:text-slate-200">
-                            {language === 'ar' ? apt.serviceNameAr : apt.serviceNameEn || apt.serviceNameAr}
+                            {(language === 'ar' ? apt.serviceNameAr : apt.serviceNameEn || apt.serviceNameAr) || (
+                              <span className="text-slate-400 font-normal italic text-[11px]">— (فارغ)</span>
+                            )}
                           </div>
                         </td>
 
@@ -2479,7 +2617,7 @@ export const BookingsFollowUpView: React.FC = () => {
                         <td className="p-3.5">
                           <div className="text-slate-900 dark:text-white font-bold flex items-center gap-1">
                             <Stethoscope className="h-3.5 w-3.5 text-indigo-500 shrink-0" />
-                            <span>{apt.doctorName || t('د. استشاري', 'Dr. Consultant')}</span>
+                            <span>{apt.doctorName || <span className="text-slate-400 font-normal italic text-[11px]">— (فارغ)</span>}</span>
                           </div>
                           {!doctorScheduled && (
                             <div className="inline-flex items-center gap-1 px-2 py-0.5 mt-1 rounded-md text-[10px] font-black bg-rose-100 text-rose-800 dark:bg-rose-900/80 dark:text-rose-200 border border-rose-300 dark:border-rose-700">
@@ -2493,7 +2631,7 @@ export const BookingsFollowUpView: React.FC = () => {
                         <td className="p-3.5 whitespace-nowrap">
                           <div className="text-slate-900 dark:text-white font-bold flex items-center gap-1.5 font-mono text-xs">
                             <Calendar className="h-3.5 w-3.5 text-indigo-500 shrink-0" />
-                            <span>{apt.date}</span>
+                            <span>{apt.date || <span className="text-amber-600 font-normal italic text-[11px]">— (فارغ)</span>}</span>
                           </div>
                           {isPastApt && (
                             <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 mt-1 rounded text-[9px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700">
@@ -2507,7 +2645,7 @@ export const BookingsFollowUpView: React.FC = () => {
                         <td className="p-3.5 text-center whitespace-nowrap">
                           <span className="inline-flex items-center justify-center gap-1 px-2.5 py-1 rounded-lg text-xs font-mono font-bold text-indigo-700 bg-indigo-50 dark:bg-indigo-950/60 dark:text-indigo-300 border border-indigo-200/80 dark:border-indigo-800/60 shadow-xs">
                             <Clock className="h-3 w-3 text-indigo-500" />
-                            <span>{sTime}</span>
+                            <span>{sTime || '—'}</span>
                           </span>
                         </td>
 
@@ -2515,7 +2653,7 @@ export const BookingsFollowUpView: React.FC = () => {
                         <td className="p-3.5 text-center whitespace-nowrap">
                           <span className="inline-flex items-center justify-center gap-1 px-2.5 py-1 rounded-lg text-xs font-mono font-bold text-emerald-700 bg-emerald-50 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200/80 dark:border-emerald-800/60 shadow-xs">
                             <Clock className="h-3 w-3 text-emerald-500" />
-                            <span>{eTime}</span>
+                            <span>{eTime || '—'}</span>
                           </span>
                         </td>
 
@@ -2654,6 +2792,79 @@ export const BookingsFollowUpView: React.FC = () => {
               </tbody>
             </table>
           </div>
+
+          {/* Pagination Controls for Agenda Table */}
+          {filteredAppointments.length > 0 && (
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-4 bg-slate-50/70 dark:bg-slate-850/50 border-t border-slate-200 dark:border-slate-800 text-xs">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-slate-500 font-bold">
+                  {t(
+                    `عرض ${(agendaRowsPerPage === -1 ? 1 : (agendaPage - 1) * agendaRowsPerPage + 1).toLocaleString('ar-EG')} إلى ${(agendaRowsPerPage === -1 ? filteredAppointments.length : Math.min(agendaPage * agendaRowsPerPage, filteredAppointments.length)).toLocaleString('ar-EG')} من إجمالي (${filteredAppointments.length.toLocaleString('ar-EG')}) حجز`,
+                    `Showing ${(agendaRowsPerPage === -1 ? 1 : (agendaPage - 1) * agendaRowsPerPage + 1)} to ${(agendaRowsPerPage === -1 ? filteredAppointments.length : Math.min(agendaPage * agendaRowsPerPage, filteredAppointments.length))} of ${filteredAppointments.length} bookings`
+                  )}
+                </span>
+                <span className="text-slate-300 dark:text-slate-700">|</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-slate-400 font-medium">{t('صفوف الصفحة:', 'Per page:')}</span>
+                  <select
+                    value={agendaRowsPerPage}
+                    onChange={(e) => {
+                      setAgendaRowsPerPage(Number(e.target.value));
+                      setAgendaPage(1);
+                    }}
+                    className="px-2 py-1 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-bold cursor-pointer"
+                  >
+                    <option value={25}>25</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                    <option value={250}>250</option>
+                    <option value={500}>500</option>
+                    <option value={-1}>{t('عرض الكل', 'All')}</option>
+                  </select>
+                </div>
+              </div>
+
+              {agendaRowsPerPage !== -1 && totalAgendaPages > 1 && (
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setAgendaPage(1)}
+                    disabled={agendaPage === 1}
+                    className="px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    {t('الأولى', 'First')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAgendaPage((p) => Math.max(1, p - 1))}
+                    disabled={agendaPage === 1}
+                    className="px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    {t('السابق', 'Prev')}
+                  </button>
+                  <span className="px-3 py-1 font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                    {agendaPage} / {totalAgendaPages}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setAgendaPage((p) => Math.min(totalAgendaPages, p + 1))}
+                    disabled={agendaPage === totalAgendaPages}
+                    className="px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    {t('التالي', 'Next')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAgendaPage(totalAgendaPages)}
+                    disabled={agendaPage === totalAgendaPages}
+                    className="px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    {t('الأخيرة', 'Last')}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -3042,12 +3253,13 @@ export const BookingsFollowUpView: React.FC = () => {
                     </td>
                   </tr>
                 ) : (
-                  filteredFollowUps.map((fup, idx) => {
+                  paginatedFollowUps.map((fup, idx) => {
                     const party = getPartyForPatient(fup.patientId, fup.patientName);
                     const creationDate = party?.createdAt
                       ? party.createdAt.split('T')[0]
                       : fup.createdAt ? fup.createdAt.split('T')[0] : '2026-01-20';
                     const futureStatus = getCustomerFutureStatus(fup.patientName, fup.patientPhone, fup.patientId);
+                    const rowNumber = followUpRowsPerPage === -1 ? idx + 1 : (followUpPage - 1) * followUpRowsPerPage + idx + 1;
 
                     const statusBadge = {
                       Pending: 'bg-amber-50 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border-amber-200',
@@ -3057,20 +3269,27 @@ export const BookingsFollowUpView: React.FC = () => {
                       Cancelled: 'bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300 border-rose-200',
                     }[fup.status] || 'bg-slate-100 text-slate-700';
 
-                    const isPastFup = fup.followUpDate < todayIso;
+                    const isPastFup = Boolean(fup.followUpDate && fup.followUpDate < todayIso);
 
                     return (
                       <tr key={fup.id} className={`hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors ${isPastFup ? 'bg-slate-50/50 dark:bg-slate-900/40 opacity-90' : ''}`}>
-                        <td className="p-3 font-semibold text-slate-400">{idx + 1}</td>
+                        <td className="p-3 font-semibold text-slate-400 font-mono">{rowNumber}</td>
 
                         {/* Patient Name, Code & Phone */}
                         <td className="p-3">
-                          <div className="font-bold text-slate-900 dark:text-white">{fup.patientName}</div>
-                          <div className="text-[11px] text-slate-500 flex items-center gap-2 mt-0.5">
+                          <div className="font-bold text-slate-900 dark:text-white">
+                            {fup.patientName || <span className="text-slate-400 font-normal italic text-[11px]">— (فارغ)</span>}
+                          </div>
+                          <div className="text-[11px] text-slate-500 flex flex-wrap items-center gap-1.5 mt-0.5">
                             <span className="font-mono font-semibold text-indigo-600 bg-indigo-50 dark:bg-indigo-950/50 px-1 rounded">
-                              {fup.systemCode || party?.systemCode || `CUST-${1000 + idx}`}
+                              {fup.customerCode || fup.systemCode || party?.systemCode || (fup.paperCode ? `P-${fup.paperCode}` : '-')}
                             </span>
-                            <span>{fup.patientPhone}</span>
+                            {fup.paperCode && (
+                              <span className="font-mono text-[10px] font-bold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 px-1 py-0.2 rounded" title="كود الملف الورقي">
+                                ورقي: {fup.paperCode}
+                              </span>
+                            )}
+                            <span>{fup.patientPhone || <span className="text-slate-400 font-mono">-</span>}</span>
                             {fup.patientPhone && (
                               <button
                                 onClick={() => {
@@ -3100,11 +3319,11 @@ export const BookingsFollowUpView: React.FC = () => {
                         <td className="p-3 font-bold text-slate-900 dark:text-white">
                           <div className="flex items-center gap-1.5 font-mono">
                             <Clock className="h-3 w-3 text-indigo-500 shrink-0" />
-                            <span>{fup.followUpTime || '11:00 AM'}</span>
+                            <span>{fup.followUpTime || '—'}</span>
                           </div>
                           <div className="flex items-center gap-1 text-[11px] text-slate-500 font-medium mt-0.5">
                             <Calendar className="h-3 w-3 text-slate-400 shrink-0" />
-                            <span>{fup.followUpDate}</span>
+                            <span>{fup.followUpDate || <span className="text-amber-600 font-normal italic text-[11px]">— (فارغ)</span>}</span>
                             {isPastFup && (
                               <span className="inline-flex items-center gap-0.5 px-1 py-0.2 rounded text-[9px] font-bold bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
                                 <Lock className="h-2.5 w-2.5" />
@@ -3116,7 +3335,9 @@ export const BookingsFollowUpView: React.FC = () => {
 
                         {/* Reason & Notes */}
                         <td className="p-3">
-                          <div className="font-semibold text-slate-800 dark:text-slate-200">{fup.reason}</div>
+                          <div className="font-semibold text-slate-800 dark:text-slate-200">
+                            {fup.reason || <span className="text-slate-400 font-normal italic text-[11px]">— (فارغ)</span>}
+                          </div>
                           {fup.notes && <div className="text-[10px] text-slate-500 mt-0.5">{fup.notes}</div>}
                         </td>
 
@@ -3229,6 +3450,79 @@ export const BookingsFollowUpView: React.FC = () => {
               </tbody>
             </table>
           </div>
+
+          {/* Pagination Controls for Follow-ups Table */}
+          {filteredFollowUps.length > 0 && (
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-4 bg-slate-50/70 dark:bg-slate-850/50 border-t border-slate-200 dark:border-slate-800 text-xs">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-slate-500 font-bold">
+                  {t(
+                    `عرض ${(followUpRowsPerPage === -1 ? 1 : (followUpPage - 1) * followUpRowsPerPage + 1).toLocaleString('ar-EG')} إلى ${(followUpRowsPerPage === -1 ? filteredFollowUps.length : Math.min(followUpPage * followUpRowsPerPage, filteredFollowUps.length)).toLocaleString('ar-EG')} من إجمالي (${filteredFollowUps.length.toLocaleString('ar-EG')}) متابعة`,
+                    `Showing ${(followUpRowsPerPage === -1 ? 1 : (followUpPage - 1) * followUpRowsPerPage + 1)} to ${(followUpRowsPerPage === -1 ? filteredFollowUps.length : Math.min(followUpPage * followUpRowsPerPage, filteredFollowUps.length))} of ${filteredFollowUps.length} follow-ups`
+                  )}
+                </span>
+                <span className="text-slate-300 dark:text-slate-700">|</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-slate-400 font-medium">{t('صفوف الصفحة:', 'Per page:')}</span>
+                  <select
+                    value={followUpRowsPerPage}
+                    onChange={(e) => {
+                      setFollowUpRowsPerPage(Number(e.target.value));
+                      setFollowUpPage(1);
+                    }}
+                    className="px-2 py-1 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-bold cursor-pointer"
+                  >
+                    <option value={25}>25</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                    <option value={250}>250</option>
+                    <option value={500}>500</option>
+                    <option value={-1}>{t('عرض الكل', 'All')}</option>
+                  </select>
+                </div>
+              </div>
+
+              {followUpRowsPerPage !== -1 && totalFollowUpPages > 1 && (
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setFollowUpPage(1)}
+                    disabled={followUpPage === 1}
+                    className="px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    {t('الأولى', 'First')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFollowUpPage((p) => Math.max(1, p - 1))}
+                    disabled={followUpPage === 1}
+                    className="px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    {t('السابق', 'Prev')}
+                  </button>
+                  <span className="px-3 py-1 font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                    {followUpPage} / {totalFollowUpPages}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setFollowUpPage((p) => Math.min(totalFollowUpPages, p + 1))}
+                    disabled={followUpPage === totalFollowUpPages}
+                    className="px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    {t('التالي', 'Next')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFollowUpPage(totalFollowUpPages)}
+                    disabled={followUpPage === totalFollowUpPages}
+                    className="px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    {t('الأخيرة', 'Last')}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 

@@ -13,6 +13,7 @@ import {
   ArrowRight,
   ShieldCheck,
   Sparkles,
+  Zap,
 } from 'lucide-react';
 
 export interface ExcelColumnConfig {
@@ -39,6 +40,8 @@ export interface ExcelValidationResult<T> {
   errors: CellValidationError[];
   totalErrorsCount?: number;
   validRows: T[];
+  allRowsAsIs?: T[];
+  allRowsWithFallback?: T[];
   warnings?: string[];
 }
 
@@ -81,6 +84,7 @@ export function ExcelDataTransferModal<T>({
   const [progressPercent, setProgressPercent] = useState<number>(0);
   const [isConfirming, setIsConfirming] = useState<boolean>(false);
   const [importSuccessMessage, setImportSuccessMessage] = useState<string | null>(null);
+  const [forceUploadMode, setForceUploadMode] = useState<boolean>(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -217,22 +221,28 @@ export function ExcelDataTransferModal<T>({
     reader.readAsArrayBuffer(file);
   };
 
-  // 4. Confirm Import
-  const handleConfirm = async () => {
-    if (!validationResult || validationResult.errors.length > 0 || validationResult.validRows.length === 0) {
+  // 4. Confirm Import with explicit rows and optional mode description
+  const handleConfirmWithRows = async (rowsToSave: T[], labelMode?: string) => {
+    if (!rowsToSave || rowsToSave.length === 0) {
+      alert('لا توجد بيانات صالحة للاستيراد!');
       return;
     }
 
     setIsConfirming(true);
     try {
-      await onConfirmImport(validationResult.validRows);
-      setImportSuccessMessage(`تم استيراد وحفظ ${validationResult.validRows.length} سجل بنجاح في قاعدة البيانات!`);
+      await onConfirmImport(rowsToSave);
+      setImportSuccessMessage(
+        `تم استيراد وحفظ ${rowsToSave.length.toLocaleString('ar-EG')} سجل بنجاح في قاعدة البيانات! ${
+          labelMode ? `(${labelMode})` : ''
+        }`
+      );
       setTimeout(() => {
         onClose();
         // Reset modal state
         setSelectedFileName(null);
         setValidationResult(null);
         setImportSuccessMessage(null);
+        setForceUploadMode(false);
         setIsConfirming(false);
       }, 1500);
     } catch (err: any) {
@@ -241,9 +251,21 @@ export function ExcelDataTransferModal<T>({
     }
   };
 
+  const handleConfirm = async () => {
+    if (!validationResult) return;
+    const rowsToUse =
+      (forceUploadMode && validationResult.allRowsAsIs && validationResult.allRowsAsIs.length > 0)
+        ? validationResult.allRowsAsIs
+        : (forceUploadMode && validationResult.allRowsWithFallback && validationResult.allRowsWithFallback.length > 0)
+        ? validationResult.allRowsWithFallback
+        : validationResult.validRows;
+    await handleConfirmWithRows(rowsToUse, forceUploadMode ? 'الرفع الإجباري كما هي بأخطائها دون أي تعديل' : undefined);
+  };
+
   const handleResetFile = () => {
     setSelectedFileName(null);
     setValidationResult(null);
+    setForceUploadMode(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -325,6 +347,37 @@ export function ExcelDataTransferModal<T>({
           {/* TAB 1: IMPORT & TEST */}
           {activeTab === 'import' && (
             <div className="space-y-5">
+              {/* Option to force upload regardless of errors */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-2xl bg-amber-500/10 dark:bg-amber-500/15 border border-amber-500/30">
+                <div className="flex items-start sm:items-center gap-3">
+                  <div className="p-2.5 rounded-xl bg-amber-500/20 text-amber-700 dark:text-amber-300 shrink-0">
+                    <Zap className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-black text-slate-900 dark:text-white">
+                        خيار الرفع وتجاوز الأخطاء (Force Upload / Ignore Errors)
+                      </span>
+                      <span className="px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-amber-500 text-white">
+                        أوبشن متاح
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-600 dark:text-slate-300 mt-0.5">
+                      تفعيل هذا الخيار يتيح لك تأكيد الرفع فورياً وتجاوز أي أخطاء تظهر في خلايا الإكسيل دون إيقاف أو تعطيل العملية.
+                    </p>
+                  </div>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer shrink-0 self-end sm:self-auto">
+                  <input
+                    type="checkbox"
+                    checked={forceUploadMode}
+                    onChange={(e) => setForceUploadMode(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-600"></div>
+                </label>
+              </div>
+
               {/* File Upload Box */}
               {!selectedFileName ? (
                 <div
@@ -473,7 +526,71 @@ export function ExcelDataTransferModal<T>({
                         );
                       })()}
 
-                      <div className="flex justify-end gap-2 pt-2">
+                      {/* Force Upload Actions & Options Card */}
+                      <div className="p-4 sm:p-5 rounded-2xl bg-amber-50/80 dark:bg-amber-950/40 border-2 border-amber-300 dark:border-amber-700/80 space-y-3.5 shadow-xs">
+                        <div className="flex items-center gap-2.5">
+                          <div className="p-2 rounded-xl bg-amber-500 text-white shadow-xs">
+                            <Zap className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <h4 className="text-xs sm:text-sm font-black text-amber-950 dark:text-amber-100">
+                              خيارات استكمال الرفع أياً كانت الأخطاء (تجاوز الأخطاء)
+                            </h4>
+                            <p className="text-[11px] text-amber-900/80 dark:text-amber-300">
+                              اختر الطريقة المفضلة لإتمام الرفع وحفظ البيانات في السيستم فورياً:
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                          {/* Option 1: Import valid rows only */}
+                          <button
+                            type="button"
+                            onClick={() => handleConfirmWithRows(validationResult.validRows, 'استيراد السجلات السليمة فقط')}
+                            disabled={isConfirming || validationResult.validRows.length === 0}
+                            className="flex flex-col text-right p-3.5 rounded-xl border-2 border-emerald-500 bg-white dark:bg-slate-900 hover:bg-emerald-50/50 dark:hover:bg-emerald-950/30 transition-all cursor-pointer shadow-xs disabled:opacity-40 disabled:cursor-not-allowed group"
+                          >
+                            <div className="flex items-center justify-between w-full">
+                              <div className="flex items-center gap-2 font-black text-xs text-emerald-700 dark:text-emerald-400">
+                                <CheckCircle2 className="w-4 h-4" />
+                                <span>استيراد السجلات السليمة فقط</span>
+                              </div>
+                              <ArrowRight className="w-4 h-4 rtl:rotate-180 text-emerald-600 group-hover:translate-x-1 transition-transform" />
+                            </div>
+                            <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300 mt-1">
+                              حفظ ({validationResult.validRows.length.toLocaleString('ar-EG')}) سجل سليم وتخطي الصفوف المعيبة
+                            </span>
+                          </button>
+
+                          {/* Option 2: Force import all rows AS-IS without modifications */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const rows = (validationResult.allRowsAsIs && validationResult.allRowsAsIs.length > 0)
+                                ? validationResult.allRowsAsIs
+                                : (validationResult.allRowsWithFallback && validationResult.allRowsWithFallback.length > 0)
+                                ? validationResult.allRowsWithFallback
+                                : validationResult.validRows;
+                              handleConfirmWithRows(rows, 'الرفع الإجباري كما هي بأخطائها دون أي تعديل');
+                            }}
+                            disabled={isConfirming}
+                            className="flex flex-col text-right p-3.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white transition-all cursor-pointer shadow-md shadow-amber-600/25 disabled:opacity-40 disabled:cursor-not-allowed group"
+                          >
+                            <div className="flex items-center justify-between w-full">
+                              <div className="flex items-center gap-2 font-black text-xs">
+                                <Zap className="w-4 h-4 text-amber-200" />
+                                <span>الرفع الإجباري للبيانات كما هي بأخطائها ({validationResult.totalRows.toLocaleString('ar-EG')} صف)</span>
+                              </div>
+                              <ArrowRight className="w-4 h-4 rtl:rotate-180 text-white group-hover:translate-x-1 transition-transform" />
+                            </div>
+                            <span className="text-[11px] font-medium text-amber-100 mt-1">
+                              إدخال كافة البيانات في الجدول كما هي بالملف، والفارغ يظل فارغاً ودون استبدال أي شيء
+                            </span>
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="flex justify-end gap-2 pt-1">
                         <button
                           onClick={handleDownloadTemplate}
                           className="flex items-center gap-1.5 px-4 py-2 rounded-xl border border-cyan-300 bg-cyan-50 dark:bg-cyan-950/30 text-cyan-800 dark:text-cyan-300 text-xs font-bold cursor-pointer"
