@@ -44,6 +44,7 @@ import {
   Briefcase,
   FileSpreadsheet,
   Download,
+  ExternalLink,
 } from 'lucide-react';
 import {
   ExcelDataTransferModal,
@@ -51,8 +52,25 @@ import {
   CellValidationError,
   ExcelValidationResult,
 } from '../components/ExcelDataTransferModal';
+import {
+  parseTimeToMinutes,
+  formatMinutesTo24h,
+  formatMinutesTo12h,
+  getAppointmentTimeRange,
+  checkDoctorAppointmentConflict,
+  sortAppointments,
+} from '../utils/bookingTimeUtils';
 
 const bookingsExcelColumns: ExcelColumnConfig[] = [
+  {
+    key: 'customerCode',
+    labelAr: 'كود العميل',
+    labelEn: 'Customer Code',
+    required: false,
+    type: 'text',
+    sampleValue: 'CUST-1001',
+    instructions: 'كود العميل المسجل في النظام للربط المباشر مع ملف المريض والتقارير وسجل الحسابات (موصى به)',
+  },
   {
     key: 'patientName',
     labelAr: 'اسم العميل / المريض',
@@ -81,13 +99,31 @@ const bookingsExcelColumns: ExcelColumnConfig[] = [
     instructions: 'تاريخ الموعد بصيغة YYYY-MM-DD (مثال: 2026-10-05)',
   },
   {
-    key: 'time',
-    labelAr: 'وقت الحجز',
-    labelEn: 'Booking Time',
+    key: 'doctorName',
+    labelAr: 'الطبيب المعالج / الأخصائي',
+    labelEn: 'Doctor / Specialist',
     required: true,
     type: 'text',
-    sampleValue: '02:30 PM',
-    instructions: 'وقت الموعد (مثال: 02:30 PM أو 14:30)',
+    sampleValue: 'د. نورهان علي',
+    instructions: 'اسم الطبيب المعالج المنفذ للجلسة (مطلوب للتحقق من عدم تداخل المواعيد)',
+  },
+  {
+    key: 'startTime',
+    labelAr: 'وقت بدء الجلسة (من)',
+    labelEn: 'Start Time (From)',
+    required: true,
+    type: 'text',
+    sampleValue: '10:00',
+    instructions: 'وقت بداية الجلسة (مثال: 10:00 أو 10:00 AM)',
+  },
+  {
+    key: 'endTime',
+    labelAr: 'وقت انتهاء الجلسة (إلى)',
+    labelEn: 'End Time (To)',
+    required: true,
+    type: 'text',
+    sampleValue: '10:45',
+    instructions: 'وقت نهاية الجلسة (مثال: 10:45 أو 10:45 AM)',
   },
   {
     key: 'serviceNameAr',
@@ -97,15 +133,6 @@ const bookingsExcelColumns: ExcelColumnConfig[] = [
     type: 'text',
     sampleValue: 'جلسة ليزر فول بودي كانديلا',
     instructions: 'اسم الخدمة الطبية أو الجلسة المحجوزة',
-  },
-  {
-    key: 'doctorName',
-    labelAr: 'الطبيب / الأخصائي',
-    labelEn: 'Doctor / Specialist',
-    required: false,
-    type: 'text',
-    sampleValue: 'د. نورهان علي',
-    instructions: 'اسم الطبيب المعالج أو الأخصائي المنفذ',
   },
   {
     key: 'price',
@@ -145,6 +172,99 @@ const bookingsExcelColumns: ExcelColumnConfig[] = [
   },
 ];
 
+const followUpsExcelColumns: ExcelColumnConfig[] = [
+  {
+    key: 'customerCode',
+    labelAr: 'كود العميل',
+    labelEn: 'Customer Code',
+    required: false,
+    type: 'text',
+    sampleValue: 'CUST-1001',
+    instructions: 'كود العميل المسجل في النظام للربط المباشر مع ملف وسجل المريض (اختياري / موصى به)',
+  },
+  {
+    key: 'patientName',
+    labelAr: 'اسم العميل / المريض',
+    labelEn: 'Patient Name',
+    required: true,
+    type: 'text',
+    sampleValue: 'سارة عبد الله',
+    instructions: 'الاسم الكامل للعميل أو متلقي المتابعة والتذكير',
+  },
+  {
+    key: 'patientPhone',
+    labelAr: 'رقم الهاتف',
+    labelEn: 'Phone Number',
+    required: true,
+    type: 'phone',
+    sampleValue: '01012345678',
+    instructions: 'رقم هاتف العميل للتواصل والمتابعة عبر واتساب أو الهاتف',
+  },
+  {
+    key: 'followUpDate',
+    labelAr: 'تاريخ المتابعة والتذكير',
+    labelEn: 'Follow-up Date',
+    required: true,
+    type: 'date',
+    sampleValue: '2026-10-06',
+    instructions: 'تاريخ استحقاق المتابعة بصيغة YYYY-MM-DD',
+  },
+  {
+    key: 'followUpTime',
+    labelAr: 'وقت المتابعة والتذكير',
+    labelEn: 'Follow-up Time',
+    required: false,
+    type: 'text',
+    sampleValue: '11:00 AM',
+    instructions: 'توقيت إجراء المكالمة أو التذكير (مثال: 11:00 AM أو 14:00)',
+  },
+  {
+    key: 'reason',
+    labelAr: 'موضوع وسبب المتابعة',
+    labelEn: 'Follow-up Reason',
+    required: true,
+    type: 'text',
+    sampleValue: 'تذكير بموعد جلسة الرتوش وعروض الليزر',
+    instructions: 'موضوع المتابعة (مثال: استفسار أسعار، متابعة ما بعد الجلسة، تذكير بموعد)',
+  },
+  {
+    key: 'type',
+    labelAr: 'نوع المتابعة',
+    labelEn: 'Type',
+    required: false,
+    type: 'text',
+    sampleValue: 'Recall',
+    instructions: 'النوع: Recall (تذكير), PostTreatment (ما بعد الجلسة), Inquiry (استفسار), Complaint (شكوى), General (عام)',
+  },
+  {
+    key: 'status',
+    labelAr: 'حالة المتابعة',
+    labelEn: 'Status',
+    required: false,
+    type: 'text',
+    sampleValue: 'Pending',
+    instructions: 'الحالة: Pending (قيد الانتظار), Contacted (تم التواصل), Booked (تم الحجز), NoAnswer (لم يرد), Cancelled (ملغي)',
+  },
+  {
+    key: 'notes',
+    labelAr: 'ملاحظات المتابعة',
+    labelEn: 'Notes',
+    required: false,
+    type: 'text',
+    sampleValue: 'العميل يفضل التواصل بعد الساعة 2 ظهراً',
+    instructions: 'تفاصيل وملاحظات مسؤول التواصل والمتابعة',
+  },
+  {
+    key: 'createdBy',
+    labelAr: 'الموظف المسؤول',
+    labelEn: 'Responsible Staff',
+    required: false,
+    type: 'text',
+    sampleValue: 'فريق الكول سنتر',
+    instructions: 'اسم الموظف أو القسم القائم بالمتابعة والتواصل',
+  },
+];
+
 export const BookingsFollowUpView: React.FC = () => {
   const {
     language,
@@ -172,6 +292,11 @@ export const BookingsFollowUpView: React.FC = () => {
     invoices,
     updateParty,
     addParty,
+    importPartiesBulk,
+    importAppointmentsBulk,
+    importFollowUpsBulk,
+    getNextCustomerSystemCode,
+    currentUser,
     canPerformAction,
   } = usePlatform();
 
@@ -349,6 +474,7 @@ export const BookingsFollowUpView: React.FC = () => {
   const [showEditFollowUpModal, setShowEditFollowUpModal] = useState(false);
   const [showQuickAddCustomerModal, setShowQuickAddCustomerModal] = useState(false);
   const [showExcelModal, setShowExcelModal] = useState(false);
+  const [showFollowUpExcelModal, setShowFollowUpExcelModal] = useState(false);
   const [patientHistoryData, setPatientHistoryData] = useState<{
     patientId?: string;
     patientName: string;
@@ -372,6 +498,7 @@ export const BookingsFollowUpView: React.FC = () => {
   const [patientName, setPatientName] = useState('');
   const [patientPhone, setPatientPhone] = useState('');
   const [systemCode, setSystemCode] = useState('');
+  const [customerCode, setCustomerCode] = useState('');
   const [doctorId, setDoctorId] = useState('');
   const [doctorName, setDoctorName] = useState('');
   const [technicianId, setTechnicianId] = useState('');
@@ -379,7 +506,9 @@ export const BookingsFollowUpView: React.FC = () => {
   const [serviceNameEn, setServiceNameEn] = useState('');
   const [roomNumber, setRoomNumber] = useState('غرفة 1');
   const [aptDate, setAptDate] = useState(todayIso);
-  const [aptTime, setAptTime] = useState('12:00 PM');
+  const [startTime, setStartTime] = useState('10:00');
+  const [endTime, setEndTime] = useState('10:45');
+  const [aptTime, setAptTime] = useState('10:00 - 10:45');
   const [price, setPrice] = useState<number>(500);
   const [deposit, setDeposit] = useState<number>(0);
   const [leadSource, setLeadSource] = useState('Facebook Ads');
@@ -390,7 +519,9 @@ export const BookingsFollowUpView: React.FC = () => {
   const [fupPatientName, setFupPatientName] = useState('');
   const [fupPatientPhone, setFupPatientPhone] = useState('');
   const [fupSystemCode, setFupSystemCode] = useState('');
+  const [fupCustomerCode, setFupCustomerCode] = useState('');
   const [fupDate, setFupDate] = useState(tomorrowIso);
+  const [fupTime, setFupTime] = useState('11:00 AM');
   const [fupReason, setFupReason] = useState('استفسار عن عروض الليزر');
   const [fupType, setFupType] = useState<'Inquiry' | 'PostTreatment' | 'Recall' | 'Complaint' | 'General'>('Inquiry');
   const [fupNotes, setFupNotes] = useState('');
@@ -403,7 +534,9 @@ export const BookingsFollowUpView: React.FC = () => {
 
   // Reschedule Form
   const [newDate, setNewDate] = useState('');
-  const [newTime, setNewTime] = useState('');
+  const [newStartTime, setNewStartTime] = useState('10:00');
+  const [newEndTime, setNewEndTime] = useState('10:45');
+  const [newTime, setNewTime] = useState('10:00 - 10:45');
   const [rescheduleNotes, setRescheduleNotes] = useState('');
 
   // New Treatment Plan Form
@@ -525,41 +658,50 @@ export const BookingsFollowUpView: React.FC = () => {
   }, [patientFollowUps, currentBranchId, activeBranch?.name, activeBranch?.code, parties, branches]);
 
   // Filtered Appointments (Search by name, phone, or systemCode, with Date Range)
-  const filteredAppointments = branchAppointments.filter((apt) => {
-    const q = searchQuery.toLowerCase().trim();
-    const matchesSearch =
-      !q ||
-      apt.patientName.toLowerCase().includes(q) ||
-      (apt.patientPhone && apt.patientPhone.includes(q)) ||
-      (apt.systemCode && apt.systemCode.toLowerCase().includes(q)) ||
-      apt.serviceNameAr.toLowerCase().includes(q) ||
-      (apt.doctorName && apt.doctorName.toLowerCase().includes(q));
+  // Sorted strictly by Date -> Doctor Name -> Booking Start Time (من)
+  const filteredAppointments = React.useMemo(() => {
+    const list = branchAppointments.filter((apt) => {
+      const q = searchQuery.toLowerCase().trim();
+      const matchesSearch =
+        !q ||
+        apt.patientName.toLowerCase().includes(q) ||
+        (apt.patientPhone && apt.patientPhone.includes(q)) ||
+        (apt.systemCode && apt.systemCode.toLowerCase().includes(q)) ||
+        apt.serviceNameAr.toLowerCase().includes(q) ||
+        (apt.doctorName && apt.doctorName.toLowerCase().includes(q));
 
-    const matchesStatus = statusFilter === 'All' || apt.status === statusFilter;
-    const matchesDoctor = selectedDoctorId === 'All' || apt.doctorId === selectedDoctorId;
-    
-    const matchesDate =
-      activeTab === 'agenda'
-        ? (!dateFrom || apt.date >= dateFrom) && (!dateTo || apt.date <= dateTo)
-        : true;
+      const matchesStatus = statusFilter === 'All' || apt.status === statusFilter;
+      const matchesDoctor = selectedDoctorId === 'All' || apt.doctorId === selectedDoctorId;
+      
+      const matchesDate =
+        activeTab === 'agenda'
+          ? (!dateFrom || apt.date >= dateFrom) && (!dateTo || apt.date <= dateTo)
+          : true;
 
-    return matchesSearch && matchesStatus && matchesDoctor && matchesDate;
-  });
+      return matchesSearch && matchesStatus && matchesDoctor && matchesDate;
+    });
 
-  // Next Day Appointments (حجوزات اليوم التالي المستقلة للفرع المفعل)
-  const nextDayAppointments = branchAppointments.filter((apt) => {
-    const isTomorrow = apt.date === tomorrowIso;
-    const q = searchQuery.toLowerCase().trim();
-    const matchesSearch =
-      !q ||
-      apt.patientName.toLowerCase().includes(q) ||
-      (apt.patientPhone && apt.patientPhone.includes(q)) ||
-      (apt.systemCode && apt.systemCode.toLowerCase().includes(q)) ||
-      apt.serviceNameAr.toLowerCase().includes(q) ||
-      (apt.doctorName && apt.doctorName.toLowerCase().includes(q));
+    return sortAppointments(list);
+  }, [branchAppointments, searchQuery, statusFilter, selectedDoctorId, activeTab, dateFrom, dateTo]);
 
-    return isTomorrow && matchesSearch;
-  });
+  // Next Day Appointments (حجوزات اليوم التالي المستقلة للفرع المفعل) - Sorted by Date -> Doctor -> Start Time
+  const nextDayAppointments = React.useMemo(() => {
+    const list = branchAppointments.filter((apt) => {
+      const isTomorrow = apt.date === tomorrowIso;
+      const q = searchQuery.toLowerCase().trim();
+      const matchesSearch =
+        !q ||
+        apt.patientName.toLowerCase().includes(q) ||
+        (apt.patientPhone && apt.patientPhone.includes(q)) ||
+        (apt.systemCode && apt.systemCode.toLowerCase().includes(q)) ||
+        apt.serviceNameAr.toLowerCase().includes(q) ||
+        (apt.doctorName && apt.doctorName.toLowerCase().includes(q));
+
+      return isTomorrow && matchesSearch;
+    });
+
+    return sortAppointments(list);
+  }, [branchAppointments, tomorrowIso, searchQuery]);
 
   // Filtered Patient Follow-ups for active branch
   const filteredFollowUps = branchFollowUps.filter((fup) => {
@@ -736,10 +878,29 @@ export const BookingsFollowUpView: React.FC = () => {
     const resolvedDoctorName = doc ? doc.nameAr : doctorName.trim() || 'د. استشاري';
     const existingParty = parties.find((p) => p.id === patientId);
 
+    // Validate No Overlapping Sessions for the same doctor on the same date
+    const conflict = checkDoctorAppointmentConflict(
+      aptDate,
+      doctorId || undefined,
+      resolvedDoctorName,
+      startTime,
+      endTime,
+      appointments
+    );
+
+    if (conflict.hasConflict) {
+      alert(isRtl ? conflict.reasonAr : conflict.reasonEn);
+      return;
+    }
+
+    const formattedTime = startTime && endTime ? `${startTime} - ${endTime}` : (aptTime || startTime);
+    const resolvedCustomerCode = existingParty?.systemCode || customerCode || systemCode || `CUST-${Date.now().toString().slice(-4)}`;
+
     addAppointment({
       patientId,
       branchId: currentBranchId,
-      systemCode: existingParty?.systemCode || systemCode || `CUST-${Date.now().toString().slice(-4)}`,
+      systemCode: resolvedCustomerCode,
+      customerCode: resolvedCustomerCode,
       patientName: existingParty?.name || patientName.trim(),
       patientPhone: existingParty?.phone || patientPhone.trim(),
       doctorId: doctorId || undefined,
@@ -747,7 +908,9 @@ export const BookingsFollowUpView: React.FC = () => {
       serviceNameAr: serviceNameAr.trim() || 'كشف واستشارة طبية',
       serviceNameEn: serviceNameAr.trim(),
       date: aptDate,
-      time: aptTime,
+      time: formattedTime,
+      startTime: startTime,
+      endTime: endTime,
       price: 0,
       deposit: 0,
       remainingBalance: 0,
@@ -761,9 +924,12 @@ export const BookingsFollowUpView: React.FC = () => {
     setPatientName('');
     setPatientPhone('');
     setSystemCode('');
+    setCustomerCode('');
     setDoctorId('');
     setDoctorName('');
     setServiceNameAr('');
+    setStartTime('10:00');
+    setEndTime('10:45');
     setNotes('');
     setShowAddModal(false);
   };
@@ -781,11 +947,18 @@ export const BookingsFollowUpView: React.FC = () => {
     setPatientName(apt.patientName);
     setPatientPhone(apt.patientPhone || '');
     setSystemCode(apt.systemCode || '');
+    setCustomerCode(apt.customerCode || apt.systemCode || '');
     setDoctorId(apt.doctorId || '');
     setDoctorName(apt.doctorName || '');
     setServiceNameAr(apt.serviceNameAr);
     setAptDate(apt.date);
-    setAptTime(apt.time);
+
+    const range = getAppointmentTimeRange(apt);
+    const sTime = apt.startTime || (range.startMin !== null ? formatMinutesTo24h(range.startMin) : '10:00');
+    const eTime = apt.endTime || (range.endMin !== null ? formatMinutesTo24h(range.endMin) : '10:45');
+    setStartTime(sTime);
+    setEndTime(eTime);
+    setAptTime(apt.time || `${sTime} - ${eTime}`);
     setLeadSource(apt.leadSource || 'زيارة مباشرة للفرع');
     setNotes(apt.notes || '');
     setShowEditAptModal(true);
@@ -795,17 +968,39 @@ export const BookingsFollowUpView: React.FC = () => {
     e.preventDefault();
     if (!selectedApt) return;
     const doc = bookingDoctors.find((s) => s.id === doctorId) || staffMembers.find((s) => s.id === doctorId);
+    const resolvedDoctorName = doc ? doc.nameAr : doctorName || selectedApt.doctorName;
+
+    // Validate No Overlapping Sessions for the same doctor (excluding current apt)
+    const conflict = checkDoctorAppointmentConflict(
+      aptDate,
+      doctorId || undefined,
+      resolvedDoctorName,
+      startTime,
+      endTime,
+      appointments,
+      selectedApt.id
+    );
+
+    if (conflict.hasConflict) {
+      alert(isRtl ? conflict.reasonAr : conflict.reasonEn);
+      return;
+    }
+
+    const formattedTime = startTime && endTime ? `${startTime} - ${endTime}` : (aptTime || startTime);
 
     updateAppointment(selectedApt.id, {
       patientName: patientName.trim(),
       patientPhone: patientPhone.trim(),
       systemCode,
+      customerCode: customerCode || systemCode,
       doctorId: doctorId || undefined,
-      doctorName: doc ? doc.nameAr : doctorName || selectedApt.doctorName,
+      doctorName: resolvedDoctorName,
       serviceNameAr: serviceNameAr.trim(),
       serviceNameEn: serviceNameAr.trim(),
       date: aptDate,
-      time: aptTime,
+      time: formattedTime,
+      startTime,
+      endTime,
       price: 0,
       deposit: 0,
       remainingBalance: 0,
@@ -838,10 +1033,33 @@ export const BookingsFollowUpView: React.FC = () => {
 
   const handleRescheduleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (selectedApt && newDate && newTime) {
-      rescheduleAppointment(selectedApt.id, newDate, newTime, rescheduleNotes);
-      setShowRescheduleModal(false);
+    if (!selectedApt || !newDate || !newStartTime || !newEndTime) return;
+
+    // Overlap validation for reschedule
+    const conflict = checkDoctorAppointmentConflict(
+      newDate,
+      selectedApt.doctorId,
+      selectedApt.doctorName,
+      newStartTime,
+      newEndTime,
+      appointments,
+      selectedApt.id
+    );
+
+    if (conflict.hasConflict) {
+      alert(isRtl ? conflict.reasonAr : conflict.reasonEn);
+      return;
     }
+
+    const formattedTime = `${newStartTime} - ${newEndTime}`;
+    rescheduleAppointment(selectedApt.id, newDate, formattedTime, rescheduleNotes);
+    updateAppointment(selectedApt.id, {
+      date: newDate,
+      time: formattedTime,
+      startTime: newStartTime,
+      endTime: newEndTime,
+    });
+    setShowRescheduleModal(false);
   };
 
   const handleOpen360 = (apt: Appointment) => {
@@ -1007,7 +1225,7 @@ export const BookingsFollowUpView: React.FC = () => {
     }
   };
 
-  // Validator for Bookings Excel
+  // Validator for Bookings Excel with Overlap Check & Customer Code
   const validateBookingRows = (rawRows: any[]): ExcelValidationResult<any> => {
     const errors: CellValidationError[] = [];
     const validRows: any[] = [];
@@ -1015,12 +1233,36 @@ export const BookingsFollowUpView: React.FC = () => {
     rawRows.forEach((row, index) => {
       const rowNum = index + 2;
 
+      const customerCode = String(row['كود العميل'] || row['كود المريض'] || row['Customer Code'] || row['Code'] || '').trim();
       const patientName = String(row['اسم العميل / المريض'] || row['اسم المريض'] || row['الاسم'] || row['Patient Name'] || '').trim();
       const patientPhone = String(row['رقم الهاتف'] || row['الموبايل'] || row['الهاتف'] || row['Phone Number'] || row['Phone'] || '').trim();
       const rawDate = String(row['تاريخ الحجز'] || row['التاريخ'] || row['Booking Date'] || row['Date'] || '').trim();
-      const time = String(row['وقت الحجز'] || row['الوقت'] || row['Booking Time'] || row['Time'] || '12:00 PM').trim();
+      const doctorName = String(row['الطبيب المعالج / الأخصائي'] || row['الطبيب / الأخصائي'] || row['الطبيب'] || row['Doctor'] || row['Doctor / Specialist'] || '').trim();
+
+      // Extract Start and End times
+      let startTime = String(row['وقت بدء الجلسة (من)'] || row['وقت البدء'] || row['من'] || row['Start Time'] || row['Start Time (From)'] || '').trim();
+      let endTime = String(row['وقت انتهاء الجلسة (إلى)'] || row['وقت الانتهاء'] || row['إلى'] || row['End Time'] || row['End Time (To)'] || '').trim();
+      const rawTime = String(row['وقت الحجز'] || row['الوقت'] || row['Booking Time'] || row['Time'] || '').trim();
+
+      if (!startTime && rawTime) {
+        if (rawTime.includes(' - ')) {
+          const parts = rawTime.split(' - ');
+          startTime = parts[0].trim();
+          endTime = parts[1].trim();
+        } else {
+          startTime = rawTime;
+          const sM = parseTimeToMinutes(rawTime);
+          if (sM !== null) endTime = formatMinutesTo24h(sM + 45);
+        }
+      }
+
+      if (!startTime) startTime = '10:00';
+      if (!endTime) {
+        const sM = parseTimeToMinutes(startTime);
+        endTime = sM !== null ? formatMinutesTo24h(sM + 45) : '10:45';
+      }
+
       const serviceNameAr = String(row['الخدمة / الجلسة'] || row['الخدمة'] || row['اسم الخدمة'] || row['Service Name'] || '').trim();
-      const doctorName = String(row['الطبيب / الأخصائي'] || row['الطبيب'] || row['Doctor'] || row['Doctor / Specialist'] || '').trim();
       const rawPrice = row['سعر الخدمة'] !== undefined && row['سعر الخدمة'] !== '' ? row['سعر الخدمة'] : (row['Price'] || 0);
       const rawDeposit = row['العربون أو المدفوع'] !== undefined && row['العربون أو المدفوع'] !== '' ? row['العربون أو المدفوع'] : (row['Deposit Paid'] || 0);
       const status = String(row['حالة الحجز'] || row['الحالة'] || row['Status'] || 'Confirmed').trim();
@@ -1071,6 +1313,92 @@ export const BookingsFollowUpView: React.FC = () => {
         });
       }
 
+      // Validate Doctor
+      if (!doctorName) {
+        errors.push({
+          rowNumber: rowNum,
+          columnKey: 'doctorName',
+          columnLabelAr: 'الطبيب المعالج / الأخصائي',
+          enteredValue: doctorName,
+          reasonAr: 'اسم الطبيب المعالج إلزامي للتحقق من عدم تداخل الجلسات',
+        });
+      }
+
+      // Validate Start and End Time
+      const startMin = parseTimeToMinutes(startTime);
+      const endMin = parseTimeToMinutes(endTime);
+
+      if (startMin === null) {
+        errors.push({
+          rowNumber: rowNum,
+          columnKey: 'startTime',
+          columnLabelAr: 'وقت بدء الجلسة (من)',
+          enteredValue: startTime,
+          reasonAr: 'صيغة وقت بدء الجلسة غير صحيحة (مثال: 10:00 أو 10:00 AM)',
+        });
+      }
+
+      if (endMin === null) {
+        errors.push({
+          rowNumber: rowNum,
+          columnKey: 'endTime',
+          columnLabelAr: 'وقت انتهاء الجلسة (إلى)',
+          enteredValue: endTime,
+          reasonAr: 'صيغة وقت انتهاء الجلسة غير صحيحة (مثال: 10:45 أو 10:45 AM)',
+        });
+      }
+
+      if (startMin !== null && endMin !== null && endMin <= startMin) {
+        errors.push({
+          rowNumber: rowNum,
+          columnKey: 'endTime',
+          columnLabelAr: 'وقت انتهاء الجلسة (إلى)',
+          enteredValue: `${startTime} - ${endTime}`,
+          reasonAr: 'وقت نهاية الجلسة (إلى) يجب أن يكون بعد وقت بدايتها (من)',
+        });
+      }
+
+      // Check Session Overlap for Same Doctor on Same Date within Excel file
+      if (startMin !== null && endMin !== null && doctorName && cleanDate) {
+        const fileConflict = validRows.find(
+          (vr) =>
+            vr.date === cleanDate &&
+            vr.doctorName.toLowerCase() === doctorName.toLowerCase() &&
+            vr.startMin < endMin &&
+            startMin < vr.endMin
+        );
+
+        if (fileConflict) {
+          errors.push({
+            rowNumber: rowNum,
+            columnKey: 'startTime',
+            columnLabelAr: 'وقت بدء الجلسة (من)',
+            enteredValue: `${startTime} - ${endTime}`,
+            reasonAr: `تعارض جلسات داخل الملف: الطبيب (${doctorName}) لديه حجز في نفس اليوم مع (${fileConflict.patientName}) في نفس التوقيت (${fileConflict.startTime} - ${fileConflict.endTime}).`,
+          });
+        }
+
+        // Check Session Overlap with existing system appointments
+        const sysConflict = checkDoctorAppointmentConflict(
+          cleanDate,
+          undefined,
+          doctorName,
+          startTime,
+          endTime,
+          appointments
+        );
+
+        if (sysConflict.hasConflict) {
+          errors.push({
+            rowNumber: rowNum,
+            columnKey: 'startTime',
+            columnLabelAr: 'وقت بدء الجلسة (من)',
+            enteredValue: `${startTime} - ${endTime}`,
+            reasonAr: sysConflict.reasonAr || 'تعارض مع حجز مسجل مسبقاً لنفس الطبيب في النظام',
+          });
+        }
+      }
+
       // Validate service
       if (!serviceNameAr) {
         errors.push({
@@ -1107,10 +1435,15 @@ export const BookingsFollowUpView: React.FC = () => {
       }
 
       validRows.push({
+        customerCode,
         patientName,
         patientPhone: cleanPhone || patientPhone,
         date: cleanDate,
-        time: time || '12:00 PM',
+        startTime,
+        endTime,
+        startMin,
+        endMin,
+        time: `${startTime} - ${endTime}`,
         serviceNameAr,
         doctorName: doctorName || 'الأخصائي المناوب',
         price: isNaN(priceNum) ? 0 : priceNum,
@@ -1128,14 +1461,47 @@ export const BookingsFollowUpView: React.FC = () => {
     };
   };
 
-  const handleConfirmBookingsImport = (validRows: any[]) => {
+  // Safe Bulk Import for Bookings: Auto-links customer code, creates missing parties, atomic bulk update
+  const handleConfirmBookingsImport = async (validRows: any[]) => {
     const branchToUse = activeBranch?.id || currentBranchId;
-    validRows.forEach((row) => {
-      addAppointment({
-        patientName: row.patientName,
-        patientPhone: row.patientPhone,
+    const newPartiesList: Omit<Party, 'id' | 'tenantId'>[] = [];
+    const appointmentsToCreate: Omit<Appointment, 'id' | 'tenantId'>[] = [];
+
+    validRows.forEach((row, idx) => {
+      // Find existing party by customer code, phone, or name
+      const party = parties.find(
+        (p) =>
+          (row.customerCode && (p.systemCode === row.customerCode || p.paperCode === row.customerCode || p.id === row.customerCode)) ||
+          (row.patientPhone && p.phone === row.patientPhone) ||
+          (p.name && p.name.trim().toLowerCase() === row.patientName.trim().toLowerCase())
+      );
+
+      let resolvedCustomerCode = party?.systemCode || row.customerCode;
+      let resolvedPartyId = party?.id;
+
+      if (!party) {
+        resolvedCustomerCode = row.customerCode || `CUST-${Date.now().toString().slice(-4)}-${idx + 1}`;
+        newPartiesList.push({
+          name: row.patientName,
+          phone: row.patientPhone,
+          systemCode: resolvedCustomerCode,
+          type: 'Customer',
+          branchId: branchToUse,
+          leadSource: 'استيراد إكسيل',
+          balance: 0,
+        });
+      }
+
+      appointmentsToCreate.push({
+        patientId: resolvedPartyId || `imported-party-${Date.now()}-${idx}`,
+        patientName: party?.name || row.patientName,
+        patientPhone: party?.phone || row.patientPhone,
+        systemCode: resolvedCustomerCode,
+        customerCode: resolvedCustomerCode,
         date: row.date,
-        time: row.time,
+        time: `${row.startTime} - ${row.endTime}`,
+        startTime: row.startTime,
+        endTime: row.endTime,
         serviceNameAr: row.serviceNameAr,
         serviceNameEn: row.serviceNameAr,
         doctorName: row.doctorName,
@@ -1148,6 +1514,160 @@ export const BookingsFollowUpView: React.FC = () => {
         notes: row.notes,
       });
     });
+
+    if (newPartiesList.length > 0) {
+      await importPartiesBulk(newPartiesList);
+    }
+
+    await importAppointmentsBulk(appointmentsToCreate);
+    setShowExcelModal(false);
+  };
+
+  // Validator for Patient Follow-ups & Reminders Excel
+  const validateFollowUpRows = (rawRows: any[]): ExcelValidationResult<any> => {
+    const errors: CellValidationError[] = [];
+    const validRows: any[] = [];
+
+    rawRows.forEach((row, index) => {
+      const rowNum = index + 2;
+
+      const customerCode = String(row['كود العميل'] || row['كود المريض'] || row['Customer Code'] || row['Code'] || '').trim();
+      const patientName = String(row['اسم العميل / المريض'] || row['اسم المريض'] || row['الاسم'] || row['Patient Name'] || '').trim();
+      const patientPhone = String(row['رقم الهاتف'] || row['الموبايل'] || row['الهاتف'] || row['Phone Number'] || row['Phone'] || '').trim();
+      const rawDate = String(row['تاريخ المتابعة والتذكير'] || row['تاريخ المتابعة'] || row['التاريخ'] || row['Follow-up Date'] || row['Date'] || '').trim();
+      const followUpTime = String(row['وقت المتابعة والتذكير'] || row['وقت المتابعة'] || row['الوقت'] || row['Follow-up Time'] || row['Time'] || '11:00 AM').trim();
+      const reason = String(row['موضوع وسبب المتابعة'] || row['موضوع المتابعة'] || row['السبب'] || row['Reason'] || row['Follow-up Reason'] || '').trim();
+      const type = String(row['نوع المتابعة'] || row['النوع'] || row['Type'] || 'Recall').trim();
+      const status = String(row['حالة المتابعة'] || row['الحالة'] || row['Status'] || 'Pending').trim();
+      const notes = String(row['ملاحظات المتابعة'] || row['ملاحظات'] || row['Notes'] || '').trim();
+      const createdBy = String(row['الموظف المسؤول'] || row['المسؤول'] || row['Created By'] || row['Responsible Staff'] || currentUser?.name || 'فريق المتابعة').trim();
+
+      if (!patientName || patientName.length < 2) {
+        errors.push({
+          rowNumber: rowNum,
+          columnKey: 'patientName',
+          columnLabelAr: 'اسم العميل / المريض',
+          enteredValue: patientName,
+          reasonAr: 'اسم العميل أو المريض حقل إلزامي',
+        });
+      }
+
+      const cleanPhone = patientPhone.replace(/[^0-9+]/g, '');
+      if (!patientPhone) {
+        errors.push({
+          rowNumber: rowNum,
+          columnKey: 'patientPhone',
+          columnLabelAr: 'رقم الهاتف',
+          enteredValue: patientPhone,
+          reasonAr: 'رقم هاتف العميل حقل إلزامي للتواصل والمتابعة',
+        });
+      } else if (cleanPhone.length < 7) {
+        errors.push({
+          rowNumber: rowNum,
+          columnKey: 'patientPhone',
+          columnLabelAr: 'رقم الهاتف',
+          enteredValue: patientPhone,
+          reasonAr: 'رقم الهاتف غير صالح، يجب ألا يقل عن 7 أرقام',
+        });
+      }
+
+      let cleanDate = rawDate;
+      if (rawDate.includes('T')) cleanDate = rawDate.split('T')[0];
+      const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+      if (!cleanDate || !dateRegex.test(cleanDate)) {
+        errors.push({
+          rowNumber: rowNum,
+          columnKey: 'followUpDate',
+          columnLabelAr: 'تاريخ المتابعة والتذكير',
+          enteredValue: rawDate,
+          reasonAr: 'تاريخ المتابعة غير صحيح، يجب أن يكون بصيغة YYYY-MM-DD (مثال: 2026-10-06)',
+        });
+      }
+
+      if (!reason) {
+        errors.push({
+          rowNumber: rowNum,
+          columnKey: 'reason',
+          columnLabelAr: 'موضوع وسبب المتابعة',
+          enteredValue: reason,
+          reasonAr: 'موضوع وسبب المتابعة مطلوب لتوجيه فريق التواصل',
+        });
+      }
+
+      validRows.push({
+        customerCode,
+        patientName,
+        patientPhone: cleanPhone || patientPhone,
+        followUpDate: cleanDate,
+        followUpTime,
+        reason,
+        type: type === 'PostTreatment' || type === 'Recall' || type === 'Complaint' || type === 'General' ? type : 'Inquiry',
+        status: status === 'Contacted' || status === 'Booked' || status === 'Cancelled' || status === 'NoAnswer' ? status : 'Pending',
+        notes,
+        createdBy,
+      });
+    });
+
+    return {
+      totalRows: rawRows.length,
+      errors,
+      validRows: errors.length === 0 ? validRows : [],
+    };
+  };
+
+  // Safe Bulk Import for Follow-ups: Auto-links customer code, creates missing parties, atomic bulk update
+  const handleConfirmFollowUpsImport = async (validRows: any[]) => {
+    const branchToUse = activeBranch?.id || currentBranchId;
+    const newPartiesList: Omit<Party, 'id' | 'tenantId'>[] = [];
+    const fupsToCreate: Omit<PatientFollowUp, 'id' | 'tenantId' | 'createdAt'>[] = [];
+
+    validRows.forEach((row, idx) => {
+      const party = parties.find(
+        (p) =>
+          (row.customerCode && (p.systemCode === row.customerCode || p.paperCode === row.customerCode || p.id === row.customerCode)) ||
+          (row.patientPhone && p.phone === row.patientPhone) ||
+          (p.name && p.name.trim().toLowerCase() === row.patientName.trim().toLowerCase())
+      );
+
+      let resolvedCustomerCode = party?.systemCode || row.customerCode;
+      let resolvedPartyId = party?.id;
+
+      if (!party) {
+        resolvedCustomerCode = row.customerCode || `CUST-${Date.now().toString().slice(-4)}-${idx + 1}`;
+        newPartiesList.push({
+          name: row.patientName,
+          phone: row.patientPhone,
+          systemCode: resolvedCustomerCode,
+          type: 'Customer',
+          branchId: branchToUse,
+          leadSource: 'استيراد إكسيل للمتابعات',
+          balance: 0,
+        });
+      }
+
+      fupsToCreate.push({
+        patientId: resolvedPartyId,
+        patientName: party?.name || row.patientName,
+        patientPhone: party?.phone || row.patientPhone,
+        systemCode: resolvedCustomerCode,
+        customerCode: resolvedCustomerCode,
+        branchId: branchToUse,
+        followUpDate: row.followUpDate,
+        followUpTime: row.followUpTime || '11:00 AM',
+        reason: row.reason,
+        type: row.type || 'Recall',
+        status: row.status || 'Pending',
+        notes: row.notes,
+        createdBy: row.createdBy || currentUser?.name || 'فريق المتابعة',
+      });
+    });
+
+    if (newPartiesList.length > 0) {
+      await importPartiesBulk(newPartiesList);
+    }
+
+    await importFollowUpsBulk(fupsToCreate);
+    setShowFollowUpExcelModal(false);
   };
 
   return (
@@ -1213,15 +1733,38 @@ export const BookingsFollowUpView: React.FC = () => {
             <span>{t('سجل مريض تفصيلي', 'Patient History')}</span>
           </button>
 
-          {/* Import / Export Bookings Excel Modal Button */}
-          <button
-            onClick={() => setShowExcelModal(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 border border-emerald-200 dark:border-emerald-800 rounded-xl transition-all cursor-pointer shadow-xs"
-            title={t('استيراد وتصدير الحجوزات وفحص الملفات', 'Import and Export Bookings')}
+          {/* Import / Export Excel Modal Button (Dynamic for Bookings or Follow-ups) */}
+          {activeTab === 'followup' ? (
+            <button
+              onClick={() => setShowFollowUpExcelModal(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 border border-emerald-200 dark:border-emerald-800 rounded-xl transition-all cursor-pointer shadow-xs"
+              title={t('استيراد وتصدير جدول المتابعات والتذكير وفحص الملفات', 'Import and Export Follow-ups & Reminders')}
+            >
+              <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
+              <span>{t('إكسيل المتابعات والتذكير', 'Follow-ups Excel')}</span>
+            </button>
+          ) : (
+            <button
+              onClick={() => setShowExcelModal(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 border border-emerald-200 dark:border-emerald-800 rounded-xl transition-all cursor-pointer shadow-xs"
+              title={t('استيراد وتصدير الحجوزات وفحص الملفات', 'Import and Export Bookings')}
+            >
+              <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
+              <span>{t('إكسيل الحجوزات (استيراد/تصدير)', 'Bookings Excel')}</span>
+            </button>
+          )}
+
+          {/* Open in New Tab Button (فتح شاشة الحجوزات في تبويب جديد) */}
+          <a
+            href="?view=bookings"
+            target="_blank"
+            rel="noopener noreferrer"
+            title={t('فتح هذه الشاشة في تبويب جديد (Open in New Tab)', 'Open bookings in new tab')}
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50/70 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 border border-indigo-200 dark:border-indigo-800 rounded-xl transition-all cursor-pointer shadow-xs"
           >
-            <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
-            <span>{t('استيراد وتصدير الحجوزات (إكسل)', 'Bookings Excel')}</span>
-          </button>
+            <ExternalLink className="h-3.5 w-3.5 text-indigo-600" />
+            <span>{t('فتح في تبويب جديد', 'New Tab')}</span>
+          </a>
 
           {/* Tabs Pill */}
           <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
@@ -1464,7 +2007,9 @@ export const BookingsFollowUpView: React.FC = () => {
                   <th className="p-3.5">{t('مصدر وتاريخ تكويد العميل', 'Lead Source & Account Creation Date')}</th>
                   <th className="p-3.5">{t('الخدمة / الجلسة', 'Service / Session')}</th>
                   <th className="p-3.5">{t('الطبيب المعالج *', 'Doctor *')}</th>
-                  <th className="p-3.5">{t('الموعد والتوقيت', 'Date & Time')}</th>
+                  <th className="p-3.5">{t('تاريخ الحجز', 'Booking Date')}</th>
+                  <th className="p-3.5 text-center">{t('وقت البدء (من)', 'Start Time (From)')}</th>
+                  <th className="p-3.5 text-center">{t('وقت الانتهاء (إلى)', 'End Time (To)')}</th>
                   <th className="p-3.5">{t('حالة العميل القادمة', 'Customer Future Status')}</th>
                   <th className="p-3.5">{t('حالة الحجز', 'Booking Status')}</th>
                   <th className="p-3.5 text-center">{t('إجراءات وسجل المريض', 'Actions & History')}</th>
@@ -1473,7 +2018,7 @@ export const BookingsFollowUpView: React.FC = () => {
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {filteredAppointments.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="py-12 text-center text-slate-400">
+                    <td colSpan={11} className="py-12 text-center text-slate-400">
                       <Calendar className="h-8 w-8 text-slate-300 dark:text-slate-700 mx-auto mb-2" />
                       <p>{t('لا توجد حجوزات مطابقة للفلاتر المحددة.', 'No bookings matching the criteria.')}</p>
                     </td>
@@ -1491,6 +2036,10 @@ export const BookingsFollowUpView: React.FC = () => {
                     const isTomorrowApt = apt.date === tomorrowIso;
                     const doctorScheduled = !isTomorrowApt || isDoctorScheduledForTomorrow(apt.doctorId, apt.doctorName);
                     const isPastApt = apt.date < todayIso;
+
+                    const range = getAppointmentTimeRange(apt);
+                    const sTime = apt.startTime || (range.startMin !== null ? formatMinutesTo24h(range.startMin) : (apt.time ? apt.time.split(' - ')[0] : '10:00'));
+                    const eTime = apt.endTime || (range.endMin !== null ? formatMinutesTo24h(range.endMin) : (apt.time && apt.time.includes(' - ') ? apt.time.split(' - ')[1] : '10:45'));
 
                     const statusBadge = {
                       Scheduled: 'bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 border-blue-200',
@@ -1611,18 +2160,34 @@ export const BookingsFollowUpView: React.FC = () => {
                           )}
                         </td>
 
-                        {/* Date & Time */}
-                        <td className="p-3.5">
-                          <div className="font-bold text-slate-900 dark:text-white">{apt.time}</div>
-                          <div className="text-[11px] text-slate-500 font-medium flex items-center gap-1">
+                        {/* Booking Date */}
+                        <td className="p-3.5 whitespace-nowrap">
+                          <div className="text-slate-900 dark:text-white font-bold flex items-center gap-1.5 font-mono text-xs">
+                            <Calendar className="h-3.5 w-3.5 text-indigo-500 shrink-0" />
                             <span>{apt.date}</span>
-                            {isPastApt && (
-                              <span className="inline-flex items-center gap-0.5 px-1 py-0.2 rounded text-[9px] font-bold bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
-                                <Lock className="h-2.5 w-2.5" />
-                                {t('سابق', 'Past')}
-                              </span>
-                            )}
                           </div>
+                          {isPastApt && (
+                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 mt-1 rounded text-[9px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700">
+                              <Lock className="h-2.5 w-2.5" />
+                              {t('سابق', 'Past')}
+                            </span>
+                          )}
+                        </td>
+
+                        {/* Start Time (من) - Separate Column */}
+                        <td className="p-3.5 text-center whitespace-nowrap">
+                          <span className="inline-flex items-center justify-center gap-1 px-2.5 py-1 rounded-lg text-xs font-mono font-bold text-indigo-700 bg-indigo-50 dark:bg-indigo-950/60 dark:text-indigo-300 border border-indigo-200/80 dark:border-indigo-800/60 shadow-xs">
+                            <Clock className="h-3 w-3 text-indigo-500" />
+                            <span>{sTime}</span>
+                          </span>
+                        </td>
+
+                        {/* End Time (إلى) - Separate Column */}
+                        <td className="p-3.5 text-center whitespace-nowrap">
+                          <span className="inline-flex items-center justify-center gap-1 px-2.5 py-1 rounded-lg text-xs font-mono font-bold text-emerald-700 bg-emerald-50 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200/80 dark:border-emerald-800/60 shadow-xs">
+                            <Clock className="h-3 w-3 text-emerald-500" />
+                            <span>{eTime}</span>
+                          </span>
                         </td>
 
                         {/* Customer Future Status */}
@@ -1721,7 +2286,12 @@ export const BookingsFollowUpView: React.FC = () => {
                                   onClick={() => {
                                     setSelectedApt(apt);
                                     setNewDate(apt.date);
-                                    setNewTime(apt.time);
+                                    const range = getAppointmentTimeRange(apt);
+                                    const sTime = apt.startTime || (range.startMin !== null ? formatMinutesTo24h(range.startMin) : '10:00');
+                                    const eTime = apt.endTime || (range.endMin !== null ? formatMinutesTo24h(range.endMin) : '10:45');
+                                    setNewStartTime(sTime);
+                                    setNewEndTime(eTime);
+                                    setNewTime(apt.time || `${sTime} - ${eTime}`);
                                     setShowRescheduleModal(true);
                                   }}
                                   className="p-1.5 text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
@@ -1848,7 +2418,9 @@ export const BookingsFollowUpView: React.FC = () => {
                   <th className="p-3">{t('مصدر وتاريخ تكويد العميل', 'Source & Creation Date')}</th>
                   <th className="p-3">{t('الخدمة / الجلسة', 'Service / Session')}</th>
                   <th className="p-3">{t('الطبيب المعالج *', 'Doctor *')}</th>
-                  <th className="p-3">{t('التوقيت', 'Time')}</th>
+                  <th className="p-3">{t('تاريخ الحجز', 'Booking Date')}</th>
+                  <th className="p-3 text-center">{t('وقت البدء (من)', 'Start Time (From)')}</th>
+                  <th className="p-3 text-center">{t('وقت الانتهاء (إلى)', 'End Time (To)')}</th>
                   <th className="p-3">{t('حالة الحجز', 'Status')}</th>
                   <th className="p-3 text-center">{t('إجراءات (إلغاء وتعديل)', 'Actions')}</th>
                 </tr>
@@ -1856,7 +2428,7 @@ export const BookingsFollowUpView: React.FC = () => {
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {nextDayAppointments.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="py-12 text-center text-slate-400">
+                    <td colSpan={10} className="py-12 text-center text-slate-400">
                       <CalendarCheck className="h-8 w-8 text-slate-300 dark:text-slate-700 mx-auto mb-2" />
                       <p>{t('لا توجد أي حجوزات مسجلة لليوم التالي بالفرع المفعل حتى الآن.', 'No bookings scheduled for tomorrow yet.')}</p>
                       <button
@@ -1973,9 +2545,40 @@ export const BookingsFollowUpView: React.FC = () => {
                           )}
                         </td>
 
-                        {/* Time */}
-                        <td className="p-3">
-                          <span className="font-bold text-emerald-700 dark:text-emerald-300 block">{apt.time}</span>
+                        {/* Booking Date */}
+                        <td className="p-3 whitespace-nowrap">
+                          <div className="text-slate-900 dark:text-white font-bold flex items-center gap-1.5 font-mono text-xs">
+                            <Calendar className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                            <span>{apt.date}</span>
+                          </div>
+                        </td>
+
+                        {/* Start Time (من) - Separate Column */}
+                        <td className="p-3 text-center whitespace-nowrap">
+                          {(() => {
+                            const nextRange = getAppointmentTimeRange(apt);
+                            const nextStart = apt.startTime || (nextRange.startMin !== null ? formatMinutesTo24h(nextRange.startMin) : (apt.time ? apt.time.split(' - ')[0] : '10:00'));
+                            return (
+                              <span className="inline-flex items-center justify-center gap-1 px-2.5 py-1 rounded-lg text-xs font-mono font-bold text-indigo-700 bg-indigo-50 dark:bg-indigo-950/60 dark:text-indigo-300 border border-indigo-200/80 dark:border-indigo-800/60 shadow-xs">
+                                <Clock className="h-3 w-3 text-indigo-500" />
+                                <span>{nextStart}</span>
+                              </span>
+                            );
+                          })()}
+                        </td>
+
+                        {/* End Time (إلى) - Separate Column */}
+                        <td className="p-3 text-center whitespace-nowrap">
+                          {(() => {
+                            const nextRange = getAppointmentTimeRange(apt);
+                            const nextEnd = apt.endTime || (nextRange.endMin !== null ? formatMinutesTo24h(nextRange.endMin) : (apt.time && apt.time.includes(' - ') ? apt.time.split(' - ')[1] : '10:45'));
+                            return (
+                              <span className="inline-flex items-center justify-center gap-1 px-2.5 py-1 rounded-lg text-xs font-mono font-bold text-emerald-700 bg-emerald-50 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200/80 dark:border-emerald-800/60 shadow-xs">
+                                <Clock className="h-3 w-3 text-emerald-500" />
+                                <span>{nextEnd}</span>
+                              </span>
+                            );
+                          })()}
                         </td>
 
                         {/* Status Badge */}
@@ -2066,13 +2669,24 @@ export const BookingsFollowUpView: React.FC = () => {
               </div>
             </div>
 
-            <button
-              onClick={() => setShowAddFollowUpModal(true)}
-              className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl cursor-pointer shadow-md shadow-indigo-600/20"
-            >
-              <Plus className="h-4 w-4" />
-              <span>{t('تسجيل متابعة مريض جديدة', 'Add Follow-up Entry')}</span>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowFollowUpExcelModal(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 border border-emerald-200 dark:border-emerald-800 rounded-xl transition-all cursor-pointer shadow-xs"
+                title={t('استيراد وتصدير جدول المتابعات والتذكير وفحص الملفات', 'Import and Export Follow-ups & Reminders')}
+              >
+                <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
+                <span>{t('إكسيل المتابعات والتذكير', 'Follow-ups Excel')}</span>
+              </button>
+
+              <button
+                onClick={() => setShowAddFollowUpModal(true)}
+                className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl cursor-pointer shadow-md shadow-indigo-600/20"
+              >
+                <Plus className="h-4 w-4" />
+                <span>{t('تسجيل متابعة مريض جديدة', 'Add Follow-up Entry')}</span>
+              </button>
+            </div>
           </div>
 
           <div className="overflow-x-auto">
@@ -2082,7 +2696,7 @@ export const BookingsFollowUpView: React.FC = () => {
                   <th className="p-3">#</th>
                   <th className="p-3">{t('كود واسم المريض والهاتف', 'Patient Name, Code & Phone')}</th>
                   <th className="p-3">{t('المصدر وتاريخ التكويد', 'Source & Creation Date')}</th>
-                  <th className="p-3">{t('تاريخ المتابعة المستحق', 'Due Follow-up Date')}</th>
+                  <th className="p-3">{t('تاريخ وتوقيت المتابعة', 'Due Date & Time')}</th>
                   <th className="p-3">{t('موضوع وسبب المتابعة', 'Follow-up Topic / Reason')}</th>
                   <th className="p-3">{t('المسؤول / التابع لـ', 'Created By')}</th>
                   <th className="p-3">{t('حالة العميل القادمة', 'Future Status')}</th>
@@ -2153,9 +2767,14 @@ export const BookingsFollowUpView: React.FC = () => {
                           <div className="text-[10px] text-slate-400 font-mono">{creationDate}</div>
                         </td>
 
-                        {/* Follow-up Date */}
+                        {/* Follow-up Date & Time */}
                         <td className="p-3 font-bold text-slate-900 dark:text-white">
-                          <div className="flex items-center gap-1">
+                          <div className="flex items-center gap-1.5 font-mono">
+                            <Clock className="h-3 w-3 text-indigo-500 shrink-0" />
+                            <span>{fup.followUpTime || '11:00 AM'}</span>
+                          </div>
+                          <div className="flex items-center gap-1 text-[11px] text-slate-500 font-medium mt-0.5">
+                            <Calendar className="h-3 w-3 text-slate-400 shrink-0" />
                             <span>{fup.followUpDate}</span>
                             {isPastFup && (
                               <span className="inline-flex items-center gap-0.5 px-1 py-0.2 rounded text-[9px] font-bold bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
@@ -3075,11 +3694,11 @@ export const BookingsFollowUpView: React.FC = () => {
                 );
               })()}
 
-              {/* Date & Time */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {/* Date & Manual Session Timing (من وقت إلى وقت) */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    {t('تاريخ الحجز * (تاريخ اليوم أو تاريخ مستقبلي)', 'Booking Date * (Today or Future)')}
+                    {t('تاريخ الحجز *', 'Booking Date *')}
                   </label>
                   <input
                     type="date"
@@ -3092,19 +3711,98 @@ export const BookingsFollowUpView: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    {t('توقيت الموعد *', 'Appointment Time *')}
+                  <label className="block text-xs font-bold text-indigo-700 dark:text-indigo-300 mb-1 flex items-center gap-1">
+                    <Clock className="h-3.5 w-3.5 text-indigo-500" />
+                    <span>{t('وقت بدء الجلسة (من) *', 'Start Time (From) *')}</span>
                   </label>
                   <input
-                    type="text"
+                    type="time"
                     required
-                    value={aptTime}
-                    onChange={(e) => setAptTime(e.target.value)}
-                    placeholder="12:00 PM"
-                    className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-indigo-600 font-bold"
+                    value={startTime}
+                    onChange={(e) => {
+                      const newS = e.target.value;
+                      setStartTime(newS);
+                      const sM = parseTimeToMinutes(newS);
+                      if (sM !== null) {
+                        const curEM = parseTimeToMinutes(endTime);
+                        if (curEM === null || curEM <= sM) {
+                          setEndTime(formatMinutesTo24h(sM + 45));
+                        }
+                      }
+                    }}
+                    className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-indigo-600 font-mono font-bold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-indigo-700 dark:text-indigo-300 mb-1 flex items-center gap-1">
+                    <Clock className="h-3.5 w-3.5 text-indigo-500" />
+                    <span>{t('وقت انتهاء الجلسة (إلى) *', 'End Time (To) *')}</span>
+                  </label>
+                  <input
+                    type="time"
+                    required
+                    value={endTime}
+                    onChange={(e) => setEndTime(e.target.value)}
+                    className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-indigo-600 font-mono font-bold"
                   />
                 </div>
               </div>
+
+              {/* Real-time Overlap Conflict Check Banner */}
+              {(() => {
+                const sMin = parseTimeToMinutes(startTime);
+                const endMin = parseTimeToMinutes(endTime);
+                const invalidInterval = sMin !== null && endMin !== null && endMin <= sMin;
+                const conflict = checkDoctorAppointmentConflict(
+                  aptDate,
+                  doctorId || undefined,
+                  doctorName,
+                  startTime,
+                  endTime,
+                  appointments
+                );
+
+                if (invalidInterval) {
+                  return (
+                    <div className="p-2.5 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded-xl text-xs text-rose-800 dark:text-rose-300 flex items-center gap-2">
+                      <AlertTriangle className="h-4 w-4 shrink-0 text-rose-600" />
+                      <span>{t('وقت نهاية الجلسة (إلى) يجب أن يكون بعد وقت بدايتها (من)', 'End time must be strictly after start time')}</span>
+                    </div>
+                  );
+                }
+
+                if (conflict.hasConflict) {
+                  return (
+                    <div className="p-3 bg-rose-50 dark:bg-rose-950/50 border border-rose-300 dark:border-rose-700 rounded-xl text-xs text-rose-900 dark:text-rose-200 space-y-1">
+                      <div className="flex items-center gap-2 font-bold text-rose-700 dark:text-rose-300">
+                        <AlertTriangle className="h-4 w-4 shrink-0" />
+                        <span>{t('تنبيه تعارض موعد محجوز لنفس الطبيب!', 'Doctor Scheduling Conflict Alert!')}</span>
+                      </div>
+                      <p className="text-[11px] leading-relaxed">
+                        {isRtl ? conflict.reasonAr : conflict.reasonEn}
+                      </p>
+                    </div>
+                  );
+                }
+
+                if (sMin !== null && endMin !== null && (doctorId || doctorName)) {
+                  const duration = endMin - sMin;
+                  return (
+                    <div className="p-2.5 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 rounded-xl text-xs text-emerald-800 dark:text-emerald-300 flex items-center justify-between">
+                      <span className="flex items-center gap-1.5 font-bold">
+                        <Check className="h-4 w-4 text-emerald-600" />
+                        <span>{t('الوقت متاح للطبيب بدون أي تداخلات', 'Slot is available for doctor without conflicts')}</span>
+                      </span>
+                      <span className="font-mono text-[11px] font-bold bg-white dark:bg-slate-900 px-2 py-0.5 rounded-md border border-emerald-200 dark:border-emerald-800">
+                        {t('المدة:', 'Duration:')} {duration} {t('دقيقة', 'min')}
+                      </span>
+                    </div>
+                  );
+                }
+
+                return null;
+              })()}
 
               {/* Notes */}
               <div>
@@ -3266,10 +3964,11 @@ export const BookingsFollowUpView: React.FC = () => {
                 </select>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {/* Date & Manual Session Timing (من وقت إلى وقت) */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    {t('التاريخ * (تاريخ اليوم أو تاريخ مستقبلي)', 'Date * (Today or Future)')}
+                    {t('التاريخ *', 'Date *')}
                   </label>
                   <input
                     type="date"
@@ -3282,18 +3981,89 @@ export const BookingsFollowUpView: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    {t('التوقيت', 'Time')}
+                  <label className="block text-xs font-bold text-indigo-700 dark:text-indigo-300 mb-1 flex items-center gap-1">
+                    <Clock className="h-3.5 w-3.5 text-indigo-500" />
+                    <span>{t('وقت بدء الجلسة (من) *', 'Start Time (From) *')}</span>
                   </label>
                   <input
-                    type="text"
+                    type="time"
                     required
-                    value={aptTime}
-                    onChange={(e) => setAptTime(e.target.value)}
-                    className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-bold"
+                    value={startTime}
+                    onChange={(e) => setStartTime(e.target.value)}
+                    className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-mono font-bold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-indigo-700 dark:text-indigo-300 mb-1 flex items-center gap-1">
+                    <Clock className="h-3.5 w-3.5 text-indigo-500" />
+                    <span>{t('وقت انتهاء الجلسة (إلى) *', 'End Time (To) *')}</span>
+                  </label>
+                  <input
+                    type="time"
+                    required
+                    value={endTime}
+                    onChange={(e) => setEndTime(e.target.value)}
+                    className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-mono font-bold"
                   />
                 </div>
               </div>
+
+              {/* Real-time Overlap Conflict Check Banner for Edit */}
+              {(() => {
+                const sMin = parseTimeToMinutes(startTime);
+                const endMin = parseTimeToMinutes(endTime);
+                const invalidInterval = sMin !== null && endMin !== null && endMin <= sMin;
+                const conflict = checkDoctorAppointmentConflict(
+                  aptDate,
+                  doctorId || undefined,
+                  doctorName,
+                  startTime,
+                  endTime,
+                  appointments,
+                  selectedApt?.id
+                );
+
+                if (invalidInterval) {
+                  return (
+                    <div className="p-2.5 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded-xl text-xs text-rose-800 dark:text-rose-300 flex items-center gap-2">
+                      <AlertTriangle className="h-4 w-4 shrink-0 text-rose-600" />
+                      <span>{t('وقت نهاية الجلسة (إلى) يجب أن يكون بعد وقت بدايتها (من)', 'End time must be strictly after start time')}</span>
+                    </div>
+                  );
+                }
+
+                if (conflict.hasConflict) {
+                  return (
+                    <div className="p-3 bg-rose-50 dark:bg-rose-950/50 border border-rose-300 dark:border-rose-700 rounded-xl text-xs text-rose-900 dark:text-rose-200 space-y-1">
+                      <div className="flex items-center gap-2 font-bold text-rose-700 dark:text-rose-300">
+                        <AlertTriangle className="h-4 w-4 shrink-0" />
+                        <span>{t('تنبيه تعارض موعد محجوز لنفس الطبيب!', 'Doctor Scheduling Conflict Alert!')}</span>
+                      </div>
+                      <p className="text-[11px] leading-relaxed">
+                        {isRtl ? conflict.reasonAr : conflict.reasonEn}
+                      </p>
+                    </div>
+                  );
+                }
+
+                if (sMin !== null && endMin !== null && (doctorId || doctorName)) {
+                  const duration = endMin - sMin;
+                  return (
+                    <div className="p-2.5 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 rounded-xl text-xs text-emerald-800 dark:text-emerald-300 flex items-center justify-between">
+                      <span className="flex items-center gap-1.5 font-bold">
+                        <Check className="h-4 w-4 text-emerald-600" />
+                        <span>{t('الوقت متاح للطبيب بدون أي تداخلات', 'Slot is available for doctor without conflicts')}</span>
+                      </span>
+                      <span className="font-mono text-[11px] font-bold bg-white dark:bg-slate-900 px-2 py-0.5 rounded-md border border-emerald-200 dark:border-emerald-800">
+                        {t('المدة:', 'Duration:')} {duration} {t('دقيقة', 'min')}
+                      </span>
+                    </div>
+                  );
+                }
+
+                return null;
+              })()}
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
@@ -3625,19 +4395,101 @@ export const BookingsFollowUpView: React.FC = () => {
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  {t('التوقيت الجديد *', 'New Time *')}
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={newTime}
-                  onChange={(e) => setNewTime(e.target.value)}
-                  placeholder="03:00 PM"
-                  className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-indigo-600"
-                />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-indigo-700 dark:text-indigo-300 mb-1 flex items-center gap-1">
+                    <Clock className="h-3.5 w-3.5 text-indigo-500" />
+                    <span>{t('وقت البدء (من) *', 'Start Time (From) *')}</span>
+                  </label>
+                  <input
+                    type="time"
+                    required
+                    value={newStartTime}
+                    onChange={(e) => {
+                      const newS = e.target.value;
+                      setNewStartTime(newS);
+                      const sM = parseTimeToMinutes(newS);
+                      if (sM !== null) {
+                        const curEM = parseTimeToMinutes(newEndTime);
+                        if (curEM === null || curEM <= sM) {
+                          setNewEndTime(formatMinutesTo24h(sM + 45));
+                        }
+                      }
+                    }}
+                    className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-indigo-600 font-mono font-bold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-indigo-700 dark:text-indigo-300 mb-1 flex items-center gap-1">
+                    <Clock className="h-3.5 w-3.5 text-indigo-500" />
+                    <span>{t('وقت الانتهاء (إلى) *', 'End Time (To) *')}</span>
+                  </label>
+                  <input
+                    type="time"
+                    required
+                    value={newEndTime}
+                    onChange={(e) => setNewEndTime(e.target.value)}
+                    className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-indigo-600 font-mono font-bold"
+                  />
+                </div>
               </div>
+
+              {/* Real-time Overlap Conflict Check Banner for Reschedule */}
+              {(() => {
+                const sMin = parseTimeToMinutes(newStartTime);
+                const endMin = parseTimeToMinutes(newEndTime);
+                const invalidInterval = sMin !== null && endMin !== null && endMin <= sMin;
+                const conflict = checkDoctorAppointmentConflict(
+                  newDate,
+                  selectedApt.doctorId,
+                  selectedApt.doctorName,
+                  newStartTime,
+                  newEndTime,
+                  appointments,
+                  selectedApt.id
+                );
+
+                if (invalidInterval) {
+                  return (
+                    <div className="p-2.5 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded-xl text-xs text-rose-800 dark:text-rose-300 flex items-center gap-2">
+                      <AlertTriangle className="h-4 w-4 shrink-0 text-rose-600" />
+                      <span>{t('وقت نهاية الجلسة (إلى) يجب أن يكون بعد وقت بدايتها (من)', 'End time must be after start time')}</span>
+                    </div>
+                  );
+                }
+
+                if (conflict.hasConflict) {
+                  return (
+                    <div className="p-3 bg-rose-50 dark:bg-rose-950/50 border border-rose-300 dark:border-rose-700 rounded-xl text-xs text-rose-900 dark:text-rose-200 space-y-1">
+                      <div className="flex items-center gap-2 font-bold text-rose-700 dark:text-rose-300">
+                        <AlertTriangle className="h-4 w-4 shrink-0" />
+                        <span>{t('تعارض موعد محجوز لنفس الطبيب!', 'Doctor Conflict!')}</span>
+                      </div>
+                      <p className="text-[11px] leading-relaxed">
+                        {isRtl ? conflict.reasonAr : conflict.reasonEn}
+                      </p>
+                    </div>
+                  );
+                }
+
+                if (sMin !== null && endMin !== null) {
+                  const duration = endMin - sMin;
+                  return (
+                    <div className="p-2 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 rounded-xl text-xs text-emerald-800 dark:text-emerald-300 flex items-center justify-between">
+                      <span className="flex items-center gap-1 font-bold">
+                        <Check className="h-3.5 w-3.5 text-emerald-600" />
+                        <span>{t('الموعد متاح بدون تعارض', 'Slot is available')}</span>
+                      </span>
+                      <span className="font-mono text-[10px] font-bold">
+                        {duration} {t('دقيقة', 'min')}
+                      </span>
+                    </div>
+                  );
+                }
+
+                return null;
+              })()}
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
@@ -4441,23 +5293,56 @@ export const BookingsFollowUpView: React.FC = () => {
         onClose={() => setShowExcelModal(false)}
         entityTitleAr="حجوزات ومواعيد المرضى"
         entityTitleEn="Patient Bookings & Appointments"
-        descriptionAr="استيراد وتصدير جدول الحجوزات مع الفحص الخلوي الذكي للتأكد من المواعيد والأطباء"
+        descriptionAr="استيراد وتصدير جدول الحجوزات مع الفحص الخلوي الذكي للتأكد من المواعيد والأطباء وربط كود العميل"
         columns={bookingsExcelColumns}
-        currentDataForExport={filteredAppointments.map((a) => ({
-          patientName: a.patientName,
-          patientPhone: a.patientPhone || '',
-          date: a.date,
-          time: a.time,
-          serviceNameAr: a.serviceNameAr,
-          doctorName: a.doctorName || '',
-          price: a.price || 0,
-          deposit: a.deposit || 0,
-          status: a.status,
-          notes: a.notes || '',
-        }))}
+        currentDataForExport={filteredAppointments.map((a) => {
+          const range = getAppointmentTimeRange(a);
+          const sTime = a.startTime || (range.startMin !== null ? formatMinutesTo24h(range.startMin) : (a.time ? a.time.split(' - ')[0] : '10:00'));
+          const eTime = a.endTime || (range.endMin !== null ? formatMinutesTo24h(range.endMin) : (a.time && a.time.includes(' - ') ? a.time.split(' - ')[1] : '10:45'));
+          return {
+            customerCode: a.customerCode || a.systemCode || '',
+            patientName: a.patientName,
+            patientPhone: a.patientPhone || '',
+            date: a.date,
+            doctorName: a.doctorName || '',
+            startTime: sTime,
+            endTime: eTime,
+            serviceNameAr: a.serviceNameAr,
+            price: a.price || 0,
+            deposit: a.deposit || 0,
+            status: a.status,
+            notes: a.notes || '',
+          };
+        })}
         exportFileNamePrefix="جدول_الحجوزات_والمواعيد"
         validator={validateBookingRows}
         onConfirmImport={handleConfirmBookingsImport}
+        branchName={activeBranch?.name || 'الفرع الحالي'}
+      />
+
+      {/* EXCEL DATA TRANSFER & VALIDATION MODAL FOR PATIENT FOLLOW-UPS & REMINDERS */}
+      <ExcelDataTransferModal
+        isOpen={showFollowUpExcelModal}
+        onClose={() => setShowFollowUpExcelModal(false)}
+        entityTitleAr="جدول المتابعات والتذكير للمرضى"
+        entityTitleEn="Patient Follow-ups & Reminders"
+        descriptionAr="استيراد وتصدير جدول المتابعات والتذكير مع الفحص الخلوي الذكي وربط كود العميل آلياً بدون تجميد المتصفح"
+        columns={followUpsExcelColumns}
+        currentDataForExport={filteredFollowUps.map((f) => ({
+          customerCode: f.customerCode || f.systemCode || '',
+          patientName: f.patientName,
+          patientPhone: f.patientPhone || '',
+          followUpDate: f.followUpDate,
+          followUpTime: f.followUpTime || '11:00 AM',
+          reason: f.reason || '',
+          type: f.type || 'Recall',
+          status: f.status || 'Pending',
+          notes: f.notes || '',
+          createdBy: f.createdBy || '',
+        }))}
+        exportFileNamePrefix="جدول_المتابعات_والتذكير"
+        validator={validateFollowUpRows}
+        onConfirmImport={handleConfirmFollowUpsImport}
         branchName={activeBranch?.name || 'الفرع الحالي'}
       />
     </div>

@@ -42,18 +42,55 @@ import { QuickActionsBar } from './components/QuickActionsBar';
 import { CommandPaletteModal } from './components/CommandPaletteModal';
 import { CustomizeQuickButtonsModal } from './components/CustomizeQuickButtonsModal';
 import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
+import { GlobalContextMenu } from './components/GlobalContextMenu';
 
 const MainLayout: React.FC = () => {
   const { language, t, canAccessView, currentUser, activeBranch } = usePlatform();
 
-  // Load preferred landing view from localStorage or user settings
+  // Load preferred landing view from URL query param, hash, or localStorage (Supports Open in New Tab)
   const [currentView, setCurrentView] = useState<string>(() => {
     try {
+      const params = new URLSearchParams(window.location.search);
+      const urlView = params.get('view');
+      if (urlView) return urlView;
+
+      if (window.location.hash) {
+        const hash = window.location.hash.replace('#', '');
+        if (hash) return hash;
+      }
+
       const saved = localStorage.getItem('erp_default_view');
       if (saved) return saved;
     } catch {}
     return 'dashboard';
   });
+
+  // Keep URL query param in sync so "Open in New Tab" and bookmarking work seamlessly
+  useEffect(() => {
+    try {
+      const url = new URL(window.location.href);
+      if (url.searchParams.get('view') !== currentView) {
+        url.searchParams.set('view', currentView);
+        window.history.replaceState({ view: currentView }, '', url.toString());
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  }, [currentView]);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const v = params.get('view');
+        if (v) setCurrentView(v);
+      } catch (e) {
+        console.error(e);
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
 
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState<boolean>(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState<boolean>(false);
@@ -298,6 +335,9 @@ const MainLayout: React.FC = () => {
         isOpen={isShortcutsModalOpen}
         onClose={() => setIsShortcutsModalOpen(false)}
       />
+
+      {/* Global Right-Click Context Menu (فتح في تبويب جديد دون إلغاء الصفحة السابقة) */}
+      <GlobalContextMenu currentView={currentView} />
 
       <div className="flex flex-1 overflow-hidden relative">
         {/* Desktop Sidebar */}

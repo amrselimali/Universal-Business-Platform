@@ -293,12 +293,14 @@ interface PlatformContextType {
   allTreatmentPlans: TreatmentPlan[];
   addAppointment: (apt: Omit<Appointment, 'id' | 'tenantId'>) => Appointment;
   updateAppointment: (id: string, data: Partial<Appointment>) => void;
+  importAppointmentsBulk: (aptsList: Omit<Appointment, 'id' | 'tenantId'>[]) => Promise<{ count: number; success: boolean }>;
   cancelAppointment: (id: string, reason: string) => void;
   markAppointmentAttendance: (id: string, attended: boolean, reason?: string) => void;
   rescheduleAppointment: (id: string, date: string, time: string, notes?: string) => void;
   addPatientFollowUp: (data: Omit<PatientFollowUp, 'id' | 'tenantId' | 'createdAt'>) => PatientFollowUp;
   updatePatientFollowUp: (id: string, data: Partial<PatientFollowUp>) => void;
   deletePatientFollowUp: (id: string) => void;
+  importFollowUpsBulk: (fupList: Omit<PatientFollowUp, 'id' | 'tenantId' | 'createdAt'>[]) => Promise<{ count: number; success: boolean }>;
   addTreatmentPlan: (plan: Omit<TreatmentPlan, 'id' | 'tenantId'>) => TreatmentPlan;
   updateTreatmentPlan: (id: string, data: Partial<TreatmentPlan>) => void;
   progressTreatmentPlan: (planId: string) => void;
@@ -1834,6 +1836,36 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     safeLocalStorageSet('erp_patient_follow_ups', JSON.stringify(allPatientFollowUps));
   }, [allPatientFollowUps]);
 
+  // Multi-tab synchronization (مزامنة فورية حية بين كافة التبويبات والشاشات المفتوحة)
+  useEffect(() => {
+    const handleMultiTabStorageSync = (e: StorageEvent) => {
+      if (!e.newValue) return;
+      try {
+        if (e.key === 'erp_appointments') {
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed)) setAllAppointments(parsed);
+        } else if (e.key === 'erp_patient_follow_ups') {
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed)) setAllPatientFollowUps(parsed);
+        } else if (e.key === 'erp_parties') {
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed)) setAllParties(parsed);
+        } else if (e.key === 'erp_reception_shifts') {
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed)) setAllReceptionShifts(parsed);
+        } else if (e.key === 'erp_treatment_plans') {
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed)) setAllTreatmentPlans(parsed);
+        }
+      } catch (err) {
+        console.error('Multi-tab sync error:', err);
+      }
+    };
+
+    window.addEventListener('storage', handleMultiTabStorageSync);
+    return () => window.removeEventListener('storage', handleMultiTabStorageSync);
+  }, []);
+
   const appointments = allAppointments.filter((a) => a.tenantId === tenant?.id);
   const treatmentPlans = allTreatmentPlans.filter((t) => t.tenantId === tenant?.id);
   const patientFollowUps = allPatientFollowUps.filter((f) => f.tenantId === tenant?.id);
@@ -1875,6 +1907,54 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const deletePatientFollowUp = (id: string) => {
     setAllPatientFollowUps((prev) => prev.filter((f) => f.id !== id));
+  };
+
+  const importFollowUpsBulk = async (
+    fupList: Omit<PatientFollowUp, 'id' | 'tenantId' | 'createdAt'>[]
+  ): Promise<{ count: number; success: boolean }> => {
+    if (!fupList || fupList.length === 0) return { count: 0, success: true };
+
+    const currentTenant = tenant || INITIAL_TENANT;
+    const defaultBranchId = activeBranch?.id || branches[0]?.id || 'branch-cairo';
+    const nowIso = new Date().toISOString();
+    const batchId = Date.now();
+
+    const newFups: PatientFollowUp[] = fupList.map((f, idx) => {
+      const branchId = f.branchId || defaultBranchId;
+      const uniqueId = `fup-${batchId}-${idx}-${Math.random().toString(36).substring(2, 7)}`;
+
+      return {
+        ...f,
+        branchId,
+        id: uniqueId,
+        tenantId: currentTenant.id,
+        createdAt: nowIso,
+        createdBy: f.createdBy || currentUser?.name || 'فريق المتابعة',
+        status: f.status || 'Pending',
+      };
+    });
+
+    setAllPatientFollowUps((prev) => [...newFups, ...prev]);
+
+    recordAudit({
+      entityType: 'Appointment',
+      entityId: `bulk-fup-${batchId}`,
+      entityName: `استيراد مجمع للمتابعات (${newFups.length})`,
+      actionType: 'CREATE',
+      diffSummary: `استيراد مجمع لعدد ${newFups.length} متابعة وتذكير من ملف إكسيل بنجاح`,
+      newState: { count: newFups.length },
+    });
+
+    logUserActivity(
+      'appointments',
+      'شاشة الحجز والمتابعة',
+      'Bookings & Follow-ups',
+      'استيراد إكسيل مجمع للمتابعات',
+      'Bulk Follow-ups Import',
+      `تم استيراد ${newFups.length} متابعة وتذكير بنجاح دفعة واحدة`
+    );
+
+    return { count: newFups.length, success: true };
   };
 
   const addAppointment = (aptData: Omit<Appointment, 'id' | 'tenantId'>): Appointment => {
@@ -1955,6 +2035,55 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       `تم حجز موعد للمريض ${newApt.patientName} بتكلفة ${newApt.price} ج.م`
     );
     return newApt;
+  };
+
+  const importAppointmentsBulk = async (
+    aptsList: Omit<Appointment, 'id' | 'tenantId'>[]
+  ): Promise<{ count: number; success: boolean }> => {
+    if (!aptsList || aptsList.length === 0) return { count: 0, success: true };
+
+    const currentTenant = tenant || INITIAL_TENANT;
+    const defaultBranchId = activeBranch?.id || branches[0]?.id || 'branch-cairo';
+    const nowIso = new Date().toISOString();
+    const batchId = Date.now();
+
+    const newApts: Appointment[] = aptsList.map((apt, idx) => {
+      const branchId = apt.branchId || defaultBranchId;
+      const serviceNameEn = apt.serviceNameEn || autoTranslateArabic(apt.serviceNameAr);
+      const uniqueId = `apt-${batchId}-${idx}-${Math.random().toString(36).substring(2, 7)}`;
+
+      return {
+        ...apt,
+        branchId,
+        serviceNameEn,
+        id: uniqueId,
+        tenantId: currentTenant.id,
+        createdAt: nowIso,
+        status: apt.status || 'Scheduled',
+      };
+    });
+
+    setAllAppointments((prev) => [...newApts, ...prev]);
+
+    recordAudit({
+      entityType: 'Appointment',
+      entityId: `bulk-apt-${batchId}`,
+      entityName: `استيراد مجمع للحجوزات (${newApts.length})`,
+      actionType: 'CREATE',
+      diffSummary: `استيراد مجمع لعدد ${newApts.length} حجز من ملف إكسيل بنجاح`,
+      newState: { count: newApts.length },
+    });
+
+    logUserActivity(
+      'appointments',
+      'شاشة الحجز والمتابعة',
+      'Bookings & Follow-ups',
+      'استيراد إكسيل مجمع للحجوزات',
+      'Bulk Bookings Import',
+      `تم استيراد ${newApts.length} حجز بنجاح دفعة واحدة`
+    );
+
+    return { count: newApts.length, success: true };
   };
 
   const updateAppointment = (id: string, data: Partial<Appointment>) => {
@@ -8167,12 +8296,14 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         allTreatmentPlans,
         addAppointment,
         updateAppointment,
+        importAppointmentsBulk,
         cancelAppointment,
         markAppointmentAttendance,
         rescheduleAppointment,
         addPatientFollowUp,
         updatePatientFollowUp,
         deletePatientFollowUp,
+        importFollowUpsBulk,
         addTreatmentPlan,
         updateTreatmentPlan,
         progressTreatmentPlan,

@@ -36,6 +36,7 @@ import {
   ArrowUpRight,
   Contact,
   Bell,
+  ExternalLink,
   LucideIcon,
 } from 'lucide-react';
 
@@ -365,26 +366,49 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate }) => 
                 const isActive = currentView === item.id;
 
                 return (
-                  <button
-                    key={item.id}
-                    onClick={() => onNavigate(item.id)}
-                    className={`group flex w-full items-center justify-between rounded-xl px-3 py-2 text-xs font-semibold transition-all cursor-pointer ${
-                      isActive
-                        ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-500/25'
-                        : item.highlight
-                        ? 'text-indigo-600 hover:bg-indigo-50 dark:text-indigo-400 dark:hover:bg-indigo-950/30'
-                        : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2.5 overflow-hidden">
-                      <Icon
-                        className={`h-4 w-4 shrink-0 transition-transform group-hover:scale-110 ${
-                          isActive ? 'text-white' : item.highlight ? 'text-indigo-500' : 'text-slate-400'
-                        }`}
-                      />
-                      <span className="truncate">{language === 'ar' ? item.labelAr : item.labelEn}</span>
-                    </div>
-                  </button>
+                  <div key={item.id} className="group relative flex items-center">
+                    <a
+                      href={`?view=${item.id}`}
+                      onClick={(e) => {
+                        if (!e.ctrlKey && !e.metaKey && e.button === 0) {
+                          e.preventDefault();
+                          onNavigate(item.id);
+                        }
+                      }}
+                      className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-xs font-semibold transition-all cursor-pointer ${
+                        isActive
+                          ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-500/25'
+                          : item.highlight
+                          ? 'text-indigo-600 hover:bg-indigo-50 dark:text-indigo-400 dark:hover:bg-indigo-950/30'
+                          : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5 overflow-hidden pe-5">
+                        <Icon
+                          className={`h-4 w-4 shrink-0 transition-transform group-hover:scale-110 ${
+                            isActive ? 'text-white' : item.highlight ? 'text-indigo-500' : 'text-slate-400'
+                          }`}
+                        />
+                        <span className="truncate">{language === 'ar' ? item.labelAr : item.labelEn}</span>
+                      </div>
+                    </a>
+
+                    {/* Dedicated Open in New Tab Button on hover */}
+                    <a
+                      href={`?view=${item.id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title={language === 'ar' ? 'فتح في تبويب جديد (Open in New Tab)' : 'Open in New Tab'}
+                      className={`absolute end-2 opacity-0 group-hover:opacity-100 p-1 rounded-md transition-all cursor-pointer ${
+                        isActive
+                          ? 'text-white/80 hover:text-white hover:bg-indigo-700'
+                          : 'text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-slate-200 dark:hover:bg-slate-700'
+                      }`}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <ExternalLink className="h-3 w-3" />
+                    </a>
+                  </div>
                 );
               })}
             </div>

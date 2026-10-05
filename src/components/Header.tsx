@@ -16,6 +16,7 @@ import {
   LogOut,
   Shield,
   BookOpen,
+  ExternalLink,
 } from 'lucide-react';
 
 interface HeaderProps {
