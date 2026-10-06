@@ -45,6 +45,8 @@ import {
   FileSpreadsheet,
   Download,
   ExternalLink,
+  ArrowDown,
+  ArrowUp,
 } from 'lucide-react';
 import {
   ExcelDataTransferModal,
@@ -500,6 +502,8 @@ export const BookingsFollowUpView: React.FC = () => {
   const [showQuickAddCustomerModal, setShowQuickAddCustomerModal] = useState(false);
   const [showExcelModal, setShowExcelModal] = useState(false);
   const [showFollowUpExcelModal, setShowFollowUpExcelModal] = useState(false);
+  const [showPatientHistoryModal, setShowPatientHistoryModal] = useState(false);
+  const [patientHistorySearch, setPatientHistorySearch] = useState('');
   const [patientHistoryData, setPatientHistoryData] = useState<{
     patientId?: string;
     patientName: string;
@@ -571,33 +575,77 @@ export const BookingsFollowUpView: React.FC = () => {
   const [planTotalSessions, setPlanTotalSessions] = useState<number>(6);
   const [planTotalCost, setPlanTotalCost] = useState<number>(3000);
 
-  // Helper: Find Party by patient name or ID
+  // Ultra-Fast O(1) indexed maps for parties
+  const partyMap = React.useMemo(() => {
+    const byId = new Map<string, Party>();
+    const byName = new Map<string, Party>();
+    const byPhone = new Map<string, Party>();
+    const byCode = new Map<string, Party>();
+
+    for (let i = 0; i < parties.length; i++) {
+      const p = parties[i];
+      if (p.id) byId.set(p.id, p);
+      if (p.name) byName.set(p.name.toLowerCase().trim(), p);
+      if (p.phone) byPhone.set(p.phone.trim(), p);
+      if (p.systemCode) byCode.set(p.systemCode.toLowerCase().trim(), p);
+      if (p.paperCode) byCode.set(p.paperCode.toLowerCase().trim(), p);
+      if (p.code) byCode.set(p.code.toLowerCase().trim(), p);
+    }
+    return { byId, byName, byPhone, byCode };
+  }, [parties]);
+
+  // Helper: Find Party by patient name or ID in O(1)
   const getPartyForPatient = (pId?: string, pName?: string) => {
-    return parties.find((p) => (pId && p.id === pId) || (pName && p.name === pName));
+    return (pId ? partyMap.byId.get(pId) : undefined) ||
+           (pName ? partyMap.byName.get(pName.toLowerCase().trim()) : undefined);
   };
 
-  // Helper: Get Future Status for a customer (حجز قادم أو متابعة قادمة)
-  const getCustomerFutureStatus = (patientName: string, patientPhone?: string, patientId?: string, currentAptId?: string) => {
-    // Find future appointment after today or current row
-    const futureApt = appointments.find(
-      (a) =>
-        a.id !== currentAptId &&
-        ((patientId && a.patientId === patientId) ||
-          a.patientName.toLowerCase() === patientName.toLowerCase() ||
-          (patientPhone && a.patientPhone && a.patientPhone === patientPhone)) &&
-        a.date >= todayIso &&
-        a.status !== 'Cancelled'
-    );
+  // Ultra-Fast O(1) Future Status Lookup Maps for upcoming events
+  const { futureAptMap, futureFupMap } = React.useMemo(() => {
+    const aptMap = new Map<string, Appointment>();
+    const fupMap = new Map<string, PatientFollowUp>();
 
-    // Find pending future follow-up
-    const futureFup = patientFollowUps.find(
-      (f) =>
-        ((patientId && f.patientId === patientId) ||
-          f.patientName.toLowerCase() === patientName.toLowerCase() ||
-          (patientPhone && f.patientPhone && f.patientPhone === patientPhone)) &&
-        f.followUpDate >= todayIso &&
-        f.status === 'Pending'
-    );
+    for (let i = 0; i < appointments.length; i++) {
+      const a = appointments[i];
+      if (a.date >= todayIso && a.status !== 'Cancelled') {
+        if (a.patientId && !aptMap.has(a.patientId)) aptMap.set(a.patientId, a);
+        if (a.patientPhone && !aptMap.has(a.patientPhone)) aptMap.set(a.patientPhone, a);
+        if (a.patientName) {
+          const k = a.patientName.toLowerCase().trim();
+          if (!aptMap.has(k)) aptMap.set(k, a);
+        }
+      }
+    }
+
+    for (let i = 0; i < patientFollowUps.length; i++) {
+      const f = patientFollowUps[i];
+      if (f.followUpDate >= todayIso && f.status === 'Pending') {
+        if (f.patientId && !fupMap.has(f.patientId)) fupMap.set(f.patientId, f);
+        if (f.patientPhone && !fupMap.has(f.patientPhone)) fupMap.set(f.patientPhone, f);
+        if (f.patientName) {
+          const k = f.patientName.toLowerCase().trim();
+          if (!fupMap.has(k)) fupMap.set(k, f);
+        }
+      }
+    }
+
+    return { futureAptMap: aptMap, futureFupMap: fupMap };
+  }, [appointments, patientFollowUps, todayIso]);
+
+  // Helper: Get Future Status for a customer in O(1)
+  const getCustomerFutureStatus = (patientName: string, patientPhone?: string, patientId?: string, currentAptId?: string) => {
+    const nameKey = (patientName || '').toLowerCase().trim();
+    const candidateApt =
+      (patientId ? futureAptMap.get(patientId) : undefined) ||
+      (patientPhone ? futureAptMap.get(patientPhone) : undefined) ||
+      (nameKey ? futureAptMap.get(nameKey) : undefined);
+
+    const futureApt = candidateApt && candidateApt.id !== currentAptId ? candidateApt : null;
+
+    const futureFup =
+      (patientId ? futureFupMap.get(patientId) : undefined) ||
+      (patientPhone ? futureFupMap.get(patientPhone) : undefined) ||
+      (nameKey ? futureFupMap.get(nameKey) : undefined);
 
     if (futureApt) {
       return {
@@ -636,7 +684,7 @@ export const BookingsFollowUpView: React.FC = () => {
     });
   }, [parties, activeBranch?.id, activeBranch?.name, activeBranch?.code, currentBranchId, branches]);
 
-  // Branch Appointments strictly filtered by active branch
+  // Branch Appointments strictly filtered by active branch in O(N) using partyMap
   const branchAppointments = React.useMemo(() => {
     return appointments.filter((apt) => {
       if (!currentBranchId) return true;
@@ -647,7 +695,8 @@ export const BookingsFollowUpView: React.FC = () => {
           (activeBranch?.code && apt.branchId === activeBranch.code)
         );
       }
-      const p = parties.find((party) => party.id === apt.patientId || party.name === apt.patientName);
+      const p = (apt.patientId ? partyMap.byId.get(apt.patientId) : undefined) ||
+                (apt.patientName ? partyMap.byName.get(apt.patientName.toLowerCase().trim()) : undefined);
       if (p) {
         return (
           p.branchId === currentBranchId ||
@@ -657,9 +706,9 @@ export const BookingsFollowUpView: React.FC = () => {
       }
       return currentBranchId === (branches[0]?.id || 'branch-cairo');
     });
-  }, [appointments, currentBranchId, activeBranch?.name, activeBranch?.code, parties, branches]);
+  }, [appointments, currentBranchId, activeBranch?.name, activeBranch?.code, partyMap, branches]);
 
-  // Branch Follow-ups strictly filtered by active branch
+  // Branch Follow-ups strictly filtered by active branch in O(N) using partyMap
   const branchFollowUps = React.useMemo(() => {
     return patientFollowUps.filter((fup) => {
       if (!currentBranchId) return true;
@@ -670,7 +719,8 @@ export const BookingsFollowUpView: React.FC = () => {
           (activeBranch?.code && fup.branchId === activeBranch.code)
         );
       }
-      const p = parties.find((party) => party.id === fup.patientId || party.name === fup.patientName);
+      const p = (fup.patientId ? partyMap.byId.get(fup.patientId) : undefined) ||
+                (fup.patientName ? partyMap.byName.get(fup.patientName.toLowerCase().trim()) : undefined);
       if (p) {
         return (
           p.branchId === currentBranchId ||
@@ -680,15 +730,21 @@ export const BookingsFollowUpView: React.FC = () => {
       }
       return currentBranchId === (branches[0]?.id || 'branch-cairo');
     });
-  }, [patientFollowUps, currentBranchId, activeBranch?.name, activeBranch?.code, parties, branches]);
+  }, [patientFollowUps, currentBranchId, activeBranch?.name, activeBranch?.code, partyMap, branches]);
 
   // Filtered Appointments (Search by name, phone, or systemCode, with Date Range)
-  // Sorted strictly by Date -> Doctor Name -> Booking Start Time (من)
+  // Evaluated ONLY when on agenda tab or excel modal to keep tab switching instantaneous
   const filteredAppointments = React.useMemo(() => {
+    if (activeTab !== 'agenda' && !showExcelModal) {
+      return [];
+    }
+
+    const q = searchQuery.toLowerCase().trim();
+    const hasSearch = Boolean(q);
+
     const list = branchAppointments.filter((apt) => {
-      const q = searchQuery.toLowerCase().trim();
       const matchesSearch =
-        !q ||
+        !hasSearch ||
         Boolean(apt.patientName && apt.patientName.toLowerCase().includes(q)) ||
         Boolean(apt.patientPhone && apt.patientPhone.includes(q)) ||
         Boolean(apt.systemCode && apt.systemCode.toLowerCase().includes(q)) ||
@@ -701,15 +757,13 @@ export const BookingsFollowUpView: React.FC = () => {
       const matchesDoctor = selectedDoctorId === 'All' || apt.doctorId === selectedDoctorId;
       
       const matchesDate =
-        activeTab === 'agenda'
-          ? (!dateFrom || (apt.date && apt.date >= dateFrom)) && (!dateTo || (apt.date && apt.date <= dateTo))
-          : true;
+        (!dateFrom || (apt.date && apt.date >= dateFrom)) && (!dateTo || (apt.date && apt.date <= dateTo));
 
       return matchesSearch && matchesStatus && matchesDoctor && matchesDate;
     });
 
     return sortAppointments(list);
-  }, [branchAppointments, searchQuery, statusFilter, selectedDoctorId, activeTab, dateFrom, dateTo]);
+  }, [branchAppointments, searchQuery, statusFilter, selectedDoctorId, activeTab, showExcelModal, dateFrom, dateTo]);
 
   // Pagination for Agenda Table
   const totalAgendaPages = Math.ceil(filteredAppointments.length / (agendaRowsPerPage || 50)) || 1;
@@ -720,12 +774,18 @@ export const BookingsFollowUpView: React.FC = () => {
   }, [filteredAppointments, agendaPage, agendaRowsPerPage]);
 
   // Next Day Appointments (حجوزات اليوم التالي المستقلة للفرع المفعل) - Sorted by Date -> Doctor -> Start Time
+  // Evaluated ONLY when on next_day tab
   const nextDayAppointments = React.useMemo(() => {
+    if (activeTab !== 'next_day') return [];
+    const q = searchQuery.toLowerCase().trim();
+    const hasSearch = Boolean(q);
+
     const list = branchAppointments.filter((apt) => {
       const isTomorrow = apt.date === tomorrowIso;
-      const q = searchQuery.toLowerCase().trim();
+      if (!isTomorrow) return false;
+
       const matchesSearch =
-        !q ||
+        !hasSearch ||
         Boolean(apt.patientName && apt.patientName.toLowerCase().includes(q)) ||
         Boolean(apt.patientPhone && apt.patientPhone.includes(q)) ||
         Boolean(apt.systemCode && apt.systemCode.toLowerCase().includes(q)) ||
@@ -734,18 +794,22 @@ export const BookingsFollowUpView: React.FC = () => {
         Boolean(apt.serviceNameAr && apt.serviceNameAr.toLowerCase().includes(q)) ||
         Boolean(apt.doctorName && apt.doctorName.toLowerCase().includes(q));
 
-      return isTomorrow && matchesSearch;
+      return matchesSearch;
     });
 
     return sortAppointments(list);
-  }, [branchAppointments, tomorrowIso, searchQuery]);
+  }, [branchAppointments, tomorrowIso, searchQuery, activeTab]);
 
   // Filtered Patient Follow-ups for active branch
+  // Evaluated ONLY when on followup tab or follow-up excel modal
   const filteredFollowUps = React.useMemo(() => {
+    if (activeTab !== 'followup' && !showFollowUpExcelModal) return [];
+    const q = searchQuery.toLowerCase().trim();
+    const hasSearch = Boolean(q);
+
     return branchFollowUps.filter((fup) => {
-      const q = searchQuery.toLowerCase().trim();
       const matchesSearch =
-        !q ||
+        !hasSearch ||
         Boolean(fup.patientName && fup.patientName.toLowerCase().includes(q)) ||
         Boolean(fup.patientPhone && fup.patientPhone.includes(q)) ||
         Boolean(fup.systemCode && fup.systemCode.toLowerCase().includes(q)) ||
@@ -759,7 +823,7 @@ export const BookingsFollowUpView: React.FC = () => {
 
       return matchesSearch && matchesDate;
     });
-  }, [branchFollowUps, searchQuery, dateFrom, dateTo]);
+  }, [branchFollowUps, searchQuery, dateFrom, dateTo, activeTab, showFollowUpExcelModal]);
 
   // Pagination for Follow-ups Table
   const totalFollowUpPages = Math.ceil(filteredFollowUps.length / (followUpRowsPerPage || 50)) || 1;
@@ -1190,6 +1254,8 @@ export const BookingsFollowUpView: React.FC = () => {
       patientName: pName || '',
       patientPhone: pPhone,
     });
+    setPatientHistorySearch(pName || pPhone || '');
+    setShowPatientHistoryModal(true);
   };
 
   // Branch Staff Schedules strictly filtered by current branch and schedule target date
@@ -2130,7 +2196,7 @@ export const BookingsFollowUpView: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col h-full overflow-y-auto p-4 md:p-6 space-y-6 bg-slate-50 dark:bg-slate-950">
+    <div className="flex flex-col min-h-full p-4 md:p-6 space-y-6 bg-slate-50 dark:bg-slate-950">
       {/* Header & Main Nav Tabs */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
         <div>
@@ -2174,19 +2240,15 @@ export const BookingsFollowUpView: React.FC = () => {
             <span>{t('إضافة عميل جديد', 'Add Client')}</span>
           </button>
 
-          {/* Detailed Patient History Shortcut Button */}
+          {/* Detailed Patient History Shortcut Button (يبدأ فارغاً للبحث فقط بدون عميل افتراضي) */}
           <button
             onClick={() => {
-              if (branchCustomers.length > 0) {
-                handleOpenPatientHistory(branchCustomers[0].id, branchCustomers[0].name, branchCustomers[0].phone);
-              } else if (parties.length > 0) {
-                handleOpenPatientHistory(parties[0].id, parties[0].name, parties[0].phone);
-              } else {
-                alert(t('لا يوجد مرضى مسجلين حتى الآن!', 'No registered patients yet!'));
-              }
+              setPatientHistoryData(null);
+              setPatientHistorySearch('');
+              setShowPatientHistoryModal(true);
             }}
             className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-xl transition-all cursor-pointer shadow-xs"
-            title={t('عرض سجل الحجوزات والمتابعات التفصيلي لأي مريض في أسطر', 'View detailed patient history in rows')}
+            title={t('عرض سجل الحجوزات والمتابعات التفصيلي لأي مريض بالبحث بكود السيستم أو الورقي أو الهاتف أو الاسم', 'View detailed patient history with search by code, phone or name')}
           >
             <History className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
             <span>{t('سجل مريض تفصيلي', 'Patient History')}</span>
@@ -2445,21 +2507,60 @@ export const BookingsFollowUpView: React.FC = () => {
       {/* TAB 1: MAIN BOOKINGS AGENDA TABLE (No Financials Column, With Lead Source & Reg Date, Customer Status) */}
       {activeTab === 'agenda' && (
         <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden">
-          <div className="flex items-center justify-between p-4 border-b border-slate-100 dark:border-slate-800">
+          <div className="flex flex-wrap items-center justify-between gap-3 p-4 border-b border-slate-100 dark:border-slate-800">
             <div className="flex items-center gap-2">
               <Calendar className="h-5 w-5 text-indigo-600" />
               <h2 className="text-sm font-bold text-slate-900 dark:text-white">
                 {t('جدول أجندة ومواعيد الحجوزات', 'Bookings Agenda Table')}
               </h2>
               <span className="px-2 py-0.5 text-xs bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-md font-bold">
-                {filteredAppointments.length} {t('حجز', 'Records')}
+                {filteredAppointments.length.toLocaleString('ar-EG')} {t('حجز', 'Records')}
               </span>
+            </div>
+
+            {/* Quick Navigation Scroll Buttons */}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const container = document.getElementById('bookings-table-scroll-container');
+                  if (container) {
+                    container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+                  } else {
+                    window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+                  }
+                }}
+                className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 border border-indigo-200 dark:border-indigo-800 rounded-xl transition-all cursor-pointer shadow-2xs"
+                title={t('النزول المباشر لأسفل الصفحة لآخر الحجوزات', 'Scroll to bottom')}
+              >
+                <ArrowDown className="h-3.5 w-3.5" />
+                <span>{t('لآخر الصفحة (الأسفل) ↓', 'To Bottom ↓')}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const container = document.getElementById('bookings-table-scroll-container');
+                  if (container) {
+                    container.scrollTo({ top: 0, behavior: 'smooth' });
+                  } else {
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }
+                }}
+                className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-xl transition-all cursor-pointer shadow-2xs"
+                title={t('الصعود لأعلى الصفحة', 'Scroll to top')}
+              >
+                <ArrowUp className="h-3.5 w-3.5" />
+                <span>{t('للأعلى ↑', 'To Top ↑')}</span>
+              </button>
             </div>
           </div>
 
-          <div className="overflow-x-auto">
+          <div
+            id="bookings-table-scroll-container"
+            className="overflow-x-auto max-h-[72vh] overflow-y-auto relative custom-scrollbar border-t border-slate-100 dark:border-slate-800"
+          >
             <table className="w-full text-xs text-left rtl:text-right">
-              <thead className="bg-slate-50 dark:bg-slate-800/70 text-slate-500 font-bold uppercase border-b border-slate-200 dark:border-slate-700">
+              <thead className="sticky top-0 z-10 bg-slate-100 dark:bg-slate-800 shadow-xs text-slate-700 dark:text-slate-300 font-bold uppercase border-b border-slate-200 dark:border-slate-700">
                 <tr>
                   <th className="p-3.5">#</th>
                   <th className="p-3.5">{t('كود واسم المريض والهاتف', 'Patient Code, Name & Phone')}</th>
@@ -3241,13 +3342,12 @@ export const BookingsFollowUpView: React.FC = () => {
                   <th className="p-3">{t('المسؤول / التابع لـ', 'Created By')}</th>
                   <th className="p-3">{t('حالة العميل القادمة', 'Future Status')}</th>
                   <th className="p-3">{t('حالة المتابعة', 'Follow-up Status')}</th>
-                  <th className="p-3 text-center">{t('إجراءات', 'Actions')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {filteredFollowUps.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="py-12 text-center text-slate-400">
+                    <td colSpan={8} className="py-12 text-center text-slate-400">
                       <MessageSquare className="h-8 w-8 text-slate-300 dark:text-slate-700 mx-auto mb-2" />
                       <p>{t('لا توجد متابعات مطابقة للفترة المحددة.', 'No follow-ups recorded.')}</p>
                     </td>
@@ -3386,62 +3486,6 @@ export const BookingsFollowUpView: React.FC = () => {
                               <option value="Cancelled">{t('اعتذر / ملغي', 'Cancelled')}</option>
                             </select>
                           )}
-                        </td>
-
-                        {/* Actions */}
-                        <td className="p-3 text-center">
-                          <div className="flex items-center justify-center gap-1">
-                            {/* Convert / Add Booking for Patient */}
-                            <button
-                              onClick={() => handleConvertFollowUpToBooking(fup)}
-                              className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:text-emerald-300 rounded-lg cursor-pointer transition-colors"
-                              title={t('تحويل إلى حجز جديد للعميل', 'Convert to Booking')}
-                            >
-                              <Plus className="h-3 w-3" />
-                              <span>{t('حجز موعد', 'Book')}</span>
-                            </button>
-
-                            {/* Action to Add New Follow-up for this Patient */}
-                            <button
-                              onClick={() => handleOpenAddFollowUpForPatient(fup.patientId, fup.patientName, fup.patientPhone, fup.systemCode)}
-                              className="p-1.5 text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 rounded-lg transition-colors cursor-pointer"
-                              title={t('إضافة متابعة جديدة لهذا العميل', 'Add New Follow-up for this Patient')}
-                            >
-                              <MessageSquare className="h-3.5 w-3.5" />
-                            </button>
-
-                            {/* Detailed Patient History */}
-                            <button
-                              onClick={() => handleOpenPatientHistory(fup.patientId, fup.patientName, fup.patientPhone)}
-                              className="p-1.5 text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 rounded-lg cursor-pointer"
-                              title={t('عرض كافة الحجوزات والمتابعات الخاصة بهذا المريض تفصيلياً في أسطر', 'View all patient bookings & follow-ups in rows')}
-                            >
-                              <History className="h-3.5 w-3.5" />
-                            </button>
-
-                            {/* Delete Follow-up (Locked for past follow-ups) */}
-                            {isPastFup ? (
-                              <span
-                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-400 border border-slate-200 dark:border-slate-700"
-                                title={t('متابعة سابقة: تم إيقاف الحذف لحماية السجلات', 'Past follow-up: deletion locked')}
-                              >
-                                <Lock className="h-3 w-3 text-slate-400" />
-                                <span>{t('مغلق', 'Locked')}</span>
-                              </span>
-                            ) : (
-                              <button
-                                onClick={() => {
-                                  if (window.confirm(t('هل تريد حذف هذه المتابعة؟', 'Delete this follow-up?'))) {
-                                    deletePatientFollowUp(fup.id);
-                                  }
-                                }}
-                                className="p-1.5 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg cursor-pointer"
-                                title={t('حذف المتابعة', 'Delete')}
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </button>
-                            )}
-                          </div>
                         </td>
                       </tr>
                     );
@@ -5477,41 +5521,74 @@ export const BookingsFollowUpView: React.FC = () => {
       )}
 
       {/* Patient Detailed History Modal (سجل كل الحجوزات والمتابعات الخاصة بالمريض تفصيلي تحت بعض في أسطر) */}
-      {patientHistoryData && (() => {
+      {showPatientHistoryModal && (() => {
         const historyPatient =
-          branchCustomers.find(
-            (p) =>
-              (patientHistoryData.patientId && p.id === patientHistoryData.patientId) ||
-              p.name.toLowerCase() === patientHistoryData.patientName.toLowerCase() ||
-              (patientHistoryData.patientPhone && p.phone === patientHistoryData.patientPhone)
-          ) ||
+          (patientHistoryData?.patientId ? partyMap.byId.get(patientHistoryData.patientId) : undefined) ||
+          (patientHistoryData?.patientName ? partyMap.byName.get(patientHistoryData.patientName.toLowerCase().trim()) : undefined) ||
+          (patientHistoryData?.patientPhone ? partyMap.byPhone.get(patientHistoryData.patientPhone.trim()) : undefined) ||
           parties.find(
             (p) =>
-              (patientHistoryData.patientId && p.id === patientHistoryData.patientId) ||
-              p.name.toLowerCase() === patientHistoryData.patientName.toLowerCase() ||
-              (patientHistoryData.patientPhone && p.phone === patientHistoryData.patientPhone)
+              (patientHistoryData?.patientId && p.id === patientHistoryData.patientId) ||
+              (patientHistoryData?.patientName && p.name.toLowerCase() === patientHistoryData.patientName.toLowerCase()) ||
+              (patientHistoryData?.patientPhone && p.phone === patientHistoryData.patientPhone)
           );
 
-        const currentBookings = appointments
-          .filter(
-            (a) =>
-              (patientHistoryData.patientId && a.patientId === patientHistoryData.patientId) ||
-              a.patientName.toLowerCase() === patientHistoryData.patientName.toLowerCase() ||
-              (patientHistoryData.patientPhone && a.patientPhone && a.patientPhone === patientHistoryData.patientPhone)
-          )
-          .sort((a, b) => (b.date + ' ' + b.time).localeCompare(a.date + ' ' + a.time));
+        const hasSelectedPatient = Boolean(historyPatient || patientHistoryData?.patientName);
 
-        const currentFollows = patientFollowUps
-          .filter(
-            (f) =>
-              (patientHistoryData.patientId && f.patientId === patientHistoryData.patientId) ||
-              f.patientName.toLowerCase() === patientHistoryData.patientName.toLowerCase() ||
-              (patientHistoryData.patientPhone && f.patientPhone && f.patientPhone === patientHistoryData.patientPhone)
-          )
-          .sort((a, b) => b.followUpDate.localeCompare(a.followUpDate));
+        // Instant Multi-Field Patient Search (Search by System Code, Paper Code, Phone, or Name)
+        const qSearch = patientHistorySearch.trim().toLowerCase();
+        const matchingSearchPatients = qSearch
+          ? parties
+              .filter((p) => {
+                const isCust = p.type === 'Customer' || p.type === 'Both' || !p.type;
+                if (!isCust) return false;
+                return (
+                  (p.name && p.name.toLowerCase().includes(qSearch)) ||
+                  (p.phone && p.phone.includes(qSearch)) ||
+                  (p.systemCode && p.systemCode.toLowerCase().includes(qSearch)) ||
+                  (p.paperCode && p.paperCode.toLowerCase().includes(qSearch)) ||
+                  (p.code && p.code.toLowerCase().includes(qSearch))
+                );
+              })
+              .slice(0, 30)
+          : [];
+
+        const currentBookings = hasSelectedPatient
+          ? appointments
+              .filter(
+                (a) =>
+                  (patientHistoryData?.patientId && a.patientId === patientHistoryData.patientId) ||
+                  (historyPatient?.id && a.patientId === historyPatient.id) ||
+                  (patientHistoryData?.patientName && a.patientName && a.patientName.toLowerCase() === patientHistoryData.patientName.toLowerCase()) ||
+                  (historyPatient?.name && a.patientName && a.patientName.toLowerCase() === historyPatient.name.toLowerCase()) ||
+                  (historyPatient?.phone && a.patientPhone && a.patientPhone === historyPatient.phone) ||
+                  (patientHistoryData?.patientPhone && a.patientPhone && a.patientPhone === patientHistoryData.patientPhone)
+              )
+              .sort((a, b) => (b.date + ' ' + b.time).localeCompare(a.date + ' ' + a.time))
+          : [];
+
+        const currentFollows = hasSelectedPatient
+          ? patientFollowUps
+              .filter(
+                (f) =>
+                  (patientHistoryData?.patientId && f.patientId === patientHistoryData.patientId) ||
+                  (historyPatient?.id && f.patientId === historyPatient.id) ||
+                  (patientHistoryData?.patientName && f.patientName && f.patientName.toLowerCase() === patientHistoryData.patientName.toLowerCase()) ||
+                  (historyPatient?.name && f.patientName && f.patientName.toLowerCase() === historyPatient.name.toLowerCase()) ||
+                  (historyPatient?.phone && f.patientPhone && f.patientPhone === historyPatient.phone) ||
+                  (patientHistoryData?.patientPhone && f.patientPhone && f.patientPhone === patientHistoryData.patientPhone)
+              )
+              .sort((a, b) => b.followUpDate.localeCompare(a.followUpDate))
+          : [];
 
         const attendedCount = currentBookings.filter((b) => b.status === 'Attended').length;
         const cancelledCount = currentBookings.filter((b) => b.status === 'Cancelled' || b.status === 'NotAttended').length;
+
+        const handleCloseModal = () => {
+          setShowPatientHistoryModal(false);
+          setPatientHistoryData(null);
+          setPatientHistorySearch('');
+        };
 
         return (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
@@ -5527,145 +5604,239 @@ export const BookingsFollowUpView: React.FC = () => {
                       {t('سجل الحجوزات والمتابعات التفصيلي للمريض', 'Detailed Patient Bookings & Follow-ups Timeline')}
                     </h3>
                     <p className="text-xs text-slate-500">
-                      {t('عرض تفصيلي لكافة الحجوزات والمتابعات بالأسطر مع الحالات والأسباب والملاحظات', 'Detailed rows showing all bookings, follow-ups, statuses, and notes')}
+                      {t('بحث مباشر بكود السيستم، الكود الورقي، رقم الهاتف، أو الاسم لاستعراض السجل الكامل', 'Instant search by system code, paper code, phone, or name')}
                     </p>
                   </div>
                 </div>
 
                 <div className="flex items-center gap-2">
-                  {/* Patient Switcher Dropdown (عملاء الفرع المفعل فقط) */}
-                  <select
-                    value={patientHistoryData.patientId || ''}
-                    onChange={(e) => {
-                      const p = branchCustomers.find((party) => party.id === e.target.value);
-                      if (p) {
-                        setPatientHistoryData({
-                          patientId: p.id,
-                          patientName: p.name,
-                          patientPhone: p.phone,
-                        });
-                      }
-                    }}
-                    className="px-2.5 py-1.5 text-xs rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-bold text-slate-900 dark:text-white max-w-[200px]"
-                  >
-                    <option value="">{t('-- تبديل لمريض آخر بالفرع... --', '-- Switch to Active Branch Patient... --')}</option>
-                    {branchCustomers.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name} ({p.phone})
-                      </option>
-                    ))}
-                  </select>
-
                   <button
-                    onClick={() => setPatientHistoryData(null)}
-                    className="text-slate-400 hover:text-slate-600 text-2xl leading-none p-1 cursor-pointer"
+                    onClick={handleCloseModal}
+                    className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-2xl leading-none p-1 cursor-pointer"
                   >
                     &times;
                   </button>
                 </div>
               </div>
 
-              {/* Patient Profile & Stats Banner */}
-              <div className="bg-slate-50 dark:bg-slate-800/60 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-3">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <div className="h-10 w-10 rounded-xl bg-indigo-100 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 font-black text-base flex items-center justify-center">
-                      {(patientHistoryData.patientName || 'م').charAt(0)}
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-black text-slate-900 dark:text-white text-base">
-                          {patientHistoryData.patientName}
-                        </span>
-                        {(historyPatient?.systemCode || historyPatient?.paperCode) && (
-                          <span className="px-2 py-0.5 text-[11px] font-mono font-bold bg-indigo-100 text-indigo-800 dark:bg-indigo-950/80 dark:text-indigo-300 rounded-md">
-                            {historyPatient.systemCode || historyPatient.paperCode}
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500 mt-1">
-                        <span className="flex items-center gap-1 font-mono">
-                          <Phone className="h-3 w-3" />
-                          {patientHistoryData.patientPhone || historyPatient?.phone || '-'}
-                        </span>
-                        {patientHistoryData.patientPhone && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              shareViaWhatsApp(
-                                patientHistoryData.patientPhone!,
-                                `مرحباً ${patientHistoryData.patientName}، نتواصل معك من ${tenant?.name || 'المركز الطبي'}`
-                              );
-                            }}
-                            className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-600 hover:text-emerald-700 cursor-pointer"
-                          >
-                            <MessageSquare className="h-3 w-3" />
-                            <span>واتساب</span>
-                          </button>
-                        )}
-                        <span>•</span>
-                        <span>{t('المصدر:', 'Source:')} <strong className="text-slate-700 dark:text-slate-300">{historyPatient?.leadSource || 'زيارة مباشرة'}</strong></span>
-                        <span>•</span>
-                        <span>{t('الفرع:', 'Branch:')} <strong className="text-slate-700 dark:text-slate-300">{historyPatient?.branchId || activeBranch?.name || 'الرئيسي'}</strong></span>
-                        <span>•</span>
-                        <span>{t('تاريخ التكويد:', 'Created:')} <strong className="font-mono text-slate-700 dark:text-slate-300">{historyPatient?.createdAt?.split('T')[0] || '2026-01-15'}</strong></span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Summary Counters */}
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="px-2.5 py-1 text-xs font-bold rounded-xl bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
-                      {currentBookings.length} {t('إجمالي الحجوزات', 'Total Bookings')}
-                    </span>
-                    <span className="px-2.5 py-1 text-xs font-bold rounded-xl bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
-                      {attendedCount} {t('حضر الجلسة', 'Attended')}
-                    </span>
-                    <span className="px-2.5 py-1 text-xs font-bold rounded-xl bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
-                      {cancelledCount} {t('اعتذار / ملغي', 'Cancelled')}
-                    </span>
-                    <span className="px-2.5 py-1 text-xs font-bold rounded-xl bg-amber-50 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
-                      {currentFollows.length} {t('سجلات المتابعة', 'Follow-ups')}
-                    </span>
-                  </div>
+              {/* Comprehensive Patient Search Bar */}
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-800/80 p-2.5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-2xs">
+                  <Search className="h-5 w-5 text-indigo-600 dark:text-indigo-400 shrink-0 mx-1" />
+                  <input
+                    type="text"
+                    value={patientHistorySearch}
+                    onChange={(e) => setPatientHistorySearch(e.target.value)}
+                    placeholder={t(
+                      'ابحث عن العميل بكود السيستم، الكود الورقي، رقم الهاتف، أو الاسم...',
+                      'Search patient by system code, paper code, phone, or name...'
+                    )}
+                    className="flex-1 bg-transparent text-xs font-bold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none"
+                  />
+                  {patientHistorySearch && (
+                    <button
+                      type="button"
+                      onClick={() => setPatientHistorySearch('')}
+                      className="px-2 py-0.5 text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer font-bold"
+                    >
+                      ✕
+                    </button>
+                  )}
                 </div>
+
+                {/* Search Matching Results Dropdown / Quick Select */}
+                {qSearch && (
+                  <div className="bg-slate-50 dark:bg-slate-800/90 rounded-xl border border-slate-200 dark:border-slate-700 p-2.5 max-h-56 overflow-y-auto space-y-1 shadow-md">
+                    <div className="flex items-center justify-between text-[11px] font-bold text-slate-500 px-1 pb-1 border-b border-slate-200 dark:border-slate-700">
+                      <span>{t('نتائج البحث المطابقة:', 'Matching Patients:')} ({matchingSearchPatients.length})</span>
+                      <span className="text-[10px] text-slate-400">{t('اضغط على العميل لعرض سجله', 'Click to view history')}</span>
+                    </div>
+                    {matchingSearchPatients.length === 0 ? (
+                      <div className="py-4 text-center text-xs text-slate-400">
+                        {t('لا يوجد عميل مطابق للبحث الحالي.', 'No patient found matching search.')}
+                      </div>
+                    ) : (
+                      matchingSearchPatients.map((p) => (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => {
+                            setPatientHistoryData({
+                              patientId: p.id,
+                              patientName: p.name,
+                              patientPhone: p.phone,
+                            });
+                            setPatientHistorySearch('');
+                          }}
+                          className="w-full text-start p-2 rounded-lg hover:bg-indigo-50 dark:hover:bg-indigo-950/60 flex items-center justify-between gap-3 transition-colors cursor-pointer border border-transparent hover:border-indigo-200 dark:hover:border-indigo-800"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-xs text-slate-900 dark:text-white">{p.name}</span>
+                            {p.phone && <span className="font-mono text-[11px] text-slate-500">{p.phone}</span>}
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            {p.systemCode && (
+                              <span className="px-1.5 py-0.5 text-[10px] font-mono font-bold bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300 rounded">
+                                سيستم: {p.systemCode}
+                              </span>
+                            )}
+                            {p.paperCode && (
+                              <span className="px-1.5 py-0.5 text-[10px] font-mono font-bold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 rounded">
+                                ورقي: {p.paperCode}
+                              </span>
+                            )}
+                          </div>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
               </div>
 
-              {/* View Filters Tabs */}
-              <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-2">
-                <button
-                  onClick={() => setHistoryFilterTab('all')}
-                  className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all cursor-pointer ${
-                    historyFilterTab === 'all'
-                      ? 'bg-indigo-600 text-white shadow-xs'
-                      : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
-                  }`}
-                >
-                  {t('كافة السجلات (حجوزات ومتابعات)', 'All Records')} ({currentBookings.length + currentFollows.length})
-                </button>
-                <button
-                  onClick={() => setHistoryFilterTab('bookings')}
-                  className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1 ${
-                    historyFilterTab === 'bookings'
-                      ? 'bg-indigo-600 text-white shadow-xs'
-                      : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
-                  }`}
-                >
-                  <Calendar className="h-3.5 w-3.5" />
-                  <span>{t('سجل الحجوزات فقط', 'Bookings Only')} ({currentBookings.length})</span>
-                </button>
-                <button
-                  onClick={() => setHistoryFilterTab('followups')}
-                  className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1 ${
-                    historyFilterTab === 'followups'
-                      ? 'bg-indigo-600 text-white shadow-xs'
-                      : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
-                  }`}
-                >
-                  <MessageSquare className="h-3.5 w-3.5" />
-                  <span>{t('سجل المتابعات والتذكير فقط', 'Follow-ups Only')} ({currentFollows.length})</span>
-                </button>
-              </div>
+              {/* EMPTY STATE: WHEN NO CLIENT IS SELECTED YET */}
+              {!hasSelectedPatient ? (
+                <div className="py-16 text-center bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-dashed border-slate-200 dark:border-slate-700 p-8 space-y-3">
+                  <div className="h-14 w-14 rounded-2xl bg-indigo-100 dark:bg-indigo-950/60 text-indigo-600 mx-auto flex items-center justify-center">
+                    <Search className="h-7 w-7" />
+                  </div>
+                  <h4 className="text-base font-black text-slate-900 dark:text-white">
+                    {t('يرجى البحث عن العميل لعرض سجله التفصيلي', 'Please search for a client to display history')}
+                  </h4>
+                  <p className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
+                    {t(
+                      'أدخل كود السيستم، الكود الورقي، رقم الهاتف، أو اسم العميل في شريط البحث أعلاه لعرض كافة الحجوزات والمتابعات الخاصة به بالأسطر.',
+                      'Enter system code, paper code, phone, or name in the search bar above to view all detailed bookings and follow-up records.'
+                    )}
+                  </p>
+                </div>
+              ) : (
+                <>
+                  {/* Patient Profile & Stats Banner */}
+                  <div className="bg-slate-50 dark:bg-slate-800/60 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-3">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        <div className="h-10 w-10 rounded-xl bg-indigo-100 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 font-black text-base flex items-center justify-center">
+                          {(patientHistoryData?.patientName || 'م').charAt(0)}
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-black text-slate-900 dark:text-white text-base">
+                              {patientHistoryData?.patientName || historyPatient?.name}
+                            </span>
+                            {(historyPatient?.systemCode || historyPatient?.paperCode) && (
+                              <div className="flex items-center gap-1">
+                                {historyPatient.systemCode && (
+                                  <span className="px-2 py-0.5 text-[11px] font-mono font-bold bg-indigo-100 text-indigo-800 dark:bg-indigo-950/80 dark:text-indigo-300 rounded-md">
+                                    سيستم: {historyPatient.systemCode}
+                                  </span>
+                                )}
+                                {historyPatient.paperCode && (
+                                  <span className="px-2 py-0.5 text-[11px] font-mono font-bold bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300 rounded-md">
+                                    ورقي: {historyPatient.paperCode}
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                            {/* Change Patient Button */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setPatientHistoryData(null);
+                                setPatientHistorySearch('');
+                              }}
+                              className="px-2 py-0.5 text-[10px] font-bold text-indigo-600 hover:text-indigo-800 bg-indigo-50 dark:bg-indigo-950/60 rounded-md border border-indigo-200 dark:border-indigo-800 cursor-pointer"
+                            >
+                              {t('بحث عن عميل آخر', 'Search Another Client')}
+                            </button>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500 mt-1">
+                            <span className="flex items-center gap-1 font-mono">
+                              <Phone className="h-3 w-3" />
+                              {patientHistoryData?.patientPhone || historyPatient?.phone || '-'}
+                            </span>
+                            {(patientHistoryData?.patientPhone || historyPatient?.phone) && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const phone = patientHistoryData?.patientPhone || historyPatient?.phone;
+                                  if (phone) {
+                                    shareViaWhatsApp(
+                                      phone,
+                                      `مرحباً ${patientHistoryData?.patientName || historyPatient?.name}، نتواصل معك من ${tenant?.name || 'المركز الطبي'}`
+                                    );
+                                  }
+                                }}
+                                className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-600 hover:text-emerald-700 cursor-pointer"
+                              >
+                                <MessageSquare className="h-3 w-3" />
+                                <span>واتساب</span>
+                              </button>
+                            )}
+                            <span>•</span>
+                            <span>{t('المصدر:', 'Source:')} <strong className="text-slate-700 dark:text-slate-300">{historyPatient?.leadSource || 'زيارة مباشرة'}</strong></span>
+                            <span>•</span>
+                            <span>{t('الفرع:', 'Branch:')} <strong className="text-slate-700 dark:text-slate-300">{historyPatient?.branchId || activeBranch?.name || 'الرئيسي'}</strong></span>
+                            <span>•</span>
+                            <span>{t('تاريخ التكويد:', 'Created:')} <strong className="font-mono text-slate-700 dark:text-slate-300">{historyPatient?.createdAt?.split('T')[0] || '2026-01-15'}</strong></span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Summary Counters */}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="px-2.5 py-1 text-xs font-bold rounded-xl bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                          {currentBookings.length} {t('إجمالي الحجوزات', 'Total Bookings')}
+                        </span>
+                        <span className="px-2.5 py-1 text-xs font-bold rounded-xl bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                          {attendedCount} {t('حضر الجلسة', 'Attended')}
+                        </span>
+                        <span className="px-2.5 py-1 text-xs font-bold rounded-xl bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
+                          {cancelledCount} {t('اعتذار / ملغي', 'Cancelled')}
+                        </span>
+                        <span className="px-2.5 py-1 text-xs font-bold rounded-xl bg-amber-50 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                          {currentFollows.length} {t('سجلات المتابعة', 'Follow-ups')}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* View Filters Tabs */}
+                  <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-2">
+                    <button
+                      onClick={() => setHistoryFilterTab('all')}
+                      className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all cursor-pointer ${
+                        historyFilterTab === 'all'
+                          ? 'bg-indigo-600 text-white shadow-xs'
+                          : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                      }`}
+                    >
+                      {t('كافة السجلات (حجوزات ومتابعات)', 'All Records')} ({currentBookings.length + currentFollows.length})
+                    </button>
+                    <button
+                      onClick={() => setHistoryFilterTab('bookings')}
+                      className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1 ${
+                        historyFilterTab === 'bookings'
+                          ? 'bg-indigo-600 text-white shadow-xs'
+                          : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                      }`}
+                    >
+                      <Calendar className="h-3.5 w-3.5" />
+                      <span>{t('سجل الحجوزات فقط', 'Bookings Only')} ({currentBookings.length})</span>
+                    </button>
+                    <button
+                      onClick={() => setHistoryFilterTab('followups')}
+                      className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1 ${
+                        historyFilterTab === 'followups'
+                          ? 'bg-indigo-600 text-white shadow-xs'
+                          : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                      }`}
+                    >
+                      <MessageSquare className="h-3.5 w-3.5" />
+                      <span>{t('سجل المتابعات والتذكير فقط', 'Follow-ups Only')} ({currentFollows.length})</span>
+                    </button>
+                  </div>
+                </>
+              )}
 
               {/* SECTION 1: DETAILED BOOKINGS IN ROWS */}
               {(historyFilterTab === 'all' || historyFilterTab === 'bookings') && (
@@ -5868,11 +6039,11 @@ export const BookingsFollowUpView: React.FC = () => {
                     onClick={() => {
                       if (historyPatient) {
                         handleSelectExistingPatient(historyPatient.id);
-                      } else {
+                      } else if (patientHistoryData) {
                         setPatientName(patientHistoryData.patientName);
                         setPatientPhone(patientHistoryData.patientPhone || '');
                       }
-                      setPatientHistoryData(null);
+                      handleCloseModal();
                       setShowAddModal(true);
                     }}
                     className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl cursor-pointer shadow-md shadow-indigo-600/20"
@@ -5885,9 +6056,9 @@ export const BookingsFollowUpView: React.FC = () => {
                     type="button"
                     onClick={() => {
                       setFupPatientId(historyPatient?.id || '');
-                      setFupPatientName(patientHistoryData.patientName);
-                      setFupPatientPhone(patientHistoryData.patientPhone || '');
-                      setPatientHistoryData(null);
+                      setFupPatientName(patientHistoryData?.patientName || historyPatient?.name || '');
+                      setFupPatientPhone(patientHistoryData?.patientPhone || historyPatient?.phone || '');
+                      handleCloseModal();
                       setShowAddFollowUpModal(true);
                     }}
                     className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl cursor-pointer"
@@ -5899,7 +6070,7 @@ export const BookingsFollowUpView: React.FC = () => {
 
                 <button
                   type="button"
-                  onClick={() => setPatientHistoryData(null)}
+                  onClick={handleCloseModal}
                   className="px-5 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl cursor-pointer"
                 >
                   {t('إغلاق السجل', 'Close')}

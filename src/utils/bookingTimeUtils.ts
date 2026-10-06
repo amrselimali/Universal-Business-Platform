@@ -302,28 +302,40 @@ export const checkDoctorAppointmentConflict = (
 };
 
 /**
- * Sorts appointments according to user requirement:
+ * High-performance O(N log N) sorting for appointments:
+ * Pre-extracts sort keys to avoid re-parsing times and regex inside the comparison loop.
  * 1. By Date (chronological ascending)
  * 2. By Doctor Name (alphabetical)
  * 3. By Booking Start Time (earliest first)
  */
 export const sortAppointments = (list: Appointment[]): Appointment[] => {
-  return [...list].sort((a, b) => {
-    // 1. Date (earliest first)
-    const dateCmp = (a.date || '').localeCompare(b.date || '');
-    if (dateCmp !== 0) return dateCmp;
+  if (!list || list.length <= 1) return list;
 
-    // 2. Doctor Name (alphabetical in Arabic)
-    const docA = (a.doctorName || '').trim();
-    const docB = (b.doctorName || '').trim();
-    const docCmp = docA.localeCompare(docB, 'ar');
-    if (docCmp !== 0) return docCmp;
-
-    // 3. Booking Start Time (earliest first)
-    const { startMin: startA } = getAppointmentTimeRange(a);
-    const { startMin: startB } = getAppointmentTimeRange(b);
-    const tA = startA !== null ? startA : 9999;
-    const tB = startB !== null ? startB : 9999;
-    return tA - tB;
+  // Decorate appointments with pre-computed keys to ensure O(N) extraction instead of O(N log N) regexes
+  const decorated = list.map((apt) => {
+    const { startMin } = getAppointmentTimeRange(apt);
+    return {
+      apt,
+      date: apt.date || '',
+      doc: (apt.doctorName || '').trim(),
+      startMin: startMin !== null ? startMin : 9999,
+    };
   });
+
+  decorated.sort((a, b) => {
+    // 1. Date (earliest first)
+    if (a.date !== b.date) {
+      return a.date < b.date ? -1 : 1;
+    }
+
+    // 2. Doctor Name
+    if (a.doc !== b.doc) {
+      return a.doc.localeCompare(b.doc, 'ar');
+    }
+
+    // 3. Start time minutes
+    return a.startMin - b.startMin;
+  });
+
+  return decorated.map((d) => d.apt);
 };

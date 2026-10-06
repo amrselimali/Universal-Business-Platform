@@ -1866,9 +1866,17 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return () => window.removeEventListener('storage', handleMultiTabStorageSync);
   }, []);
 
-  const appointments = allAppointments.filter((a) => a.tenantId === tenant?.id);
-  const treatmentPlans = allTreatmentPlans.filter((t) => t.tenantId === tenant?.id);
-  const patientFollowUps = allPatientFollowUps.filter((f) => f.tenantId === tenant?.id);
+  const appointments = useMemo(() => {
+    return allAppointments.filter((a) => !tenant?.id || a.tenantId === tenant?.id);
+  }, [allAppointments, tenant?.id]);
+
+  const treatmentPlans = useMemo(() => {
+    return allTreatmentPlans.filter((t) => !tenant?.id || t.tenantId === tenant?.id);
+  }, [allTreatmentPlans, tenant?.id]);
+
+  const patientFollowUps = useMemo(() => {
+    return allPatientFollowUps.filter((f) => !tenant?.id || f.tenantId === tenant?.id);
+  }, [allPatientFollowUps, tenant?.id]);
 
   const addPatientFollowUp = (data: Omit<PatientFollowUp, 'id' | 'tenantId' | 'createdAt'>): PatientFollowUp => {
     const newFollowUp: PatientFollowUp = {
