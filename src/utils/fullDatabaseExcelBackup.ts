@@ -43,6 +43,7 @@ export interface DatabaseBackupPayload {
   attendanceRecords: AttendanceRecord[];
   staffMembers: StaffMember[];
   appointments: Appointment[];
+  patientFollowUps?: PatientFollowUp[];
   paymentMethods: PaymentMethod[];
   laserDevices: LaserDevice[];
 }
@@ -389,21 +390,44 @@ export function exportDatabaseToMultiSheetExcel(payload: DatabaseBackupPayload):
 
     // 21. الحجوزات والمواعيد (Appointments)
     addSheet('الحجوزات والمواعيد', payload.appointments.map((ap) => ({
-      'رقم الحجز': ap.id.slice(-6),
-      'الفرع': payload.branches.find((b) => b.id === ap.branchId)?.name || '',
+      'كود الحجز': ap.id,
+      'الفرع': payload.branches.find((b) => b.id === ap.branchId)?.name || ap.branchId || '',
       'التاريخ': ap.date,
       'الوقت': ap.time,
-      'اسم المريض': ap.patientName,
+      'اسم المريض / العميل': ap.patientName,
       'الهاتف': ap.patientPhone || '',
+      'كود السيستم': ap.systemCode || ap.customerCode || '',
+      'الكود الورقي': ap.paperCode || '',
       'الطبيب المعالج': ap.doctorName,
       'الخدمة المطلوبة': ap.serviceNameAr,
       'السعر': ap.price,
       'العربون/المقدم': ap.deposit || 0,
       'المتبقي': ap.remainingBalance || 0,
       'حالة الموعد': ap.status,
+      'مصدر الحجز': ap.leadSource || '',
+      'ملاحظات': ap.notes || '',
     })));
 
-    // 22. طرق السداد (Payment Methods)
+    // 22. المتابعات والتذكير (Follow-ups & Reminders)
+    const followUpsList = payload.patientFollowUps || [];
+    addSheet('المتابعات والتذكير - FollowUps', followUpsList.map((fup) => ({
+      'كود المتابعة': fup.id,
+      'الفرع': payload.branches.find((b) => b.id === fup.branchId)?.name || fup.branchId || '',
+      'اسم المريض / العميل': fup.patientName,
+      'الهاتف': fup.patientPhone || '',
+      'كود السيستم': fup.systemCode || fup.customerCode || '',
+      'الكود الورقي': fup.paperCode || '',
+      'تاريخ المتابعة': fup.followUpDate,
+      'وقت المتابعة': fup.followUpTime || '',
+      'سبب المتابعة': fup.reason,
+      'النوع': fup.type,
+      'الحالة': fup.status,
+      'المسؤول / المسجل': fup.createdBy || '',
+      'ملاحظات': fup.notes || '',
+      'تاريخ التسجيل': fup.createdAt || '',
+    })));
+
+    // 23. طرق السداد (Payment Methods)
     addSheet('طرق السداد المعتمدة', payload.paymentMethods.map((pm) => ({
       'كود الطريقة': pm.code,
       'اسم الطريقة (عربي)': pm.nameAr,
@@ -414,7 +438,7 @@ export function exportDatabaseToMultiSheetExcel(payload: DatabaseBackupPayload):
       'افتراضي؟': pm.isDefault ? 'نعم' : 'لا',
     })));
 
-    // 23. أجهزة الليزر (Laser Devices)
+    // 24. أجهزة الليزر (Laser Devices)
     addSheet('أجهزة ومعدات الليزر', payload.laserDevices.map((d) => ({
       'كود الجهاز': d.code,
       'اسم الجهاز': d.name,

@@ -10,6 +10,7 @@ import {
   Warehouse,
   Party,
   Appointment,
+  PatientFollowUp,
   JournalEntry,
 } from '../types';
 
@@ -43,6 +44,7 @@ export class NeonService {
     try {
       const sql = this.getClient(connectionString);
       // Execute each drop statement individually because PostgreSQL prepared statements allow only one command
+      await sql`DROP TABLE IF EXISTS patient_follow_ups CASCADE`;
       await sql`DROP TABLE IF EXISTS appointments CASCADE`;
       await sql`DROP TABLE IF EXISTS journal_lines CASCADE`;
       await sql`DROP TABLE IF EXISTS journal_entries CASCADE`;
@@ -93,6 +95,20 @@ export class NeonService {
         counts['patients'] = patRes && patRes[0] ? Number(patRes[0].c) : 0;
       } catch {
         counts['patients'] = 0;
+      }
+
+      try {
+        const aptRes = await sql`SELECT COUNT(*)::int as c FROM appointments`;
+        counts['appointments'] = aptRes && aptRes[0] ? Number(aptRes[0].c) : 0;
+      } catch {
+        counts['appointments'] = 0;
+      }
+
+      try {
+        const fupRes = await sql`SELECT COUNT(*)::int as c FROM patient_follow_ups`;
+        counts['patient_follow_ups'] = fupRes && fupRes[0] ? Number(fupRes[0].c) : 0;
+      } catch {
+        counts['patient_follow_ups'] = 0;
       }
 
       return counts;
@@ -158,6 +174,7 @@ export class NeonService {
       patients: Patient[];
       parties?: Party[];
       appointments?: Appointment[];
+      patientFollowUps?: PatientFollowUp[];
       journalEntries?: JournalEntry[];
     }
   ): Promise<{ success: boolean; insertedCount: number; message: string }> {
@@ -423,9 +440,45 @@ export class NeonService {
       if (data.appointments) {
         for (const apt of data.appointments) {
           await sql`
-            INSERT INTO appointments (id, tenant_id, branch_id, patient_id, patient_name, doctor_name, service_name_ar, price, appointment_date, appointment_time, status)
-            VALUES (${apt.id}, ${data.tenant.id}, ${apt.branchId}, ${apt.patientId}, ${apt.patientName}, ${apt.doctorName}, ${apt.serviceNameAr}, ${apt.price}, ${apt.date}, ${apt.time}, ${apt.status})
-            ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status;
+            INSERT INTO appointments (
+              id, tenant_id, branch_id, patient_id, patient_name, patient_phone,
+              paper_code, system_code, customer_code, doctor_name, service_name_ar,
+              price, deposit, remaining_balance, appointment_date, appointment_time,
+              status, lead_source, notes
+            )
+            VALUES (
+              ${apt.id}, ${data.tenant.id}, ${apt.branchId}, ${apt.patientId}, ${apt.patientName},
+              ${apt.patientPhone || ''}, ${apt.paperCode || ''}, ${apt.systemCode || ''},
+              ${apt.customerCode || ''}, ${apt.doctorName}, ${apt.serviceNameAr},
+              ${apt.price}, ${apt.deposit || 0}, ${apt.remainingBalance || 0}, ${apt.date}, ${apt.time},
+              ${apt.status}, ${apt.leadSource || ''}, ${apt.notes || ''}
+            )
+            ON CONFLICT (id) DO UPDATE SET
+              status = EXCLUDED.status,
+              notes = EXCLUDED.notes;
+          `;
+          totalSynced++;
+        }
+      }
+
+      // 9.1 Sync Patient Follow-ups if provided
+      if (data.patientFollowUps) {
+        for (const fup of data.patientFollowUps) {
+          await sql`
+            INSERT INTO patient_follow_ups (
+              id, tenant_id, branch_id, patient_id, patient_name, patient_phone,
+              paper_code, system_code, customer_code, follow_up_date, follow_up_time,
+              reason, type, status, notes, created_by
+            )
+            VALUES (
+              ${fup.id}, ${data.tenant.id}, ${fup.branchId}, ${fup.patientId}, ${fup.patientName},
+              ${fup.patientPhone || ''}, ${fup.paperCode || ''}, ${fup.systemCode || ''},
+              ${fup.customerCode || ''}, ${fup.followUpDate}, ${fup.followUpTime || ''},
+              ${fup.reason}, ${fup.type}, ${fup.status}, ${fup.notes || ''}, ${fup.createdBy || ''}
+            )
+            ON CONFLICT (id) DO UPDATE SET
+              status = EXCLUDED.status,
+              notes = EXCLUDED.notes;
           `;
           totalSynced++;
         }
@@ -732,12 +785,42 @@ export class NeonService {
           branch_id VARCHAR(100),
           patient_id VARCHAR(100),
           patient_name VARCHAR(255),
+          patient_phone VARCHAR(50),
+          paper_code VARCHAR(50),
+          system_code VARCHAR(50),
+          customer_code VARCHAR(50),
           doctor_name VARCHAR(255),
           service_name_ar VARCHAR(255),
           price NUMERIC(15, 2) DEFAULT 0.00,
+          deposit NUMERIC(15, 2) DEFAULT 0.00,
+          remaining_balance NUMERIC(15, 2) DEFAULT 0.00,
           appointment_date VARCHAR(50),
           appointment_time VARCHAR(50),
-          status VARCHAR(50)
+          status VARCHAR(50),
+          lead_source VARCHAR(100),
+          notes TEXT
+        );
+      `;
+
+      await sql`
+        CREATE TABLE IF NOT EXISTS patient_follow_ups (
+          id VARCHAR(100) PRIMARY KEY,
+          tenant_id VARCHAR(100) NOT NULL,
+          branch_id VARCHAR(100),
+          patient_id VARCHAR(100),
+          patient_name VARCHAR(255),
+          patient_phone VARCHAR(50),
+          paper_code VARCHAR(50),
+          system_code VARCHAR(50),
+          customer_code VARCHAR(50),
+          follow_up_date VARCHAR(50),
+          follow_up_time VARCHAR(50),
+          reason VARCHAR(255),
+          type VARCHAR(50),
+          status VARCHAR(50) DEFAULT 'Pending',
+          notes TEXT,
+          created_by VARCHAR(100),
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         );
       `;
 
@@ -754,6 +837,18 @@ export class NeonService {
       `;
 
       // 2. Safe Column Additions (Adds new schema fields if not already present)
+      await sql`ALTER TABLE appointments ADD COLUMN IF NOT EXISTS patient_phone VARCHAR(50);`;
+      await sql`ALTER TABLE appointments ADD COLUMN IF NOT EXISTS paper_code VARCHAR(50);`;
+      await sql`ALTER TABLE appointments ADD COLUMN IF NOT EXISTS system_code VARCHAR(50);`;
+      await sql`ALTER TABLE appointments ADD COLUMN IF NOT EXISTS customer_code VARCHAR(50);`;
+      await sql`ALTER TABLE appointments ADD COLUMN IF NOT EXISTS deposit NUMERIC(15, 2) DEFAULT 0.00;`;
+      await sql`ALTER TABLE appointments ADD COLUMN IF NOT EXISTS remaining_balance NUMERIC(15, 2) DEFAULT 0.00;`;
+      await sql`ALTER TABLE appointments ADD COLUMN IF NOT EXISTS lead_source VARCHAR(100);`;
+      await sql`ALTER TABLE appointments ADD COLUMN IF NOT EXISTS notes TEXT;`;
+      await sql`ALTER TABLE patient_follow_ups ADD COLUMN IF NOT EXISTS paper_code VARCHAR(50);`;
+      await sql`ALTER TABLE patient_follow_ups ADD COLUMN IF NOT EXISTS system_code VARCHAR(50);`;
+      await sql`ALTER TABLE patient_follow_ups ADD COLUMN IF NOT EXISTS customer_code VARCHAR(50);`;
+      await sql`ALTER TABLE patient_follow_ups ADD COLUMN IF NOT EXISTS notes TEXT;`;
       await sql`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS default_pos_collection_only BOOLEAN DEFAULT FALSE;`;
       await sql`ALTER TABLE branches ADD COLUMN IF NOT EXISTS default_pos_collection_only BOOLEAN DEFAULT FALSE;`;
       await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS default_collection_only BOOLEAN DEFAULT FALSE;`;

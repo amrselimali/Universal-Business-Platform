@@ -508,6 +508,8 @@ export const BookingsFollowUpView: React.FC = () => {
     patientId?: string;
     patientName: string;
     patientPhone?: string;
+    systemCode?: string;
+    paperCode?: string;
   } | null>(null);
   const [historyFilterTab, setHistoryFilterTab] = useState<'all' | 'bookings' | 'followups'>('all');
 
@@ -741,8 +743,9 @@ export const BookingsFollowUpView: React.FC = () => {
 
     const q = searchQuery.toLowerCase().trim();
     const hasSearch = Boolean(q);
+    const sourcePool = hasSearch ? appointments : branchAppointments;
 
-    const list = branchAppointments.filter((apt) => {
+    const list = sourcePool.filter((apt) => {
       const matchesSearch =
         !hasSearch ||
         Boolean(apt.patientName && apt.patientName.toLowerCase().includes(q)) ||
@@ -757,13 +760,14 @@ export const BookingsFollowUpView: React.FC = () => {
       const matchesDoctor = selectedDoctorId === 'All' || apt.doctorId === selectedDoctorId;
       
       const matchesDate =
-        (!dateFrom || (apt.date && apt.date >= dateFrom)) && (!dateTo || (apt.date && apt.date <= dateTo));
+        hasSearch ||
+        ((!dateFrom || (apt.date && apt.date >= dateFrom)) && (!dateTo || (apt.date && apt.date <= dateTo)));
 
       return matchesSearch && matchesStatus && matchesDoctor && matchesDate;
     });
 
     return sortAppointments(list);
-  }, [branchAppointments, searchQuery, statusFilter, selectedDoctorId, activeTab, showExcelModal, dateFrom, dateTo]);
+  }, [branchAppointments, appointments, searchQuery, statusFilter, selectedDoctorId, activeTab, showExcelModal, dateFrom, dateTo]);
 
   // Pagination for Agenda Table
   const totalAgendaPages = Math.ceil(filteredAppointments.length / (agendaRowsPerPage || 50)) || 1;
@@ -806,8 +810,9 @@ export const BookingsFollowUpView: React.FC = () => {
     if (activeTab !== 'followup' && !showFollowUpExcelModal) return [];
     const q = searchQuery.toLowerCase().trim();
     const hasSearch = Boolean(q);
+    const sourcePool = hasSearch ? patientFollowUps : branchFollowUps;
 
-    return branchFollowUps.filter((fup) => {
+    return sourcePool.filter((fup) => {
       const matchesSearch =
         !hasSearch ||
         Boolean(fup.patientName && fup.patientName.toLowerCase().includes(q)) ||
@@ -819,11 +824,12 @@ export const BookingsFollowUpView: React.FC = () => {
         Boolean(fup.notes && fup.notes.toLowerCase().includes(q));
 
       const matchesDate =
-        (!dateFrom || (fup.followUpDate && fup.followUpDate >= dateFrom)) && (!dateTo || (fup.followUpDate && fup.followUpDate <= dateTo));
+        hasSearch ||
+        ((!dateFrom || (fup.followUpDate && fup.followUpDate >= dateFrom)) && (!dateTo || (fup.followUpDate && fup.followUpDate <= dateTo)));
 
       return matchesSearch && matchesDate;
     });
-  }, [branchFollowUps, searchQuery, dateFrom, dateTo, activeTab, showFollowUpExcelModal]);
+  }, [branchFollowUps, patientFollowUps, searchQuery, dateFrom, dateTo, activeTab, showFollowUpExcelModal]);
 
   // Pagination for Follow-ups Table
   const totalFollowUpPages = Math.ceil(filteredFollowUps.length / (followUpRowsPerPage || 50)) || 1;
@@ -5535,23 +5541,95 @@ export const BookingsFollowUpView: React.FC = () => {
 
         const hasSelectedPatient = Boolean(historyPatient || patientHistoryData?.patientName);
 
-        // Instant Multi-Field Patient Search (Search by System Code, Paper Code, Phone, or Name)
+        // Instant Multi-Field Patient Search (Search by System Code, Paper Code, Phone, or Name across parties, bookings & followups)
         const qSearch = patientHistorySearch.trim().toLowerCase();
-        const matchingSearchPatients = qSearch
-          ? parties
-              .filter((p) => {
-                const isCust = p.type === 'Customer' || p.type === 'Both' || !p.type;
-                if (!isCust) return false;
-                return (
-                  (p.name && p.name.toLowerCase().includes(qSearch)) ||
-                  (p.phone && p.phone.includes(qSearch)) ||
-                  (p.systemCode && p.systemCode.toLowerCase().includes(qSearch)) ||
-                  (p.paperCode && p.paperCode.toLowerCase().includes(qSearch)) ||
-                  (p.code && p.code.toLowerCase().includes(qSearch))
-                );
-              })
-              .slice(0, 30)
-          : [];
+        const matchingSearchPatients = React.useMemo(() => {
+          if (!qSearch) return [];
+          const matched: Party[] = [];
+          const seenKeys = new Set<string>();
+
+          // 1. Search in parties
+          for (let i = 0; i < parties.length; i++) {
+            const p = parties[i];
+            const isCust = p.type === 'Customer' || p.type === 'Both' || !p.type;
+            if (!isCust) continue;
+            const matches =
+              Boolean(p.name && p.name.toLowerCase().includes(qSearch)) ||
+              Boolean(p.phone && p.phone.includes(qSearch)) ||
+              Boolean(p.systemCode && p.systemCode.toLowerCase().includes(qSearch)) ||
+              Boolean(p.paperCode && p.paperCode.toLowerCase().includes(qSearch)) ||
+              Boolean(p.code && p.code.toLowerCase().includes(qSearch));
+            if (matches) {
+              const k = p.id || p.phone || p.name;
+              if (!seenKeys.has(k)) {
+                seenKeys.add(k);
+                matched.push(p);
+                if (matched.length >= 30) return matched;
+              }
+            }
+          }
+
+          // 2. Also search in appointments for patients that might only be in appointments
+          for (let i = 0; i < appointments.length; i++) {
+            const a = appointments[i];
+            const matches =
+              Boolean(a.patientName && a.patientName.toLowerCase().includes(qSearch)) ||
+              Boolean(a.patientPhone && a.patientPhone.includes(qSearch)) ||
+              Boolean(a.systemCode && a.systemCode.toLowerCase().includes(qSearch)) ||
+              Boolean(a.customerCode && a.customerCode.toLowerCase().includes(qSearch)) ||
+              Boolean(a.paperCode && a.paperCode.toLowerCase().includes(qSearch));
+            if (matches) {
+              const k = a.patientPhone || a.patientName.toLowerCase().trim();
+              if (!seenKeys.has(k)) {
+                seenKeys.add(k);
+                matched.push({
+                  id: a.patientId || `apt-cust-${i}`,
+                  name: a.patientName,
+                  phone: a.patientPhone || '',
+                  systemCode: a.systemCode || a.customerCode,
+                  paperCode: a.paperCode,
+                  type: 'Customer',
+                  branchId: a.branchId,
+                  balance: 0,
+                } as Party);
+                if (matched.length >= 30) return matched;
+              }
+            }
+          }
+
+          // 3. Also search in patientFollowUps
+          for (let i = 0; i < patientFollowUps.length; i++) {
+            const f = patientFollowUps[i];
+            const matches =
+              Boolean(f.patientName && f.patientName.toLowerCase().includes(qSearch)) ||
+              Boolean(f.patientPhone && f.patientPhone.includes(qSearch)) ||
+              Boolean(f.systemCode && f.systemCode.toLowerCase().includes(qSearch)) ||
+              Boolean(f.customerCode && f.customerCode.toLowerCase().includes(qSearch)) ||
+              Boolean(f.paperCode && f.paperCode.toLowerCase().includes(qSearch));
+            if (matches) {
+              const k = f.patientPhone || f.patientName.toLowerCase().trim();
+              if (!seenKeys.has(k)) {
+                seenKeys.add(k);
+                matched.push({
+                  id: f.patientId || `fup-cust-${i}`,
+                  name: f.patientName,
+                  phone: f.patientPhone || '',
+                  systemCode: f.systemCode || f.customerCode,
+                  paperCode: f.paperCode,
+                  type: 'Customer',
+                  branchId: f.branchId,
+                  balance: 0,
+                } as Party);
+                if (matched.length >= 30) return matched;
+              }
+            }
+          }
+
+          return matched;
+        }, [qSearch, parties, appointments, patientFollowUps]);
+
+        const selectedSysCode = historyPatient?.systemCode || patientHistoryData?.systemCode;
+        const selectedPaperCode = historyPatient?.paperCode || patientHistoryData?.paperCode;
 
         const currentBookings = hasSelectedPatient
           ? appointments
@@ -5562,7 +5640,9 @@ export const BookingsFollowUpView: React.FC = () => {
                   (patientHistoryData?.patientName && a.patientName && a.patientName.toLowerCase() === patientHistoryData.patientName.toLowerCase()) ||
                   (historyPatient?.name && a.patientName && a.patientName.toLowerCase() === historyPatient.name.toLowerCase()) ||
                   (historyPatient?.phone && a.patientPhone && a.patientPhone === historyPatient.phone) ||
-                  (patientHistoryData?.patientPhone && a.patientPhone && a.patientPhone === patientHistoryData.patientPhone)
+                  (patientHistoryData?.patientPhone && a.patientPhone && a.patientPhone === patientHistoryData.patientPhone) ||
+                  (selectedSysCode && (a.systemCode === selectedSysCode || a.customerCode === selectedSysCode)) ||
+                  (selectedPaperCode && a.paperCode === selectedPaperCode)
               )
               .sort((a, b) => (b.date + ' ' + b.time).localeCompare(a.date + ' ' + a.time))
           : [];
@@ -5576,7 +5656,9 @@ export const BookingsFollowUpView: React.FC = () => {
                   (patientHistoryData?.patientName && f.patientName && f.patientName.toLowerCase() === patientHistoryData.patientName.toLowerCase()) ||
                   (historyPatient?.name && f.patientName && f.patientName.toLowerCase() === historyPatient.name.toLowerCase()) ||
                   (historyPatient?.phone && f.patientPhone && f.patientPhone === historyPatient.phone) ||
-                  (patientHistoryData?.patientPhone && f.patientPhone && f.patientPhone === patientHistoryData.patientPhone)
+                  (patientHistoryData?.patientPhone && f.patientPhone && f.patientPhone === patientHistoryData.patientPhone) ||
+                  (selectedSysCode && (f.systemCode === selectedSysCode || f.customerCode === selectedSysCode)) ||
+                  (selectedPaperCode && f.paperCode === selectedPaperCode)
               )
               .sort((a, b) => b.followUpDate.localeCompare(a.followUpDate))
           : [];
@@ -5665,6 +5747,8 @@ export const BookingsFollowUpView: React.FC = () => {
                               patientId: p.id,
                               patientName: p.name,
                               patientPhone: p.phone,
+                              systemCode: p.systemCode || p.code,
+                              paperCode: p.paperCode,
                             });
                             setPatientHistorySearch('');
                           }}

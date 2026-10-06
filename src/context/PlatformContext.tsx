@@ -54,7 +54,7 @@ import {
   NotificationSeverity,
   NotificationCategory,
 } from '../types';
-import { safeLocalStorageSet, safeLocalStorageGet, idbSet, idbGet } from '../utils/safeStorage';
+import { safeLocalStorageSet, safeLocalStorageGet, idbSet, idbGet, persistDataset, loadPersistedDataset } from '../utils/safeStorage';
 import { INITIAL_NOTIFICATION_RULES, INITIAL_NOTIFICATIONS_HISTORY } from '../data/notificationRulesData';
 import { playNotificationSound } from '../utils/audioAlert';
 import {
@@ -1824,17 +1824,61 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return INITIAL_PATIENT_FOLLOW_UPS;
   });
 
-  useEffect(() => {
-    safeLocalStorageSet('erp_appointments', JSON.stringify(allAppointments));
-  }, [allAppointments]);
+  // Track storage hydration from IndexedDB so large datasets (e.g. 62,000+ records) are never wiped on reload/startup
+  const [isStorageHydrated, setIsStorageHydrated] = useState(false);
 
   useEffect(() => {
-    safeLocalStorageSet('erp_treatment_plans', JSON.stringify(allTreatmentPlans));
-  }, [allTreatmentPlans]);
+    let isMounted = true;
+    const hydrateDatasets = async () => {
+      try {
+        const [idbApts, idbFups, idbPlans, idbParties] = await Promise.all([
+          idbGet<Appointment[]>('erp_appointments'),
+          idbGet<PatientFollowUp[]>('erp_patient_follow_ups'),
+          idbGet<TreatmentPlan[]>('erp_treatment_plans'),
+          idbGet<Party[]>('erp_parties'),
+        ]);
+
+        if (!isMounted) return;
+
+        if (Array.isArray(idbApts) && idbApts.length > 0) {
+          setAllAppointments((curr) => (idbApts.length >= curr.length ? idbApts : curr));
+        }
+        if (Array.isArray(idbFups) && idbFups.length > 0) {
+          setAllPatientFollowUps((curr) => (idbFups.length >= curr.length ? idbFups : curr));
+        }
+        if (Array.isArray(idbPlans) && idbPlans.length > 0) {
+          setAllTreatmentPlans((curr) => (idbPlans.length >= curr.length ? idbPlans : curr));
+        }
+        if (Array.isArray(idbParties) && idbParties.length > 0) {
+          setAllParties((curr) => (idbParties.length >= curr.length ? idbParties : curr));
+        }
+      } catch (err) {
+        console.warn('Storage hydration error:', err);
+      } finally {
+        if (isMounted) setIsStorageHydrated(true);
+      }
+    };
+
+    hydrateDatasets();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   useEffect(() => {
-    safeLocalStorageSet('erp_patient_follow_ups', JSON.stringify(allPatientFollowUps));
-  }, [allPatientFollowUps]);
+    if (!isStorageHydrated) return;
+    persistDataset('erp_appointments', allAppointments);
+  }, [allAppointments, isStorageHydrated]);
+
+  useEffect(() => {
+    if (!isStorageHydrated) return;
+    persistDataset('erp_treatment_plans', allTreatmentPlans);
+  }, [allTreatmentPlans, isStorageHydrated]);
+
+  useEffect(() => {
+    if (!isStorageHydrated) return;
+    persistDataset('erp_patient_follow_ups', allPatientFollowUps);
+  }, [allPatientFollowUps, isStorageHydrated]);
 
   // Multi-tab synchronization (مزامنة فورية حية بين كافة التبويبات والشاشات المفتوحة)
   useEffect(() => {
@@ -1867,15 +1911,15 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, []);
 
   const appointments = useMemo(() => {
-    return allAppointments.filter((a) => !tenant?.id || a.tenantId === tenant?.id);
+    return allAppointments.filter((a) => !tenant?.id || !a.tenantId || a.tenantId === tenant?.id || a.tenantId === 'tenant-default');
   }, [allAppointments, tenant?.id]);
 
   const treatmentPlans = useMemo(() => {
-    return allTreatmentPlans.filter((t) => !tenant?.id || t.tenantId === tenant?.id);
+    return allTreatmentPlans.filter((t) => !tenant?.id || !t.tenantId || t.tenantId === tenant?.id || t.tenantId === 'tenant-default');
   }, [allTreatmentPlans, tenant?.id]);
 
   const patientFollowUps = useMemo(() => {
-    return allPatientFollowUps.filter((f) => !tenant?.id || f.tenantId === tenant?.id);
+    return allPatientFollowUps.filter((f) => !tenant?.id || !f.tenantId || f.tenantId === tenant?.id || f.tenantId === 'tenant-default');
   }, [allPatientFollowUps, tenant?.id]);
 
   const addPatientFollowUp = (data: Omit<PatientFollowUp, 'id' | 'tenantId' | 'createdAt'>): PatientFollowUp => {
@@ -1942,7 +1986,11 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       };
     });
 
-    setAllPatientFollowUps((prev) => [...newFups, ...prev]);
+    setAllPatientFollowUps((prev) => {
+      const merged = [...newFups, ...prev];
+      persistDataset('erp_patient_follow_ups', merged);
+      return merged;
+    });
 
     recordAudit({
       entityType: 'Appointment',
@@ -2071,7 +2119,11 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       };
     });
 
-    setAllAppointments((prev) => [...newApts, ...prev]);
+    setAllAppointments((prev) => {
+      const merged = [...newApts, ...prev];
+      persistDataset('erp_appointments', merged);
+      return merged;
+    });
 
     recordAudit({
       entityType: 'Appointment',

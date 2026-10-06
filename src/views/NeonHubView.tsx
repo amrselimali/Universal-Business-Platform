@@ -66,6 +66,8 @@ export const NeonHubView: React.FC = () => {
     allStaffMembers,
     appointments,
     allAppointments,
+    patientFollowUps,
+    allPatientFollowUps,
     paymentMethods,
     allPaymentMethods,
     laserDevices,
@@ -108,12 +110,13 @@ export const NeonHubView: React.FC = () => {
         attendanceRecords: allAttendanceRecords || attendanceRecords,
         staffMembers: allStaffMembers || staffMembers,
         appointments: allAppointments || appointments,
+        patientFollowUps: allPatientFollowUps || patientFollowUps,
         paymentMethods: allPaymentMethods || paymentMethods,
         laserDevices: allLaserDevices || laserDevices,
       });
 
       if (res.success) {
-        setBackupFeedback(t(`تم تصدير النسخة الاحتياطية بنجاح إلى ملف: ${res.filename} (يحتوي على 23 جدول منفصل)`, `Database backup exported successfully to: ${res.filename} with 23 separate sheets!`));
+        setBackupFeedback(t(`تم تصدير النسخة الاحتياطية بنجاح إلى ملف: ${res.filename} (يحتوي على 24 جدول منفصل تشمل الحجوزات والمتابعات)`, `Database backup exported successfully to: ${res.filename} with 24 separate sheets including bookings and follow-ups!`));
       } else {
         setBackupFeedback(t('فشل في تصدير النسخة الاحتياطية: ' + res.filename, 'Failed to export backup: ' + res.filename));
       }

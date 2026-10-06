@@ -115,3 +115,53 @@ export function safeLocalStorageGet(key: string, defaultValue: string | null = n
     return defaultValue;
   }
 }
+
+// Safely persist large or critical datasets: writes to IndexedDB first (handles 100MB+ safely), then mirrors to LocalStorage
+export async function persistDataset(key: string, data: any): Promise<void> {
+  if (typeof window === 'undefined') return;
+  try {
+    await idbSet(key, data);
+  } catch (err) {
+    console.warn(`[safeStorage] IDB persist failed for "${key}":`, err);
+  }
+
+  try {
+    const serialized = typeof data === 'string' ? data : JSON.stringify(data);
+    safeLocalStorageSet(key, serialized);
+  } catch {
+    // Safe fallback already stored in IndexedDB
+  }
+}
+
+// Safely load datasets: checks IndexedDB first (prioritizes large preserved datasets), falls back to LocalStorage
+export async function loadPersistedDataset<T = any>(key: string, fallback: T): Promise<T> {
+  if (typeof window === 'undefined') return fallback;
+  try {
+    const idbData = await idbGet<T>(key);
+    if (idbData !== null && idbData !== undefined) {
+      if (Array.isArray(idbData) && idbData.length > 0) {
+        return idbData;
+      }
+      if (!Array.isArray(idbData)) {
+        return idbData;
+      }
+    }
+  } catch (err) {
+    console.warn(`[safeStorage] IDB load error for "${key}":`, err);
+  }
+
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed !== null && parsed !== undefined) {
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (!Array.isArray(parsed)) return parsed;
+      }
+    }
+  } catch {
+    // fallback
+  }
+
+  return fallback;
+}
