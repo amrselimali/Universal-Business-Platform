@@ -1006,7 +1006,9 @@ export const BookingsFollowUpView: React.FC = () => {
     if (!pId) {
       setPatientName('');
       setPatientPhone('');
+      setCustomerCode('');
       setSystemCode('');
+      setFileCode('');
       setLeadSource('زيارة مباشرة للفرع');
       return;
     }
@@ -1014,7 +1016,9 @@ export const BookingsFollowUpView: React.FC = () => {
     if (p) {
       setPatientName(p.name);
       setPatientPhone(p.phone);
+      setCustomerCode(p.customerCode || p.code || '');
       setSystemCode(p.systemCode || p.paperCode || '');
+      setFileCode(p.fileCode || p.fileNumber || '');
       setLeadSource(p.leadSource || 'زيارة مباشرة للفرع');
     }
   };
@@ -1082,13 +1086,18 @@ export const BookingsFollowUpView: React.FC = () => {
     }
 
     const formattedTime = startTime && endTime ? `${startTime} - ${endTime}` : (aptTime || startTime);
-    const resolvedCustomerCode = existingParty?.systemCode || customerCode || systemCode || `CUST-${Date.now().toString().slice(-4)}`;
+    const resolvedCustomerCode = existingParty?.customerCode || existingParty?.code || customerCode || '';
+    const resolvedSystemCode = existingParty?.systemCode || existingParty?.paperCode || systemCode || '';
+    const resolvedPaperCode = existingParty?.paperCode || existingParty?.systemCode || '';
+    const resolvedFileCode = existingParty?.fileCode || existingParty?.fileNumber || fileCode || '';
 
     addAppointment({
       patientId,
       branchId: currentBranchId,
-      systemCode: resolvedCustomerCode,
+      systemCode: resolvedSystemCode,
+      paperCode: resolvedPaperCode,
       customerCode: resolvedCustomerCode,
+      fileCode: resolvedFileCode,
       patientName: existingParty?.name || patientName.trim(),
       patientPhone: existingParty?.phone || patientPhone.trim(),
       doctorId: doctorId || undefined,
@@ -1130,12 +1139,14 @@ export const BookingsFollowUpView: React.FC = () => {
 
   // Open Edit Modal for Booking
   const handleOpenEditApt = (apt: Appointment) => {
+    const party = parties.find(p => p.id === apt.patientId);
     setSelectedApt(apt);
     setPatientId(apt.patientId || '');
     setPatientName(apt.patientName);
     setPatientPhone(apt.patientPhone || '');
-    setSystemCode(apt.systemCode || '');
-    setCustomerCode(apt.customerCode || apt.systemCode || '');
+    setSystemCode(apt.systemCode || party?.systemCode || apt.paperCode || party?.paperCode || '');
+    setCustomerCode(apt.customerCode || party?.customerCode || party?.code || '');
+    setFileCode(apt.fileCode || party?.fileCode || party?.fileNumber || '');
     setDoctorId(apt.doctorId || '');
     setDoctorName(apt.doctorName || '');
     setServiceNameAr(apt.serviceNameAr);
@@ -1180,7 +1191,9 @@ export const BookingsFollowUpView: React.FC = () => {
       patientName: patientName.trim(),
       patientPhone: patientPhone.trim(),
       systemCode,
+      paperCode: selectedApt.paperCode || systemCode,
       customerCode: customerCode || systemCode,
+      fileCode,
       doctorId: doctorId || undefined,
       doctorName: resolvedDoctorName,
       serviceNameAr: serviceNameAr.trim(),
@@ -1273,14 +1286,20 @@ export const BookingsFollowUpView: React.FC = () => {
   const handleAddFollowUpSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const p = getPartyForPatient(fupPatientId, fupPatientName);
-    const finalCode = fupSystemCode || p?.systemCode || `CUST-${Date.now().toString().slice(-4)}`;
+    const resolvedCustCode = p?.customerCode || p?.code || fupCustomerCode || '';
+    const resolvedSysCode = fupSystemCode || p?.systemCode || p?.paperCode || `CUST-${Date.now().toString().slice(-4)}`;
+    const resolvedPaperCode = p?.paperCode || p?.systemCode || resolvedSysCode;
+    const resolvedFileCode = fupFileCode || p?.fileCode || p?.fileNumber || resolvedCustCode || '';
 
     addPatientFollowUp({
       patientId: fupPatientId || p?.id,
       branchId: currentBranchId,
       patientName: fupPatientName.trim(),
       patientPhone: fupPatientPhone.trim(),
-      systemCode: finalCode,
+      customerCode: resolvedCustCode,
+      systemCode: resolvedSysCode,
+      paperCode: resolvedPaperCode,
+      fileCode: resolvedFileCode,
       leadSource: p?.leadSource || 'Facebook Ads',
       followUpDate: fupDate,
       reason: fupReason.trim(),
@@ -1293,7 +1312,9 @@ export const BookingsFollowUpView: React.FC = () => {
     setFupPatientId('');
     setFupPatientName('');
     setFupPatientPhone('');
+    setFupCustomerCode('');
     setFupSystemCode('');
+    setFupFileCode('');
     setFupNotes('');
     setShowAddFollowUpModal(false);
   };
@@ -1430,13 +1451,19 @@ export const BookingsFollowUpView: React.FC = () => {
 
     // 1. Pre-index existing customers in HashMaps for instant O(1) lookups
     const partiesByPaperCode = new Map<string, Party>();
+    const partiesByCustomerCode = new Map<string, Party>();
     const partiesBySystemCode = new Map<string, Party>();
+    const partiesByFileCode = new Map<string, Party>();
     const partiesByPhone = new Map<string, Party>();
     const partiesByName = new Map<string, Party>();
 
     parties.forEach((p) => {
       if (p.paperCode) partiesByPaperCode.set(p.paperCode.trim().toLowerCase(), p);
+      if (p.customerCode) partiesByCustomerCode.set(p.customerCode.trim().toLowerCase(), p);
+      if (p.code) partiesByCustomerCode.set(p.code.trim().toLowerCase(), p);
       if (p.systemCode) partiesBySystemCode.set(p.systemCode.trim().toLowerCase(), p);
+      if (p.fileCode) partiesByFileCode.set(p.fileCode.trim().toLowerCase(), p);
+      if (p.fileNumber) partiesByFileCode.set(p.fileNumber.trim().toLowerCase(), p);
       if (p.id) partiesBySystemCode.set(p.id.trim().toLowerCase(), p);
       if (p.phone) {
         const clean = p.phone.replace(/[^0-9]/g, '');
@@ -1478,6 +1505,34 @@ export const BookingsFollowUpView: React.FC = () => {
         const row = rawRows[index];
         const rowNum = index + 2;
 
+        const branchName = String(
+          row['اسم الفرع'] ??
+          row['الفرع'] ??
+          row['Branch Name'] ??
+          row['Branch'] ??
+          ''
+        ).trim();
+
+        const customerCode = String(
+          row['كود العميل (التطبيق)'] ??
+          row['كود العميل'] ??
+          row['كود التطبيق'] ??
+          row['كود العميل (السيستم)'] ??
+          row['Customer App Code'] ??
+          row['Customer Code'] ??
+          row['Code'] ??
+          ''
+        ).trim();
+
+        const systemCode = String(
+          row['كود السيستم (الورقي سابقاً)'] ??
+          row['كود السيستم'] ??
+          row['كود السيستم (الكود الورقي سابقاً)'] ??
+          row['System Code'] ??
+          row['SystemCode'] ??
+          ''
+        ).trim();
+
         const paperCode = String(
           row['الكود الورقي'] ??
           row['كود الملف الورقي'] ??
@@ -1485,16 +1540,16 @@ export const BookingsFollowUpView: React.FC = () => {
           row['كود الورقي'] ??
           row['Paper Code'] ??
           row['PaperCode'] ??
+          systemCode ??
           ''
         ).trim();
 
-        const customerCode = String(
-          row['كود العميل (السيستم)'] ??
-          row['كود العميل'] ??
-          row['كود المريض'] ??
-          row['Customer Code'] ??
-          row['System Code'] ??
-          row['Code'] ??
+        const fileCode = String(
+          row['كود الملف'] ??
+          row['رقم الملف'] ??
+          row['ملف الأرشيف'] ??
+          row['File Code'] ??
+          row['File Number'] ??
           ''
         ).trim();
 
@@ -1946,13 +2001,19 @@ export const BookingsFollowUpView: React.FC = () => {
 
     // Pre-index existing customers in HashMaps for instant O(1) lookups
     const partiesByPaperCode = new Map<string, Party>();
+    const partiesByCustomerCode = new Map<string, Party>();
     const partiesBySystemCode = new Map<string, Party>();
+    const partiesByFileCode = new Map<string, Party>();
     const partiesByPhone = new Map<string, Party>();
     const partiesByName = new Map<string, Party>();
 
     parties.forEach((p) => {
       if (p.paperCode) partiesByPaperCode.set(p.paperCode.trim().toLowerCase(), p);
+      if (p.customerCode) partiesByCustomerCode.set(p.customerCode.trim().toLowerCase(), p);
+      if (p.code) partiesByCustomerCode.set(p.code.trim().toLowerCase(), p);
       if (p.systemCode) partiesBySystemCode.set(p.systemCode.trim().toLowerCase(), p);
+      if (p.fileCode) partiesByFileCode.set(p.fileCode.trim().toLowerCase(), p);
+      if (p.fileNumber) partiesByFileCode.set(p.fileNumber.trim().toLowerCase(), p);
       if (p.id) partiesBySystemCode.set(p.id.trim().toLowerCase(), p);
       if (p.phone) {
         const clean = p.phone.replace(/[^0-9]/g, '');
@@ -1974,6 +2035,34 @@ export const BookingsFollowUpView: React.FC = () => {
         const row = rawRows[index];
         const rowNum = index + 2;
 
+        const branchName = String(
+          row['اسم الفرع'] ??
+          row['الفرع'] ??
+          row['Branch Name'] ??
+          row['Branch'] ??
+          ''
+        ).trim();
+
+        const customerCode = String(
+          row['كود العميل (التطبيق)'] ??
+          row['كود العميل'] ??
+          row['كود التطبيق'] ??
+          row['كود العميل (السيستم)'] ??
+          row['Customer App Code'] ??
+          row['Customer Code'] ??
+          row['Code'] ??
+          ''
+        ).trim();
+
+        const systemCode = String(
+          row['كود السيستم (الورقي سابقاً)'] ??
+          row['كود السيستم'] ??
+          row['كود السيستم (الكود الورقي سابقاً)'] ??
+          row['System Code'] ??
+          row['SystemCode'] ??
+          ''
+        ).trim();
+
         const paperCode = String(
           row['الكود الورقي'] ??
           row['كود الملف الورقي'] ??
@@ -1981,16 +2070,16 @@ export const BookingsFollowUpView: React.FC = () => {
           row['كود الورقي'] ??
           row['Paper Code'] ??
           row['PaperCode'] ??
+          systemCode ??
           ''
         ).trim();
 
-        const customerCode = String(
-          row['كود العميل (السيستم)'] ??
-          row['كود العميل'] ??
-          row['كود المريض'] ??
-          row['Customer Code'] ??
-          row['System Code'] ??
-          row['Code'] ??
+        const fileCode = String(
+          row['كود الملف'] ??
+          row['رقم الملف'] ??
+          row['ملف الأرشيف'] ??
+          row['File Code'] ??
+          row['File Number'] ??
           ''
         ).trim();
 
@@ -2638,7 +2727,11 @@ export const BookingsFollowUpView: React.FC = () => {
               <thead className="sticky top-0 z-10 bg-slate-100 dark:bg-slate-800 shadow-xs text-slate-700 dark:text-slate-300 font-bold uppercase border-b border-slate-200 dark:border-slate-700">
                 <tr>
                   <th className="p-3.5">#</th>
-                  <th className="p-3.5">{t('كود واسم المريض والهاتف', 'Patient Code, Name & Phone')}</th>
+                  <th className="p-3.5">{t('الفرع', 'Branch')}</th>
+                  <th className="p-3.5">{t('كود العميل (التطبيق)', 'Customer Code')}</th>
+                  <th className="p-3.5">{t('كود السيستم', 'System Code')}</th>
+                  <th className="p-3.5">{t('كود الملف', 'File Code')}</th>
+                  <th className="p-3.5">{t('المريض والهاتف', 'Patient & Phone')}</th>
                   <th className="p-3.5">{t('مصدر وتاريخ تكويد العميل', 'Lead Source & Account Creation Date')}</th>
                   <th className="p-3.5">{t('الخدمة / الجلسة', 'Service / Session')}</th>
                   <th className="p-3.5">{t('الطبيب المعالج *', 'Doctor *')}</th>
@@ -2653,7 +2746,7 @@ export const BookingsFollowUpView: React.FC = () => {
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {filteredAppointments.length === 0 ? (
                   <tr>
-                    <td colSpan={11} className="py-12 text-center text-slate-400">
+                    <td colSpan={15} className="py-12 text-center text-slate-400">
                       <Calendar className="h-8 w-8 text-slate-300 dark:text-slate-700 mx-auto mb-2" />
                       <p>{t('لا توجد حجوزات مطابقة للفلاتر المحددة.', 'No bookings matching the criteria.')}</p>
                     </td>
@@ -2661,12 +2754,16 @@ export const BookingsFollowUpView: React.FC = () => {
                 ) : (
                   paginatedAppointments.map((apt, idx) => {
                     const party = getPartyForPatient(apt.patientId, apt.patientName);
+                    const branchObj = branches.find((b) => b.id === (apt.branchId || party?.branchId)) || activeBranch;
+                    const branchName = branchObj?.name || 'الفرع الرئيسي';
+                    const customerAppCode = apt.customerCode || party?.customerCode || party?.code || '—';
+                    const systemCodeDisplay = apt.systemCode || party?.systemCode || apt.paperCode || party?.paperCode || '—';
+                    const fileCodeDisplay = apt.fileCode || party?.fileCode || party?.fileNumber || '—';
                     const creationDate = party?.createdAt
                       ? party.createdAt.split('T')[0]
                       : apt.createdAt ? apt.createdAt.split('T')[0] : '2026-01-15';
                     const activeLeadSource = apt.leadSource || party?.leadSource || '';
                     const rowNumber = agendaRowsPerPage === -1 ? idx + 1 : (agendaPage - 1) * agendaRowsPerPage + idx + 1;
-                    const custCode = apt.customerCode || apt.systemCode || party?.systemCode || (apt.paperCode ? `P-${apt.paperCode}` : '-');
                     const futureStatus = getCustomerFutureStatus(apt.patientName, apt.patientPhone, apt.patientId, apt.id);
 
                     const isTomorrowApt = apt.date === tomorrowIso;
@@ -2696,6 +2793,35 @@ export const BookingsFollowUpView: React.FC = () => {
                       <tr key={apt.id} className={rowClass}>
                         <td className="p-3.5 font-semibold text-slate-400 font-mono">{rowNumber}</td>
 
+                        {/* Branch */}
+                        <td className="p-3.5 whitespace-nowrap">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                            <GitBranch className="h-3 w-3 text-slate-400" />
+                            {branchName}
+                          </span>
+                        </td>
+
+                        {/* Customer App Code (Serialized) */}
+                        <td className="p-3.5 font-mono font-bold whitespace-nowrap">
+                          <span className="px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800" title={t('كود العميل (كود التطبيق مسريل آلياً)', 'Customer App Code')}>
+                            {customerAppCode}
+                          </span>
+                        </td>
+
+                        {/* System Code (Paper Code previously) */}
+                        <td className="p-3.5 font-mono font-bold whitespace-nowrap">
+                          <span className="px-2 py-0.5 rounded-md bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800" title={t('كود السيستم (الورقي سابقاً)', 'System Code')}>
+                            {systemCodeDisplay}
+                          </span>
+                        </td>
+
+                        {/* File Code */}
+                        <td className="p-3.5 font-mono font-bold whitespace-nowrap">
+                          <span className="px-2 py-0.5 rounded-md bg-cyan-50 dark:bg-cyan-950/60 text-cyan-800 dark:text-cyan-300 border border-cyan-200 dark:border-cyan-800" title={t('كود الملف', 'File Code')}>
+                            {fileCodeDisplay}
+                          </span>
+                        </td>
+
                         {/* Patient Code, Name & Phone */}
                         <td className="p-3.5">
                           <div className="flex items-center gap-2">
@@ -2717,14 +2843,6 @@ export const BookingsFollowUpView: React.FC = () => {
                             </button>
                           </div>
                           <div className="text-[11px] text-slate-500 flex flex-wrap items-center gap-1.5 mt-0.5">
-                            <span className="font-mono font-semibold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/50 px-1.5 py-0.2 rounded">
-                              {custCode}
-                            </span>
-                            {apt.paperCode && (
-                              <span className="font-mono text-[10px] font-bold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 px-1 py-0.2 rounded" title="كود الملف الورقي">
-                                ورقي: {apt.paperCode}
-                              </span>
-                            )}
                             <span className="flex items-center gap-1">
                               <Phone className="h-3 w-3" />
                               {apt.patientPhone || <span className="text-slate-400 font-mono">-</span>}
@@ -3407,7 +3525,11 @@ export const BookingsFollowUpView: React.FC = () => {
               <thead className="bg-slate-50 dark:bg-slate-800/70 text-slate-500 font-bold uppercase border-b border-slate-200 dark:border-slate-700">
                 <tr>
                   <th className="p-3">#</th>
-                  <th className="p-3">{t('كود واسم المريض والهاتف', 'Patient Name, Code & Phone')}</th>
+                  <th className="p-3">{t('الفرع', 'Branch')}</th>
+                  <th className="p-3">{t('كود العميل (التطبيق)', 'Customer Code')}</th>
+                  <th className="p-3">{t('كود السيستم', 'System Code')}</th>
+                  <th className="p-3">{t('كود الملف', 'File Code')}</th>
+                  <th className="p-3">{t('اسم المريض والهاتف', 'Patient Name & Phone')}</th>
                   <th className="p-3">{t('المصدر وتاريخ التكويد', 'Source & Creation Date')}</th>
                   <th className="p-3">{t('تاريخ وتوقيت المتابعة', 'Due Date & Time')}</th>
                   <th className="p-3">{t('موضوع وسبب المتابعة', 'Follow-up Topic / Reason')}</th>
@@ -3419,7 +3541,7 @@ export const BookingsFollowUpView: React.FC = () => {
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {filteredFollowUps.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="py-12 text-center text-slate-400">
+                    <td colSpan={12} className="py-12 text-center text-slate-400">
                       <MessageSquare className="h-8 w-8 text-slate-300 dark:text-slate-700 mx-auto mb-2" />
                       <p>{t('لا توجد متابعات مطابقة للفترة المحددة.', 'No follow-ups recorded.')}</p>
                     </td>
@@ -3427,6 +3549,11 @@ export const BookingsFollowUpView: React.FC = () => {
                 ) : (
                   paginatedFollowUps.map((fup, idx) => {
                     const party = getPartyForPatient(fup.patientId, fup.patientName);
+                    const branchObj = branches.find((b) => b.id === (fup.branchId || party?.branchId)) || activeBranch;
+                    const branchName = branchObj?.name || 'الفرع الرئيسي';
+                    const customerAppCode = fup.customerCode || party?.customerCode || party?.code || '—';
+                    const systemCodeDisplay = fup.systemCode || party?.systemCode || fup.paperCode || party?.paperCode || '—';
+                    const fileCodeDisplay = fup.fileCode || party?.fileCode || party?.fileNumber || '—';
                     const creationDate = party?.createdAt
                       ? party.createdAt.split('T')[0]
                       : fup.createdAt ? fup.createdAt.split('T')[0] : '2026-01-20';
@@ -3447,20 +3574,41 @@ export const BookingsFollowUpView: React.FC = () => {
                       <tr key={fup.id} className={`hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors ${isPastFup ? 'bg-slate-50/50 dark:bg-slate-900/40 opacity-90' : ''}`}>
                         <td className="p-3 font-semibold text-slate-400 font-mono">{rowNumber}</td>
 
+                        {/* Branch */}
+                        <td className="p-3 whitespace-nowrap">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                            <GitBranch className="h-3 w-3 text-slate-400" />
+                            {branchName}
+                          </span>
+                        </td>
+
+                        {/* Customer App Code (Serialized) */}
+                        <td className="p-3 font-mono font-bold whitespace-nowrap">
+                          <span className="px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800" title={t('كود العميل (كود التطبيق مسريل آلياً)', 'Customer App Code')}>
+                            {customerAppCode}
+                          </span>
+                        </td>
+
+                        {/* System Code (Paper Code previously) */}
+                        <td className="p-3 font-mono font-bold whitespace-nowrap">
+                          <span className="px-2 py-0.5 rounded-md bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800" title={t('كود السيستم (الورقي سابقاً)', 'System Code')}>
+                            {systemCodeDisplay}
+                          </span>
+                        </td>
+
+                        {/* File Code */}
+                        <td className="p-3 font-mono font-bold whitespace-nowrap">
+                          <span className="px-2 py-0.5 rounded-md bg-cyan-50 dark:bg-cyan-950/60 text-cyan-800 dark:text-cyan-300 border border-cyan-200 dark:border-cyan-800" title={t('كود الملف', 'File Code')}>
+                            {fileCodeDisplay}
+                          </span>
+                        </td>
+
                         {/* Patient Name, Code & Phone */}
                         <td className="p-3">
                           <div className="font-bold text-slate-900 dark:text-white">
                             {fup.patientName || <span className="text-slate-400 font-normal italic text-[11px]">— (فارغ)</span>}
                           </div>
                           <div className="text-[11px] text-slate-500 flex flex-wrap items-center gap-1.5 mt-0.5">
-                            <span className="font-mono font-semibold text-indigo-600 bg-indigo-50 dark:bg-indigo-950/50 px-1 rounded">
-                              {fup.customerCode || fup.systemCode || party?.systemCode || (fup.paperCode ? `P-${fup.paperCode}` : '-')}
-                            </span>
-                            {fup.paperCode && (
-                              <span className="font-mono text-[10px] font-bold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 px-1 py-0.2 rounded" title="كود الملف الورقي">
-                                ورقي: {fup.paperCode}
-                              </span>
-                            )}
                             <span>{fup.patientPhone || <span className="text-slate-400 font-mono">-</span>}</span>
                             {fup.patientPhone && (
                               <button
@@ -4265,11 +4413,14 @@ export const BookingsFollowUpView: React.FC = () => {
                   </label>
                   <button
                     type="button"
-                    onClick={() => setShowQuickAddCustomerModal(true)}
-                    className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 cursor-pointer"
+                    onClick={() => {
+                      window.dispatchEvent(new CustomEvent('app:navigate', { detail: 'parties' }));
+                    }}
+                    className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 cursor-pointer underline"
+                    title={t('تكويد العملاء متاح حصراً من شاشة إدارة العملاء', 'Register clients in Customer Management')}
                   >
                     <UserPlus className="h-3.5 w-3.5" />
-                    <span>{t('+ إضافة عميل جديد سريعاً', '+ Quick Add New Client')}</span>
+                    <span>{t('الانتقال إلى «إدارة العملاء» لتكويد عميل جديد ↗', 'Go to Customer Management to add client ↗')}</span>
                   </button>
                 </div>
 
@@ -4282,7 +4433,7 @@ export const BookingsFollowUpView: React.FC = () => {
                   <option value="">{t('-- اختر اسم العميل من عملاء الفرع المفعل * --', '-- Select customer from active branch * --')}</option>
                   {branchCustomers.map((p) => (
                     <option key={p.id} value={p.id}>
-                      {p.name} • {p.phone} {p.paperCode ? `[ورقي: ${p.paperCode}]` : ''} {p.systemCode ? `[${p.systemCode}]` : ''}
+                      {p.name} • {p.phone} [كود: {p.customerCode || p.code || '—'}] [سيستم: {p.systemCode || p.paperCode || '—'}] [ملف: {p.fileCode || p.fileNumber || '—'}]
                     </option>
                   ))}
                 </select>
@@ -4292,69 +4443,111 @@ export const BookingsFollowUpView: React.FC = () => {
                     <span>{t('لا يوجد عملاء مكودين بهذا الفرع حتى الآن.', 'No customers found for this branch.')}</span>
                     <button
                       type="button"
-                      onClick={() => setShowQuickAddCustomerModal(true)}
+                      onClick={() => {
+                        window.dispatchEvent(new CustomEvent('app:navigate', { detail: 'parties' }));
+                      }}
                       className="font-bold underline cursor-pointer"
                     >
-                      {t('إضافة أول عميل الآن (+)', 'Add First Client (+)')}
+                      {t('تكويد العميل من شاشة إدارة العملاء (↗)', 'Go to Customer Management (↗)')}
                     </button>
                   </div>
                 )}
 
-                {/* Read-Only Pre-filled Registered Data */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2.5 p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700">
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-500 mb-1 flex items-center gap-1">
-                      <Lock className="h-3 w-3 text-slate-400" />
-                      <span>{t('اسم العميل (افتراضي ومقفل)', 'Customer Name (Locked)')}</span>
-                    </label>
-                    <input
-                      type="text"
-                      readOnly
-                      value={patientName}
-                      placeholder={t('سيظهر الاسم المسجل...', 'Registered name...')}
-                      className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-bold cursor-not-allowed"
-                    />
+                {/* Read-Only Locked Customer Codes & Data */}
+                <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700 space-y-2.5">
+                  <div className="flex items-center justify-between text-[11px] pb-1.5 border-b border-slate-200 dark:border-slate-700 text-slate-500">
+                    <span className="font-bold flex items-center gap-1 text-amber-800 dark:text-amber-300">
+                      <Lock className="h-3.5 w-3.5" />
+                      {t('بيانات وأكواد العميل (مقفولة بالكامل - الإدخال حصراً من إدارة العملاء)', 'Customer Data & Codes (Locked - Entry only in Customer Management)')}
+                    </span>
                   </div>
 
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-500 mb-1 flex items-center gap-1">
-                      <Lock className="h-3 w-3 text-slate-400" />
-                      <span>{t('رقم الهاتف (افتراضي ومقفل)', 'Phone (Locked)')}</span>
-                    </label>
-                    <input
-                      type="text"
-                      readOnly
-                      value={patientPhone}
-                      placeholder={t('سيظهر الهاتف المسجل...', 'Registered phone...')}
-                      className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-mono font-bold cursor-not-allowed"
-                    />
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 mb-0.5 flex items-center gap-1">
+                        <Lock className="h-2.5 w-2.5 text-slate-400" />
+                        <span>{t('اسم الفرع', 'Branch')}</span>
+                      </label>
+                      <input
+                        type="text"
+                        readOnly
+                        disabled
+                        value={activeBranch?.name || t('الفرع المفعل', 'Active Branch')}
+                        className="w-full px-2 py-1.5 text-xs rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-bold cursor-not-allowed select-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 mb-0.5 flex items-center gap-1">
+                        <Lock className="h-2.5 w-2.5 text-slate-400" />
+                        <span>{t('كود العميل (التطبيق)', 'Customer Code')}</span>
+                      </label>
+                      <input
+                        type="text"
+                        readOnly
+                        disabled
+                        value={customerCode || '—'}
+                        className="w-full px-2 py-1.5 text-xs rounded-lg bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 font-mono font-bold cursor-not-allowed select-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 mb-0.5 flex items-center gap-1">
+                        <Lock className="h-2.5 w-2.5 text-slate-400" />
+                        <span>{t('كود السيستم', 'System Code')}</span>
+                      </label>
+                      <input
+                        type="text"
+                        readOnly
+                        disabled
+                        value={systemCode || '—'}
+                        className="w-full px-2 py-1.5 text-xs rounded-lg bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300 font-mono font-bold cursor-not-allowed select-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 mb-0.5 flex items-center gap-1">
+                        <Lock className="h-2.5 w-2.5 text-slate-400" />
+                        <span>{t('كود الملف', 'File Code')}</span>
+                      </label>
+                      <input
+                        type="text"
+                        readOnly
+                        disabled
+                        value={fileCode || '—'}
+                        className="w-full px-2 py-1.5 text-xs rounded-lg bg-cyan-50 dark:bg-cyan-950/50 border border-cyan-200 dark:border-cyan-800 text-cyan-800 dark:text-cyan-300 font-mono font-bold cursor-not-allowed select-none"
+                      />
+                    </div>
                   </div>
 
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-500 mb-1 flex items-center gap-1">
-                      <Lock className="h-3 w-3 text-slate-400" />
-                      <span>{t('مصدر العميل (افتراضي ومقفل)', 'Lead Source (Locked)')}</span>
-                    </label>
-                    <input
-                      type="text"
-                      readOnly
-                      value={leadSource || t('زيارة مباشرة للفرع', 'Walk-in')}
-                      placeholder={t('مصدر العميل...', 'Lead source...')}
-                      className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-bold cursor-not-allowed"
-                    />
-                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 mb-0.5 flex items-center gap-1">
+                        <Lock className="h-2.5 w-2.5 text-slate-400" />
+                        <span>{t('اسم العميل / المريض', 'Patient Name')}</span>
+                      </label>
+                      <input
+                        type="text"
+                        readOnly
+                        disabled
+                        value={patientName || '—'}
+                        className="w-full px-2 py-1.5 text-xs rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 font-bold cursor-not-allowed select-none"
+                      />
+                    </div>
 
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-500 mb-1 flex items-center gap-1">
-                      <Lock className="h-3 w-3 text-slate-400" />
-                      <span>{t('الفرع المفعل (غير قابل للتعديل)', 'Branch (Locked)')}</span>
-                    </label>
-                    <input
-                      type="text"
-                      readOnly
-                      value={activeBranch?.name || t('الفرع المفعل', 'Active Branch')}
-                      className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-indigo-700 dark:text-indigo-400 font-bold cursor-not-allowed"
-                    />
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 mb-0.5 flex items-center gap-1">
+                        <Lock className="h-2.5 w-2.5 text-slate-400" />
+                        <span>{t('رقم الهاتف', 'Phone')}</span>
+                      </label>
+                      <input
+                        type="text"
+                        readOnly
+                        disabled
+                        value={patientPhone || '—'}
+                        className="w-full px-2 py-1.5 text-xs rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 font-mono font-bold cursor-not-allowed select-none"
+                      />
+                    </div>
                   </div>
                 </div>
               </div>
@@ -4591,42 +4784,110 @@ export const BookingsFollowUpView: React.FC = () => {
             </div>
 
             <form onSubmit={handleEditAptSubmit} className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    {t('اسم المريض', 'Patient Name')}
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    readOnly
-                    value={patientName}
-                    className="w-full px-3 py-2 text-xs rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 cursor-not-allowed font-bold"
-                  />
+              {/* Locked Customer Codes & Data in Edit Booking Modal */}
+              <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700 space-y-2.5">
+                <div className="flex items-center justify-between text-[11px] pb-1.5 border-b border-slate-200 dark:border-slate-700 text-slate-500">
+                  <span className="font-bold flex items-center gap-1 text-amber-800 dark:text-amber-300">
+                    <Lock className="h-3.5 w-3.5" />
+                    {t('بيانات وأكواد العميل (مقفولة بالكامل - التعديل حصراً من إدارة العملاء)', 'Customer Data & Codes (Locked - Edit only in Customer Management)')}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      window.dispatchEvent(new CustomEvent('app:navigate', { detail: 'parties' }));
+                    }}
+                    className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 cursor-pointer underline"
+                  >
+                    {t('الانتقال لإدارة العملاء ↗', 'Go to Customer Management ↗')}
+                  </button>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    {t('رقم الهاتف', 'Phone')}
-                  </label>
-                  <input
-                    type="text"
-                    readOnly
-                    value={patientPhone}
-                    className="w-full px-3 py-2 text-xs rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 cursor-not-allowed font-mono font-bold"
-                  />
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 mb-0.5 flex items-center gap-1">
+                      <Lock className="h-2.5 w-2.5 text-slate-400" />
+                      <span>{t('اسم الفرع', 'Branch')}</span>
+                    </label>
+                    <input
+                      type="text"
+                      readOnly
+                      disabled
+                      value={branches.find(b => b.id === (selectedApt.branchId || activeBranch?.id))?.name || activeBranch?.name || '—'}
+                      className="w-full px-2 py-1.5 text-xs rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-bold cursor-not-allowed select-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 mb-0.5 flex items-center gap-1">
+                      <Lock className="h-2.5 w-2.5 text-slate-400" />
+                      <span>{t('كود العميل (التطبيق)', 'Customer Code')}</span>
+                    </label>
+                    <input
+                      type="text"
+                      readOnly
+                      disabled
+                      value={customerCode || selectedApt.customerCode || '—'}
+                      className="w-full px-2 py-1.5 text-xs rounded-lg bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 font-mono font-bold cursor-not-allowed select-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 mb-0.5 flex items-center gap-1">
+                      <Lock className="h-2.5 w-2.5 text-slate-400" />
+                      <span>{t('كود السيستم', 'System Code')}</span>
+                    </label>
+                    <input
+                      type="text"
+                      readOnly
+                      disabled
+                      value={systemCode || selectedApt.systemCode || selectedApt.paperCode || '—'}
+                      className="w-full px-2 py-1.5 text-xs rounded-lg bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300 font-mono font-bold cursor-not-allowed select-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 mb-0.5 flex items-center gap-1">
+                      <Lock className="h-2.5 w-2.5 text-slate-400" />
+                      <span>{t('كود الملف', 'File Code')}</span>
+                    </label>
+                    <input
+                      type="text"
+                      readOnly
+                      disabled
+                      value={fileCode || selectedApt.fileCode || '—'}
+                      className="w-full px-2 py-1.5 text-xs rounded-lg bg-cyan-50 dark:bg-cyan-950/50 border border-cyan-200 dark:border-cyan-800 text-cyan-800 dark:text-cyan-300 font-mono font-bold cursor-not-allowed select-none"
+                    />
+                  </div>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    {t('كود السيستم', 'System Code')}
-                  </label>
-                  <input
-                    type="text"
-                    readOnly
-                    value={systemCode}
-                    className="w-full px-3 py-2 text-xs rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-mono cursor-not-allowed"
-                  />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 mb-0.5 flex items-center gap-1">
+                      <Lock className="h-2.5 w-2.5 text-slate-400" />
+                      <span>{t('اسم العميل / المريض', 'Patient Name')}</span>
+                    </label>
+                    <input
+                      type="text"
+                      readOnly
+                      disabled
+                      value={patientName}
+                      className="w-full px-2 py-1.5 text-xs rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 font-bold cursor-not-allowed select-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 mb-0.5 flex items-center gap-1">
+                      <Lock className="h-2.5 w-2.5 text-slate-400" />
+                      <span>{t('رقم الهاتف', 'Phone')}</span>
+                    </label>
+                    <input
+                      type="text"
+                      readOnly
+                      disabled
+                      value={patientPhone}
+                      className="w-full px-2 py-1.5 text-xs rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 font-mono font-bold cursor-not-allowed select-none"
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -4850,11 +5111,26 @@ export const BookingsFollowUpView: React.FC = () => {
             </div>
 
             <form onSubmit={handleAddFollowUpSubmit} className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  {t('اختيار مريض مسجل (اختياري)', 'Select Registered Patient')}
-                </label>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                    {t('اختيار العميل من عملاء الفرع المفعل *', 'Select Customer from Active Branch *')}
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      window.dispatchEvent(new CustomEvent('app:navigate', { detail: 'parties' }));
+                    }}
+                    className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 cursor-pointer underline"
+                    title={t('تكويد العملاء متاح حصراً من شاشة إدارة العملاء', 'Register clients in Customer Management')}
+                  >
+                    <UserPlus className="h-3.5 w-3.5" />
+                    <span>{t('الانتقال إلى «إدارة العملاء» لتكويد عميل جديد ↗', 'Go to Customer Management to add client ↗')}</span>
+                  </button>
+                </div>
+
                 <select
+                  required
                   value={fupPatientId}
                   onChange={(e) => {
                     setFupPatientId(e.target.value);
@@ -4862,47 +5138,123 @@ export const BookingsFollowUpView: React.FC = () => {
                     if (p) {
                       setFupPatientName(p.name);
                       setFupPatientPhone(p.phone);
-                      setFupSystemCode(p.systemCode || '');
+                      setFupCustomerCode(p.customerCode || p.code || '');
+                      setFupSystemCode(p.systemCode || p.paperCode || '');
+                      setFupFileCode(p.fileCode || p.fileNumber || '');
+                    } else {
+                      setFupPatientName('');
+                      setFupPatientPhone('');
+                      setFupCustomerCode('');
+                      setFupSystemCode('');
+                      setFupFileCode('');
                     }
                   }}
-                  className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
+                  className="w-full px-3 py-2.5 text-xs rounded-xl bg-indigo-50/50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800 font-bold"
                 >
-                  <option value="">{t('مريض جديد أو كتابة يدوية...', 'New patient or custom...')}</option>
-                  {parties.map((p) => (
+                  <option value="">{t('-- اختر اسم العميل من عملاء الفرع المفعل * --', '-- Select customer from active branch * --')}</option>
+                  {branchCustomers.map((p) => (
                     <option key={p.id} value={p.id}>
-                      {p.name} ({p.phone})
+                      {p.name} • {p.phone} [كود: {p.customerCode || p.code || '—'}] [سيستم: {p.systemCode || p.paperCode || '—'}] [ملف: {p.fileCode || p.fileNumber || '—'}]
                     </option>
                   ))}
                 </select>
-              </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    {t('اسم المريض / العميل *', 'Patient Name *')}
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={fupPatientName}
-                    onChange={(e) => setFupPatientName(e.target.value)}
-                    placeholder="اسم المريض..."
-                    className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
-                  />
-                </div>
+                {/* Read-Only Locked Customer Codes & Data */}
+                <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700 space-y-2.5">
+                  <div className="flex items-center justify-between text-[11px] pb-1.5 border-b border-slate-200 dark:border-slate-700 text-slate-500">
+                    <span className="font-bold flex items-center gap-1 text-amber-800 dark:text-amber-300">
+                      <Lock className="h-3.5 w-3.5" />
+                      {t('بيانات وأكواد العميل (مقفولة بالكامل - الإدخال حصراً من إدارة العملاء)', 'Customer Data & Codes (Locked - Entry only in Customer Management)')}
+                    </span>
+                  </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    {t('رقم الهاتف *', 'Phone *')}
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={fupPatientPhone}
-                    onChange={(e) => setFupPatientPhone(e.target.value)}
-                    placeholder="01xxxxxxxxx"
-                    className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
-                  />
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 mb-0.5 flex items-center gap-1">
+                        <Lock className="h-2.5 w-2.5 text-slate-400" />
+                        <span>{t('اسم الفرع', 'Branch')}</span>
+                      </label>
+                      <input
+                        type="text"
+                        readOnly
+                        disabled
+                        value={activeBranch?.name || t('الفرع المفعل', 'Active Branch')}
+                        className="w-full px-2 py-1.5 text-xs rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-bold cursor-not-allowed select-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 mb-0.5 flex items-center gap-1">
+                        <Lock className="h-2.5 w-2.5 text-slate-400" />
+                        <span>{t('كود العميل (التطبيق)', 'Customer Code')}</span>
+                      </label>
+                      <input
+                        type="text"
+                        readOnly
+                        disabled
+                        value={fupCustomerCode || '—'}
+                        className="w-full px-2 py-1.5 text-xs rounded-lg bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 font-mono font-bold cursor-not-allowed select-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 mb-0.5 flex items-center gap-1">
+                        <Lock className="h-2.5 w-2.5 text-slate-400" />
+                        <span>{t('كود السيستم', 'System Code')}</span>
+                      </label>
+                      <input
+                        type="text"
+                        readOnly
+                        disabled
+                        value={fupSystemCode || '—'}
+                        className="w-full px-2 py-1.5 text-xs rounded-lg bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300 font-mono font-bold cursor-not-allowed select-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 mb-0.5 flex items-center gap-1">
+                        <Lock className="h-2.5 w-2.5 text-slate-400" />
+                        <span>{t('كود الملف', 'File Code')}</span>
+                      </label>
+                      <input
+                        type="text"
+                        readOnly
+                        disabled
+                        value={fupFileCode || '—'}
+                        className="w-full px-2 py-1.5 text-xs rounded-lg bg-cyan-50 dark:bg-cyan-950/50 border border-cyan-200 dark:border-cyan-800 text-cyan-800 dark:text-cyan-300 font-mono font-bold cursor-not-allowed select-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 mb-0.5 flex items-center gap-1">
+                        <Lock className="h-2.5 w-2.5 text-slate-400" />
+                        <span>{t('اسم العميل / المريض', 'Patient Name')}</span>
+                      </label>
+                      <input
+                        type="text"
+                        readOnly
+                        disabled
+                        value={fupPatientName || '—'}
+                        className="w-full px-2 py-1.5 text-xs rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 font-bold cursor-not-allowed select-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 mb-0.5 flex items-center gap-1">
+                        <Lock className="h-2.5 w-2.5 text-slate-400" />
+                        <span>{t('رقم الهاتف', 'Phone')}</span>
+                      </label>
+                      <input
+                        type="text"
+                        readOnly
+                        disabled
+                        value={fupPatientPhone || '—'}
+                        className="w-full px-2 py-1.5 text-xs rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 font-mono font-bold cursor-not-allowed select-none"
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -6240,10 +6592,14 @@ export const BookingsFollowUpView: React.FC = () => {
           const range = getAppointmentTimeRange(a);
           const sTime = a.startTime || (range.startMin !== null ? formatMinutesTo24h(range.startMin) : (a.time ? a.time.split(' - ')[0] : '10:00'));
           const eTime = a.endTime || (range.endMin !== null ? formatMinutesTo24h(range.endMin) : (a.time && a.time.includes(' - ') ? a.time.split(' - ')[1] : '10:45'));
-          const party = parties.find((p) => p.id === a.patientId || p.systemCode === a.systemCode || p.systemCode === a.customerCode);
+          const party = parties.find((p) => p.id === a.patientId || p.systemCode === a.systemCode || p.systemCode === a.customerCode || p.customerCode === a.customerCode);
+          const branchObj = branches.find((b) => b.id === (a.branchId || party?.branchId)) || activeBranch;
           return {
-            paperCode: a.paperCode || party?.paperCode || '',
-            customerCode: a.customerCode || a.systemCode || party?.systemCode || '',
+            branchName: branchObj?.name || activeBranch?.name || 'الفرع الرئيسي',
+            customerCode: a.customerCode || party?.customerCode || party?.code || '',
+            systemCode: a.systemCode || a.paperCode || party?.systemCode || party?.paperCode || '',
+            fileCode: a.fileCode || party?.fileCode || party?.fileNumber || '',
+            paperCode: a.paperCode || party?.paperCode || a.systemCode || party?.systemCode || '',
             patientName: a.patientName,
             patientPhone: a.patientPhone || '',
             date: a.date,
@@ -6272,10 +6628,14 @@ export const BookingsFollowUpView: React.FC = () => {
         descriptionAr="استيراد وتصدير جدول المتابعات والتذكير مع الفحص الخلوي الذكي وربط كود العميل آلياً بدون تجميد المتصفح"
         columns={followUpsExcelColumns}
         currentDataForExport={filteredFollowUps.map((f) => {
-          const party = parties.find((p) => p.id === f.patientId || p.systemCode === f.systemCode || p.systemCode === f.customerCode);
+          const party = parties.find((p) => p.id === f.patientId || p.systemCode === f.systemCode || p.systemCode === f.customerCode || p.customerCode === f.customerCode);
+          const branchObj = branches.find((b) => b.id === (f.branchId || party?.branchId)) || activeBranch;
           return {
-            paperCode: f.paperCode || party?.paperCode || '',
-            customerCode: f.customerCode || f.systemCode || party?.systemCode || '',
+            branchName: branchObj?.name || activeBranch?.name || 'الفرع الرئيسي',
+            customerCode: f.customerCode || party?.customerCode || party?.code || '',
+            systemCode: f.systemCode || f.paperCode || party?.systemCode || party?.paperCode || '',
+            fileCode: f.fileCode || party?.fileCode || party?.fileNumber || '',
+            paperCode: f.paperCode || party?.paperCode || f.systemCode || party?.systemCode || '',
             patientName: f.patientName,
             patientPhone: f.patientPhone || '',
             followUpDate: f.followUpDate,

@@ -183,8 +183,18 @@ const MainLayout: React.FC = () => {
       }
     };
 
+    const handleNavigate = (e: any) => {
+      if (e.detail && canAccessView(e.detail)) {
+        setCurrentView(e.detail);
+      }
+    };
+
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('app:navigate', handleNavigate);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('app:navigate', handleNavigate);
+    };
   }, [canAccessView]);
 
   const renderActiveView = () => {

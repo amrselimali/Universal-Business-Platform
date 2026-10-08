@@ -34,6 +34,7 @@ import {
   LayoutGrid,
   Table,
   Zap,
+  Lock,
 } from 'lucide-react';
 import { PartyStatementModal } from '../components/PartyStatementModal';
 import { exportToCsv, shareViaWhatsApp } from '../utils/exportUtils';
@@ -204,6 +205,7 @@ export const PartiesView: React.FC = () => {
 
   const currentBranchId = activeBranch?.id || (branches.length > 0 ? branches[0].id : 'branch-cairo');
 
+  const [autoFileCodeFromCustomerCode, setAutoFileCodeFromCustomerCode] = useState(true);
   const [newParty, setNewParty] = useState({
     name: '',
     nameEn: '',
@@ -296,6 +298,9 @@ export const PartiesView: React.FC = () => {
       return;
     }
 
+    const nextCustCode = getNextCustomerAppCode();
+    const finalFileCode = newParty.fileCode.trim() || (autoFileCodeFromCustomerCode ? nextCustCode : undefined);
+
     addParty({
       name: newParty.name.trim(),
       nameEn: newParty.nameEn.trim() || autoTranslateArabic(newParty.name),
@@ -305,7 +310,7 @@ export const PartiesView: React.FC = () => {
       email: newParty.email.trim() || undefined,
       systemCode: newParty.systemCode.trim() || newParty.paperCode.trim() || undefined,
       paperCode: newParty.paperCode.trim() || newParty.systemCode.trim() || undefined,
-      fileCode: newParty.fileCode.trim() || undefined,
+      fileCode: finalFileCode,
       nationalId: newParty.nationalId.trim() || undefined,
       address: newParty.address.trim() || undefined,
       medicalNotes: newParty.medicalNotes.trim() || undefined,
@@ -482,16 +487,18 @@ export const PartiesView: React.FC = () => {
       const branchMatch = branches.find(
         (b) => b.name === row.branchName || b.nameEn?.toLowerCase() === row.branchName?.toLowerCase() || b.id === row.branchName
       );
+      const custCode = row.customerCode || undefined;
+      const fileCode = row.fileCode || custCode || undefined;
       return {
         name: row.name,
         nameEn: row.nameEn,
         phone: row.phone,
         type: 'Customer' as const,
         branchId: branchMatch?.id || defaultBranchId,
-        customerCode: row.customerCode || undefined,
+        customerCode: custCode,
         systemCode: row.systemCode || undefined,
         paperCode: row.systemCode || row.paperCode || undefined,
-        fileCode: row.fileCode || undefined,
+        fileCode: fileCode,
         nationalId: row.nationalId || undefined,
         leadSource: row.leadSource || 'Excel Import',
         balance: row.balance || 0,
@@ -1142,8 +1149,20 @@ export const PartiesView: React.FC = () => {
                     placeholder="F-101 (رقم الملف بالأرشيف)..."
                     className="w-full rounded-xl border border-slate-200 bg-white dark:bg-slate-800 p-2 font-mono outline-none dark:border-slate-700 dark:text-white"
                   />
-                  <span className="text-[10px] text-slate-400 mt-0.5 block">
-                    {t('يدخل يدوياً عند تكويد العميل', 'Manually entered when registering client')}
+                  <div className="flex items-center gap-2 mt-2 p-1.5 rounded-lg bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-900/40">
+                    <input
+                      type="checkbox"
+                      id="autoFileCodeToggle"
+                      checked={autoFileCodeFromCustomerCode}
+                      onChange={(e) => setAutoFileCodeFromCustomerCode(e.target.checked)}
+                      className="rounded border-indigo-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                    />
+                    <label htmlFor="autoFileCodeToggle" className="text-[11px] font-semibold text-indigo-900 dark:text-indigo-200 cursor-pointer select-none">
+                      {t('إذا تُرك كود الملف فارغاً، يتم اعتماده تلقائياً مطابقاً لكود العميل', 'If left blank, auto-use customer code as file code')} ({getNextCustomerAppCode()})
+                    </label>
+                  </div>
+                  <span className="text-[10px] text-slate-400 mt-1 block">
+                    {t('يدخل يدوياً عند تكويد العميل، أو يُولّد آلياً من كود العميل في حال عدم الإدخال', 'Manually entered code, or auto-filled with customer code')}
                   </span>
                 </div>
               </div>
@@ -1262,18 +1281,25 @@ export const PartiesView: React.FC = () => {
         entityTitleEn="Customers & Patients Database"
         descriptionAr="استيراد وتصدير قاعدة بيانات العملاء مع الفحص الخلوي الذكي واكتشاف الأخطاء"
         columns={partyExcelColumns}
-        currentDataForExport={filteredParties.map((p) => ({
-          name: p.name,
-          nameEn: p.nameEn || '',
-          phone: p.phone,
-          paperCode: p.paperCode || '',
-          nationalId: p.nationalId || '',
-          leadSource: p.leadSource || '',
-          balance: p.balance || 0,
-          creditLimit: p.creditLimit || 0,
-          address: p.address || '',
-          medicalNotes: p.medicalNotes || '',
-        }))}
+        currentDataForExport={filteredParties.map((p) => {
+          const branchObj = branches.find((b) => b.id === p.branchId);
+          return {
+            branchName: branchObj?.name || activeBranch?.name || 'الفرع الرئيسي',
+            customerCode: p.customerCode || p.code || '',
+            systemCode: p.systemCode || p.paperCode || '',
+            fileCode: p.fileCode || p.fileNumber || '',
+            name: p.name,
+            nameEn: p.nameEn || '',
+            phone: p.phone,
+            paperCode: p.paperCode || p.systemCode || '',
+            nationalId: p.nationalId || '',
+            leadSource: p.leadSource || '',
+            balance: p.balance || 0,
+            creditLimit: p.creditLimit || 0,
+            address: p.address || '',
+            medicalNotes: p.medicalNotes || '',
+          };
+        })}
         exportFileNamePrefix="سجل_العملاء_والمرضى"
         validator={validatePartyRows}
         onConfirmImport={handleConfirmPartyImport}

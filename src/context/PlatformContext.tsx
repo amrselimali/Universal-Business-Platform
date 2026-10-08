@@ -1415,8 +1415,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const nameEn = p.nameEn || autoTranslateArabic(p.name);
       const customerCode = p.customerCode || `C-${String(existingCount + idx + 1).padStart(5, '0')}`;
       const systemCode = p.systemCode || p.paperCode || `CUST-${startNum + existingCount + idx + 1}`;
-      const paperCode = p.paperCode || p.systemCode || '';
-      const fileCode = p.fileCode || p.fileNumber || '';
+      const paperCode = p.paperCode || p.systemCode || systemCode;
+      const fileCode = p.fileCode || p.fileNumber || customerCode;
       const uniqueId = `party-${batchId}-${idx}-${Math.random().toString(36).substring(2, 7)}`;
 
       return {
@@ -1490,8 +1490,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const customerCode = partyData.customerCode || getNextCustomerAppCode();
     // System Code: contains currently entered data (formerly paperCode)
     const systemCode = partyData.systemCode || partyData.paperCode || getNextCustomerSystemCode(branchId);
-    const paperCode = partyData.paperCode || partyData.systemCode || '';
-    const fileCode = partyData.fileCode || partyData.fileNumber || '';
+    const paperCode = partyData.paperCode || partyData.systemCode || systemCode;
+    const fileCode = partyData.fileCode?.trim() || partyData.fileNumber?.trim() || customerCode;
 
     const newParty: Party = {
       ...partyData,
@@ -1787,8 +1787,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         const nameEn = row.nameEn || autoTranslateArabic(row.name);
         const custCode = row.customerCode || `C-${String(parties.length + newPartiesToAdd.length + 1).padStart(5, '0')}`;
         const sysCode = row.systemCode || row.paperCode || getNextCustomerSystemCode(branchMatch?.id);
-        const paperCode = row.paperCode || row.systemCode || '';
-        const fileCode = row.fileCode || '';
+        const paperCode = row.paperCode || row.systemCode || sysCode;
+        const fileCode = row.fileCode || custCode;
 
         const newParty: Party = {
           id: `party-imp-${Date.now()}-${idx}`,

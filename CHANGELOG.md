@@ -8,6 +8,30 @@ It is intended to help future AI agents understand how the project evolved.
 
 # 2026-10-08
 
+## Bugfix: Resolve "TypeError: Illegal constructor" in Edit Customer Modal
+
+### Cause
+In `src/views/PartiesView.tsx`, the `<Lock />` component was used in both the Add Customer and Edit Customer modals. However, `Lock` had not been added to the `lucide-react` import statement at the top of `PartiesView.tsx`. In web browsers, `window.Lock` is an internal Web Locks API constructor (`Web Locks API - Lock interface`). When React attempted to instantiate `<Lock ... />`, it tried to call `new window.Lock(...)` as an JSX component, which throws a native `TypeError: Illegal constructor`.
+
+### Resolution
+- Added `Lock` to the `lucide-react` import list in `src/views/PartiesView.tsx`.
+- Successfully compiled the applet and verified that the Edit Customer modal opens smoothly without errors.
+
+---
+
+## Customer Identifiers Unification (Branch, App Code, System Code, File Code) & Full Lifecycle Locking
+
+### Purpose
+Completed user requirements regarding customer identification consistency across Customer Management, Bookings, Follow-ups, and Excel imports/exports:
+- **Branch Name (`اسم الفرع`)**: Displayed consistently across client directory, booking agenda, follow-ups agenda, and Excel files.
+- **Customer Code (`كود العميل (التطبيق)`)**: Serves as the primary immutable application code (`C-XXXXX`), automatically generated and serialized in sequence (`getNextCustomerAppCode`). Users cannot manually modify or disrupt this sequence. Serves as the foundational relationship key linking customer lifecycle, transactions, and appointments.
+- **System Code (`كود السيستم`)**: Renamed from previous "Paper Code", retaining all existing entered data (`CUST-XXXX` / `BR-XXXX` or user code).
+- **File Code (`كود الملف`)**: Manually entered during customer onboarding or editing. If left blank during coding, an automatic fallback checkbox allows adopting the serialized customer app code directly as the file code.
+- **Locked Inputs in Booking & Follow-Up Screens**: All customer creation and core code inputs are strictly locked in Bookings and Follow-ups modals/tables with navigation shortcuts to Customer Management, guaranteeing that Customer Management is the sole authoritative entry point.
+- **Excel Transfer & Validation Integration**: Added and synchronized Branch Name, Customer Code, System Code, and File Code across Excel column templates, validator checks, and export mappings for both Bookings and Follow-ups.
+
+---
+
 ## Shared AI Development System Initialized
 
 ### Purpose
