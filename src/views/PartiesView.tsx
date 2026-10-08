@@ -46,6 +46,42 @@ import {
 
 const partyExcelColumns: ExcelColumnConfig[] = [
   {
+    key: 'branchName',
+    labelAr: 'اسم الفرع',
+    labelEn: 'Branch Name',
+    required: false,
+    type: 'text',
+    sampleValue: 'فرع المعادي',
+    instructions: 'اسم الفرع التابع له العميل (اختياري - يحدد الفرع الحالي افتراضياً)',
+  },
+  {
+    key: 'customerCode',
+    labelAr: 'كود العميل',
+    labelEn: 'Customer Code',
+    required: false,
+    type: 'text',
+    sampleValue: 'C-00001',
+    instructions: 'كود العميل المسريل بالتطبيق (يحسب آلياً مسريل إذا ترك فارغاً)',
+  },
+  {
+    key: 'systemCode',
+    labelAr: 'كود السيستم',
+    labelEn: 'System Code',
+    required: false,
+    type: 'text',
+    sampleValue: 'P-101',
+    instructions: 'كود السيستم (الكود الورقي سابقاً المحتفظ بالبيانات المدخلة)',
+  },
+  {
+    key: 'fileCode',
+    labelAr: 'كود الملف',
+    labelEn: 'File Code',
+    required: false,
+    type: 'text',
+    sampleValue: 'F-101',
+    instructions: 'كود ورقم الملف الورقي بالعيادة أو الأرشيف (يدخل يدوياً عند تكويد العميل)',
+  },
+  {
     key: 'name',
     labelAr: 'الاسم بالعربي',
     labelEn: 'Full Name Ar',
@@ -71,15 +107,6 @@ const partyExcelColumns: ExcelColumnConfig[] = [
     type: 'phone',
     sampleValue: '01011112233',
     instructions: 'رقم هاتف صالح يبدأ بـ 01 ويتكون من أرقام ولا يقل عن 8 أرقام',
-  },
-  {
-    key: 'paperCode',
-    labelAr: 'الكود الورقي',
-    labelEn: 'Paper File Code',
-    required: false,
-    type: 'text',
-    sampleValue: 'P-101',
-    instructions: 'رقم الملف الورقي بالعيادة أو الأرشيف إن وجد',
   },
   {
     key: 'nationalId',
@@ -147,6 +174,7 @@ export const PartiesView: React.FC = () => {
     deleteParty,
     importPartiesBulk,
     importCustomersFromExcel,
+    getNextCustomerAppCode,
     language,
     tenant,
     activeBranch,
@@ -174,13 +202,18 @@ export const PartiesView: React.FC = () => {
   );
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const currentBranchId = activeBranch?.id || (branches.length > 0 ? branches[0].id : 'branch-cairo');
+
   const [newParty, setNewParty] = useState({
     name: '',
     nameEn: '',
+    branchId: currentBranchId,
     type: 'Customer' as const,
     phone: '',
     email: '',
+    systemCode: '',
     paperCode: '',
+    fileCode: '',
     nationalId: '',
     address: '',
     medicalNotes: '',
@@ -190,7 +223,6 @@ export const PartiesView: React.FC = () => {
   });
 
   // Only patients & customers strictly belonging to the active branch
-  const currentBranchId = activeBranch?.id || (branches.length > 0 ? branches[0].id : 'branch-cairo');
   const customers = parties.filter((p) => {
     const isCustomer = p.type === 'Customer' || p.type === 'Both';
     if (!isCustomer) return false;
@@ -231,8 +263,12 @@ export const PartiesView: React.FC = () => {
         p.name.toLowerCase().includes(q) ||
         (p.nameEn && p.nameEn.toLowerCase().includes(q)) ||
         p.phone.includes(q) ||
+        (p.customerCode && p.customerCode.toLowerCase().includes(q)) ||
+        (p.code && p.code.toLowerCase().includes(q)) ||
         (p.systemCode && p.systemCode.toLowerCase().includes(q)) ||
-        (p.paperCode && p.paperCode.toLowerCase().includes(q))
+        (p.paperCode && p.paperCode.toLowerCase().includes(q)) ||
+        (p.fileCode && p.fileCode.toLowerCase().includes(q)) ||
+        (p.fileNumber && p.fileNumber.toLowerCase().includes(q))
       );
     });
   }, [customers, activeFilter, searchQuery]);
@@ -263,11 +299,13 @@ export const PartiesView: React.FC = () => {
     addParty({
       name: newParty.name.trim(),
       nameEn: newParty.nameEn.trim() || autoTranslateArabic(newParty.name),
-      branchId: activeBranch?.id || branches[0]?.id || 'branch-cairo',
+      branchId: newParty.branchId || currentBranchId,
       type: newParty.type,
       phone: newParty.phone.trim(),
       email: newParty.email.trim() || undefined,
-      paperCode: newParty.paperCode.trim() || undefined,
+      systemCode: newParty.systemCode.trim() || newParty.paperCode.trim() || undefined,
+      paperCode: newParty.paperCode.trim() || newParty.systemCode.trim() || undefined,
+      fileCode: newParty.fileCode.trim() || undefined,
       nationalId: newParty.nationalId.trim() || undefined,
       address: newParty.address.trim() || undefined,
       medicalNotes: newParty.medicalNotes.trim() || undefined,
@@ -281,10 +319,13 @@ export const PartiesView: React.FC = () => {
     setNewParty({
       name: '',
       nameEn: '',
+      branchId: currentBranchId,
       type: 'Customer',
       phone: '',
       email: '',
+      systemCode: '',
       paperCode: '',
+      fileCode: '',
       nationalId: '',
       address: '',
       medicalNotes: '',
@@ -307,9 +348,14 @@ export const PartiesView: React.FC = () => {
     updateParty(editingParty.id, {
       name: editingParty.name.trim(),
       nameEn: editingParty.nameEn?.trim() || autoTranslateArabic(editingParty.name),
+      branchId: editingParty.branchId || currentBranchId,
+      customerCode: editingParty.customerCode || editingParty.code,
+      code: editingParty.customerCode || editingParty.code,
       phone: editingParty.phone.trim(),
       email: editingParty.email?.trim() || undefined,
-      paperCode: editingParty.paperCode?.trim() || undefined,
+      systemCode: editingParty.systemCode?.trim() || editingParty.paperCode?.trim() || undefined,
+      paperCode: editingParty.paperCode?.trim() || editingParty.systemCode?.trim() || undefined,
+      fileCode: editingParty.fileCode?.trim() || undefined,
       nationalId: editingParty.nationalId?.trim() || undefined,
       address: editingParty.address?.trim() || undefined,
       medicalNotes: editingParty.medicalNotes?.trim() || undefined,
@@ -334,10 +380,14 @@ export const PartiesView: React.FC = () => {
     rawRows.forEach((row, index) => {
       const rowNum = index + 2; // Row number in Excel
 
+      const branchName = String(row['اسم الفرع'] || row['الفرع'] || row['Branch'] || row['Branch Name'] || '').trim();
+      const customerCode = String(row['كود العميل'] || row['كود العميل (السيستم)'] || row['Customer Code'] || row['Client Code'] || '').trim();
+      const systemCode = String(row['كود السيستم'] || row['الكود الورقي'] || row['System Code'] || row['Paper Code'] || row['الكود الورقي للعميل'] || '').trim();
+      const fileCode = String(row['كود الملف'] || row['رقم الملف'] || row['كود الملف الورقي'] || row['File Code'] || row['File Number'] || '').trim();
       const name = String(row['الاسم بالعربي'] || row['الاسم'] || row['Name'] || row['Full Name Ar'] || '').trim();
       const nameEn = String(row['الاسم بالإنجليزي'] || row['Name En'] || row['Full Name En'] || '').trim();
       const phone = String(row['رقم الموبايل'] || row['الموبايل'] || row['Phone'] || row['Phone Number'] || row['الهاتف'] || '').trim();
-      const paperCode = String(row['الكود الورقي'] || row['Paper File Code'] || row['Paper Code'] || '').trim();
+      const paperCode = systemCode || String(row['الكود الورقي'] || row['Paper File Code'] || row['Paper Code'] || '').trim();
       const nationalId = String(row['الرقم القومي'] || row['National ID'] || row['الهوية'] || '').trim();
       const leadSource = String(row['مصدر العميل'] || row['Lead Source'] || row['مصدر الإعلان'] || 'Excel Import').trim();
       const rawBalance = row['الرصيد الافتتاحي'] !== undefined && row['الرصيد الافتتاحي'] !== '' ? row['الرصيد الافتتاحي'] : (row['Opening Balance'] || 0);
@@ -401,6 +451,10 @@ export const PartiesView: React.FC = () => {
       }
 
       validRows.push({
+        branchName,
+        customerCode,
+        systemCode,
+        fileCode,
         name,
         nameEn: nameEn || autoTranslateArabic(name),
         phone: cleanPhone || phone,
@@ -423,21 +477,29 @@ export const PartiesView: React.FC = () => {
   };
 
   const handleConfirmPartyImport = async (validRows: any[]) => {
-    const branchToUse = activeBranch?.id || currentBranchId;
-    const mapped = validRows.map((row) => ({
-      name: row.name,
-      nameEn: row.nameEn,
-      phone: row.phone,
-      type: 'Customer' as const,
-      branchId: branchToUse,
-      paperCode: row.paperCode || undefined,
-      nationalId: row.nationalId || undefined,
-      leadSource: row.leadSource || 'Excel Import',
-      balance: row.balance || 0,
-      creditLimit: row.creditLimit || 10000,
-      address: row.address || undefined,
-      medicalNotes: row.medicalNotes || undefined,
-    }));
+    const defaultBranchId = activeBranch?.id || currentBranchId;
+    const mapped = validRows.map((row) => {
+      const branchMatch = branches.find(
+        (b) => b.name === row.branchName || b.nameEn?.toLowerCase() === row.branchName?.toLowerCase() || b.id === row.branchName
+      );
+      return {
+        name: row.name,
+        nameEn: row.nameEn,
+        phone: row.phone,
+        type: 'Customer' as const,
+        branchId: branchMatch?.id || defaultBranchId,
+        customerCode: row.customerCode || undefined,
+        systemCode: row.systemCode || undefined,
+        paperCode: row.systemCode || row.paperCode || undefined,
+        fileCode: row.fileCode || undefined,
+        nationalId: row.nationalId || undefined,
+        leadSource: row.leadSource || 'Excel Import',
+        balance: row.balance || 0,
+        creditLimit: row.creditLimit || 10000,
+        address: row.address || undefined,
+        medicalNotes: row.medicalNotes || undefined,
+      };
+    });
     await importPartiesBulk(mapped);
     setShowExcelModal(false);
   };
@@ -666,20 +728,30 @@ export const PartiesView: React.FC = () => {
                       <span className="rounded-md px-2 py-0.5 text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">
                         {t('مريض / عميل', 'Patient / Client')}
                       </span>
-                      {party.systemCode && (
-                        <span className="rounded-md px-1.5 py-0.5 text-[10px] font-mono font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
-                          {party.systemCode}
-                        </span>
-                      )}
                       {(() => {
                         const branchObj = branches.find((b) => b.id === party.branchId) || activeBranch;
                         return branchObj ? (
-                          <span className="rounded-md px-1.5 py-0.5 text-[10px] font-semibold bg-violet-50 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300 border border-violet-200 dark:border-violet-800 inline-flex items-center gap-1">
+                          <span className="rounded-md px-1.5 py-0.5 text-[10px] font-semibold bg-violet-50 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300 border border-violet-200 dark:border-violet-800 inline-flex items-center gap-1" title={t('اسم الفرع', 'Branch')}>
                             <GitBranch className="h-2.5 w-2.5" />
                             {branchObj.name}
                           </span>
                         ) : null;
                       })()}
+                      {(party.customerCode || party.code) && (
+                        <span className="rounded-md px-1.5 py-0.5 text-[10px] font-mono font-bold bg-indigo-50 text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800" title={t('كود العميل (التطبيق)', 'Customer Code')}>
+                          كود العميل: {party.customerCode || party.code}
+                        </span>
+                      )}
+                      {(party.systemCode || party.paperCode) && (
+                        <span className="rounded-md px-1.5 py-0.5 text-[10px] font-mono font-bold bg-amber-50 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300 border border-amber-200 dark:border-amber-800" title={t('كود السيستم (الورقي سابقاً)', 'System Code')}>
+                          كود السيستم: {party.systemCode || party.paperCode}
+                        </span>
+                      )}
+                      {(party.fileCode || party.fileNumber) && (
+                        <span className="rounded-md px-1.5 py-0.5 text-[10px] font-mono font-bold bg-cyan-50 text-cyan-800 dark:bg-cyan-950/50 dark:text-cyan-300 border border-cyan-200 dark:border-cyan-800" title={t('كود الملف', 'File Code')}>
+                          كود الملف: {party.fileCode || party.fileNumber}
+                        </span>
+                      )}
                     </div>
                     <h3 className="text-sm font-extrabold text-slate-900 dark:text-white mt-1.5">{party.name}</h3>
                     {party.nameEn && <p className="text-xs text-slate-400">{party.nameEn}</p>}
@@ -702,13 +774,6 @@ export const PartiesView: React.FC = () => {
                     <Phone className="h-3.5 w-3.5 text-slate-400" />
                     <span className="font-mono font-semibold">{party.phone}</span>
                   </div>
-
-                  {party.paperCode && (
-                    <div className="flex items-center gap-2 text-[11px] text-slate-500">
-                      <Hash className="h-3.5 w-3.5 text-slate-400" />
-                      <span>{t('الكود الورقي:', 'Paper File:')} {party.paperCode}</span>
-                    </div>
-                  )}
 
                   {party.medicalNotes && (
                     <div className="flex items-center gap-2 text-[11px] text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 p-1.5 rounded-lg mt-1">
@@ -788,12 +853,13 @@ export const PartiesView: React.FC = () => {
             <thead className="bg-slate-50 dark:bg-slate-850 text-slate-600 dark:text-slate-400 font-bold border-b border-slate-200 dark:border-slate-800">
               <tr>
                 <th className="p-3">#</th>
-                <th className="p-3">{t('كود النظام', 'Code')}</th>
+                <th className="p-3">{t('اسم الفرع', 'Branch')}</th>
+                <th className="p-3">{t('كود العميل (التطبيق)', 'Client Code')}</th>
+                <th className="p-3">{t('كود السيستم', 'System Code')}</th>
+                <th className="p-3">{t('كود الملف', 'File Code')}</th>
                 <th className="p-3">{t('اسم العميل / المريض', 'Name')}</th>
                 <th className="p-3">{t('الموبايل', 'Phone')}</th>
-                <th className="p-3">{t('الفرع', 'Branch')}</th>
                 <th className="p-3">{t('الرصيد المالي', 'Balance')}</th>
-                <th className="p-3">{t('الكود الورقي', 'Paper Code')}</th>
                 <th className="p-3">{t('المصدر', 'Lead Source')}</th>
                 <th className="p-3 text-center">{t('الإجراءات', 'Actions')}</th>
               </tr>
@@ -806,18 +872,33 @@ export const PartiesView: React.FC = () => {
                     <td className="p-3 text-slate-400 font-mono">
                       {(safeCurrentPage - 1) * itemsPerPage + idx + 1}
                     </td>
-                    <td className="p-3 font-mono font-bold text-slate-700 dark:text-slate-300">
-                      {party.systemCode || '—'}
+                    <td className="p-3 text-slate-700 dark:text-slate-300 font-bold">
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-[11px]">
+                        <GitBranch className="h-3 w-3 text-slate-400" />
+                        {branchObj?.name || 'الفرع الرئيسي'}
+                      </span>
+                    </td>
+                    <td className="p-3 font-mono font-bold">
+                      <span className="px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                        {party.customerCode || party.code || '—'}
+                      </span>
+                    </td>
+                    <td className="p-3 font-mono font-bold">
+                      <span className="px-2 py-0.5 rounded-md bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                        {party.systemCode || party.paperCode || '—'}
+                      </span>
+                    </td>
+                    <td className="p-3 font-mono font-bold">
+                      <span className="px-2 py-0.5 rounded-md bg-cyan-50 dark:bg-cyan-950/60 text-cyan-800 dark:text-cyan-300 border border-cyan-200 dark:border-cyan-800">
+                        {party.fileCode || party.fileNumber || '—'}
+                      </span>
                     </td>
                     <td className="p-3 font-extrabold text-slate-900 dark:text-white">
                       <div>{party.name}</div>
                       {party.nameEn && <div className="text-[10px] text-slate-400 font-normal">{party.nameEn}</div>}
                     </td>
-                    <td className="p-3 font-mono text-slate-700 dark:text-slate-300">
+                    <td className="p-3 font-mono text-slate-700 dark:text-slate-300 font-bold">
                       {party.phone}
-                    </td>
-                    <td className="p-3 text-slate-500">
-                      {branchObj?.name || '—'}
                     </td>
                     <td className="p-3 font-mono font-bold">
                       <span
@@ -831,9 +912,6 @@ export const PartiesView: React.FC = () => {
                       >
                         {formatMoney(party.balance)}
                       </span>
-                    </td>
-                    <td className="p-3 font-mono text-slate-500">
-                      {party.paperCode || '—'}
                     </td>
                     <td className="p-3 text-slate-500 text-[11px]">
                       {party.leadSource || '—'}
@@ -994,27 +1072,80 @@ export const PartiesView: React.FC = () => {
 
             <div className="space-y-3 text-xs">
 
-              {/* Branch Field (الفرع التابع له العميل - بشكل افتراضي للفرع المفعل وغير قابل للتعديل) */}
-              <div className="rounded-xl border border-indigo-100 bg-indigo-50/60 p-2.5 dark:border-indigo-900/40 dark:bg-indigo-950/20">
-                <div className="flex items-center justify-between mb-1">
-                  <label className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+              {/* Branch and Auto Serial Customer Code */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-xl border border-indigo-100 bg-indigo-50/50 dark:border-indigo-900/40 dark:bg-indigo-950/20">
+                <div>
+                  <label className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5 mb-1">
                     <GitBranch className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />
-                    <span>{t('الفرع التابع له العميل', 'Assigned Branch')}</span>
+                    <span>{t('اسم الفرع *', 'Branch *')}</span>
                   </label>
-                  <span className="rounded-md bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 px-2 py-0.5 text-[10px] font-bold">
-                    {t('الفرع المفعل (غير قابل للتعديل)', 'Active Branch (Read-Only)')}
+                  <select
+                    value={newParty.branchId || currentBranchId}
+                    onChange={(e) => setNewParty({ ...newParty, branchId: e.target.value })}
+                    className="w-full rounded-xl border border-slate-200 bg-white dark:bg-slate-800 p-2 text-xs font-bold text-slate-800 dark:text-slate-200 outline-none"
+                  >
+                    {branches.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                      <Lock className="h-3.5 w-3.5 text-slate-400" />
+                      <span>{t('كود العميل (كود التطبيق)', 'Customer Code')}</span>
+                    </label>
+                    <span className="rounded-md bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 px-1.5 py-0.2 text-[9px] font-bold">
+                      {t('مسريل آلياً بالتطبيق', 'Auto-Serialized')}
+                    </span>
+                  </div>
+                  <input
+                    type="text"
+                    disabled
+                    readOnly
+                    value={getNextCustomerAppCode()}
+                    className="w-full rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-100/60 dark:bg-slate-800/80 p-2 text-xs font-mono font-black text-indigo-700 dark:text-indigo-300 outline-none cursor-not-allowed select-none"
+                    title={t('يحسب آلياً مسريل ولا يمكن للمستخدم التحكم فيه', 'Auto-calculated serial code - cannot be modified')}
+                  />
+                </div>
+              </div>
+
+              {/* System Code and File Code */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-800/40">
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    {t('كود السيستم (الكود الورقي سابقاً)', 'System Code')}
+                  </label>
+                  <input
+                    type="text"
+                    value={newParty.systemCode || newParty.paperCode}
+                    onChange={(e) => setNewParty({ ...newParty, systemCode: e.target.value, paperCode: e.target.value })}
+                    placeholder="P-101 أو كود السيستم..."
+                    className="w-full rounded-xl border border-slate-200 bg-white dark:bg-slate-800 p-2 font-mono outline-none dark:border-slate-700 dark:text-white"
+                  />
+                  <span className="text-[10px] text-slate-400 mt-0.5 block">
+                    {t('يحتوي على البيانات المدخلة حالياً', 'Contains currently entered code')}
                   </span>
                 </div>
-                <input
-                  type="text"
-                  disabled
-                  readOnly
-                  value={activeBranch?.name || branches.find((b) => b.id === currentBranchId)?.name || t('الفرع الرئيسي', 'Main Branch')}
-                  className="w-full rounded-lg border border-indigo-200 dark:border-indigo-800 bg-white dark:bg-slate-800 p-2 text-xs font-extrabold text-slate-800 dark:text-slate-200 outline-none cursor-not-allowed select-none"
-                />
-                <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">
-                  {t('يتم تسجيل العميل وتكويده تلقائياً ضمن فرع المركز المفعل حالياً.', 'Customer will automatically be linked strictly to the active branch.')}
-                </p>
+
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    {t('كود الملف (إدخال يدوي)', 'File Code')}
+                  </label>
+                  <input
+                    type="text"
+                    value={newParty.fileCode}
+                    onChange={(e) => setNewParty({ ...newParty, fileCode: e.target.value })}
+                    placeholder="F-101 (رقم الملف بالأرشيف)..."
+                    className="w-full rounded-xl border border-slate-200 bg-white dark:bg-slate-800 p-2 font-mono outline-none dark:border-slate-700 dark:text-white"
+                  />
+                  <span className="text-[10px] text-slate-400 mt-0.5 block">
+                    {t('يدخل يدوياً عند تكويد العميل', 'Manually entered when registering client')}
+                  </span>
+                </div>
               </div>
 
               {/* Dual Language Names */}
@@ -1057,7 +1188,7 @@ export const PartiesView: React.FC = () => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
                     {t('الموبايل / الهاتف *', 'Phone *')}
@@ -1068,19 +1199,6 @@ export const PartiesView: React.FC = () => {
                     value={newParty.phone}
                     onChange={(e) => setNewParty({ ...newParty, phone: e.target.value })}
                     placeholder="01xxxxxxxxx"
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2 font-mono outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    {t('الكود الورقي (الملف)', 'Paper File #')}
-                  </label>
-                  <input
-                    type="text"
-                    value={newParty.paperCode}
-                    onChange={(e) => setNewParty({ ...newParty, paperCode: e.target.value })}
-                    placeholder="P-101"
                     className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2 font-mono outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                   />
                 </div>
@@ -1435,7 +1553,83 @@ export const PartiesView: React.FC = () => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {/* Branch and Auto Serial Customer Code */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-xl border border-indigo-100 bg-indigo-50/50 dark:border-indigo-900/40 dark:bg-indigo-950/20">
+                <div>
+                  <label className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5 mb-1">
+                    <GitBranch className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />
+                    <span>{t('اسم الفرع *', 'Branch *')}</span>
+                  </label>
+                  <select
+                    value={editingParty.branchId || currentBranchId}
+                    onChange={(e) => setEditingParty({ ...editingParty, branchId: e.target.value })}
+                    className="w-full rounded-xl border border-slate-200 bg-white dark:bg-slate-800 p-2 text-xs font-bold text-slate-800 dark:text-slate-200 outline-none"
+                  >
+                    {branches.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                      <Lock className="h-3.5 w-3.5 text-slate-400" />
+                      <span>{t('كود العميل (كود التطبيق)', 'Customer Code')}</span>
+                    </label>
+                    <span className="rounded-md bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 px-1.5 py-0.2 text-[9px] font-bold">
+                      {t('مسريل آلياً بالتطبيق', 'Auto-Serialized')}
+                    </span>
+                  </div>
+                  <input
+                    type="text"
+                    disabled
+                    readOnly
+                    value={editingParty.customerCode || editingParty.code || ''}
+                    className="w-full rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-100/60 dark:bg-slate-800/80 p-2 text-xs font-mono font-black text-indigo-700 dark:text-indigo-300 outline-none cursor-not-allowed select-none"
+                    title={t('يحسب آلياً مسريل ولا يمكن للمستخدم التحكم فيه', 'Auto-calculated serial code - cannot be modified')}
+                  />
+                </div>
+              </div>
+
+              {/* System Code and File Code */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-800/40">
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    {t('كود السيستم (الكود الورقي سابقاً)', 'System Code')}
+                  </label>
+                  <input
+                    type="text"
+                    value={editingParty.systemCode || editingParty.paperCode || ''}
+                    onChange={(e) => setEditingParty({ ...editingParty, systemCode: e.target.value, paperCode: e.target.value })}
+                    placeholder="P-101 أو كود السيستم..."
+                    className="w-full rounded-xl border border-slate-200 bg-white dark:bg-slate-800 p-2 font-mono outline-none dark:border-slate-700 dark:text-white"
+                  />
+                  <span className="text-[10px] text-slate-400 mt-0.5 block">
+                    {t('يحتوي على البيانات المدخلة حالياً', 'Contains currently entered code')}
+                  </span>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    {t('كود الملف (إدخال يدوي)', 'File Code')}
+                  </label>
+                  <input
+                    type="text"
+                    value={editingParty.fileCode || editingParty.fileNumber || ''}
+                    onChange={(e) => setEditingParty({ ...editingParty, fileCode: e.target.value, fileNumber: e.target.value })}
+                    placeholder="F-101 (رقم الملف بالأرشيف)..."
+                    className="w-full rounded-xl border border-slate-200 bg-white dark:bg-slate-800 p-2 font-mono outline-none dark:border-slate-700 dark:text-white"
+                  />
+                  <span className="text-[10px] text-slate-400 mt-0.5 block">
+                    {t('يدخل يدوياً عند تكويد العميل', 'Manually entered code')}
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
                     {t('الموبايل / الهاتف *', 'Phone *')}
@@ -1445,17 +1639,6 @@ export const PartiesView: React.FC = () => {
                     required
                     value={editingParty.phone}
                     onChange={(e) => setEditingParty({ ...editingParty, phone: e.target.value })}
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2 font-mono outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-                  />
-                </div>
-                <div>
-                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    {t('الكود الورقي', 'Paper File #')}
-                  </label>
-                  <input
-                    type="text"
-                    value={editingParty.paperCode || ''}
-                    onChange={(e) => setEditingParty({ ...editingParty, paperCode: e.target.value })}
                     className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2 font-mono outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                   />
                 </div>

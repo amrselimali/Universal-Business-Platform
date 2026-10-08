@@ -319,8 +319,11 @@ export interface Party {
   tenantId: string;
   branchId?: string; // التابع له
   branchIds?: string[]; // الفروع المصرح بها
-  paperCode?: string; // كود ورقي
-  systemCode?: string; // كود السيستم
+  customerCode?: string; // كود العميل (كود التطبيق المسريل آلياً)
+  code?: string; // كود العميل
+  systemCode?: string; // كود السيستم (الكود الورقي سابقاً ومحتفظ بالبيانات الحالية)
+  paperCode?: string; // الكود الورقي سابقاً للتوافق
+  fileCode?: string; // كود الملف (يدخل يدوياً عند تكويد العميل)
   fileNumber?: string; // رقم الملف
   fullName?: string;
   name: string; // الاسم بالعربي
@@ -530,7 +533,8 @@ export interface Appointment {
   startTime?: string; // وقت بداية الجلسة (من)
   endTime?: string; // وقت نهاية الجلسة (إلى)
   customerCode?: string; // كود العميل للربط مع كشف الحساب والتقارير
-  paperCode?: string; // كود الملف الورقي للعميل
+  paperCode?: string; // كود الملف الورقي للعميل سابقاً
+  fileCode?: string; // كود الملف للعميل
   status: 'Scheduled' | 'Confirmed' | 'Completed' | 'Cancelled' | 'Attended' | 'NotAttended';
   notAttendedReason?: string; // سبب عدم الحضور
   cancellationReason?: string;
@@ -550,7 +554,8 @@ export interface PatientFollowUp {
   patientPhone: string;
   systemCode?: string;
   customerCode?: string; // كود العميل للربط بالسجل والتقارير
-  paperCode?: string; // كود الملف الورقي للعميل
+  paperCode?: string; // كود الملف الورقي للعميل سابقاً
+  fileCode?: string; // كود الملف للعميل
   followUpDate: string; // تاريخ المتابعة
   followUpTime?: string; // وقت المتابعة والتذكير
   notes?: string; // الملاحظة المسجلة وقت المتابعة

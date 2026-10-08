@@ -270,8 +270,10 @@ interface PlatformContextType {
   deleteParty: (id: string) => void;
   importPartiesBulk: (partiesList: Omit<Party, 'id' | 'tenantId'>[]) => Promise<{ count: number; success: boolean }>;
   importPartiesFromExcel: (rows: Array<{
+    customerCode?: string;
     paperCode?: string;
     systemCode?: string;
+    fileCode?: string;
     name: string;
     nameEn?: string;
     phone: string;
@@ -281,6 +283,7 @@ interface PlatformContextType {
   }>) => { imported: number; updated: number; errors: string[] };
   importCustomersFromExcel: (rows: any[]) => void;
   getNextCustomerSystemCode: (branchId?: string) => string;
+  getNextCustomerAppCode: () => string;
   addClientOffer: (partyId: string, offer: Omit<ClientOffer, 'id' | 'purchaseDate' | 'status'>) => ClientOffer;
   consumeClientOfferSession: (partyId: string, offerId: string, count?: number) => { success: boolean; remaining: number; message?: string };
 
@@ -1358,6 +1361,24 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const parties = allParties.filter((p) => p.tenantId === tenant?.id);
 
+  // Serialized Customer App Code Generator (يحسب آلياً مسريل ولا يمكن للمستخدم التحكم فيه)
+  const getNextCustomerAppCode = (): string => {
+    let maxSerial = 0;
+    const custParties = allParties.filter((p) => p.type === 'Customer' || p.type === 'Both');
+    for (const p of custParties) {
+      const codeToCheck = p.customerCode || p.code || '';
+      const match = codeToCheck.match(/(\d+)/);
+      if (match) {
+        const val = parseInt(match[1], 10);
+        if (!isNaN(val) && val > maxSerial) {
+          maxSerial = val;
+        }
+      }
+    }
+    const nextNum = Math.max(custParties.length + 1, maxSerial + 1);
+    return `C-${String(nextNum).padStart(5, '0')}`;
+  };
+
   // System Code Generator based on Company preferences
   const getNextCustomerSystemCode = (branchId?: string): string => {
     const currentTenant = tenant || INITIAL_TENANT;
@@ -1392,14 +1413,21 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const newParties: Party[] = partiesList.map((p, idx) => {
       const branchId = p.branchId || defaultBranchId;
       const nameEn = p.nameEn || autoTranslateArabic(p.name);
-      const systemCode = p.systemCode || `CUST-${startNum + existingCount + idx + 1}`;
+      const customerCode = p.customerCode || `C-${String(existingCount + idx + 1).padStart(5, '0')}`;
+      const systemCode = p.systemCode || p.paperCode || `CUST-${startNum + existingCount + idx + 1}`;
+      const paperCode = p.paperCode || p.systemCode || '';
+      const fileCode = p.fileCode || p.fileNumber || '';
       const uniqueId = `party-${batchId}-${idx}-${Math.random().toString(36).substring(2, 7)}`;
 
       return {
         ...p,
         branchId,
         nameEn,
+        customerCode,
+        code: customerCode,
         systemCode,
+        paperCode,
+        fileCode,
         id: uniqueId,
         tenantId: currentTenant.id,
         createdAt: nowIso,
@@ -1459,13 +1487,21 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const addParty = (partyData: Omit<Party, 'id' | 'tenantId'>): Party => {
     const nameEn = partyData.nameEn || autoTranslateArabic(partyData.name);
     const branchId = partyData.branchId || activeBranch?.id || branches[0]?.id || 'branch-cairo';
-    const systemCode = partyData.systemCode || getNextCustomerSystemCode(branchId);
+    const customerCode = partyData.customerCode || getNextCustomerAppCode();
+    // System Code: contains currently entered data (formerly paperCode)
+    const systemCode = partyData.systemCode || partyData.paperCode || getNextCustomerSystemCode(branchId);
+    const paperCode = partyData.paperCode || partyData.systemCode || '';
+    const fileCode = partyData.fileCode || partyData.fileNumber || '';
 
     const newParty: Party = {
       ...partyData,
       branchId,
       nameEn,
+      customerCode,
+      code: customerCode,
       systemCode,
+      paperCode,
+      fileCode,
       id: `party-${Date.now()}`,
       tenantId: tenant?.id || INITIAL_TENANT.id,
       createdAt: new Date().toISOString(),
@@ -1709,8 +1745,10 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const importPartiesFromExcel = (
     rows: Array<{
+      customerCode?: string;
       paperCode?: string;
       systemCode?: string;
+      fileCode?: string;
       name: string;
       nameEn?: string;
       phone: string;
@@ -1737,6 +1775,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (existing) {
         updateParty(existing.id, {
           paperCode: row.paperCode || existing.paperCode,
+          systemCode: row.systemCode || existing.systemCode || row.paperCode,
+          fileCode: row.fileCode || existing.fileCode,
           leadSource: row.leadSource || existing.leadSource,
         });
         updated++;
@@ -1745,14 +1785,20 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           (b) => b.name.includes(row.branchName || '') || b.nameEn.toLowerCase().includes((row.branchName || '').toLowerCase())
         );
         const nameEn = row.nameEn || autoTranslateArabic(row.name);
-        const sysCode = row.systemCode || getNextCustomerSystemCode(branchMatch?.id);
+        const custCode = row.customerCode || `C-${String(parties.length + newPartiesToAdd.length + 1).padStart(5, '0')}`;
+        const sysCode = row.systemCode || row.paperCode || getNextCustomerSystemCode(branchMatch?.id);
+        const paperCode = row.paperCode || row.systemCode || '';
+        const fileCode = row.fileCode || '';
 
         const newParty: Party = {
           id: `party-imp-${Date.now()}-${idx}`,
           tenantId: activeTenantId,
           branchId: branchMatch?.id || activeBranch?.id,
-          paperCode: row.paperCode || '',
+          customerCode: custCode,
+          code: custCode,
+          paperCode,
           systemCode: sysCode,
+          fileCode,
           name: row.name.trim(),
           nameEn: nameEn.trim(),
           phone: cleanPhone || '0000000000',
@@ -1923,11 +1969,22 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, [allPatientFollowUps, tenant?.id]);
 
   const addPatientFollowUp = (data: Omit<PatientFollowUp, 'id' | 'tenantId' | 'createdAt'>): PatientFollowUp => {
+    const party = data.patientId ? allParties.find((p) => p.id === data.patientId) : undefined;
+    const branchId = data.branchId || party?.branchId || activeBranch?.id || 'branch-cairo';
+    const customerCode = data.customerCode || party?.customerCode || party?.code || '';
+    const systemCode = data.systemCode || party?.systemCode || party?.paperCode || '';
+    const paperCode = data.paperCode || party?.paperCode || party?.systemCode || '';
+    const fileCode = data.fileCode || party?.fileCode || party?.fileNumber || '';
+
     const newFollowUp: PatientFollowUp = {
       ...data,
+      branchId,
+      customerCode,
+      systemCode,
+      paperCode,
+      fileCode,
       id: `fup-${Date.now()}`,
       tenantId: tenant?.id || INITIAL_TENANT.id,
-      branchId: data.branchId || activeBranch?.id || 'branch-cairo',
       createdAt: new Date().toISOString(),
       createdBy: data.createdBy || currentUser?.name || 'فريق المتابعة',
     };
@@ -2015,8 +2072,20 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const addAppointment = (aptData: Omit<Appointment, 'id' | 'tenantId'>): Appointment => {
     const serviceNameEn = aptData.serviceNameEn || autoTranslateArabic(aptData.serviceNameAr);
+    const party = aptData.patientId ? allParties.find((p) => p.id === aptData.patientId) : undefined;
+    const branchId = aptData.branchId || party?.branchId || activeBranch?.id || 'branch-cairo';
+    const customerCode = aptData.customerCode || party?.customerCode || party?.code || '';
+    const systemCode = aptData.systemCode || party?.systemCode || party?.paperCode || '';
+    const paperCode = aptData.paperCode || party?.paperCode || party?.systemCode || '';
+    const fileCode = aptData.fileCode || party?.fileCode || party?.fileNumber || '';
+
     const newApt: Appointment = {
       ...aptData,
+      branchId,
+      customerCode,
+      systemCode,
+      paperCode,
+      fileCode,
       serviceNameEn,
       id: `apt-${Date.now()}`,
       tenantId: tenant?.id || INITIAL_TENANT.id,
@@ -8346,6 +8415,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         importPartiesFromExcel,
         importCustomersFromExcel,
         getNextCustomerSystemCode,
+        getNextCustomerAppCode,
         addClientOffer,
         consumeClientOfferSession,
         appointments,

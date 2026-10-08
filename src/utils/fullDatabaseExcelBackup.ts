@@ -97,15 +97,16 @@ export function exportDatabaseToMultiSheetExcel(payload: DatabaseBackupPayload):
     // 4. العملاء والمرضى (Customers - Separate)
     const customers = payload.parties.filter((p) => p.type === 'Customer' || p.type === 'Both');
     addSheet('العملاء والمرضى - Customers', customers.map((c) => ({
-      'كود السيستم': c.systemCode || c.id,
-      'الكود الورقي': c.paperCode || '',
+      'اسم الفرع': payload.branches.find((b) => b.id === c.branchId)?.name || 'الفرع الرئيسي',
+      'كود العميل (التطبيق)': c.customerCode || c.code || '',
+      'كود السيستم': c.systemCode || c.paperCode || '',
+      'كود الملف': c.fileCode || c.fileNumber || '',
       'الاسم بالعربي': c.name,
       'الاسم بالإنجليزي': c.nameEn || '',
       'رقم الهاتف': c.phone,
       'الهاتف البديل': c.altPhone || '',
       'الرقم القومي': c.nationalId || '',
       'الرصيد المالي': c.balance,
-      'الفرع التابع': payload.branches.find((b) => b.id === c.branchId)?.name || 'الكل',
       'مصدر المعرفة': c.leadSource || '',
       'ملاحظات': c.medicalNotes || '',
     })));
@@ -389,43 +390,51 @@ export function exportDatabaseToMultiSheetExcel(payload: DatabaseBackupPayload):
     })));
 
     // 21. الحجوزات والمواعيد (Appointments)
-    addSheet('الحجوزات والمواعيد', payload.appointments.map((ap) => ({
-      'كود الحجز': ap.id,
-      'الفرع': payload.branches.find((b) => b.id === ap.branchId)?.name || ap.branchId || '',
-      'التاريخ': ap.date,
-      'الوقت': ap.time,
-      'اسم المريض / العميل': ap.patientName,
-      'الهاتف': ap.patientPhone || '',
-      'كود السيستم': ap.systemCode || ap.customerCode || '',
-      'الكود الورقي': ap.paperCode || '',
-      'الطبيب المعالج': ap.doctorName,
-      'الخدمة المطلوبة': ap.serviceNameAr,
-      'السعر': ap.price,
-      'العربون/المقدم': ap.deposit || 0,
-      'المتبقي': ap.remainingBalance || 0,
-      'حالة الموعد': ap.status,
-      'مصدر الحجز': ap.leadSource || '',
-      'ملاحظات': ap.notes || '',
-    })));
+    addSheet('الحجوزات والمواعيد', payload.appointments.map((ap) => {
+      const p = payload.parties.find((pt) => pt.id === ap.patientId || (ap.patientPhone && pt.phone === ap.patientPhone));
+      return {
+        'كود الحجز': ap.id,
+        'اسم الفرع': payload.branches.find((b) => b.id === ap.branchId)?.name || ap.branchId || 'الفرع الرئيسي',
+        'كود العميل': ap.customerCode || p?.customerCode || p?.code || '',
+        'كود السيستم': ap.systemCode || p?.systemCode || ap.paperCode || p?.paperCode || '',
+        'كود الملف': ap.fileCode || p?.fileCode || p?.fileNumber || '',
+        'التاريخ': ap.date,
+        'الوقت': ap.time,
+        'اسم المريض / العميل': ap.patientName,
+        'الهاتف': ap.patientPhone || '',
+        'الطبيب المعالج': ap.doctorName,
+        'الخدمة المطلوبة': ap.serviceNameAr,
+        'السعر': ap.price,
+        'العربون/المقدم': ap.deposit || 0,
+        'المتبقي': ap.remainingBalance || 0,
+        'حالة الموعد': ap.status,
+        'مصدر الحجز': ap.leadSource || '',
+        'ملاحظات': ap.notes || '',
+      };
+    }));
 
     // 22. المتابعات والتذكير (Follow-ups & Reminders)
     const followUpsList = payload.patientFollowUps || [];
-    addSheet('المتابعات والتذكير - FollowUps', followUpsList.map((fup) => ({
-      'كود المتابعة': fup.id,
-      'الفرع': payload.branches.find((b) => b.id === fup.branchId)?.name || fup.branchId || '',
-      'اسم المريض / العميل': fup.patientName,
-      'الهاتف': fup.patientPhone || '',
-      'كود السيستم': fup.systemCode || fup.customerCode || '',
-      'الكود الورقي': fup.paperCode || '',
-      'تاريخ المتابعة': fup.followUpDate,
-      'وقت المتابعة': fup.followUpTime || '',
-      'سبب المتابعة': fup.reason,
-      'النوع': fup.type,
-      'الحالة': fup.status,
-      'المسؤول / المسجل': fup.createdBy || '',
-      'ملاحظات': fup.notes || '',
-      'تاريخ التسجيل': fup.createdAt || '',
-    })));
+    addSheet('المتابعات والتذكير - FollowUps', followUpsList.map((fup) => {
+      const p = payload.parties.find((pt) => pt.id === fup.patientId || (fup.patientPhone && pt.phone === fup.patientPhone));
+      return {
+        'كود المتابعة': fup.id,
+        'اسم الفرع': payload.branches.find((b) => b.id === fup.branchId)?.name || fup.branchId || 'الفرع الرئيسي',
+        'كود العميل': fup.customerCode || p?.customerCode || p?.code || '',
+        'كود السيستم': fup.systemCode || p?.systemCode || fup.paperCode || p?.paperCode || '',
+        'كود الملف': fup.fileCode || p?.fileCode || p?.fileNumber || '',
+        'اسم المريض / العميل': fup.patientName,
+        'الهاتف': fup.patientPhone || '',
+        'تاريخ المتابعة': fup.followUpDate,
+        'وقت المتابعة': fup.followUpTime || '',
+        'سبب المتابعة': fup.reason,
+        'النوع': fup.type,
+        'الحالة': fup.status,
+        'المسؤول / المسجل': fup.createdBy || '',
+        'ملاحظات': fup.notes || '',
+        'تاريخ التسجيل': fup.createdAt || '',
+      };
+    }));
 
     // 23. طرق السداد (Payment Methods)
     addSheet('طرق السداد المعتمدة', payload.paymentMethods.map((pm) => ({

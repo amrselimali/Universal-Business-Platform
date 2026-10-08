@@ -54,6 +54,7 @@ import {
   CellValidationError,
   ExcelValidationResult,
 } from '../components/ExcelDataTransferModal';
+import { PatientDetailedHistoryModal } from '../components/PatientDetailedHistoryModal';
 import {
   parseExcelDate,
   parseTimeToMinutes,
@@ -66,22 +67,40 @@ import {
 
 const bookingsExcelColumns: ExcelColumnConfig[] = [
   {
-    key: 'paperCode',
-    labelAr: 'الكود الورقي',
-    labelEn: 'Paper File Code',
+    key: 'branchName',
+    labelAr: 'اسم الفرع',
+    labelEn: 'Branch Name',
     required: false,
     type: 'text',
-    sampleValue: 'MED-1042',
-    instructions: 'كود الملف الورقي للعميل. من خلاله يتم البحث آلياً في قاعدة بيانات العملاء وربط كود العميل على السيستم تلقائياً، وسيتم إصدار خطأ فوري إذا كان الكود الورقي غير مسجل بداتا العملاء.',
+    sampleValue: 'فرع المعادي',
+    instructions: 'اسم الفرع التابع له الحجز (اختياري - يحدد الفرع المفعل افتراضياً)',
   },
   {
     key: 'customerCode',
-    labelAr: 'كود العميل (السيستم)',
-    labelEn: 'System Customer Code',
+    labelAr: 'كود العميل (التطبيق)',
+    labelEn: 'Customer App Code',
+    required: false,
+    type: 'text',
+    sampleValue: 'C-00001',
+    instructions: 'كود العميل الرقمي المسريل بالتطبيق للربط المباشر مع ملف المريض والتقارير وسجل الحسابات',
+  },
+  {
+    key: 'systemCode',
+    labelAr: 'كود السيستم (الورقي سابقاً)',
+    labelEn: 'System / Paper Code',
     required: false,
     type: 'text',
     sampleValue: 'CUST-1001',
-    instructions: 'كود العميل الرقمي المسجل في النظام للربط المباشر مع ملف المريض والتقارير وسجل الحسابات (اختياري في حال استخدام الكود الورقي)',
+    instructions: 'كود السيستم (الكود الورقي سابقاً المحتفظ بالبيانات الحالية للعميل)',
+  },
+  {
+    key: 'fileCode',
+    labelAr: 'كود الملف',
+    labelEn: 'File Code',
+    required: false,
+    type: 'text',
+    sampleValue: 'F-1042',
+    instructions: 'كود أو رقم الملف اليدوي للعميل بالأرشيف',
   },
   {
     key: 'patientName',
@@ -186,22 +205,40 @@ const bookingsExcelColumns: ExcelColumnConfig[] = [
 
 const followUpsExcelColumns: ExcelColumnConfig[] = [
   {
-    key: 'paperCode',
-    labelAr: 'الكود الورقي',
-    labelEn: 'Paper File Code',
+    key: 'branchName',
+    labelAr: 'اسم الفرع',
+    labelEn: 'Branch Name',
     required: false,
     type: 'text',
-    sampleValue: 'MED-1042',
-    instructions: 'كود الملف الورقي للعميل. من خلاله يتم البحث آلياً في قاعدة بيانات العملاء وربط كود العميل على السيستم تلقائياً، وسيتم إصدار خطأ فوري إذا كان الكود الورقي غير مسجل بداتا العملاء.',
+    sampleValue: 'فرع المعادي',
+    instructions: 'اسم الفرع التابع له المتابعة (اختياري - يحدد الفرع المفعل افتراضياً)',
   },
   {
     key: 'customerCode',
-    labelAr: 'كود العميل (السيستم)',
-    labelEn: 'System Customer Code',
+    labelAr: 'كود العميل (التطبيق)',
+    labelEn: 'Customer App Code',
+    required: false,
+    type: 'text',
+    sampleValue: 'C-00001',
+    instructions: 'كود العميل الرقمي المسريل بالنظام للربط المباشر مع ملف وسجل المريض',
+  },
+  {
+    key: 'systemCode',
+    labelAr: 'كود السيستم (الورقي سابقاً)',
+    labelEn: 'System / Paper Code',
     required: false,
     type: 'text',
     sampleValue: 'CUST-1001',
-    instructions: 'كود العميل الرقمي المسجل في النظام للربط المباشر مع ملف وسجل المريض (اختياري في حال استخدام الكود الورقي)',
+    instructions: 'كود السيستم (الكود الورقي سابقاً المحتفظ بالبيانات الحالية للعميل)',
+  },
+  {
+    key: 'fileCode',
+    labelAr: 'كود الملف',
+    labelEn: 'File Code',
+    required: false,
+    type: 'text',
+    sampleValue: 'F-1042',
+    instructions: 'كود ورقم الملف اليدوي للعميل بالأرشيف',
   },
   {
     key: 'patientName',
@@ -531,6 +568,8 @@ export const BookingsFollowUpView: React.FC = () => {
   const [patientPhone, setPatientPhone] = useState('');
   const [systemCode, setSystemCode] = useState('');
   const [customerCode, setCustomerCode] = useState('');
+  const [fileCode, setFileCode] = useState('');
+  const [bookingBranchId, setBookingBranchId] = useState('');
   const [doctorId, setDoctorId] = useState('');
   const [doctorName, setDoctorName] = useState('');
   const [technicianId, setTechnicianId] = useState('');
@@ -552,6 +591,8 @@ export const BookingsFollowUpView: React.FC = () => {
   const [fupPatientPhone, setFupPatientPhone] = useState('');
   const [fupSystemCode, setFupSystemCode] = useState('');
   const [fupCustomerCode, setFupCustomerCode] = useState('');
+  const [fupFileCode, setFupFileCode] = useState('');
+  const [fupBranchId, setFupBranchId] = useState('');
   const [fupDate, setFupDate] = useState(tomorrowIso);
   const [fupTime, setFupTime] = useState('11:00 AM');
   const [fupReason, setFupReason] = useState('استفسار عن عروض الليزر');
