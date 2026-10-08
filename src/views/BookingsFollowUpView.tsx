@@ -77,12 +77,12 @@ const bookingsExcelColumns: ExcelColumnConfig[] = [
   },
   {
     key: 'customerCode',
-    labelAr: 'كود العميل (التطبيق)',
-    labelEn: 'Customer App Code',
+    labelAr: 'كود العميل',
+    labelEn: 'Customer Code',
     required: false,
     type: 'text',
-    sampleValue: 'C-00001',
-    instructions: 'كود العميل الرقمي المسريل بالتطبيق للربط المباشر مع ملف المريض والتقارير وسجل الحسابات',
+    sampleValue: '1',
+    instructions: 'كود العميل الرقمي المسريل للربط المباشر مع ملف المريض والتقارير وسجل الحسابات',
   },
   {
     key: 'systemCode',
@@ -215,12 +215,12 @@ const followUpsExcelColumns: ExcelColumnConfig[] = [
   },
   {
     key: 'customerCode',
-    labelAr: 'كود العميل (التطبيق)',
-    labelEn: 'Customer App Code',
+    labelAr: 'كود العميل',
+    labelEn: 'Customer Code',
     required: false,
     type: 'text',
-    sampleValue: 'C-00001',
-    instructions: 'كود العميل الرقمي المسريل بالنظام للربط المباشر مع ملف وسجل المريض',
+    sampleValue: '1',
+    instructions: 'كود العميل الرقمي المسريل للربط المباشر مع ملف وسجل المريض',
   },
   {
     key: 'systemCode',
@@ -2369,18 +2369,33 @@ export const BookingsFollowUpView: React.FC = () => {
               <Calendar className="h-6 w-6" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-lg md:text-xl font-black text-slate-900 dark:text-white">
+              <div
+                className="flex items-center gap-2 cursor-pointer select-none"
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  window.open('?view=bookings', '_blank');
+                }}
+                title={t('كليك يمين لفتح شاشة إدارة الحجوزات في تبويب جديد', 'Right click to open bookings management in a new tab')}
+              >
+                <a
+                  href="?view=bookings"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-lg md:text-xl font-black text-slate-900 dark:text-white hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+                  onClick={(e) => {
+                    e.preventDefault();
+                  }}
+                >
                   {t('إدارة الحجوزات', 'Bookings Management')}
-                </h1>
+                </a>
                 <span className="px-2.5 py-0.5 text-xs font-bold bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 rounded-full">
                   {appointments.length} {t('حجز مسجل', 'Bookings')}
                 </span>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                 {t(
-                  'جدولة وتأكيد حجوزات المرضى، واستعراض سجل الحجوزات والمتابعات التفصيلي',
-                  'Schedule and confirm patient bookings, and explore detailed timeline history'
+                  'جدولة وتأكيد حجوزات المرضى، واستعراض سجل الحجوزات والمتابعات التفصيلي (كليك يمين على العنوان للفتح في تبويب جديد)',
+                  'Schedule and confirm patient bookings, and explore detailed timeline history (Right click title to open in new tab)'
                 )}
               </p>
             </div>
@@ -2438,18 +2453,6 @@ export const BookingsFollowUpView: React.FC = () => {
               <span>{t('إكسيل الحجوزات (استيراد/تصدير)', 'Bookings Excel')}</span>
             </button>
           )}
-
-          {/* Open in New Tab Button (فتح شاشة الحجوزات في تبويب جديد) */}
-          <a
-            href="?view=bookings"
-            target="_blank"
-            rel="noopener noreferrer"
-            title={t('فتح هذه الشاشة في تبويب جديد (Open in New Tab)', 'Open bookings in new tab')}
-            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50/70 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 border border-indigo-200 dark:border-indigo-800 rounded-xl transition-all cursor-pointer shadow-xs"
-          >
-            <ExternalLink className="h-3.5 w-3.5 text-indigo-600" />
-            <span>{t('فتح في تبويب جديد', 'New Tab')}</span>
-          </a>
 
           {/* Tabs Pill */}
           <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">

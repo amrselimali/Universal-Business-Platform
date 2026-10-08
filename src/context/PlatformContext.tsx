@@ -1323,27 +1323,26 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
           const hasCashSupplier = parsed.some((p: Party) => p.name.includes('مورد كاش') || p.name.includes('مورد نقدي'));
-          if (!hasCashSupplier) {
-            const cashSupplier: Party = {
-              id: 'party-s-cash',
-              tenantId: parsed[0]?.tenantId || 'tenant-eg-001',
-              name: 'مورد كاش (نقدي)',
-              nameEn: 'Cash Supplier (General)',
-              type: 'Supplier',
-              phone: '01000000000',
-              taxNumber: '000-000-000',
-              balance: 0,
-              createdAt: '2026-01-01T08:00:00Z',
-            };
-            return [cashSupplier, ...parsed].map((p: Party) => ({
+          let custSeq = 1;
+          const rawList = hasCashSupplier ? parsed : [cashSupplier, ...parsed];
+          return rawList.map((p: Party) => {
+            let normalizedCustCode = p.customerCode;
+            if (p.type === 'Customer' || p.type === 'Both') {
+              if (!normalizedCustCode || normalizedCustCode.startsWith('CUST-') || (p.systemCode && normalizedCustCode === p.systemCode)) {
+                normalizedCustCode = String(custSeq++);
+              } else if (normalizedCustCode.startsWith('C-')) {
+                const digits = normalizedCustCode.replace(/\D/g, '');
+                const num = parseInt(digits, 10);
+                normalizedCustCode = isNaN(num) || num >= 1000 ? String(custSeq++) : String(num);
+              }
+            }
+            return {
               ...p,
               branchId: p.branchId || 'branch-cairo',
-            }));
-          }
-          return parsed.map((p: Party) => ({
-            ...p,
-            branchId: p.branchId || 'branch-cairo',
-          }));
+              customerCode: normalizedCustCode || p.customerCode,
+              code: normalizedCustCode || p.code || p.customerCode,
+            };
+          });
         }
       }
     } catch (e) {
@@ -1361,22 +1360,25 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const parties = allParties.filter((p) => p.tenantId === tenant?.id);
 
-  // Serialized Customer App Code Generator (يحسب آلياً مسريل ولا يمكن للمستخدم التحكم فيه)
+  // Serialized Customer Code Generator (مسريل من 1 وملوش علاقة بكود السيستم)
   const getNextCustomerAppCode = (): string => {
     let maxSerial = 0;
     const custParties = allParties.filter((p) => p.type === 'Customer' || p.type === 'Both');
     for (const p of custParties) {
-      const codeToCheck = p.customerCode || p.code || '';
-      const match = codeToCheck.match(/(\d+)/);
-      if (match) {
-        const val = parseInt(match[1], 10);
-        if (!isNaN(val) && val > maxSerial) {
+      if (!p.customerCode) continue;
+      // Completely independent of systemCode: ignore systemCode values or CUST- prefix
+      if (p.systemCode && p.customerCode === p.systemCode) continue;
+      if (p.customerCode.startsWith('CUST-') || p.customerCode.startsWith('BR-')) continue;
+      const digitsOnly = p.customerCode.replace(/\D/g, '');
+      if (digitsOnly) {
+        const val = parseInt(digitsOnly, 10);
+        if (!isNaN(val) && val < 1000 && val > maxSerial) {
           maxSerial = val;
         }
       }
     }
-    const nextNum = Math.max(custParties.length + 1, maxSerial + 1);
-    return `C-${String(nextNum).padStart(5, '0')}`;
+    const nextNum = Math.max(1, maxSerial + 1);
+    return String(nextNum);
   };
 
   // System Code Generator based on Company preferences
@@ -1413,7 +1415,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const newParties: Party[] = partiesList.map((p, idx) => {
       const branchId = p.branchId || defaultBranchId;
       const nameEn = p.nameEn || autoTranslateArabic(p.name);
-      const customerCode = p.customerCode || `C-${String(existingCount + idx + 1).padStart(5, '0')}`;
+      const customerCode = p.customerCode || String(existingCount + idx + 1);
       const systemCode = p.systemCode || p.paperCode || `CUST-${startNum + existingCount + idx + 1}`;
       const paperCode = p.paperCode || p.systemCode || systemCode;
       const fileCode = p.fileCode || p.fileNumber || customerCode;
@@ -1785,7 +1787,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           (b) => b.name.includes(row.branchName || '') || b.nameEn.toLowerCase().includes((row.branchName || '').toLowerCase())
         );
         const nameEn = row.nameEn || autoTranslateArabic(row.name);
-        const custCode = row.customerCode || `C-${String(parties.length + newPartiesToAdd.length + 1).padStart(5, '0')}`;
+        const custCode = row.customerCode || String(parties.length + newPartiesToAdd.length + 1);
         const sysCode = row.systemCode || row.paperCode || getNextCustomerSystemCode(branchMatch?.id);
         const paperCode = row.paperCode || row.systemCode || sysCode;
         const fileCode = row.fileCode || custCode;

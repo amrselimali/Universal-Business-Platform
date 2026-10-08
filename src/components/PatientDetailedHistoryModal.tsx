@@ -257,7 +257,7 @@ export const PatientDetailedHistoryModal: React.FC<PatientDetailedHistoryModalPr
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder={t(
-                'ابحث عن العميل بكود العميل (التطبيق)، كود السيستم، كود الملف، رقم الهاتف، أو الاسم...',
+                'ابحث عن العميل بكود العميل، كود السيستم، كود الملف، رقم الهاتف، أو الاسم...',
                 'Search patient by customer code, system code, file code, phone, or name...'
               )}
               className="flex-1 bg-transparent text-xs font-bold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none"

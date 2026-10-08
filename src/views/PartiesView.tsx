@@ -745,7 +745,7 @@ export const PartiesView: React.FC = () => {
                         ) : null;
                       })()}
                       {(party.customerCode || party.code) && (
-                        <span className="rounded-md px-1.5 py-0.5 text-[10px] font-mono font-bold bg-indigo-50 text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800" title={t('كود العميل (التطبيق)', 'Customer Code')}>
+                        <span className="rounded-md px-1.5 py-0.5 text-[10px] font-mono font-bold bg-indigo-50 text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800" title={t('كود العميل', 'Customer Code')}>
                           كود العميل: {party.customerCode || party.code}
                         </span>
                       )}
@@ -861,7 +861,7 @@ export const PartiesView: React.FC = () => {
               <tr>
                 <th className="p-3">#</th>
                 <th className="p-3">{t('اسم الفرع', 'Branch')}</th>
-                <th className="p-3">{t('كود العميل (التطبيق)', 'Client Code')}</th>
+                <th className="p-3">{t('كود العميل', 'Client Code')}</th>
                 <th className="p-3">{t('كود السيستم', 'System Code')}</th>
                 <th className="p-3">{t('كود الملف', 'File Code')}</th>
                 <th className="p-3">{t('اسم العميل / المريض', 'Name')}</th>
@@ -1103,7 +1103,7 @@ export const PartiesView: React.FC = () => {
                   <div className="flex items-center justify-between mb-1">
                     <label className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
                       <Lock className="h-3.5 w-3.5 text-slate-400" />
-                      <span>{t('كود العميل (كود التطبيق)', 'Customer Code')}</span>
+                      <span>{t('كود العميل', 'Customer Code')}</span>
                     </label>
                     <span className="rounded-md bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 px-1.5 py-0.2 text-[9px] font-bold">
                       {t('مسريل آلياً بالتطبيق', 'Auto-Serialized')}
@@ -1603,7 +1603,7 @@ export const PartiesView: React.FC = () => {
                   <div className="flex items-center justify-between mb-1">
                     <label className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
                       <Lock className="h-3.5 w-3.5 text-slate-400" />
-                      <span>{t('كود العميل (كود التطبيق)', 'Customer Code')}</span>
+                      <span>{t('كود العميل', 'Customer Code')}</span>
                     </label>
                     <span className="rounded-md bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 px-1.5 py-0.2 text-[9px] font-bold">
                       {t('مسريل آلياً بالتطبيق', 'Auto-Serialized')}

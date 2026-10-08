@@ -319,7 +319,7 @@ export interface Party {
   tenantId: string;
   branchId?: string; // التابع له
   branchIds?: string[]; // الفروع المصرح بها
-  customerCode?: string; // كود العميل (كود التطبيق المسريل آلياً)
+  customerCode?: string; // كود العميل (مسريل آلياً من 1)
   code?: string; // كود العميل
   systemCode?: string; // كود السيستم (الكود الورقي سابقاً ومحتفظ بالبيانات الحالية)
   paperCode?: string; // الكود الورقي سابقاً للتوافق

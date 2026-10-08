@@ -98,7 +98,7 @@ export function exportDatabaseToMultiSheetExcel(payload: DatabaseBackupPayload):
     const customers = payload.parties.filter((p) => p.type === 'Customer' || p.type === 'Both');
     addSheet('العملاء والمرضى - Customers', customers.map((c) => ({
       'اسم الفرع': payload.branches.find((b) => b.id === c.branchId)?.name || 'الفرع الرئيسي',
-      'كود العميل (التطبيق)': c.customerCode || c.code || '',
+      'كود العميل': c.customerCode || c.code || '',
       'كود السيستم': c.systemCode || c.paperCode || '',
       'كود الملف': c.fileCode || c.fileNumber || '',
       'الاسم بالعربي': c.name,
