@@ -72,6 +72,7 @@ import {
   resolveCustomerAggregationAccount,
   resolveCustomerPartyAccount,
   resolveCustomerControlAccount,
+  findCustomerReceiptJournalIndex,
   resolveAccount,
   createJournalLine,
 } from '../services/accountingEngine';
@@ -8128,16 +8129,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         return receipt;
       }
 
-      const matchesReceiptLine = (line: JournalLine) => {
-        const marker = `سند ${receipt.voucherNumber}`;
-        const markerIndex = line.memo?.indexOf(marker) ?? -1;
-        const nextCharacter = line.memo?.[markerIndex + marker.length];
-        return markerIndex >= 0 && (!nextCharacter || !/\d/.test(nextCharacter));
-      };
-      const journalIndex = updatedJournals.findIndex((journal) =>
-        (journal.id === receipt.journalEntryId || journal.lines.some(matchesReceiptLine)) &&
-        journal.lines.some((line) => matchesReceiptLine(line) && Number(line.credit) > 0)
-      );
+      const journalIndex = findCustomerReceiptJournalIndex(receipt, updatedJournals);
       const nextReceipt = { ...receipt };
       if (!receipt.customerBalanceApplied) {
         const currentParty = updatedParties.get(receiptParty.id) || receiptParty;
@@ -8152,7 +8144,12 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (journalIndex >= 0) {
         const journal = updatedJournals[journalIndex];
         const lineIndex = journal.lines.findIndex(
-          (line) => matchesReceiptLine(line) && Number(line.credit) > 0
+          (line) => {
+            const marker = `سند ${receipt.voucherNumber}`;
+            const markerIndex = line.memo?.indexOf(marker) ?? -1;
+            const nextCharacter = line.memo?.[markerIndex + marker.length];
+            return markerIndex >= 0 && (!nextCharacter || !/\d/.test(nextCharacter)) && Number(line.credit) > 0;
+          }
         );
         if (lineIndex >= 0) {
           const oldLine = journal.lines[lineIndex];

@@ -6,6 +6,7 @@ import {
   Party,
   PaymentMethod,
   AccountingPeriodLock,
+  CashReceiptVoucher,
 } from '../types';
 
 /**
@@ -125,6 +126,70 @@ export function resolveCustomerPartyAccount(
 export function resolveCustomerAggregationAccount(accounts: Account[], tenantId: string): Account | undefined {
   const customerControl = resolveCustomerControlAccount(accounts, tenantId);
   return customerControl.account;
+}
+
+export function resolveJournalLineAccount(
+  line: Pick<JournalLine, 'accountId' | 'accountCode'>,
+  accounts: Account[],
+  tenantId: string,
+  branchId?: string
+): Account | undefined {
+  const accountCode = line.accountCode.trim();
+  if (/^1120(?:-|$)/.test(accountCode)) {
+    const customerControl = resolveCustomerControlAccount(accounts, tenantId);
+    if (customerControl.account) return customerControl.account;
+  }
+
+  const accountById = accounts.find((account) =>
+    account.id === line.accountId && account.tenantId === tenantId
+  );
+  if (accountById) return accountById;
+
+  const matchingByCode = accounts.filter((account) =>
+    account.tenantId === tenantId && account.code.trim() === accountCode
+  );
+  if (branchId) {
+    const branchAccounts = matchingByCode.filter((account) => account.branchId === branchId);
+    if (branchAccounts.length === 1) return branchAccounts[0];
+    if (branchAccounts.length > 1) return undefined;
+    const generalAccounts = matchingByCode.filter(
+      (account) => !account.branchId || account.branchId === 'all'
+    );
+    return generalAccounts.length === 1 ? generalAccounts[0] : undefined;
+  }
+
+  const generalAccounts = matchingByCode.filter(
+    (account) => !account.branchId || account.branchId === 'all'
+  );
+  if (generalAccounts.length > 0) {
+    return generalAccounts.length === 1 ? generalAccounts[0] : undefined;
+  }
+  return matchingByCode.length === 1 ? matchingByCode[0] : undefined;
+}
+
+export function findCustomerReceiptJournalIndex(
+  receipt: Pick<CashReceiptVoucher, 'tenantId' | 'journalEntryId' | 'voucherNumber'>,
+  journals: JournalEntry[]
+): number {
+  if (receipt.journalEntryId) {
+    const linkedIndex = journals.findIndex((journal) =>
+      journal.id === receipt.journalEntryId &&
+      journal.tenantId === receipt.tenantId &&
+      journal.isPosted
+    );
+    if (linkedIndex >= 0) return linkedIndex;
+  }
+
+  const marker = `سند ${receipt.voucherNumber}`;
+  return journals.findIndex((journal) =>
+    journal.tenantId === receipt.tenantId &&
+    journal.isPosted &&
+    journal.lines.some((line) => {
+      const markerIndex = line.memo?.indexOf(marker) ?? -1;
+      const nextCharacter = line.memo?.[markerIndex + marker.length];
+      return markerIndex >= 0 && (!nextCharacter || !/\d/.test(nextCharacter)) && Number(line.credit) > 0;
+    })
+  );
 }
 
 export function buildCustomerCollectionJournalLines(params: {
