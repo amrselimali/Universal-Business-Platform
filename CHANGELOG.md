@@ -2,6 +2,12 @@
 
 # 2026-10-10
 
+## GitHub Pages Deployment
+
+- Added an Actions-based Pages build and deploy workflow for pushes to `main`, with pull requests running a build check and manual deployments available through `workflow_dispatch`.
+- Configured Vite's production asset base for the repository Pages path (`/Universal-Business-Platform/`); local development continues to use `/`.
+- Repository Pages must be enabled with **Settings → Pages → Build and deployment → Source: GitHub Actions** before the deployment job can publish.
+
 ## Customer Account 2000 Linking
 
 - On storage hydration, active, coded customer profiles are linked to their unique tenant-specific chart account with code `2000`. Archived or merged profiles and supplier-only records are left unchanged; `Both` parties retain their previous supplier account in a separate link.
