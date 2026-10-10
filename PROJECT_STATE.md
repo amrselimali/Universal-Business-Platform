@@ -8,6 +8,16 @@
 
 Universal Business Platform
 
+## Customer Control Account and Trial Balance Diagnostics — 2026-10-10
+
+- Direct collection receipts now post a debit to the selected payment method's exact tenant-scoped cash/bank account and a credit to the exact tenant-scoped account code `2000`. Posting is rejected when code `2000` is missing, duplicated, or not a debit-normal Asset, or when the payment method has no valid linked cash/bank Asset account.
+- New receipts no longer create `1120-<customerCode>` subsidiary accounts. Existing direct receipt journal credits are reclassified only when the voucher number is explicitly present on the credit-line memo; generated customer subledgers are removed only when their projected balance is zero and no journal line or party still references them. Locked periods and unidentifiable journal lines are left untouched.
+- Customer party links are pointed to control account `2000` without replacing a `Both` party's existing supplier payable link. Receipt vouchers now retain `systemCode` and customer code; customer statements show receipt movements from the voucher once, suppress linked shift-row and journal duplicates, and avoid treating shared account `2000` as a unique party ledger.
+- The trial-balance screen now lists each posted unbalanced journal entry with debit/credit totals and its difference, and lists journal lines whose account IDs do not resolve. Account balance synchronization uses account IDs only to avoid applying same-code movements across tenants.
+- Repository demo reconciliation: its sole posted opening entry (`JV-2026-0001`) has debit `465,000`, credit `465,000`, difference `0`, and no unresolved accounts. However, the bundled demo account `2000` is `الالتزامات (الخصوم)` with type `Liability`, not a customer receivable Asset. The demo data is therefore correctly rejected by the new collection posting guard; no demo or user ledger was rewritten to hide this chart conflict.
+- Runtime/localStorage accounting data is not available in this workspace. To calculate the user's actual trial-balance difference and safely assess all historical entries, export posted journal entries with their lines (`tenantId`, `branchId`, entry number/date/source, line account ID/code, debit, credit, memo), the matching account master (`id`, tenant, branch, code, name, type, normal balance, parent, current balance), and collection vouchers (`partyId`, system/customer code, voucher/reference number, amount/date, journal ID) plus applicable period locks.
+- Validation: production build passed. Focused accounting-engine checks confirmed balanced posting, tenant/type isolation, and rejection of an unlinked payment account. TypeScript checking still reports pre-existing unrelated errors, including missing `Branch.nameAr` references. No runtime ledger export or migration was run.
+
 ## Repository
 
 Universal-Business-Platform

@@ -510,8 +510,8 @@ export const CollectionReceiptsView: React.FC = () => {
   const handlePostUnpostedReceipts = () => {
     const result = postUnpostedCollectionReceipts(activeBranch?.id);
     alert(t(
-      `تم ترحيل ${result.posted} سند، وتم تخطي ${result.skipped} سند لوجود قيد مرتبط به مسبقاً.`,
-      `Posted ${result.posted} receipts; skipped ${result.skipped} because a related shift journal already exists.`
+      `تم ترحيل ${result.posted} سند، وتم تخطي ${result.skipped} سند. ${result.errors.length ? `أسباب عدم الترحيل:\n${result.errors.join('\n')}` : ''}`,
+      `Posted ${result.posted} receipts and skipped ${result.skipped}. ${result.errors.length ? `Posting errors:\n${result.errors.join('\n')}` : ''}`
     ));
   };
 

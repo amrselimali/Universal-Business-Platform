@@ -2,6 +2,18 @@
 
 # 2026-10-10
 
+## Customer Control Account and Trial Balance Reconciliation
+
+- Collection receipt postings now use only the exact tenant-scoped account `2000` as the receivable control account and the payment method's linked cash/bank account for the debit. Missing/duplicate/misclassified control accounts, missing payment mappings, invalid amounts, and duplicate supplied receipt reference numbers are rejected before any receipt or journal is saved.
+- Removed automatic per-customer chart account creation from direct receipt posting. Existing generated customer subledgers are retired only if the journal-linked balances are reclassified to `2000`, their projected balance is zero, and no party or journal line still references them. Historical receipt credit lines are changed only when their voucher marker is unambiguous; locked periods are not modified.
+- Customer receipts preserve system/customer codes for statement identity. Direct receipt vouchers are the single source of their statement movement; linked reception rows and their shared journal are suppressed to prevent duplicate customer credits. Shared account `2000` is not treated as a unique account for generic party statement matching, and existing supplier links for `Both` parties are preserved.
+- Trial Balance now identifies individual unbalanced posted journals and journal lines with account IDs that cannot be resolved. Account balance synchronization matches account IDs only, preventing account-code matches from changing same-code accounts belonging to another tenant.
+- Bundled demo reconciliation: one opening journal, `JV-2026-0001`, has `465,000` debit and `465,000` credit (difference `0`); all its lines resolve. The demo chart uses code `2000` for `الالتزامات (الخصوم)` as a Liability, not customer receivables. The posting guard intentionally blocks receipts against that demo account rather than silently misclassifying them.
+- Runtime accounting data was unavailable, so no production/local ledger was altered and the user's actual debit-credit discrepancy cannot be quantified here. A real reconciliation needs posted journal headers/lines, account masters and balances, collection vouchers with party/system/customer codes and journal links, and period locks.
+- Validation: `npm run build` passed; focused TypeScript-based accounting checks passed. Repository TypeScript checking remains blocked by existing unrelated errors, including `Branch.nameAr` diagnostics.
+
+# 2026-10-10
+
 ## Collection Receipt Direct Accounting & Customer Quantity Crediting
 
 - Collection receipts recorded or imported from the Collection Receipts screen are no longer routed or posted into reception shift operational sheets.
