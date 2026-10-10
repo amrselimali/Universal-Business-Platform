@@ -2,6 +2,17 @@
 
 # 2026-10-10
 
+## Legacy Account References in Trial Balance
+
+- Trial Balance now falls back from a stale journal account ID to a unique account code within the same tenant, preferring the journal branch and allowing a unique general account. Ambiguous or missing matches remain unresolved rather than being guessed.
+- Legacy customer receivable codes `1120` and `1120-*` are included under account `2000` only when that tenant has a unique debit-normal Asset control account. This is report-time aggregation only; journal lines and stored account balances are not changed.
+- The unmapped-line diagnostic keeps the true total while displaying at most 50 example lines, so large ledgers do not overwhelm the page. Successfully matched legacy lines are reported separately from actual errors.
+- Customer cards and the compact table now show the linked chart account and identify missing/stale links.
+- Receipt reconciliation now treats a valid posted journal ID on the receipt as authoritative even if that journal's line memo has no voucher marker, preventing another journal from being generated for the same linked receipt during hydration. Existing duplicates remain untouched pending ledger evidence.
+- Runtime ledger data is not available in this workspace; this change does not claim to reconcile the user's actual balance or create adjustment entries.
+
+# 2026-10-10
+
 ## GitHub Pages Deployment
 
 - Added an Actions-based Pages build and deploy workflow for pushes to `main`, with pull requests running a build check and manual deployments available through `workflow_dispatch`.

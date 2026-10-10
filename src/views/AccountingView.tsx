@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { usePlatform } from '../context/PlatformContext';
 import { Account, AccountType } from '../types';
+import { resolveJournalLineAccount } from '../services/accountingEngine';
 import { autoTranslateArabic } from '../utils/translator';
 import {
   BookOpen,
@@ -119,12 +120,11 @@ export const AccountingView: React.FC = () => {
 
   const trialBalanceAccounts = useMemo(() => {
     const balances = new Map<string, number>();
-    const accountsById = new Map(accounts.map((account) => [account.id, account]));
     const trialAccounts = new Map(activeBranchAccounts.map((account) => [account.id, account]));
     filteredJournalEntries.forEach((entry) => {
       if (!entry.isPosted) return;
       entry.lines.forEach((line) => {
-        const account = accountsById.get(line.accountId);
+        const account = resolveJournalLineAccount(line, accounts, entry.tenantId, entry.branchId);
         if (!account) return;
         trialAccounts.set(account.id, account);
         balances.set(account.id, (balances.get(account.id) || 0) + Number(line.debit || 0) - Number(line.credit || 0));
@@ -136,9 +136,10 @@ export const AccountingView: React.FC = () => {
   }, [accounts, activeBranchAccounts, filteredJournalEntries]);
 
   const trialBalanceDiagnostics = useMemo(() => {
-    const accountsById = new Map(accounts.map((account) => [account.id, account]));
     const unbalancedEntries: Array<{ id: string; entryNumber: string; date: string; debit: number; credit: number; difference: number }> = [];
     const unmappedLines: Array<{ entryNumber: string; accountId: string; accountCode: string; debit: number; credit: number }> = [];
+    let unmappedLineCount = 0;
+    let resolvedByLegacyCodeCount = 0;
     filteredJournalEntries.filter((entry) => entry.isPosted).forEach((entry) => {
       let debit = 0;
       let credit = 0;
@@ -147,14 +148,20 @@ export const AccountingView: React.FC = () => {
         const lineCredit = Number(line.credit);
         debit += Number.isFinite(lineDebit) ? lineDebit : 0;
         credit += Number.isFinite(lineCredit) ? lineCredit : 0;
-        if (!accountsById.has(line.accountId)) {
-          unmappedLines.push({
-            entryNumber: entry.entryNumber,
-            accountId: line.accountId,
-            accountCode: line.accountCode,
-            debit: Number.isFinite(lineDebit) ? lineDebit : 0,
-            credit: Number.isFinite(lineCredit) ? lineCredit : 0,
-          });
+        const resolvedAccount = resolveJournalLineAccount(line, accounts, entry.tenantId, entry.branchId);
+        if (!resolvedAccount) {
+          unmappedLineCount += 1;
+          if (unmappedLines.length < 50) {
+            unmappedLines.push({
+              entryNumber: entry.entryNumber,
+              accountId: line.accountId,
+              accountCode: line.accountCode,
+              debit: Number.isFinite(lineDebit) ? lineDebit : 0,
+              credit: Number.isFinite(lineCredit) ? lineCredit : 0,
+            });
+          }
+        } else if (resolvedAccount.id !== line.accountId) {
+          resolvedByLegacyCodeCount += 1;
         }
       });
       const difference = Number((debit - credit).toFixed(2));
@@ -162,7 +169,7 @@ export const AccountingView: React.FC = () => {
         unbalancedEntries.push({ id: entry.id, entryNumber: entry.entryNumber, date: entry.date, debit, credit, difference });
       }
     });
-    return { unbalancedEntries, unmappedLines };
+    return { unbalancedEntries, unmappedLines, unmappedLineCount, resolvedByLegacyCodeCount };
   }, [accounts, filteredJournalEntries]);
 
   const totalDebits = trialBalanceAccounts.reduce((sum, account) => sum + Math.max(0, account.balance), 0);
@@ -1229,7 +1236,7 @@ export const AccountingView: React.FC = () => {
             </div>
           </div>
 
-          {(trialBalanceDiagnostics.unbalancedEntries.length > 0 || trialBalanceDiagnostics.unmappedLines.length > 0) && (
+          {(trialBalanceDiagnostics.unbalancedEntries.length > 0 || trialBalanceDiagnostics.unmappedLineCount > 0) && (
             <div role="alert" className="space-y-3 rounded-xl border border-rose-200 bg-rose-50 p-4 text-xs dark:border-rose-900/60 dark:bg-rose-950/20">
               <h4 className="font-bold text-rose-800 dark:text-rose-300">
                 {t('تفاصيل القيود التي تحتاج مراجعة', 'Journal entries requiring review')}
@@ -1238,7 +1245,7 @@ export const AccountingView: React.FC = () => {
                 {' '}
                 {t('قيد غير متوازن', 'unbalanced entries')}
                 {' · '}
-                {trialBalanceDiagnostics.unmappedLines.length}
+                {trialBalanceDiagnostics.unmappedLineCount}
                 {' '}
                 {t('سطر بحساب غير مربوط', 'lines with unmapped accounts')}
               </h4>
@@ -1272,7 +1279,10 @@ export const AccountingView: React.FC = () => {
               {trialBalanceDiagnostics.unmappedLines.length > 0 && (
                 <div className="space-y-1 text-rose-800 dark:text-rose-300">
                   <p className="font-semibold">
-                    {t('أسطر القيد التالية لا تطابق حسابًا موجودًا بمعرّف الحساب؛ لم تدخل في إجمالي الميزان:', 'These journal lines do not resolve to an account ID and were excluded from trial-balance totals:')}
+                    {t(
+                      `تعذر مطابقة ${trialBalanceDiagnostics.unmappedLineCount} سطرًا بحساب في نفس الكيان والفرع؛ لم تدخل في إجمالي الميزان. المعروض أول ${trialBalanceDiagnostics.unmappedLines.length} سطر فقط:`,
+                      `${trialBalanceDiagnostics.unmappedLineCount} lines could not be matched to an account in the same tenant and branch; they were excluded. Showing the first ${trialBalanceDiagnostics.unmappedLines.length} only:`
+                    )}
                   </p>
                   {trialBalanceDiagnostics.unmappedLines.map((line, index) => (
                     <p key={`${line.entryNumber}-${line.accountId}-${index}`} className="font-mono">
@@ -1282,6 +1292,14 @@ export const AccountingView: React.FC = () => {
                 </div>
               )}
             </div>
+          )}
+          {trialBalanceDiagnostics.resolvedByLegacyCodeCount > 0 && (
+            <p className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-300">
+              {t(
+                `تم تضمين ${trialBalanceDiagnostics.resolvedByLegacyCodeCount} سطرًا بمطابقة كود الحساب أو حساب العملاء المجمع، دون تعديل القيود المحفوظة.`,
+                `${trialBalanceDiagnostics.resolvedByLegacyCodeCount} lines were included by matching account code or the customer control account; saved journals were not changed.`
+              )}
+            </p>
           )}
 
           <div className="overflow-x-auto">

@@ -220,6 +220,7 @@ export const PartiesView: React.FC = () => {
     t,
     formatMoney,
     parties,
+    accounts,
     addParty,
     updateParty,
     deleteParty,
@@ -280,6 +281,19 @@ export const PartiesView: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const currentBranchId = activeBranch?.id || (branches.length > 0 ? branches[0].id : 'branch-cairo');
+  const getPartyAccountLabel = (party: Party) => {
+    const linkedAccount = accounts.find((account) => account.id === party.accountId);
+    if (linkedAccount) {
+      return `${linkedAccount.code} — ${language === 'ar' ? linkedAccount.nameAr : linkedAccount.nameEn}`;
+    }
+    if (party.accountId) {
+      return t(
+        `رابط قديم غير موجود بالدليل: ${party.accountNameAr || party.accountId}`,
+        `Stale chart link: ${party.accountNameAr || party.accountId}`
+      );
+    }
+    return t('غير مربوط بحساب في الشجرة', 'Not linked to a chart account');
+  };
 
   const [autoFileCodeFromCustomerCode, setAutoFileCodeFromCustomerCode] = useState(true);
   const [newParty, setNewParty] = useState({
@@ -1106,6 +1120,12 @@ export const PartiesView: React.FC = () => {
                     <Phone className="h-3.5 w-3.5 text-slate-400" />
                     <span className="font-mono font-semibold">{party.phone}</span>
                   </div>
+                  <div className="flex items-center gap-2">
+                    <CreditCard className="h-3.5 w-3.5 shrink-0 text-indigo-500" />
+                    <span className="truncate" title={getPartyAccountLabel(party)}>
+                      {t('حساب الشجرة:', 'Chart account:')} {getPartyAccountLabel(party)}
+                    </span>
+                  </div>
 
                   {party.medicalNotes && (
                     <div className="flex items-center gap-2 text-[11px] text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 p-1.5 rounded-lg mt-1">
@@ -1191,6 +1211,7 @@ export const PartiesView: React.FC = () => {
                 <th className="p-3">{t('كود الملف', 'File Code')}</th>
                 <th className="p-3">{t('اسم العميل / المريض', 'Name')}</th>
                 <th className="p-3">{t('الموبايل', 'Phone')}</th>
+                <th className="p-3">{t('حساب الشجرة', 'Chart Account')}</th>
                 <th className="p-3">{t('الرصيد المالي', 'Balance')}</th>
                 <th className="p-3">{t('المصدر', 'Lead Source')}</th>
                 <th className="p-3 text-center">{t('الإجراءات', 'Actions')}</th>
@@ -1231,6 +1252,9 @@ export const PartiesView: React.FC = () => {
                     </td>
                     <td className="p-3 font-mono text-slate-700 dark:text-slate-300 font-bold">
                       {party.phone}
+                    </td>
+                    <td className="p-3 text-slate-700 dark:text-slate-300">
+                      {getPartyAccountLabel(party)}
                     </td>
                     <td className="p-3 font-mono font-bold">
                       <span
