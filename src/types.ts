@@ -985,6 +985,8 @@ export interface CashReceiptVoucher {
   tenantId: string;
   branchId: string;
   partyId?: string;
+  customerCode?: string;
+  systemCode?: string;
   receivedFrom: string;
   amount: number;
   currency: string;
@@ -1253,4 +1255,3 @@ export interface AppNotification {
   actionUrl?: string;
   metadata?: Record<string, any>;
 }
-

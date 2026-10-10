@@ -87,6 +87,56 @@ export function resolveAccount(
   return accounts[0];
 }
 
+export function resolveCustomerControlAccount(
+  accounts: Account[],
+  tenantId: string
+): { account?: Account; error?: string } {
+  const matchingAccounts = accounts.filter(
+    (account) => account.tenantId === tenantId && account.code === '2000'
+  );
+  if (matchingAccounts.length === 0) {
+    return { error: 'لا يوجد حساب عملاء مسجل بالكود 2000 لهذا الكيان.' };
+  }
+  if (matchingAccounts.length > 1) {
+    return { error: 'يوجد أكثر من حساب بالكود 2000 لهذا الكيان؛ يجب إزالة الالتباس قبل الترحيل.' };
+  }
+  if (matchingAccounts[0].type !== 'Asset' || !matchingAccounts[0].isDebitNormal) {
+    return { error: 'الحساب 2000 ليس أصلًا ذا طبيعة مدينة، لذلك لا يمكن استخدامه كحساب تحكم للعملاء.' };
+  }
+  return { account: matchingAccounts[0] };
+}
+
+export function buildCustomerCollectionJournalLines(params: {
+  accounts: Account[];
+  tenantId: string;
+  amount: number;
+  paymentAccountId?: string;
+  memo: string;
+}): JournalLine[] {
+  const controlAccount = resolveCustomerControlAccount(params.accounts, params.tenantId);
+  if (!controlAccount.account) {
+    throw new Error(controlAccount.error || 'تعذر تحديد حساب تحكم العملاء 2000.');
+  }
+
+  const amount = Number(params.amount);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error('مبلغ إيصال التحصيل يجب أن يكون رقمًا موجبًا وصحيحًا.');
+  }
+
+  const paymentAccount = params.accounts.find(
+    (account) => account.id === params.paymentAccountId && account.tenantId === params.tenantId
+  );
+  if (!paymentAccount || paymentAccount.type !== 'Asset' || !paymentAccount.isDebitNormal ||
+    paymentAccount.id === controlAccount.account.id) {
+    throw new Error('طريقة الدفع غير مرتبطة بحساب خزينة/بنك صالح لهذا الكيان؛ لم يتم ترحيل الإيصال.');
+  }
+
+  return [
+    createJournalLine(paymentAccount, amount, 0, `${params.memo} - قبض ونقدية واردة`, 1),
+    createJournalLine(controlAccount.account, 0, amount, `${params.memo} - سداد ذمم العملاء`, 2),
+  ];
+}
+
 /**
  * Helper to build a unique Journal Entry object
  */
@@ -402,4 +452,3 @@ export function buildGoodsIssueJournalLines(params: {
     createJournalLine(invAcc, 0, params.totalCost, `${params.memo} - صرف أصناف من المخزن`, lineIdx++),
   ];
 }
-

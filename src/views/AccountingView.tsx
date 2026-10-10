@@ -124,7 +124,7 @@ export const AccountingView: React.FC = () => {
     filteredJournalEntries.forEach((entry) => {
       if (!entry.isPosted) return;
       entry.lines.forEach((line) => {
-        const account = accountsById.get(line.accountId) || accounts.find((candidate) => candidate.code === line.accountCode);
+        const account = accountsById.get(line.accountId);
         if (!account) return;
         trialAccounts.set(account.id, account);
         balances.set(account.id, (balances.get(account.id) || 0) + Number(line.debit || 0) - Number(line.credit || 0));
@@ -134,6 +134,36 @@ export const AccountingView: React.FC = () => {
       .map((account) => ({ ...account, balance: Number((balances.get(account.id) || 0).toFixed(2)) }))
       .sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true, sensitivity: 'base' }));
   }, [accounts, activeBranchAccounts, filteredJournalEntries]);
+
+  const trialBalanceDiagnostics = useMemo(() => {
+    const accountsById = new Map(accounts.map((account) => [account.id, account]));
+    const unbalancedEntries: Array<{ id: string; entryNumber: string; date: string; debit: number; credit: number; difference: number }> = [];
+    const unmappedLines: Array<{ entryNumber: string; accountId: string; accountCode: string; debit: number; credit: number }> = [];
+    filteredJournalEntries.filter((entry) => entry.isPosted).forEach((entry) => {
+      let debit = 0;
+      let credit = 0;
+      entry.lines.forEach((line) => {
+        const lineDebit = Number(line.debit);
+        const lineCredit = Number(line.credit);
+        debit += Number.isFinite(lineDebit) ? lineDebit : 0;
+        credit += Number.isFinite(lineCredit) ? lineCredit : 0;
+        if (!accountsById.has(line.accountId)) {
+          unmappedLines.push({
+            entryNumber: entry.entryNumber,
+            accountId: line.accountId,
+            accountCode: line.accountCode,
+            debit: Number.isFinite(lineDebit) ? lineDebit : 0,
+            credit: Number.isFinite(lineCredit) ? lineCredit : 0,
+          });
+        }
+      });
+      const difference = Number((debit - credit).toFixed(2));
+      if (Math.abs(difference) >= 0.01) {
+        unbalancedEntries.push({ id: entry.id, entryNumber: entry.entryNumber, date: entry.date, debit, credit, difference });
+      }
+    });
+    return { unbalancedEntries, unmappedLines };
+  }, [accounts, filteredJournalEntries]);
 
   const totalDebits = trialBalanceAccounts.reduce((sum, account) => sum + Math.max(0, account.balance), 0);
   const totalCredits = trialBalanceAccounts.reduce((sum, account) => sum + Math.max(0, -account.balance), 0);
@@ -1196,6 +1226,61 @@ export const AccountingView: React.FC = () => {
               </span>
             </div>
           </div>
+
+          {(trialBalanceDiagnostics.unbalancedEntries.length > 0 || trialBalanceDiagnostics.unmappedLines.length > 0) && (
+            <div role="alert" className="space-y-3 rounded-xl border border-rose-200 bg-rose-50 p-4 text-xs dark:border-rose-900/60 dark:bg-rose-950/20">
+              <h4 className="font-bold text-rose-800 dark:text-rose-300">
+                {t('تفاصيل القيود التي تحتاج مراجعة', 'Journal entries requiring review')}
+                {' · '}
+                {trialBalanceDiagnostics.unbalancedEntries.length}
+                {' '}
+                {t('قيد غير متوازن', 'unbalanced entries')}
+                {' · '}
+                {trialBalanceDiagnostics.unmappedLines.length}
+                {' '}
+                {t('سطر بحساب غير مربوط', 'lines with unmapped accounts')}
+              </h4>
+              {trialBalanceDiagnostics.unbalancedEntries.length > 0 && (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[560px] text-start">
+                    <thead className="text-rose-700 dark:text-rose-300">
+                      <tr>
+                        <th className="py-1 text-start">{t('رقم القيد / التاريخ', 'Entry / Date')}</th>
+                        <th className="py-1 text-end">{t('إجمالي المدين', 'Debits')}</th>
+                        <th className="py-1 text-end">{t('إجمالي الدائن', 'Credits')}</th>
+                        <th className="py-1 text-end">{t('الفرق (مدين - دائن)', 'Difference (debit - credit)')}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {trialBalanceDiagnostics.unbalancedEntries.map((entry) => (
+                        <tr key={entry.id} className="border-t border-rose-200/70 dark:border-rose-900/50">
+                          <td className="py-1.5 font-mono">{entry.entryNumber} · {entry.date}</td>
+                          <td className="py-1.5 text-end font-mono">{formatMoney(entry.debit)}</td>
+                          <td className="py-1.5 text-end font-mono">{formatMoney(entry.credit)}</td>
+                          <td className="py-1.5 text-end font-mono font-bold">
+                            {entry.difference > 0 ? t('زيادة مدين ', 'Debit excess ') : t('زيادة دائن ', 'Credit excess ')}
+                            {formatMoney(Math.abs(entry.difference))}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {trialBalanceDiagnostics.unmappedLines.length > 0 && (
+                <div className="space-y-1 text-rose-800 dark:text-rose-300">
+                  <p className="font-semibold">
+                    {t('أسطر القيد التالية لا تطابق حسابًا موجودًا بمعرّف الحساب؛ لم تدخل في إجمالي الميزان:', 'These journal lines do not resolve to an account ID and were excluded from trial-balance totals:')}
+                  </p>
+                  {trialBalanceDiagnostics.unmappedLines.map((line, index) => (
+                    <p key={`${line.entryNumber}-${line.accountId}-${index}`} className="font-mono">
+                      {line.entryNumber} · {line.accountCode} ({line.accountId}) · {t('مدين', 'Dr')} {formatMoney(line.debit)} · {t('دائن', 'Cr')} {formatMoney(line.credit)}
+                    </p>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="overflow-x-auto">
             <table className="w-full text-xs">

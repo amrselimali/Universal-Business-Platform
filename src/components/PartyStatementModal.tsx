@@ -61,6 +61,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
     language,
     tenant,
     activeBranch,
+    accounts,
     parties,
     invoices,
     receptionShifts,
@@ -160,6 +161,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
     const pName = currentParty.name.toLowerCase().trim();
     const pPhone = currentParty.phone.trim();
     const pCode = currentParty.systemCode?.toLowerCase().trim();
+    const pCustomerCode = (currentParty.customerCode || currentParty.code)?.toLowerCase().trim();
 
     // 1. Gather Customer Movements
     if (currentParty.type === 'Customer' || currentParty.type === 'Both') {
@@ -216,7 +218,14 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
           if (matchRow) {
             const rowDate = row.date || shift.shiftDate || shift.openedAt.slice(0, 10);
             const revenue = row.totalRevenue || 0;
-            const collected = row.collectedAmount || 0;
+            const linkedReceipt = cashReceipts.find((receipt) =>
+              receipt.status !== 'cancelled' && receipt.partyId === currentParty.id &&
+              (receipt.id === row.receiptVoucherId ||
+                (Boolean(receipt.journalEntryId) && receipt.journalEntryId === row.journalEntryId &&
+                  receipt.date === rowDate &&
+                  Math.abs(Number(receipt.amount || 0) - Number(row.collectedAmount || 0)) < 0.01))
+            );
+            const collected = linkedReceipt ? 0 : row.collectedAmount || 0;
 
             if (revenue > 0) {
               rawMovements.push({
@@ -253,7 +262,9 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
         const matchRcpt =
           rcpt.partyId
             ? rcpt.partyId === currentParty.id
-            : Boolean(rcpt.receivedFrom && rcpt.receivedFrom.toLowerCase().trim() === pName);
+            : (Boolean(pCode && rcpt.systemCode?.toLowerCase().trim() === pCode) ||
+              Boolean(pCustomerCode && rcpt.customerCode?.toLowerCase().trim() === pCustomerCode) ||
+              Boolean(rcpt.receivedFrom && rcpt.receivedFrom.toLowerCase().trim() === pName));
 
         if (matchRcpt) {
           const amt = Number(rcpt.amount) || 0;
@@ -339,27 +350,21 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
         .map((receipt) => receipt.journalEntryId)
         .filter((journalId): journalId is string => Boolean(journalId))
     );
+    const linkedPartyAccount = accounts.find((account) => account.id === currentParty.accountId);
+    const hasSharedCustomerControlAccount = linkedPartyAccount?.code === '2000';
+    const partyJournalIdentifiers = [pName, pCode, pCustomerCode, pPhone.toLowerCase()]
+      .filter((identifier): identifier is string => Boolean(identifier));
 
     // 3. Journal Entries mentioning this party
     journalEntries.forEach((entry) => {
       if (entry.entryNumber?.startsWith('JV-MNT')) return;
       const isCollectionPosting = entry.sourceDocument?.startsWith('إيصالات التحصيل -') || false;
+      if (receiptJournalIds.has(entry.id) || isCollectionPosting) return;
 
       const matchingLines = entry.lines.filter(
-        (line) => isCollectionPosting
-          ? line.accountId === currentParty.accountId && Number(line.credit) > 0
-          : line.accountId === currentParty.accountId || line.memo?.toLowerCase().includes(pName)
+        (line) => (!hasSharedCustomerControlAccount && line.accountId === currentParty.accountId) ||
+          partyJournalIdentifiers.some((identifier) => line.memo?.toLowerCase().includes(identifier))
       );
-      if (receiptJournalIds.has(entry.id)) return;
-      if (isCollectionPosting) {
-        const matchingReceipts = cashReceipts.filter(
-          (receipt) => receipt.partyId === currentParty.id && receipt.status !== 'cancelled' &&
-            (receipt.journalEntryId === entry.id || entry.lines.some((line) => line.memo?.includes(receipt.voucherNumber)))
-        );
-        const receiptAmount = matchingReceipts.reduce((sum, receipt) => sum + (Number(receipt.amount) || 0), 0);
-        const journalCredit = matchingLines.reduce((sum, line) => sum + (Number(line.credit) || 0), 0);
-        if (receiptAmount > 0 && Math.abs(receiptAmount - journalCredit) < 0.01) return;
-      }
 
       matchingLines.forEach((line) => {
         rawMovements.push({

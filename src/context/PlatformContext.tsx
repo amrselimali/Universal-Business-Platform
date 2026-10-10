@@ -64,10 +64,12 @@ import {
   buildCostJournalLines,
   calculateItemCostAndDeductions,
   buildCashReceiptJournalLines,
+  buildCustomerCollectionJournalLines,
   buildCashPaymentJournalLines,
   buildGoodsReceiptJournalLines,
   buildGoodsIssueJournalLines,
   isDateLockedInPeriod,
+  resolveCustomerControlAccount,
   resolveAccount,
   createJournalLine,
 } from '../services/accountingEngine';
@@ -398,7 +400,7 @@ interface PlatformContextType {
     reason: string;
   }) => { success: boolean; error?: string };
   archiveCollectionReceipts: (receiptIds: string[]) => void;
-  postUnpostedCollectionReceipts: (branchId?: string) => { posted: number; skipped: number };
+  postUnpostedCollectionReceipts: (branchId?: string) => { posted: number; skipped: number; errors: string[] };
   addShiftExpense: (shiftId: string, expense: Omit<ShiftExpense, 'id'>) => void;
   removeShiftExpense: (shiftId: string, expenseId: string) => void;
   updateShiftBalancing: (
@@ -1133,7 +1135,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (!lines || lines.length === 0) return;
     setAllAccounts((prev) =>
       prev.map((acc) => {
-        const matchingLines = lines.filter((l) => l.accountId === acc.id || l.accountCode === acc.code);
+        const matchingLines = lines.filter((line) => line.accountId === acc.id);
         if (matchingLines.length === 0) return acc;
         let delta = 0;
         matchingLines.forEach((l) => {
@@ -7912,7 +7914,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return INITIAL_CASH_RECEIPTS;
   });
   const cashReceiptNumberCounter = useRef(0);
-  const collectionReceiptReconciliationRef = useRef(false);
+  const collectionReceiptReconciliationRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!isStorageHydrated) return;
@@ -7922,99 +7924,83 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, [allCashReceipts, isStorageHydrated]);
 
   useEffect(() => {
-    if (!isStorageHydrated || collectionReceiptReconciliationRef.current) return;
-    collectionReceiptReconciliationRef.current = true;
+    const controlAccountFingerprint = allAccounts
+      .filter((account) => account.code === '2000')
+      .map((account) => `${account.tenantId}:${account.id}:${account.type}`)
+      .sort()
+      .join('|');
+    if (!isStorageHydrated || collectionReceiptReconciliationRef.current === controlAccountFingerprint) return;
+    collectionReceiptReconciliationRef.current = controlAccountFingerprint;
 
     const accountsForReconciliation = [...allAccounts];
-    const newCustomerAccounts: Account[] = [];
     const accountBalanceDeltas = new Map<string, number>();
     const updatedParties = new Map<string, Party>();
     const updatedJournals = [...allJournals];
     let journalsChanged = false;
     let receiptsChanged = false;
-    const usedCustomerCodes = getUsedCustomerCodes();
+    const warnedTenants = new Set<string>();
+    const controlAccountsByTenant = new Map<string, Account>();
 
-    const getCustomerReceivableAccount = (party: Party): Account => {
-      const currentParty = updatedParties.get(party.id) || party;
-      const receivableParent = accountsForReconciliation.find(
-        (account) => account.tenantId === currentParty.tenantId && account.code === '1120'
-      );
-      const linkedAccount = accountsForReconciliation.find(
-        (account) => account.id === currentParty.accountId && account.tenantId === currentParty.tenantId
-      );
-      if (linkedAccount?.type === 'Asset' && linkedAccount.id !== receivableParent?.id) return linkedAccount;
-
-      const requestedCode = [currentParty.customerCode, currentParty.code].find(
-        (code) => Boolean(code && code !== currentParty.systemCode && /^\d+$/.test(code) && Number.isSafeInteger(Number(code)))
-      );
-      const customerCode = requestedCode
-        ? String(Number(requestedCode))
-        : allocateCustomerCode(usedCustomerCodes);
-      usedCustomerCodes.add(customerCode);
-      const existingSubledger = accountsForReconciliation.find(
-        (account) =>
-          account.tenantId === currentParty.tenantId &&
-          account.code === `1120-${customerCode}` &&
-          account.type === 'Asset'
-      );
-      if (existingSubledger) {
-        updatedParties.set(currentParty.id, {
-          ...currentParty,
-          customerCode,
-          code: customerCode,
-          accountId: existingSubledger.id,
-          accountNameAr: existingSubledger.nameAr,
+    allParties.forEach((party) => {
+      if (party.type !== 'Customer' && party.type !== 'Both') return;
+      const control = resolveCustomerControlAccount(accountsForReconciliation, party.tenantId);
+      if (!control.account) {
+        if (!warnedTenants.has(party.tenantId)) {
+          console.error(`Collection receipt migration skipped: ${control.error} Tenant: ${party.tenantId}`);
+          warnedTenants.add(party.tenantId);
+        }
+        return;
+      }
+      controlAccountsByTenant.set(party.tenantId, control.account);
+      const linkedAccount = accountsForReconciliation.find((account) => account.id === party.accountId);
+      const hasCustomerSubledger = linkedAccount?.tenantId === party.tenantId &&
+        (linkedAccount.code === '1120' || linkedAccount.code.startsWith('1120-'));
+      if (party.type === 'Customer' || !linkedAccount || hasCustomerSubledger) {
+        updatedParties.set(party.id, {
+          ...party,
+          accountId: control.account.id,
+          accountNameAr: control.account.nameAr,
         });
-        return existingSubledger;
       }
-
-      let accountCode = `1120-${customerCode}`;
-      let accountCodeSuffix = 2;
-      while (accountsForReconciliation.some((account) => account.tenantId === currentParty.tenantId && account.code === accountCode)) {
-        accountCode = `1120-${customerCode}-${accountCodeSuffix++}`;
-      }
-
-      let accountId = `acc-customer-${currentParty.id}`;
-      let accountIdSuffix = 2;
-      while (accountsForReconciliation.some((account) => account.id === accountId)) {
-        accountId = `acc-customer-${currentParty.id}-${accountIdSuffix++}`;
-      }
-      const account: Account = {
-        id: accountId,
-        tenantId: currentParty.tenantId,
-        code: accountCode,
-        nameAr: `العميل ${currentParty.name} - كود ${customerCode}`,
-        nameEn: `Customer ${currentParty.nameEn || currentParty.name} - Code ${customerCode}`,
-        type: 'Asset',
-        parentId: receivableParent?.id,
-        balance: 0,
-        isDebitNormal: true,
-        level: receivableParent ? receivableParent.level + 1 : 1,
-      };
-      accountsForReconciliation.push(account);
-      newCustomerAccounts.push(account);
-      updatedParties.set(currentParty.id, {
-        ...currentParty,
-        customerCode,
-        code: customerCode,
-        accountId: account.id,
-        accountNameAr: account.nameAr,
-      });
-      return account;
-    };
+    });
 
     const reconciledReceipts = allCashReceipts.map((receipt) => {
       if (receipt.status !== 'active' || !receipt.partyId) return receipt;
       const receiptParty = updatedParties.get(receipt.partyId) || allParties.find((party) => party.id === receipt.partyId);
       if (!receiptParty || (receiptParty.type !== 'Customer' && receiptParty.type !== 'Both')) return receipt;
+      if (isDateLockedInPeriod(receipt.date, allPeriodLocks, receipt.tenantId, receipt.branchId).isLocked) return receipt;
 
-      const journalIndex = updatedJournals.findIndex((journal) =>
-        (journal.id === receipt.journalEntryId || journal.lines.some((line) => line.memo?.includes(receipt.voucherNumber))) &&
-        journal.lines.some((line) => line.memo?.includes(receipt.voucherNumber) && Number(line.credit) > 0)
+      const receivableAccount = controlAccountsByTenant.get(receipt.tenantId);
+      if (!receivableAccount) return receipt;
+      if (!Number.isFinite(Number(receipt.amount)) || Number(receipt.amount) <= 0) {
+        console.error(`Collection receipt migration skipped: invalid amount on ${receipt.voucherNumber}.`);
+        return receipt;
+      }
+      const receiptMethod = allPaymentMethods.find((method) =>
+        method.tenantId === receipt.tenantId &&
+        (!method.branchId || method.branchId === receipt.branchId) &&
+        (method.nameAr === receipt.paymentMethodLabel || method.nameEn === receipt.paymentMethodLabel)
       );
-      if (!validatePeriodDate(receipt.date, receipt.branchId).allowed) return receipt;
+      const paymentAccountId = receipt.bankOrSafeAccountId || receiptMethod?.linkedAccountId;
+      const paymentAccount = accountsForReconciliation.find(
+        (account) => account.id === paymentAccountId && account.tenantId === receipt.tenantId &&
+          account.type === 'Asset' && account.isDebitNormal
+      );
+      if (!paymentAccount || paymentAccount.id === receivableAccount.id) {
+        console.error(`Collection receipt migration skipped: no linked cash/bank account for ${receipt.voucherNumber}.`);
+        return receipt;
+      }
 
-      const receivableAccount = getCustomerReceivableAccount(receiptParty);
+      const matchesReceiptLine = (line: JournalLine) => {
+        const marker = `سند ${receipt.voucherNumber}`;
+        const markerIndex = line.memo?.indexOf(marker) ?? -1;
+        const nextCharacter = line.memo?.[markerIndex + marker.length];
+        return markerIndex >= 0 && (!nextCharacter || !/\d/.test(nextCharacter));
+      };
+      const journalIndex = updatedJournals.findIndex((journal) =>
+        (journal.id === receipt.journalEntryId || journal.lines.some(matchesReceiptLine)) &&
+        journal.lines.some((line) => matchesReceiptLine(line) && Number(line.credit) > 0)
+      );
       const nextReceipt = { ...receipt };
       if (!receipt.customerBalanceApplied) {
         const currentParty = updatedParties.get(receiptParty.id) || receiptParty;
@@ -8029,7 +8015,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (journalIndex >= 0) {
         const journal = updatedJournals[journalIndex];
         const lineIndex = journal.lines.findIndex(
-          (line) => line.memo?.includes(receipt.voucherNumber) && Number(line.credit) > 0
+          (line) => matchesReceiptLine(line) && Number(line.credit) > 0
         );
         if (lineIndex >= 0) {
           const oldLine = journal.lines[lineIndex];
@@ -8065,11 +8051,11 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           }
         }
       } else {
-        const journalLines = buildCashReceiptJournalLines({
+        const journalLines = buildCustomerCollectionJournalLines({
           accounts: accountsForReconciliation,
+          tenantId: receipt.tenantId,
           amount: Number(receipt.amount) || 0,
-          cashOrBankAccountId: receipt.bankOrSafeAccountId,
-          party: { ...receiptParty, accountId: receivableAccount.id },
+          paymentAccountId: paymentAccount.id,
           memo: `تحصيل ${receipt.serviceName || receipt.description} - العميل ${receipt.receivedFrom} - سند ${receipt.voucherNumber}`,
         });
         const journal = buildJournalEntry({
@@ -8097,12 +8083,28 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       return nextReceipt;
     });
 
-    if (newCustomerAccounts.length > 0 || accountBalanceDeltas.size > 0) {
+    const linkedPartyAccountIds = new Set(allParties.map((party) =>
+      (updatedParties.get(party.id) || party).accountId
+    ).filter((accountId): accountId is string => Boolean(accountId)));
+    const removableCustomerSubledgerIds = new Set(accountsForReconciliation
+      .filter((account) => {
+        const isGeneratedCustomerSubledger = account.type === 'Asset' &&
+          controlAccountsByTenant.has(account.tenantId) &&
+          account.code.startsWith('1120-') &&
+          account.nameAr.startsWith('العميل ') &&
+          account.id.startsWith('acc-customer-');
+        if (!isGeneratedCustomerSubledger || linkedPartyAccountIds.has(account.id)) return false;
+        const projectedBalance = Number(account.balance || 0) + (accountBalanceDeltas.get(account.id) || 0);
+        return Math.abs(projectedBalance) < 0.01 &&
+          !updatedJournals.some((journal) => journal.lines.some((line) =>
+            line.accountId === account.id || line.accountCode === account.code
+          ));
+      })
+      .map((account) => account.id));
+
+    if (accountBalanceDeltas.size > 0 || removableCustomerSubledgerIds.size > 0) {
       setAllAccounts((previous) => {
-        const accountsWithSubledgers = newCustomerAccounts.length > 0
-          ? [...newCustomerAccounts, ...previous]
-          : previous;
-        return accountsWithSubledgers.map((account) => {
+        return previous.filter((account) => !removableCustomerSubledgerIds.has(account.id)).map((account) => {
           const delta = accountBalanceDeltas.get(account.id);
           return delta === undefined
             ? account
@@ -8268,89 +8270,73 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const partyOffersMap = new Map<string, ClientOffer[]>();
     const customerCreditsMap = new Map<string, number>();
     const customerPartiesWithAccounts = new Map<string, Party>();
-    const customerAccounts: Account[] = [];
     const accountsForPosting = [...allAccounts];
-    const reservedCustomerCodes = getUsedCustomerCodes();
+    const controlAccountsByTenant = new Map<string, Account>();
+    const seenReceiptNumbers = new Set<string>();
 
-    const ensureCustomerReceivableAccount = (party?: Party): Party | undefined => {
-      if (!party || (party.type !== 'Customer' && party.type !== 'Both')) return party;
-      const alreadyPreparedParty = customerPartiesWithAccounts.get(party.id);
-      if (alreadyPreparedParty) return alreadyPreparedParty;
-
-      const receivableParent = accountsForPosting.find(
-        (account) => account.tenantId === party.tenantId && account.code === '1120'
+    for (const item of items) {
+      const customer = allParties.find((party) =>
+        party.id === item.partyId && party.tenantId === item.tenantId &&
+        (party.type === 'Customer' || party.type === 'Both')
       );
-      const linkedAccount = accountsForPosting.find(
-        (account) => account.id === party.accountId && account.tenantId === party.tenantId
-      );
-      if (linkedAccount && linkedAccount.type === 'Asset' && linkedAccount.id !== receivableParent?.id) {
-        return party;
+      if (!customer) {
+        return { success: false, created: 0, error: t('العميل المحدد غير موجود أو لا يتبع هذا الكيان.', 'The selected customer was not found in this tenant.') };
+      }
+      if (!Number.isFinite(Number(item.amount)) || Number(item.amount) <= 0) {
+        return { success: false, created: 0, error: t('مبلغ إيصال التحصيل يجب أن يكون رقمًا موجبًا.', 'Collection receipt amount must be a positive finite number.') };
       }
 
-      const requestedCode = [party.customerCode, party.code].find(
-        (code) => Boolean(code && code !== party.systemCode && /^\d+$/.test(code) && Number.isSafeInteger(Number(code)))
+      let controlAccount = controlAccountsByTenant.get(item.tenantId);
+      if (!controlAccount) {
+        const result = resolveCustomerControlAccount(accountsForPosting, item.tenantId);
+        if (!result.account) {
+          return { success: false, created: 0, error: `${t('تعذر ترحيل إيصال التحصيل:', 'Cannot post collection receipts:')} ${result.error}` };
+        }
+        controlAccount = result.account;
+        controlAccountsByTenant.set(item.tenantId, controlAccount);
+      }
+
+      const paymentAccount = accountsForPosting.find(
+        (account) => account.id === item.paymentAccountId && account.tenantId === item.tenantId &&
+          account.type === 'Asset' && account.isDebitNormal
       );
-      const customerCode = requestedCode
-        ? String(Number(requestedCode))
-        : allocateCustomerCode(reservedCustomerCodes);
-      reservedCustomerCodes.add(customerCode);
-      const existingSubledger = accountsForPosting.find(
-        (account) =>
-          account.tenantId === party.tenantId &&
-          account.code === `1120-${customerCode}` &&
-          account.type === 'Asset'
-      );
-      if (existingSubledger) {
-        const updatedParty = {
-          ...party,
-          customerCode,
-          code: customerCode,
-          accountId: existingSubledger.id,
-          accountNameAr: existingSubledger.nameAr,
+      if (!paymentAccount || paymentAccount.id === controlAccount.id) {
+        return {
+          success: false,
+          created: 0,
+          error: t('طريقة الدفع المحددة غير مرتبطة بحساب خزينة/بنك صالح؛ لم يتم تسجيل أي إيصال.', 'The selected payment method has no valid linked cash/bank account; no receipts were recorded.'),
         };
-        customerPartiesWithAccounts.set(party.id, updatedParty);
-        return updatedParty;
       }
 
-      const customerCodeUpdatedParty = party.customerCode === customerCode && party.code === customerCode
-        ? party
-        : { ...party, customerCode, code: customerCode };
-      const accountCodeBase = `1120-${customerCode}`;
-      let accountCode = accountCodeBase;
-      let suffix = 2;
-      while (accountsForPosting.some((account) => account.code === accountCode)) {
-        accountCode = `${accountCodeBase}-${suffix++}`;
+      if (item.receiptNumber?.trim()) {
+        const normalizedNumber = item.receiptNumber.trim().toLocaleLowerCase();
+        const duplicateKey = `${item.tenantId}|${item.branchId}|${item.partyId}|${normalizedNumber}`;
+        const alreadyExists = allCashReceipts.some((receipt) =>
+          receipt.status === 'active' && receipt.tenantId === item.tenantId &&
+          receipt.branchId === item.branchId && receipt.partyId === item.partyId &&
+          receipt.referenceInvoiceNo?.trim().toLocaleLowerCase() === normalizedNumber
+        );
+        if (alreadyExists || seenReceiptNumbers.has(duplicateKey)) {
+          return {
+            success: false,
+            created: 0,
+            error: t(`رقم الإيصال ${item.receiptNumber} مسجل بالفعل لهذا العميل والفرع.`, `Receipt number ${item.receiptNumber} is already recorded for this customer and branch.`),
+          };
+        }
+        seenReceiptNumbers.add(duplicateKey);
       }
 
-      const accountIdBase = `acc-customer-${party.id}`;
-      let accountId = accountIdBase;
-      let idSuffix = 2;
-      while (accountsForPosting.some((account) => account.id === accountId)) {
-        accountId = `${accountIdBase}-${idSuffix++}`;
+      const linkedAccount = accountsForPosting.find((account) => account.id === customer.accountId);
+      if (customer.type === 'Customer' || !linkedAccount ||
+        (linkedAccount.tenantId === customer.tenantId &&
+          (linkedAccount.code === '1120' || linkedAccount.code.startsWith('1120-')))) {
+        customerPartiesWithAccounts.set(customer.id, {
+          ...customer,
+          accountId: controlAccount.id,
+          accountNameAr: controlAccount.nameAr,
+        });
       }
-      const account: Account = {
-        id: accountId,
-        tenantId: party.tenantId,
-        code: accountCode,
-        nameAr: `العميل ${party.name} - كود ${customerCode}`,
-        nameEn: `Customer ${party.nameEn || party.name} - Code ${customerCode}`,
-        type: 'Asset',
-        parentId: receivableParent?.id,
-        balance: 0,
-        isDebitNormal: true,
-        level: receivableParent ? receivableParent.level + 1 : 1,
-      };
-      accountsForPosting.push(account);
-      customerAccounts.push(account);
-
-      const updatedParty = {
-        ...customerCodeUpdatedParty,
-        accountId: account.id,
-        accountNameAr: account.nameAr,
-      };
-      customerPartiesWithAccounts.set(party.id, updatedParty);
-      return updatedParty;
-    };
+    }
 
     items.forEach((item, index) => {
       const sequence = nextSequence + index + 1;
@@ -8360,7 +8346,14 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const displayDesc = item.productName && item.productName !== item.serviceName
         ? `${item.serviceName} - ${item.productName} (الكمية المحجوزة: ${bookedQty})`
         : `${item.serviceName} (الكمية المحجوزة: ${bookedQty})`;
-      const receiptParty = ensureCustomerReceivableAccount(allParties.find((party) => party.id === item.partyId));
+      const originalParty = allParties.find((party) => party.id === item.partyId);
+      const receiptParty = originalParty && (originalParty.type === 'Customer' || originalParty.type === 'Both')
+        ? customerPartiesWithAccounts.get(originalParty.id) || originalParty
+        : originalParty;
+      const controlAccount = controlAccountsByTenant.get(item.tenantId);
+      if (!controlAccount || !receiptParty) {
+        throw new Error('Validated customer collection receipt lost its party or control account before posting.');
+      }
 
       const receipt: CashReceiptVoucher = {
         id: receiptId,
@@ -8369,6 +8362,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         branchId: item.branchId,
         partyId: item.partyId,
         receivedFrom: item.receivedFrom,
+        customerCode: item.customerCode || receiptParty.customerCode || receiptParty.code,
+        systemCode: item.systemCode || receiptParty.systemCode,
         amount: Number(item.amount),
         currency: 'EGP',
         paymentMethod: item.paymentMethod,
@@ -8396,11 +8391,11 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         group = { tenantId: item.tenantId, branchId: item.branchId, date: item.date, lines: [] };
         groupedJournals.set(groupKey, group);
       }
-      group.lines.push(...buildCashReceiptJournalLines({
+      group.lines.push(...buildCustomerCollectionJournalLines({
         accounts: accountsForPosting,
+        tenantId: item.tenantId,
         amount: Number(item.amount),
-        cashOrBankAccountId: item.paymentAccountId,
-        party: receiptParty,
+        paymentAccountId: item.paymentAccountId,
         memo: `تحصيل ${displayDesc} - العميل ${item.receivedFrom} - سند ${voucherNumber}`,
       }));
       receipts.push(receipt);
@@ -8454,9 +8449,6 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }));
 
     const allJournalLines = journalEntries.flatMap((entry) => entry.lines);
-    if (customerAccounts.length > 0) {
-      setAllAccounts((prev) => [...customerAccounts, ...prev]);
-    }
     applyJournalLinesToAccounts(allJournalLines);
     setAllJournals((prev) => [...journalEntries, ...prev]);
     setAllCashReceipts((prev) => [...updatedReceipts, ...prev]);
@@ -8494,9 +8486,9 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return { success: true, created: updatedReceipts.length };
   };
 
-  const postUnpostedCollectionReceipts = (branchId?: string): { posted: number; skipped: number } => {
+  const postUnpostedCollectionReceipts = (branchId?: string): { posted: number; skipped: number; errors: string[] } => {
     const targetBranchId = branchId || activeBranch?.id;
-    if (!targetBranchId) return { posted: 0, skipped: 0 };
+    if (!targetBranchId) return { posted: 0, skipped: 0, errors: [] };
     const unpostedRows = allReceptionShifts
       .filter((shift) => shift.tenantId === tenant?.id && shift.branchId === targetBranchId)
       .flatMap((shift) => shift.runRows
@@ -8520,6 +8512,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }>();
     const linkedRunRowIds = new Set<string>();
     let skipped = 0;
+    const errors: string[] = [];
     const getPostingGroup = (tenantId: string, date: string) => {
       const key = `${tenantId}|${targetBranchId}|${date}`;
       let group = postingGroups.get(key);
@@ -8560,23 +8553,40 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       );
       const method = matchMethod(row.paymentMethod || '', shift.branchId);
       const isCustomerSettlement = Boolean(linkedVoucher || row.receiptVoucherId || row.notes?.includes('استيراد تحصيل إكسيل'));
-      const lines = isCustomerSettlement
-        ? buildCashReceiptJournalLines({
-            accounts: allAccounts,
-            amount: Number(row.collectedAmount) || 0,
-            cashOrBankAccountId: method?.linkedAccountId || linkedVoucher?.bankOrSafeAccountId,
-            party: allParties.find((party) => party.id === (row.customerId || row.patientId)),
-            memo: `ترحيل تحصيل العميل ${row.customerName || row.patientName || ''} من سجل الشيفت ${shift.shiftNumber}`,
-          })
-        : buildRevenueJournalLines({
+      const rowParty = allParties.find((party) =>
+        party.id === (row.customerId || row.patientId) && party.tenantId === shift.tenantId
+      );
+      let lines: JournalLine[];
+      if (isCustomerSettlement) {
+        const paymentAccountId = method?.linkedAccountId || linkedVoucher?.bankOrSafeAccountId;
+        const control = resolveCustomerControlAccount(allAccounts, shift.tenantId);
+        if (!rowParty || !control.account || !paymentAccountId ||
+          !allAccounts.some((account) => account.id === paymentAccountId && account.tenantId === shift.tenantId &&
+            account.type === 'Asset' && account.isDebitNormal && account.id !== control.account?.id)) {
+          skipped += 1;
+          const reason = control.error || 'لا يوجد حساب خزينة/بنك مرتبط صالح أو العميل غير مربوط.';
+          errors.push(`الحركة ${row.id}: ${reason}`);
+          console.error(`Collection run-row posting skipped: ${reason} Row: ${row.id}`);
+          return;
+        }
+        lines = buildCustomerCollectionJournalLines({
+          accounts: allAccounts,
+          tenantId: shift.tenantId,
+          amount: Number(row.collectedAmount) || 0,
+          paymentAccountId,
+          memo: `ترحيل تحصيل العميل ${row.customerName || row.patientName || ''} من سجل الشيفت ${shift.shiftNumber}`,
+        });
+      } else {
+        lines = buildRevenueJournalLines({
             accounts: allAccounts,
             paymentMethod: method,
-            customer: allParties.find((party) => party.id === (row.customerId || row.patientId)),
+            customer: rowParty,
             productOrService: allProducts.find((product) => product.id === row.serviceId || product.nameAr === row.serviceName),
             totalRevenue: Number(row.totalRevenue) || 0,
             collectedAmount: Number(row.collectedAmount) || 0,
             memo: `ترحيل إيصال ${row.serviceName} للعميل ${row.customerName || row.patientName || ''}`,
           });
+      }
       const group = getPostingGroup(shift.tenantId, postingDate);
       group.lines.push(...lines);
       group.runRowIds.add(row.id);
@@ -8629,11 +8639,25 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const method = methodsForBranch.find((item) => item.nameAr === receipt.paymentMethodLabel || item.nameEn === receipt.paymentMethodLabel)
         || methodsForBranch.find((item) => item.type === expectedType && item.branchId === receipt.branchId)
         || methodsForBranch.find((item) => item.type === expectedType);
-      const lines = buildCashReceiptJournalLines({
+      const customer = allParties.find((item) => item.id === receipt.partyId && item.tenantId === receipt.tenantId);
+      const control = resolveCustomerControlAccount(allAccounts, receipt.tenantId);
+      const paymentAccountId = receipt.bankOrSafeAccountId || method?.linkedAccountId;
+      if (!customer || (customer.type !== 'Customer' && customer.type !== 'Both') ||
+        !control.account || !paymentAccountId ||
+        !Number.isFinite(Number(receipt.amount)) || Number(receipt.amount) <= 0 ||
+        !allAccounts.some((account) => account.id === paymentAccountId && account.tenantId === receipt.tenantId &&
+          account.type === 'Asset' && account.isDebitNormal && account.id !== control.account?.id)) {
+        skipped += 1;
+        const reason = control.error || 'لا يوجد حساب خزينة/بنك مرتبط صالح أو بيانات الإيصال غير مكتملة.';
+        errors.push(`الإيصال ${receipt.voucherNumber}: ${reason}`);
+        console.error(`Collection receipt backfill skipped: ${reason} Receipt: ${receipt.voucherNumber}`);
+        return;
+      }
+      const lines = buildCustomerCollectionJournalLines({
         accounts: allAccounts,
+        tenantId: receipt.tenantId,
         amount: Number(receipt.amount) || 0,
-        cashOrBankAccountId: receipt.bankOrSafeAccountId || method?.linkedAccountId,
-        party: allParties.find((item) => item.id === receipt.partyId),
+        paymentAccountId,
         memo: `ترحيل تحصيل عميل ${receipt.receivedFrom} - سند ${receipt.voucherNumber}`,
       });
       const group = getPostingGroup(receipt.tenantId, receipt.date);
@@ -8677,10 +8701,10 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         'ترحيل سندات تحصيل قديمة', 'Backfill customer collection vouchers',
         `تم ترحيل ${postedCount} حركة تحصيل غير مرحلة في ${journalEntries.length} قيد يومية بتاريخ ${postedAt}`
       );
-      return { posted: postedCount, skipped };
+      return { posted: postedCount, skipped, errors };
     }
 
-    return { posted: 0, skipped };
+    return { posted: 0, skipped, errors };
   };
 
   const deleteCashReceipt = (id: string) => {
