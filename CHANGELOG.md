@@ -6,7 +6,7 @@
 
 - Added an Actions-based Pages build and deploy workflow for pushes to `main`, with pull requests running a build check and manual deployments available through `workflow_dispatch`.
 - Configured Vite's production asset base for the repository Pages path (`/Universal-Business-Platform/`); local development continues to use `/`.
-- Repository Pages must be enabled with **Settings → Pages → Build and deployment → Source: GitHub Actions** before the deployment job can publish.
+- Enabled repository Pages with the GitHub Actions source. The first deployment from `main` completed successfully; the live HTML, JavaScript, and CSS assets all returned HTTP 200.
 
 ## Customer Account 2000 Linking
 

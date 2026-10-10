@@ -10,10 +10,11 @@ Universal Business Platform
 
 ## GitHub Pages Deployment — 2026-10-10
 
-- The repository's Pages settings were confirmed disabled, which explains why merged changes were not appearing on the live site; there were no existing deployment workflows or recorded deployments.
+- The repository's Pages settings were confirmed disabled, which explained why merged changes were not appearing on the live site; there had been no existing deployment workflows or recorded deployments.
 - Added `.github/workflows/deploy-pages.yml`: pull requests to `main` build and validate the static app; pushes to `main` and manual workflow dispatch build and deploy the site to GitHub Pages using Bun's frozen lockfile.
 - Vite uses `/Universal-Business-Platform/` as the Pages production base path and `/` for local development.
-- One-time repository owner action remains: open **Settings → Pages**, select **GitHub Actions** under Build and deployment → Source, and save. Then merge the workflow PR; the resulting `main` push runs the first live deployment.
+- Enabled GitHub Pages using the GitHub Actions source. The workflow's first production deployment on `main` completed successfully at commit `5fe03034cc5ba18118a3be5887e4c50c460940ca`.
+- Verified the live site at `https://amrselimali.github.io/Universal-Business-Platform/` and confirmed its HTML, JavaScript, and CSS assets return HTTP 200.
 
 ## Customer Control Account and Trial Balance Diagnostics — 2026-10-10
 
