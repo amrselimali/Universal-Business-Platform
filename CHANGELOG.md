@@ -2,6 +2,12 @@
 
 # 2026-10-10
 
+## Customer Account 2000 Linking
+
+- On storage hydration, active, coded customer profiles are linked to their unique tenant-specific chart account with code `2000`. Archived or merged profiles, supplier records, and `Both` parties are left unchanged.
+- Party linking does not rewrite journal entries or account balances. Legacy customer subledger consolidation only targets `2000` when it is a debit-normal Asset; missing, duplicate, or misclassified control accounts are not used as a GL fallback.
+- Collection posting continues to reject account `2000` unless it is a debit-normal Asset. The bundled demo chart classifies `2000` as a Liability, so demo receipt posting remains blocked until the chart is corrected by the business owner.
+
 ## Customer Control Account and Trial Balance Reconciliation
 
 - The Chart of Accounts no longer lists legacy generated customer subledgers individually (`acc-customer-*` IDs with `1120-*` account codes); the existing party and journal transaction data remains intact.
