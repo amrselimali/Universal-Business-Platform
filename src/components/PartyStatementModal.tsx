@@ -352,6 +352,9 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
     );
     const linkedPartyAccount = accounts.find((account) => account.id === currentParty.accountId);
     const hasSharedCustomerControlAccount = linkedPartyAccount?.code === '2000';
+    const supplierAccountId = currentParty.type === 'Both'
+      ? currentParty.supplierAccountId
+      : currentParty.type === 'Supplier' ? currentParty.accountId : undefined;
     const partyJournalIdentifiers = [pName, pCode, pCustomerCode, pPhone.toLowerCase()]
       .filter((identifier): identifier is string => Boolean(identifier));
 
@@ -363,6 +366,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
 
       const matchingLines = entry.lines.filter(
         (line) => (!hasSharedCustomerControlAccount && line.accountId === currentParty.accountId) ||
+          (supplierAccountId && line.accountId === supplierAccountId) ||
           partyJournalIdentifiers.some((identifier) => line.memo?.toLowerCase().includes(identifier))
       );
 
