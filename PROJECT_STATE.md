@@ -10,6 +10,7 @@ Universal Business Platform
 
 ## Customer Control Account and Trial Balance Diagnostics — 2026-10-10
 
+- The Chart of Accounts view hides legacy generated customer subledger accounts (`acc-customer-*` with `1120-*` codes), so customers are not listed individually in the chart; transaction records and journal lines are not deleted by this display filter.
 - Direct collection receipts now post a debit to the selected payment method's exact tenant-scoped cash/bank account and a credit to the exact tenant-scoped account code `2000`. Posting is rejected when code `2000` is missing, duplicated, or not a debit-normal Asset, or when the payment method has no valid linked cash/bank Asset account.
 - New receipts no longer create `1120-<customerCode>` subsidiary accounts. Existing direct receipt journal credits are reclassified only when the voucher number is explicitly present on the credit-line memo; generated customer subledgers are removed only when their projected balance is zero and no journal line or party still references them. Locked periods and unidentifiable journal lines are left untouched.
 - Customer party links are pointed to control account `2000` without replacing a `Both` party's existing supplier payable link. Receipt vouchers now retain `systemCode` and customer code; customer statements show receipt movements from the voucher once, suppress linked shift-row and journal duplicates, and avoid treating shared account `2000` as a unique party ledger.

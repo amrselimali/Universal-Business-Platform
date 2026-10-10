@@ -180,9 +180,11 @@ export const AccountingView: React.FC = () => {
 
   // Sorted accounts by account code (ترتيب شجرة الحسابات بكود الحساب)
   const sortedAccounts = useMemo(() => {
-    return [...activeBranchAccounts].sort((a, b) =>
-      a.code.localeCompare(b.code, undefined, { numeric: true, sensitivity: 'base' })
-    );
+    return activeBranchAccounts
+      .filter((account) => !(account.id.startsWith('acc-customer-') && account.code.startsWith('1120-')))
+      .sort((a, b) =>
+        a.code.localeCompare(b.code, undefined, { numeric: true, sensitivity: 'base' })
+      );
   }, [activeBranchAccounts]);
 
   // Filtered accounts for COA table (ordered by account code and search)
@@ -617,7 +619,7 @@ export const AccountingView: React.FC = () => {
           <BookOpen className="h-4 w-4" />
           <span>{t('شجرة الحسابات (Chart of Accounts)', 'Chart of Accounts')}</span>
           <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-            {accounts.length}
+            {sortedAccounts.length}
           </span>
         </button>
 
