@@ -342,6 +342,7 @@ export interface Party {
   // Accounting Link (الربط بشجرة الحسابات)
   accountId?: string; // حساب العميل / المورد بالدليل المحاسبي
   accountNameAr?: string;
+  supplierAccountId?: string; // حساب المورد عند ارتباط سجل واحد بدور العميل والمورد
 
   // Medical / Patient specifics (العملاء هما المرضى)
   dateOfBirth?: string;

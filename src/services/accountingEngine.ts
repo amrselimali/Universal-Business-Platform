@@ -422,7 +422,7 @@ export function buildCashPaymentJournalLines(params: {
   let lineIdx = 1;
   const debitAcc = resolveAccount(
     params.accounts,
-    params.expenseOrSupplierAccountId || params.party?.accountId,
+    params.expenseOrSupplierAccountId || params.party?.supplierAccountId || params.party?.accountId,
     params.party ? '2100' : '5200',
     params.party ? 'Liability' : 'Expense'
   );
@@ -446,7 +446,12 @@ export function buildGoodsReceiptJournalLines(params: {
 }): JournalLine[] {
   let lineIdx = 1;
   const invAcc = resolveAccount(params.accounts, params.inventoryAccountId, '1130', 'Asset');
-  const supplierAcc = resolveAccount(params.accounts, params.supplier?.accountId, '2100', 'Liability');
+  const supplierAcc = resolveAccount(
+    params.accounts,
+    params.supplier?.supplierAccountId || params.supplier?.accountId,
+    '2100',
+    'Liability'
+  );
 
   return [
     createJournalLine(invAcc, params.totalCost, 0, `${params.memo} - استلام بضاعة للمخزن`, lineIdx++),

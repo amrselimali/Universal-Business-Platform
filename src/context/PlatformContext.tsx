@@ -7984,7 +7984,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const hasCustomerCode = Boolean(
         party.customerCode?.trim() || party.code?.trim() || party.systemCode?.trim() || party.paperCode?.trim()
       );
-      if (party.type !== 'Customer' || party.isArchived || party.mergedIntoPartyId || !hasCustomerCode) return;
+      if ((party.type !== 'Customer' && party.type !== 'Both') ||
+        party.isArchived || party.mergedIntoPartyId || !hasCustomerCode) return;
 
       const link = resolveCustomerPartyAccount(accountsForReconciliation, party.tenantId);
       if (!link.account) {
@@ -7999,6 +8000,9 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         ...currentParty,
         accountId: link.account.id,
         accountNameAr: link.account.nameAr,
+        supplierAccountId: party.type === 'Both' && party.accountId !== link.account.id
+          ? party.supplierAccountId || party.accountId
+          : party.supplierAccountId,
       });
     });
 
@@ -8216,9 +8220,11 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       return nextReceipt;
     });
 
-    const linkedPartyAccountIds = new Set(allParties.map((party) =>
-      (updatedParties.get(party.id) || party).accountId
-    ).filter((accountId): accountId is string => Boolean(accountId)));
+    const linkedPartyAccountIds = new Set(allParties.flatMap((party) => {
+      const updatedParty = updatedParties.get(party.id) || party;
+      return [updatedParty.accountId, updatedParty.supplierAccountId]
+        .filter((accountId): accountId is string => Boolean(accountId));
+    }));
     const removableCustomerSubledgerIds = new Set(accountsForReconciliation
       .filter((account) => {
         if (!consolidatedAccountIds.has(account.id) || linkedPartyAccountIds.has(account.id)) return false;
@@ -8246,6 +8252,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         return currentParty && (
           currentParty.accountId !== updatedParty.accountId ||
           currentParty.accountNameAr !== updatedParty.accountNameAr ||
+          currentParty.supplierAccountId !== updatedParty.supplierAccountId ||
           currentParty.balance !== updatedParty.balance
         );
       });
