@@ -106,6 +106,27 @@ export function resolveCustomerControlAccount(
   return { account: matchingAccounts[0] };
 }
 
+export function resolveCustomerPartyAccount(
+  accounts: Account[],
+  tenantId: string
+): { account?: Account; error?: string } {
+  const matchingAccounts = accounts.filter(
+    (account) => account.tenantId === tenantId && account.code === '2000'
+  );
+  if (matchingAccounts.length === 0) {
+    return { error: 'لا يوجد حساب عملاء مسجل بالكود 2000 لهذا الكيان.' };
+  }
+  if (matchingAccounts.length > 1) {
+    return { error: 'يوجد أكثر من حساب بالكود 2000 لهذا الكيان؛ يجب إزالة الالتباس قبل الربط.' };
+  }
+  return { account: matchingAccounts[0] };
+}
+
+export function resolveCustomerAggregationAccount(accounts: Account[], tenantId: string): Account | undefined {
+  const customerControl = resolveCustomerControlAccount(accounts, tenantId);
+  return customerControl.account;
+}
+
 export function buildCustomerCollectionJournalLines(params: {
   accounts: Account[];
   tenantId: string;

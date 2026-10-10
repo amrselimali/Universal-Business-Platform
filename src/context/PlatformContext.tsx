@@ -69,6 +69,8 @@ import {
   buildGoodsReceiptJournalLines,
   buildGoodsIssueJournalLines,
   isDateLockedInPeriod,
+  resolveCustomerAggregationAccount,
+  resolveCustomerPartyAccount,
   resolveCustomerControlAccount,
   resolveAccount,
   createJournalLine,
@@ -7914,7 +7916,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return INITIAL_CASH_RECEIPTS;
   });
   const cashReceiptNumberCounter = useRef(0);
-  const collectionReceiptReconciliationRef = useRef<string | null>(null);
+  const customerAccountConsolidationRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!isStorageHydrated) return;
@@ -7924,22 +7926,156 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, [allCashReceipts, isStorageHydrated]);
 
   useEffect(() => {
-    const controlAccountFingerprint = allAccounts
-      .filter((account) => account.code === '2000')
-      .map((account) => `${account.tenantId}:${account.id}:${account.type}`)
-      .sort()
-      .join('|');
-    if (!isStorageHydrated || collectionReceiptReconciliationRef.current === controlAccountFingerprint) return;
-    collectionReceiptReconciliationRef.current = controlAccountFingerprint;
+    if (!isStorageHydrated) return;
 
     const accountsForReconciliation = [...allAccounts];
     const accountBalanceDeltas = new Map<string, number>();
+    const consolidatedBalances = new Map<string, number>();
+    const consolidatedAccountIds = new Map<string, string>();
+    const consolidatedAccountCodes = new Map<string, string>();
     const updatedParties = new Map<string, Party>();
     const updatedJournals = [...allJournals];
     let journalsChanged = false;
     let receiptsChanged = false;
     const warnedTenants = new Set<string>();
     const controlAccountsByTenant = new Map<string, Account>();
+    const aggregationAccountsByTenant = new Map<string, Account>();
+    const hasLockedAccountReference = (account: Account) => allJournals.some((journal) =>
+      journal.tenantId === account.tenantId &&
+      isDateLockedInPeriod(journal.date, allPeriodLocks, journal.tenantId, journal.branchId).isLocked &&
+      journal.lines.some((line) => line.accountId === account.id || line.accountCode === account.code)
+    );
+
+    accountsForReconciliation.forEach((account) => {
+      const aggregationAccount = resolveCustomerAggregationAccount(accountsForReconciliation, account.tenantId);
+      if (aggregationAccount && account.id !== aggregationAccount.id &&
+        account.type === 'Asset' && account.code.startsWith('1120-') &&
+        !hasLockedAccountReference(account)) {
+        aggregationAccountsByTenant.set(account.tenantId, aggregationAccount);
+        consolidatedAccountIds.set(account.id, aggregationAccount.id);
+      }
+    });
+
+    allParties.forEach((party) => {
+      if (party.type !== 'Customer' && party.type !== 'Both') return;
+      const aggregationAccount = resolveCustomerAggregationAccount(accountsForReconciliation, party.tenantId);
+      if (!aggregationAccount) return;
+      aggregationAccountsByTenant.set(party.tenantId, aggregationAccount);
+
+      const linkedAccount = accountsForReconciliation.find((account) => account.id === party.accountId);
+      const isReceivableSubledger = linkedAccount?.tenantId === party.tenantId &&
+        linkedAccount.id !== aggregationAccount.id &&
+        linkedAccount.type === 'Asset' &&
+        !hasLockedAccountReference(linkedAccount) &&
+        (linkedAccount.code.startsWith('1120-') || linkedAccount.parentId === aggregationAccount.id);
+      if (isReceivableSubledger && linkedAccount) {
+        consolidatedAccountIds.set(linkedAccount.id, aggregationAccount.id);
+      }
+      if (party.type === 'Customer' || isReceivableSubledger) {
+        updatedParties.set(party.id, {
+          ...party,
+          accountId: aggregationAccount.id,
+          accountNameAr: aggregationAccount.nameAr,
+        });
+      }
+    });
+
+    allParties.forEach((party) => {
+      const hasCustomerCode = Boolean(
+        party.customerCode?.trim() || party.code?.trim() || party.systemCode?.trim() || party.paperCode?.trim()
+      );
+      if (party.type !== 'Customer' || party.isArchived || party.mergedIntoPartyId || !hasCustomerCode) return;
+
+      const link = resolveCustomerPartyAccount(accountsForReconciliation, party.tenantId);
+      if (!link.account) {
+        if (!warnedTenants.has(party.tenantId)) {
+          console.error(`Customer account linking skipped: ${link.error} Tenant: ${party.tenantId}`);
+          warnedTenants.add(party.tenantId);
+        }
+        return;
+      }
+      const currentParty = updatedParties.get(party.id) || party;
+      updatedParties.set(party.id, {
+        ...currentParty,
+        accountId: link.account.id,
+        accountNameAr: link.account.nameAr,
+      });
+    });
+
+    const subledgerAccountsByTenantCode = new Map<string, Account[]>();
+    consolidatedAccountIds.forEach((_, sourceAccountId) => {
+      const account = accountsForReconciliation.find((candidate) => candidate.id === sourceAccountId);
+      if (!account) return;
+      const key = `${account.tenantId}|${account.code}`;
+      const matching = subledgerAccountsByTenantCode.get(key) || [];
+      matching.push(account);
+      subledgerAccountsByTenantCode.set(key, matching);
+    });
+    subledgerAccountsByTenantCode.forEach((matchingAccounts, key) => {
+      if (matchingAccounts.length !== 1) return;
+      const sourceAccount = matchingAccounts[0];
+      const targetAccountId = consolidatedAccountIds.get(sourceAccount.id);
+      if (targetAccountId) consolidatedAccountCodes.set(key, targetAccountId);
+    });
+
+    const consolidationFingerprint = [
+      ...accountsForReconciliation
+        .filter((account) => account.code.startsWith('1120-') && consolidatedAccountIds.has(account.id))
+        .map((account) => `account:${account.tenantId}:${account.id}:${account.code}`),
+      ...allParties
+        .filter((party) => party.type === 'Customer' || party.type === 'Both')
+        .map((party) => `party:${party.id}:${party.accountId || ''}`),
+      ...allJournals.flatMap((journal) => journal.lines
+        .filter((line) => consolidatedAccountIds.has(line.accountId) ||
+          consolidatedAccountCodes.has(`${journal.tenantId}|${line.accountCode}`))
+        .map((line) => `journal:${journal.id}:${line.id}:${line.accountId}:${line.accountCode}`)),
+    ].sort().join('|');
+    const shouldConsolidateCustomerAccounts =
+      customerAccountConsolidationRef.current !== consolidationFingerprint;
+
+    if (consolidatedAccountIds.size > 0 && shouldConsolidateCustomerAccounts) {
+      consolidatedAccountIds.forEach((targetAccountId, sourceAccountId) => {
+        const sourceAccount = accountsForReconciliation.find((account) => account.id === sourceAccountId);
+        if (!sourceAccount) return;
+        consolidatedBalances.set(
+          targetAccountId,
+          (consolidatedBalances.get(targetAccountId) || 0) + Number(sourceAccount.balance || 0)
+        );
+      });
+      consolidatedAccountIds.forEach((_, sourceAccountId) => {
+        accountBalanceDeltas.set(sourceAccountId, -Number(
+          accountsForReconciliation.find((account) => account.id === sourceAccountId)?.balance || 0
+        ));
+      });
+      consolidatedBalances.forEach((balance, targetAccountId) => {
+        accountBalanceDeltas.set(targetAccountId, (accountBalanceDeltas.get(targetAccountId) || 0) + balance);
+      });
+
+      updatedJournals.forEach((journal, journalIndex) => {
+        if (isDateLockedInPeriod(journal.date, allPeriodLocks, journal.tenantId, journal.branchId).isLocked) return;
+        let entryChanged = false;
+        const lines = journal.lines.map((line) => {
+          const targetAccountId = consolidatedAccountIds.get(line.accountId) ||
+            consolidatedAccountCodes.get(`${journal.tenantId}|${line.accountCode}`);
+          if (!targetAccountId) return line;
+          const targetAccount = accountsForReconciliation.find((account) => account.id === targetAccountId);
+          if (!targetAccount) return line;
+          entryChanged = true;
+          return {
+            ...line,
+            accountId: targetAccount.id,
+            accountCode: targetAccount.code,
+            accountNameAr: targetAccount.nameAr,
+            accountNameEn: targetAccount.nameEn,
+          };
+        });
+        if (entryChanged) {
+          updatedJournals[journalIndex] = { ...journal, lines };
+          journalsChanged = true;
+        }
+      });
+      customerAccountConsolidationRef.current = consolidationFingerprint;
+    }
 
     allParties.forEach((party) => {
       if (party.type !== 'Customer' && party.type !== 'Both') return;
@@ -7952,10 +8088,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         return;
       }
       controlAccountsByTenant.set(party.tenantId, control.account);
-      const linkedAccount = accountsForReconciliation.find((account) => account.id === party.accountId);
-      const hasCustomerSubledger = linkedAccount?.tenantId === party.tenantId &&
-        (linkedAccount.code === '1120' || linkedAccount.code.startsWith('1120-'));
-      if (party.type === 'Customer' || !linkedAccount || hasCustomerSubledger) {
+      if (!aggregationAccountsByTenant.has(party.tenantId)) {
         updatedParties.set(party.id, {
           ...party,
           accountId: control.account.id,
@@ -8088,12 +8221,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     ).filter((accountId): accountId is string => Boolean(accountId)));
     const removableCustomerSubledgerIds = new Set(accountsForReconciliation
       .filter((account) => {
-        const isGeneratedCustomerSubledger = account.type === 'Asset' &&
-          controlAccountsByTenant.has(account.tenantId) &&
-          account.code.startsWith('1120-') &&
-          account.nameAr.startsWith('العميل ') &&
-          account.id.startsWith('acc-customer-');
-        if (!isGeneratedCustomerSubledger || linkedPartyAccountIds.has(account.id)) return false;
+        if (!consolidatedAccountIds.has(account.id) || linkedPartyAccountIds.has(account.id)) return false;
         const projectedBalance = Number(account.balance || 0) + (accountBalanceDeltas.get(account.id) || 0);
         return Math.abs(projectedBalance) < 0.01 &&
           !updatedJournals.some((journal) => journal.lines.some((line) =>
@@ -8113,11 +8241,21 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       });
     }
     if (updatedParties.size > 0) {
-      setAllParties((previous) => previous.map((party) => updatedParties.get(party.id) || party));
+      const changedParties = [...updatedParties].some(([partyId, updatedParty]) => {
+        const currentParty = allParties.find((party) => party.id === partyId);
+        return currentParty && (
+          currentParty.accountId !== updatedParty.accountId ||
+          currentParty.accountNameAr !== updatedParty.accountNameAr ||
+          currentParty.balance !== updatedParty.balance
+        );
+      });
+      if (changedParties) {
+        setAllParties((previous) => previous.map((party) => updatedParties.get(party.id) || party));
+      }
     }
     if (journalsChanged) setAllJournals(updatedJournals);
     if (receiptsChanged) setAllCashReceipts(reconciledReceipts);
-  }, [allAccounts, allCashReceipts, allJournals, allParties, isStorageHydrated]);
+  }, [allAccounts, allCashReceipts, allJournals, allParties, allPeriodLocks, isStorageHydrated]);
 
   const [allCashPayments, setAllCashPayments] = useState<CashPaymentVoucher[]>(() => {
     try {
