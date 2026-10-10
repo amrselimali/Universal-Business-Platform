@@ -1007,6 +1007,7 @@ export interface CashReceiptVoucher {
   clientSignature?: string;
   status: 'active' | 'cancelled';
   journalEntryId?: string;
+  customerBalanceApplied?: boolean;
   isReplaced?: boolean;
   replacedByVoucherId?: string;
   reversalJournalEntryId?: string;
@@ -1252,5 +1253,4 @@ export interface AppNotification {
   actionUrl?: string;
   metadata?: Record<string, any>;
 }
-
 

@@ -108,13 +108,36 @@ export const AccountingView: React.FC = () => {
     return accounts.filter((a) => a.branchId === selectedBranchId || !a.branchId || a.branchId === 'all');
   }, [accounts, selectedBranchId, branchOnlyFilter]);
 
-  // Totals for Trial Balance & Health Ribbon (isolated per branch if selected)
-  const totalDebits = activeBranchAccounts
-    .filter((a) => a.isDebitNormal)
-    .reduce((sum, a) => sum + a.balance, 0);
-  const totalCredits = activeBranchAccounts
-    .filter((a) => !a.isDebitNormal)
-    .reduce((sum, a) => sum + a.balance, 0);
+  // Trial balance comes from posted journal movements, not roll-up balances in parent accounts.
+  const filteredJournalEntries = useMemo(() => {
+    return journalEntries.filter((entry) => {
+      if (selectedBranchId === 'all') return true;
+      if (selectedBranchId === 'general') return !entry.branchId || entry.branchId === 'all';
+      return entry.branchId === selectedBranchId;
+    });
+  }, [journalEntries, selectedBranchId]);
+
+  const trialBalanceAccounts = useMemo(() => {
+    const balances = new Map<string, number>();
+    const accountsById = new Map(accounts.map((account) => [account.id, account]));
+    const trialAccounts = new Map(activeBranchAccounts.map((account) => [account.id, account]));
+    filteredJournalEntries.forEach((entry) => {
+      if (!entry.isPosted) return;
+      entry.lines.forEach((line) => {
+        const account = accountsById.get(line.accountId) || accounts.find((candidate) => candidate.code === line.accountCode);
+        if (!account) return;
+        trialAccounts.set(account.id, account);
+        balances.set(account.id, (balances.get(account.id) || 0) + Number(line.debit || 0) - Number(line.credit || 0));
+      });
+    });
+    return Array.from(trialAccounts.values())
+      .map((account) => ({ ...account, balance: Number((balances.get(account.id) || 0).toFixed(2)) }))
+      .sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true, sensitivity: 'base' }));
+  }, [accounts, activeBranchAccounts, filteredJournalEntries]);
+
+  const totalDebits = trialBalanceAccounts.reduce((sum, account) => sum + Math.max(0, account.balance), 0);
+  const totalCredits = trialBalanceAccounts.reduce((sum, account) => sum + Math.max(0, -account.balance), 0);
+  const isTrialBalanceBalanced = Math.abs(totalDebits - totalCredits) < 0.01;
 
   // Total Revenue & Expense for Net Profit
   const totalRevenue = activeBranchAccounts
@@ -146,15 +169,6 @@ export const AccountingView: React.FC = () => {
       return matchesType && matchesSearch;
     });
   }, [sortedAccounts, selectedType, searchQuery]);
-
-  // Filtered Journal Entries by Branch (فصل القيود المحاسبية لكل فرع)
-  const filteredJournalEntries = useMemo(() => {
-    return journalEntries.filter((entry) => {
-      if (selectedBranchId === 'all') return true;
-      if (selectedBranchId === 'general') return !entry.branchId || entry.branchId === 'all';
-      return entry.branchId === selectedBranchId;
-    });
-  }, [journalEntries, selectedBranchId]);
 
   // Open Add Account modal (optionally with parent preset)
   const handleOpenAddAccount = (parentId: string = '') => {
@@ -1158,7 +1172,7 @@ export const AccountingView: React.FC = () => {
           <div className="flex items-center justify-between border-b border-slate-200 pb-3 dark:border-slate-800">
             <div>
               <h3 className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                <span>{t('ميزان المراجعة التقديري بالأرصدة', 'Trial Balance (Balances)')}</span>
+                <span>{t('ميزان المراجعة من القيود المرحلة', 'Trial Balance (Posted Journals)')}</span>
                 {selectedBranchId !== 'all' && (
                   <span className="text-[10px] font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950 px-2 py-0.5 rounded-md border border-indigo-200 dark:border-indigo-800">
                     🏢 {branches.find((b) => b.id === selectedBranchId)?.name || selectedBranchId}
@@ -1167,14 +1181,18 @@ export const AccountingView: React.FC = () => {
               </h3>
               <p className="text-[11px] text-slate-500">
                 {selectedBranchId !== 'all'
-                  ? t('ميزان مراجعة مخصص لفرع محدد لحصر الأرصدة والعمليات الخاصة به.', 'Branch-isolated trial balance for specific branch operations.')
-                  : t('توازن إجمالي الأرصدة المدينة مع الأرصدة الدائنة لتأكيد صحة الدفاتر لجميع الفروع.', 'Verification of double-entry equality across all branches.')}
+                  ? t('إجمالي أرصدة القيود المرحلة للفرع المحدد، دون تكرار أرصدة الحسابات الرئيسية والفرعية.', 'Posted journal balances for the selected branch, without double-counting parent and subsidiary accounts.')
+                  : t('إجمالي أرصدة القيود المرحلة لجميع الفروع، دون تكرار أرصدة الحسابات الرئيسية والفرعية.', 'Posted journal balances across branches, without double-counting parent and subsidiary accounts.')}
               </p>
             </div>
 
             <div className="flex items-center gap-2">
-              <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300">
-                {t('الميزان متوازن', 'Balanced')}
+              <span className={`rounded-full px-3 py-1 text-xs font-bold ${
+                isTrialBalanceBalanced
+                  ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
+                  : 'bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300'
+              }`}>
+                {isTrialBalanceBalanced ? t('الميزان متوازن', 'Balanced') : t('الميزان غير متوازن', 'Out of balance')}
               </span>
             </div>
           </div>
@@ -1192,7 +1210,7 @@ export const AccountingView: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-medium">
-                {activeBranchAccounts.map((acc) => (
+                {trialBalanceAccounts.map((acc) => (
                   <tr key={acc.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
                     <td className="py-2.5 font-mono font-bold text-indigo-600 dark:text-indigo-400">{acc.code}</td>
                     <td className="py-2.5 text-slate-900 dark:text-white">
@@ -1209,10 +1227,14 @@ export const AccountingView: React.FC = () => {
                       )}
                     </td>
                     <td className="py-2.5 text-end font-mono font-bold text-emerald-600">
-                      {acc.isDebitNormal ? formatMoney(acc.balance) : '-'}
+                      {acc.balance > 0
+                        ? formatMoney(acc.balance)
+                        : '-'}
                     </td>
                     <td className="py-2.5 text-end font-mono font-bold text-rose-600">
-                      {!acc.isDebitNormal ? formatMoney(acc.balance) : '-'}
+                      {acc.balance < 0
+                        ? formatMoney(-acc.balance)
+                        : '-'}
                     </td>
                   </tr>
                 ))}

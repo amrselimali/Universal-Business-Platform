@@ -7912,6 +7912,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return INITIAL_CASH_RECEIPTS;
   });
   const cashReceiptNumberCounter = useRef(0);
+  const collectionReceiptReconciliationRef = useRef(false);
 
   useEffect(() => {
     if (!isStorageHydrated) return;
@@ -7919,6 +7920,202 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (!saved) console.error('Failed to persist cash receipts to IndexedDB. The current in-memory data is preserved.');
     });
   }, [allCashReceipts, isStorageHydrated]);
+
+  useEffect(() => {
+    if (!isStorageHydrated || collectionReceiptReconciliationRef.current) return;
+    collectionReceiptReconciliationRef.current = true;
+
+    const accountsForReconciliation = [...allAccounts];
+    const newCustomerAccounts: Account[] = [];
+    const accountBalanceDeltas = new Map<string, number>();
+    const updatedParties = new Map<string, Party>();
+    const updatedJournals = [...allJournals];
+    let journalsChanged = false;
+    let receiptsChanged = false;
+    const usedCustomerCodes = getUsedCustomerCodes();
+
+    const getCustomerReceivableAccount = (party: Party): Account => {
+      const currentParty = updatedParties.get(party.id) || party;
+      const receivableParent = accountsForReconciliation.find(
+        (account) => account.tenantId === currentParty.tenantId && account.code === '1120'
+      );
+      const linkedAccount = accountsForReconciliation.find(
+        (account) => account.id === currentParty.accountId && account.tenantId === currentParty.tenantId
+      );
+      if (linkedAccount?.type === 'Asset' && linkedAccount.id !== receivableParent?.id) return linkedAccount;
+
+      const requestedCode = [currentParty.customerCode, currentParty.code].find(
+        (code) => Boolean(code && code !== currentParty.systemCode && /^\d+$/.test(code) && Number.isSafeInteger(Number(code)))
+      );
+      const customerCode = requestedCode
+        ? String(Number(requestedCode))
+        : allocateCustomerCode(usedCustomerCodes);
+      usedCustomerCodes.add(customerCode);
+      const existingSubledger = accountsForReconciliation.find(
+        (account) =>
+          account.tenantId === currentParty.tenantId &&
+          account.code === `1120-${customerCode}` &&
+          account.type === 'Asset'
+      );
+      if (existingSubledger) {
+        updatedParties.set(currentParty.id, {
+          ...currentParty,
+          customerCode,
+          code: customerCode,
+          accountId: existingSubledger.id,
+          accountNameAr: existingSubledger.nameAr,
+        });
+        return existingSubledger;
+      }
+
+      let accountCode = `1120-${customerCode}`;
+      let accountCodeSuffix = 2;
+      while (accountsForReconciliation.some((account) => account.tenantId === currentParty.tenantId && account.code === accountCode)) {
+        accountCode = `1120-${customerCode}-${accountCodeSuffix++}`;
+      }
+
+      let accountId = `acc-customer-${currentParty.id}`;
+      let accountIdSuffix = 2;
+      while (accountsForReconciliation.some((account) => account.id === accountId)) {
+        accountId = `acc-customer-${currentParty.id}-${accountIdSuffix++}`;
+      }
+      const account: Account = {
+        id: accountId,
+        tenantId: currentParty.tenantId,
+        code: accountCode,
+        nameAr: `العميل ${currentParty.name} - كود ${customerCode}`,
+        nameEn: `Customer ${currentParty.nameEn || currentParty.name} - Code ${customerCode}`,
+        type: 'Asset',
+        parentId: receivableParent?.id,
+        balance: 0,
+        isDebitNormal: true,
+        level: receivableParent ? receivableParent.level + 1 : 1,
+      };
+      accountsForReconciliation.push(account);
+      newCustomerAccounts.push(account);
+      updatedParties.set(currentParty.id, {
+        ...currentParty,
+        customerCode,
+        code: customerCode,
+        accountId: account.id,
+        accountNameAr: account.nameAr,
+      });
+      return account;
+    };
+
+    const reconciledReceipts = allCashReceipts.map((receipt) => {
+      if (receipt.status !== 'active' || !receipt.partyId) return receipt;
+      const receiptParty = updatedParties.get(receipt.partyId) || allParties.find((party) => party.id === receipt.partyId);
+      if (!receiptParty || (receiptParty.type !== 'Customer' && receiptParty.type !== 'Both')) return receipt;
+
+      const journalIndex = updatedJournals.findIndex((journal) =>
+        (journal.id === receipt.journalEntryId || journal.lines.some((line) => line.memo?.includes(receipt.voucherNumber))) &&
+        journal.lines.some((line) => line.memo?.includes(receipt.voucherNumber) && Number(line.credit) > 0)
+      );
+      if (!validatePeriodDate(receipt.date, receipt.branchId).allowed) return receipt;
+
+      const receivableAccount = getCustomerReceivableAccount(receiptParty);
+      const nextReceipt = { ...receipt };
+      if (!receipt.customerBalanceApplied) {
+        const currentParty = updatedParties.get(receiptParty.id) || receiptParty;
+        updatedParties.set(receiptParty.id, {
+          ...currentParty,
+          balance: Number((Number(currentParty.balance || 0) - (Number(receipt.amount) || 0)).toFixed(2)),
+        });
+        nextReceipt.customerBalanceApplied = true;
+        receiptsChanged = true;
+      }
+
+      if (journalIndex >= 0) {
+        const journal = updatedJournals[journalIndex];
+        const lineIndex = journal.lines.findIndex(
+          (line) => line.memo?.includes(receipt.voucherNumber) && Number(line.credit) > 0
+        );
+        if (lineIndex >= 0) {
+          const oldLine = journal.lines[lineIndex];
+          if (oldLine.accountId !== receivableAccount.id) {
+            const oldAccount = accountsForReconciliation.find((account) => account.id === oldLine.accountId);
+            if (oldAccount) {
+              const oldBalanceDelta = oldAccount.isDebitNormal
+                ? Number(oldLine.debit) - Number(oldLine.credit)
+                : Number(oldLine.credit) - Number(oldLine.debit);
+              accountBalanceDeltas.set(oldAccount.id, (accountBalanceDeltas.get(oldAccount.id) || 0) - oldBalanceDelta);
+            }
+            const newBalanceDelta = receivableAccount.isDebitNormal
+              ? Number(oldLine.debit) - Number(oldLine.credit)
+              : Number(oldLine.credit) - Number(oldLine.debit);
+            accountBalanceDeltas.set(
+              receivableAccount.id,
+              (accountBalanceDeltas.get(receivableAccount.id) || 0) + newBalanceDelta
+            );
+            const lines = [...journal.lines];
+            lines[lineIndex] = {
+              ...oldLine,
+              accountId: receivableAccount.id,
+              accountCode: receivableAccount.code,
+              accountNameAr: receivableAccount.nameAr,
+              accountNameEn: receivableAccount.nameEn,
+            };
+            updatedJournals[journalIndex] = { ...journal, lines };
+            journalsChanged = true;
+          }
+          if (nextReceipt.journalEntryId !== journal.id) {
+            nextReceipt.journalEntryId = journal.id;
+            receiptsChanged = true;
+          }
+        }
+      } else {
+        const journalLines = buildCashReceiptJournalLines({
+          accounts: accountsForReconciliation,
+          amount: Number(receipt.amount) || 0,
+          cashOrBankAccountId: receipt.bankOrSafeAccountId,
+          party: { ...receiptParty, accountId: receivableAccount.id },
+          memo: `تحصيل ${receipt.serviceName || receipt.description} - العميل ${receipt.receivedFrom} - سند ${receipt.voucherNumber}`,
+        });
+        const journal = buildJournalEntry({
+          tenantId: receipt.tenantId,
+          branchId: receipt.branchId,
+          prefix: 'JV-CR-REC',
+          date: receipt.date,
+          description: `إعادة ترحيل إيصال التحصيل ${receipt.voucherNumber}`,
+          sourceDocument: `إيصالات التحصيل - سند ${receipt.voucherNumber}`,
+          lines: journalLines,
+        });
+        updatedJournals.unshift(journal);
+        journalsChanged = true;
+        nextReceipt.journalEntryId = journal.id;
+        receiptsChanged = true;
+        journalLines.forEach((line) => {
+          const account = accountsForReconciliation.find((candidate) => candidate.id === line.accountId);
+          if (!account) return;
+          const delta = account.isDebitNormal
+            ? Number(line.debit) - Number(line.credit)
+            : Number(line.credit) - Number(line.debit);
+          accountBalanceDeltas.set(account.id, (accountBalanceDeltas.get(account.id) || 0) + delta);
+        });
+      }
+      return nextReceipt;
+    });
+
+    if (newCustomerAccounts.length > 0 || accountBalanceDeltas.size > 0) {
+      setAllAccounts((previous) => {
+        const accountsWithSubledgers = newCustomerAccounts.length > 0
+          ? [...newCustomerAccounts, ...previous]
+          : previous;
+        return accountsWithSubledgers.map((account) => {
+          const delta = accountBalanceDeltas.get(account.id);
+          return delta === undefined
+            ? account
+            : { ...account, balance: Number((Number(account.balance || 0) + delta).toFixed(2)) };
+        });
+      });
+    }
+    if (updatedParties.size > 0) {
+      setAllParties((previous) => previous.map((party) => updatedParties.get(party.id) || party));
+    }
+    if (journalsChanged) setAllJournals(updatedJournals);
+    if (receiptsChanged) setAllCashReceipts(reconciledReceipts);
+  }, [allAccounts, allCashReceipts, allJournals, allParties, isStorageHydrated]);
 
   const [allCashPayments, setAllCashPayments] = useState<CashPaymentVoucher[]>(() => {
     try {
@@ -8069,6 +8266,91 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const groupedJournals = new Map<string, { tenantId: string; branchId: string; date: string; lines: JournalLine[] }>();
     const receipts: CashReceiptVoucher[] = [];
     const partyOffersMap = new Map<string, ClientOffer[]>();
+    const customerCreditsMap = new Map<string, number>();
+    const customerPartiesWithAccounts = new Map<string, Party>();
+    const customerAccounts: Account[] = [];
+    const accountsForPosting = [...allAccounts];
+    const reservedCustomerCodes = getUsedCustomerCodes();
+
+    const ensureCustomerReceivableAccount = (party?: Party): Party | undefined => {
+      if (!party || (party.type !== 'Customer' && party.type !== 'Both')) return party;
+      const alreadyPreparedParty = customerPartiesWithAccounts.get(party.id);
+      if (alreadyPreparedParty) return alreadyPreparedParty;
+
+      const receivableParent = accountsForPosting.find(
+        (account) => account.tenantId === party.tenantId && account.code === '1120'
+      );
+      const linkedAccount = accountsForPosting.find(
+        (account) => account.id === party.accountId && account.tenantId === party.tenantId
+      );
+      if (linkedAccount && linkedAccount.type === 'Asset' && linkedAccount.id !== receivableParent?.id) {
+        return party;
+      }
+
+      const requestedCode = [party.customerCode, party.code].find(
+        (code) => Boolean(code && code !== party.systemCode && /^\d+$/.test(code) && Number.isSafeInteger(Number(code)))
+      );
+      const customerCode = requestedCode
+        ? String(Number(requestedCode))
+        : allocateCustomerCode(reservedCustomerCodes);
+      reservedCustomerCodes.add(customerCode);
+      const existingSubledger = accountsForPosting.find(
+        (account) =>
+          account.tenantId === party.tenantId &&
+          account.code === `1120-${customerCode}` &&
+          account.type === 'Asset'
+      );
+      if (existingSubledger) {
+        const updatedParty = {
+          ...party,
+          customerCode,
+          code: customerCode,
+          accountId: existingSubledger.id,
+          accountNameAr: existingSubledger.nameAr,
+        };
+        customerPartiesWithAccounts.set(party.id, updatedParty);
+        return updatedParty;
+      }
+
+      const customerCodeUpdatedParty = party.customerCode === customerCode && party.code === customerCode
+        ? party
+        : { ...party, customerCode, code: customerCode };
+      const accountCodeBase = `1120-${customerCode}`;
+      let accountCode = accountCodeBase;
+      let suffix = 2;
+      while (accountsForPosting.some((account) => account.code === accountCode)) {
+        accountCode = `${accountCodeBase}-${suffix++}`;
+      }
+
+      const accountIdBase = `acc-customer-${party.id}`;
+      let accountId = accountIdBase;
+      let idSuffix = 2;
+      while (accountsForPosting.some((account) => account.id === accountId)) {
+        accountId = `${accountIdBase}-${idSuffix++}`;
+      }
+      const account: Account = {
+        id: accountId,
+        tenantId: party.tenantId,
+        code: accountCode,
+        nameAr: `العميل ${party.name} - كود ${customerCode}`,
+        nameEn: `Customer ${party.nameEn || party.name} - Code ${customerCode}`,
+        type: 'Asset',
+        parentId: receivableParent?.id,
+        balance: 0,
+        isDebitNormal: true,
+        level: receivableParent ? receivableParent.level + 1 : 1,
+      };
+      accountsForPosting.push(account);
+      customerAccounts.push(account);
+
+      const updatedParty = {
+        ...customerCodeUpdatedParty,
+        accountId: account.id,
+        accountNameAr: account.nameAr,
+      };
+      customerPartiesWithAccounts.set(party.id, updatedParty);
+      return updatedParty;
+    };
 
     items.forEach((item, index) => {
       const sequence = nextSequence + index + 1;
@@ -8078,6 +8360,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const displayDesc = item.productName && item.productName !== item.serviceName
         ? `${item.serviceName} - ${item.productName} (الكمية المحجوزة: ${bookedQty})`
         : `${item.serviceName} (الكمية المحجوزة: ${bookedQty})`;
+      const receiptParty = ensureCustomerReceivableAccount(allParties.find((party) => party.id === item.partyId));
 
       const receipt: CashReceiptVoucher = {
         id: receiptId,
@@ -8103,6 +8386,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         date: item.date,
         time: '12:00:00',
         status: 'active',
+        customerBalanceApplied: receiptParty?.type === 'Customer' || receiptParty?.type === 'Both',
         createdAt: new Date().toISOString(),
       };
 
@@ -8113,13 +8397,19 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         groupedJournals.set(groupKey, group);
       }
       group.lines.push(...buildCashReceiptJournalLines({
-        accounts: allAccounts,
+        accounts: accountsForPosting,
         amount: Number(item.amount),
         cashOrBankAccountId: item.paymentAccountId,
-        party: allParties.find((party) => party.id === item.partyId),
+        party: receiptParty,
         memo: `تحصيل ${displayDesc} - العميل ${item.receivedFrom} - سند ${voucherNumber}`,
       }));
       receipts.push(receipt);
+      if (receiptParty && (receiptParty.type === 'Customer' || receiptParty.type === 'Both')) {
+        customerCreditsMap.set(
+          receiptParty.id,
+          (customerCreditsMap.get(receiptParty.id) || 0) + Number(item.amount)
+        );
+      }
 
       // Register booked service/product and quantity as credit in customer account (offers / sessions balance)
       if (item.partyId && bookedQty > 0) {
@@ -8164,6 +8454,9 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }));
 
     const allJournalLines = journalEntries.flatMap((entry) => entry.lines);
+    if (customerAccounts.length > 0) {
+      setAllAccounts((prev) => [...customerAccounts, ...prev]);
+    }
     applyJournalLinesToAccounts(allJournalLines);
     setAllJournals((prev) => [...journalEntries, ...prev]);
     setAllCashReceipts((prev) => [...updatedReceipts, ...prev]);
@@ -8173,15 +8466,24 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (partyOffersMap.size > 0) {
       setAllParties((prev) =>
         prev.map((party) => {
+          const linkedParty = customerPartiesWithAccounts.get(party.id) || party;
           const newOffers = partyOffersMap.get(party.id);
-          if (!newOffers || newOffers.length === 0) return party;
-          const existingOffers = party.offers || [];
+          const customerCredit = customerCreditsMap.get(party.id) || 0;
+          if (!newOffers || newOffers.length === 0) {
+            return customerCredit > 0
+              ? { ...linkedParty, balance: Number((Number(linkedParty.balance || 0) - customerCredit).toFixed(2)) }
+              : linkedParty;
+          }
+          const existingOffers = linkedParty.offers || [];
           return {
-            ...party,
+            ...linkedParty,
+            balance: Number((Number(linkedParty.balance || 0) - customerCredit).toFixed(2)),
             offers: [...newOffers, ...existingOffers],
           };
         })
       );
+    } else if (customerPartiesWithAccounts.size > 0) {
+      setAllParties((prev) => prev.map((party) => customerPartiesWithAccounts.get(party.id) || party));
     }
 
     logUserActivity(
