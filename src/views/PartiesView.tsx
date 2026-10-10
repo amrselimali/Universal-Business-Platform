@@ -35,9 +35,12 @@ import {
   Table,
   Zap,
   Lock,
+  AlertTriangle,
+  CalendarDays,
 } from 'lucide-react';
 import { PartyStatementModal } from '../components/PartyStatementModal';
 import { exportToCsv, shareViaWhatsApp } from '../utils/exportUtils';
+import { buildCustomerDuplicateIndex, buildCustomerDuplicateIndexAsync, CustomerDuplicateMatch, findCustomerDuplicates, findCustomerNameDuplicates } from '../utils/customerDuplicateDetection';
 import {
   ExcelDataTransferModal,
   ExcelColumnConfig,
@@ -61,7 +64,7 @@ const partyExcelColumns: ExcelColumnConfig[] = [
     labelEn: 'Customer Code',
     required: false,
     type: 'text',
-    sampleValue: 'C-00001',
+    sampleValue: '1',
     instructions: 'كود العميل المسريل بالتطبيق (يحسب آلياً مسريل إذا ترك فارغاً)',
   },
   {
@@ -165,6 +168,53 @@ const partyExcelColumns: ExcelColumnConfig[] = [
   },
 ];
 
+const MultiSelectFilter: React.FC<{
+  label: string;
+  selectAllLabel: string;
+  clearLabel: string;
+  emptyLabel: string;
+  searchLabel: string;
+  options: Array<{ value: string; label: string }>;
+  selected: string[];
+  onChange: (values: string[]) => void;
+}> = ({ label, selectAllLabel, clearLabel, emptyLabel, searchLabel, options, selected, onChange }) => {
+  const [search, setSearch] = useState('');
+  const visibleOptions = useMemo(() => {
+    const query = search.trim().toLocaleLowerCase();
+    return query ? options.filter((option) => option.label.toLocaleLowerCase().includes(query) || option.value.toLocaleLowerCase().includes(query)) : options;
+  }, [options, search]);
+  const allVisibleSelected = visibleOptions.length > 0 && visibleOptions.every((option) => selected.includes(option.value));
+
+  return (
+    <details className="relative min-w-0 text-xs">
+      <summary className="cursor-pointer list-none truncate rounded-lg border border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-800">
+        {label} ({selected.length || '—'})
+      </summary>
+      <div className="absolute z-20 mt-1 max-h-72 min-w-full overflow-auto rounded-lg border border-slate-200 bg-white p-2 shadow-xl dark:border-slate-700 dark:bg-slate-900">
+        <div className="sticky top-0 bg-white pb-1 dark:bg-slate-900">
+          <div className="relative">
+            <Search className="absolute start-2 top-2 h-3.5 w-3.5 text-slate-400" />
+            <input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={searchLabel} className="w-full rounded border border-slate-200 bg-slate-50 py-1.5 ps-7 pe-2 dark:border-slate-700 dark:bg-slate-800" />
+          </div>
+          <button type="button" disabled={visibleOptions.length === 0} onClick={() => {
+            const visibleValues = new Set(visibleOptions.map((option) => option.value));
+            onChange(allVisibleSelected ? selected.filter((value) => !visibleValues.has(value)) : [...new Set([...selected, ...visibleValues])]);
+          }} className="mt-1 w-full rounded px-2 py-1 text-start font-bold text-indigo-700 hover:bg-indigo-50 disabled:opacity-40 dark:text-indigo-300 dark:hover:bg-indigo-950/40">
+            {allVisibleSelected ? clearLabel : selectAllLabel} ({visibleOptions.length})
+          </button>
+        </div>
+        {visibleOptions.map((option) => (
+          <label key={option.value} className="flex cursor-pointer items-center gap-2 whitespace-nowrap rounded px-2 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800">
+            <input type="checkbox" checked={selected.includes(option.value)} onChange={(event) => onChange(event.target.checked ? [...selected, option.value] : selected.filter((value) => value !== option.value))} />
+            <span>{option.label}</span>
+          </label>
+        ))}
+        {visibleOptions.length === 0 && <p className="px-2 py-2 text-slate-500">{emptyLabel}</p>}
+      </div>
+    </details>
+  );
+};
+
 export const PartiesView: React.FC = () => {
   const {
     t,
@@ -173,6 +223,14 @@ export const PartiesView: React.FC = () => {
     addParty,
     updateParty,
     deleteParty,
+    deletePartiesBulk,
+    archiveParty,
+    mergeCustomerParties,
+    mergeCustomerPartiesBulk,
+    allReceptionShifts,
+    allInvoices,
+    allCashReceipts,
+    allSpecializedTaxInvoices,
     importPartiesBulk,
     importCustomersFromExcel,
     getNextCustomerAppCode,
@@ -186,12 +244,30 @@ export const PartiesView: React.FC = () => {
   } = usePlatform();
 
   const [activeFilter, setActiveFilter] = useState<'ALL' | 'WITH_BALANCE' | 'ZERO_BALANCE'>('ALL');
+  const [customerStatusFilter, setCustomerStatusFilter] = useState<'all' | 'active' | 'archived'>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [showAddModal, setShowAddModal] = useState<boolean>(false);
   const [showExcelModal, setShowExcelModal] = useState<boolean>(false);
   const [statementPartyId, setStatementPartyId] = useState<string | null>(null);
   const [statementInitialMode, setStatementInitialMode] = useState<'VALUE' | 'QUANTITY'>('VALUE');
   const [showStatementModal, setShowStatementModal] = useState<boolean>(false);
+  const [showDuplicateReview, setShowDuplicateReview] = useState(false);
+  const [duplicateReviewStartDate, setDuplicateReviewStartDate] = useState('');
+  const [duplicateReviewEndDate, setDuplicateReviewEndDate] = useState('');
+  const [duplicateReviewSubmitted, setDuplicateReviewSubmitted] = useState(false);
+  const [duplicateReviewResults, setDuplicateReviewResults] = useState<Array<{ party: Party; match: CustomerDuplicateMatch }>>([]);
+  const [duplicateReviewLoading, setDuplicateReviewLoading] = useState(false);
+  const [duplicateReviewProgress, setDuplicateReviewProgress] = useState(0);
+  const [duplicateReviewVisibleCount, setDuplicateReviewVisibleCount] = useState(100);
+  const [codingFilters, setCodingFilters] = useState({ query: '', branchIds: [] as string[], statuses: ['active'], customerCodes: [] as string[], systemCodes: [] as string[], fileCodes: [] as string[], phone: '', dateFrom: '', dateTo: '' });
+  const [codingResults, setCodingResults] = useState<Party[] | null>(null);
+  const [selectedCodingPartyIds, setSelectedCodingPartyIds] = useState<string[]>([]);
+  const [mergePrimaryId, setMergePrimaryId] = useState('');
+  const [mergeNote, setMergeNote] = useState('');
+  const [codingAction, setCodingAction] = useState<'merge' | 'archive' | 'delete' | null>(null);
+  const [systemCodeMergeGroups, setSystemCodeMergeGroups] = useState<Array<{ systemCode: string; parties: Party[]; primaryId: string }>>([]);
+  const duplicateReviewRunIdRef = useRef(0);
+  const [showAddDuplicateWarning, setShowAddDuplicateWarning] = useState(false);
   const [selectedPackageParty, setSelectedPackageParty] = useState<Party | null>(null);
   const [showEditModal, setShowEditModal] = useState<boolean>(false);
   const [editingParty, setEditingParty] = useState<Party | null>(null);
@@ -245,6 +321,13 @@ export const PartiesView: React.FC = () => {
     return currentBranchId === (branches[0]?.id || 'branch-cairo');
   });
 
+  const statusFilteredCustomers = useMemo(() => customers.filter((party) => {
+    const isArchived = Boolean(party.isArchived || party.mergedIntoPartyId);
+    if (customerStatusFilter === 'active') return !isArchived;
+    if (customerStatusFilter === 'archived') return isArchived;
+    return true;
+  }), [customers, customerStatusFilter]);
+
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [itemsPerPage, setItemsPerPage] = useState<number>(50);
   const [viewMode, setViewMode] = useState<'GRID' | 'TABLE'>('GRID');
@@ -252,11 +335,11 @@ export const PartiesView: React.FC = () => {
   // Reset page when search or filter changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, activeFilter, itemsPerPage]);
+  }, [searchQuery, activeFilter, customerStatusFilter, itemsPerPage]);
 
   const filteredParties = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
-    return customers.filter((p) => {
+    return statusFilteredCustomers.filter((p) => {
       if (activeFilter === 'WITH_BALANCE' && p.balance === 0) return false;
       if (activeFilter === 'ZERO_BALANCE' && p.balance !== 0) return false;
 
@@ -273,7 +356,213 @@ export const PartiesView: React.FC = () => {
         (p.fileNumber && p.fileNumber.toLowerCase().includes(q))
       );
     });
-  }, [customers, activeFilter, searchQuery]);
+  }, [statusFilteredCustomers, activeFilter, searchQuery]);
+
+  const runCodingSearch = () => {
+    const q = codingFilters.query.trim().toLocaleLowerCase();
+    const phone = codingFilters.phone.trim().toLocaleLowerCase();
+    const results = parties.filter((party) => {
+      if (!(party.type === 'Customer' || party.type === 'Both')) return false;
+      const isArchived = Boolean(party.isArchived || party.mergedIntoPartyId);
+      if (codingFilters.statuses.length && !codingFilters.statuses.includes(isArchived ? 'archived' : 'active')) return false;
+      const assignedBranch = branches.find((branch) => branch.id === party.branchId || branch.name === party.branchId || branch.code === party.branchId)?.id || party.branchId;
+      const customerBranches = new Set([assignedBranch, ...(party.branchIds || []).map((value) => branches.find((branch) => branch.id === value || branch.name === value || branch.code === value)?.id || value)].filter(Boolean));
+      if (codingFilters.branchIds.length && !codingFilters.branchIds.some((branchId) => customerBranches.has(branchId))) return false;
+      const customerCode = party.customerCode || party.code || '';
+      const systemCode = party.systemCode || party.paperCode || '';
+      const fileCode = party.fileCode || party.fileNumber || '';
+      if (codingFilters.customerCodes.length && !codingFilters.customerCodes.includes(customerCode)) return false;
+      if (codingFilters.systemCodes.length && !codingFilters.systemCodes.includes(systemCode)) return false;
+      if (codingFilters.fileCodes.length && !codingFilters.fileCodes.includes(fileCode)) return false;
+      if (phone && ![party.phone, party.altPhone].some((value) => value?.toLocaleLowerCase().includes(phone))) return false;
+      const createdDate = party.createdAt?.slice(0, 10) || '';
+      if (codingFilters.dateFrom && (!createdDate || createdDate < codingFilters.dateFrom)) return false;
+      if (codingFilters.dateTo && (!createdDate || createdDate > codingFilters.dateTo)) return false;
+      if (q) {
+        const values = Object.values(party).flatMap((value) => Array.isArray(value) ? value : [value]);
+        if (!values.some((value) => value != null && String(value).toLocaleLowerCase().includes(q))) return false;
+      }
+      return true;
+    });
+    setCodingResults(results);
+    setSelectedCodingPartyIds([]);
+    setMergePrimaryId('');
+  };
+
+  const codingPartyOptions = useMemo(() => {
+    const scopedParties = parties.filter((party) => {
+      if (!(party.type === 'Customer' || party.type === 'Both')) return false;
+      const isArchived = Boolean(party.isArchived || party.mergedIntoPartyId);
+      if (codingFilters.statuses.length && !codingFilters.statuses.includes(isArchived ? 'archived' : 'active')) return false;
+      const assignedBranch = branches.find((branch) => branch.id === party.branchId || branch.name === party.branchId || branch.code === party.branchId)?.id || party.branchId;
+      const partyBranchIds = new Set([assignedBranch, ...(party.branchIds || []).map((value) => branches.find((branch) => branch.id === value || branch.name === value || branch.code === value)?.id || value)].filter(Boolean));
+      return !codingFilters.branchIds.length || codingFilters.branchIds.some((branchId) => partyBranchIds.has(branchId));
+    });
+    const optionsFor = (getValue: (party: Party) => string | undefined) => Array.from(new Set(scopedParties.map(getValue).filter((value): value is string => Boolean(value?.trim())))).sort((a, b) => a.localeCompare(b, language === 'ar' ? 'ar' : 'en')).map((value) => ({ value, label: value }));
+    return {
+      customerCodes: optionsFor((party) => party.customerCode || party.code),
+      systemCodes: optionsFor((party) => party.systemCode || party.paperCode),
+      fileCodes: optionsFor((party) => party.fileCode || party.fileNumber),
+    };
+  }, [parties, branches, codingFilters.branchIds, codingFilters.statuses, language]);
+
+  const selectedCodingIdSet = useMemo(() => new Set(selectedCodingPartyIds), [selectedCodingPartyIds]);
+  const selectedCodingParties = parties.filter((party) => selectedCodingIdSet.has(party.id));
+  const findSystemCodeMergeGroups = () => {
+    const groupsByCode = new Map<string, Party[]>();
+    parties.forEach((party) => {
+      if (!(party.type === 'Customer' || party.type === 'Both') || party.isArchived || party.mergedIntoPartyId) return;
+      const assignedBranch = branches.find((branch) => branch.id === party.branchId || branch.name === party.branchId || branch.code === party.branchId)?.id || party.branchId;
+      const partyBranches = new Set([assignedBranch, ...(party.branchIds || []).map((value) => branches.find((branch) => branch.id === value || branch.name === value || branch.code === value)?.id || value)].filter(Boolean));
+      if (codingFilters.branchIds.length && !codingFilters.branchIds.some((branchId) => partyBranches.has(branchId))) return;
+      const systemCode = (party.systemCode || party.paperCode || '').trim();
+      if (!systemCode) return;
+      const normalizedCode = systemCode.toLocaleLowerCase();
+      const matches = groupsByCode.get(normalizedCode) || [];
+      matches.push(party);
+      groupsByCode.set(normalizedCode, matches);
+    });
+    const groups = [...groupsByCode.entries()]
+      .filter(([, matches]) => matches.length > 1)
+      .map(([systemCodeKey, matches]) => ({
+        systemCode: (matches[0].systemCode || matches[0].paperCode || systemCodeKey).trim(),
+        parties: matches.sort((left, right) => (left.createdAt || '').localeCompare(right.createdAt || '') || left.name.localeCompare(right.name)),
+        primaryId: '',
+      }))
+      .sort((left, right) => left.systemCode.localeCompare(right.systemCode));
+    setSystemCodeMergeGroups(groups);
+    setCodingAction(null);
+    if (!groups.length) window.alert(t('لا توجد مجموعات عملاء نشطين لها كود سيستم متطابق ضمن الفروع المختارة.', 'No active customer groups share a system code within the selected branches.'));
+  };
+
+  const mergeAllSystemCodeGroups = () => {
+    if (!systemCodeMergeGroups.length || systemCodeMergeGroups.some((group) => !group.primaryId)) return;
+    const sourceCount = systemCodeMergeGroups.reduce((total, group) => total + group.parties.length - 1, 0);
+    if (!window.confirm(t(`سيتم دمج ${sourceCount} ملف مصدر في ${systemCodeMergeGroups.length} ملفات رئيسية حسب اختيارك، وأرشفة الملفات المصدر. لن تتغير أي معاملات تاريخية. استمرار؟`, `Merge ${sourceCount} source files into ${systemCodeMergeGroups.length} primaries as selected, then archive the sources? Historical transactions will remain unchanged.`))) return;
+    const mergeResult = mergeCustomerPartiesBulk(systemCodeMergeGroups.map((group) => ({
+      primaryId: group.primaryId,
+      sourceIds: group.parties.filter((party) => party.id !== group.primaryId).map((party) => party.id),
+      note: `دمج لتطابق كود السيستم: ${group.systemCode}`,
+    })));
+    const mergedSourceIds = new Set(systemCodeMergeGroups.flatMap((group) => group.parties.filter((party) => party.id !== group.primaryId).map((party) => party.id)));
+    setCodingResults((current) => current?.filter((party) => !mergedSourceIds.has(party.id)) || current);
+    setSelectedCodingPartyIds((current) => current.filter((id) => !mergedSourceIds.has(id)));
+    setSystemCodeMergeGroups([]);
+    window.alert(t(`تم دمج ${mergeResult.sources} ملف في ${mergeResult.groups} مجموعات.`, `Merged ${mergeResult.sources} files across ${mergeResult.groups} groups.`));
+  };
+
+  const handleCodingAction = () => {
+    if (!codingAction || selectedCodingPartyIds.length === 0) return;
+    let successfullyProcessedIds: string[] = [];
+    if (codingAction === 'merge') {
+      const primary = selectedCodingParties.find((party) => party.id === mergePrimaryId);
+      if (!primary || primary.isArchived) return;
+      const sources = selectedCodingPartyIds.filter((id) => id !== mergePrimaryId);
+      if (!sources.length) return;
+      if (!window.confirm(t(`سيتم اعتماد ${primary.name} ملفاً رئيسياً وأرشفة ${sources.length} ملف. لن يتم تعديل أي سجل تاريخي. استمرار؟`, `Use ${primary.name} as the primary file and archive ${sources.length} files? Historical records will remain unchanged.`))) return;
+      mergeCustomerParties(mergePrimaryId, sources, mergeNote);
+      successfullyProcessedIds = sources;
+    } else if (codingAction === 'archive') {
+      if (!window.confirm(t(`أرشفة ${selectedCodingPartyIds.length} عميل؟`, `Archive ${selectedCodingPartyIds.length} selected customers?`))) return;
+      selectedCodingPartyIds.forEach((id) => archiveParty(id, 'أرشفة جماعية من مراجعة تكويد العملاء'));
+      successfullyProcessedIds = selectedCodingPartyIds;
+    } else {
+      const protectedCustomerIds = new Set<string>();
+      allCashReceipts.forEach((receipt) => { if (receipt.partyId && receipt.status === 'active') protectedCustomerIds.add(receipt.partyId); });
+      allInvoices.forEach((invoice) => { if ((invoice.status === 'Posted' || invoice.status === 'Refunded') && invoice.netAmount > 0) protectedCustomerIds.add(invoice.customerId); });
+      allSpecializedTaxInvoices.forEach((invoice) => { if (invoice.partyId && invoice.status !== 'cancelled' && invoice.grandTotal > 0) protectedCustomerIds.add(invoice.partyId); });
+      allReceptionShifts.forEach((shift) => shift.runRows.forEach((row) => { const id = row.customerId || row.patientId; if (id && (row.collectedAmount > 0 || row.totalRevenue > 0)) protectedCustomerIds.add(id); }));
+      const protectedNames = selectedCodingParties.filter((party) => protectedCustomerIds.has(party.id));
+      const deletableIds = selectedCodingParties.filter((party) => !protectedCustomerIds.has(party.id)).map((party) => party.id);
+      if (!deletableIds.length) {
+        window.alert(t(`لا يمكن حذف العملاء المحددين لوجود تحصيلات أو إيرادات سابقة. عدد العملاء المحميين: ${protectedNames.length}.`, `The selected customers have prior receipts or revenue and are protected from deletion. Protected customers: ${protectedNames.length}.`));
+        return;
+      }
+      if (!window.confirm(t(`سيتم حذف ${deletableIds.length} عميل نهائياً. سيتم تجاوز ${selectedCodingPartyIds.length - deletableIds.length} عميل لوجود تحصيلات أو إيرادات سابقة. متابعة؟`, `Permanently delete ${deletableIds.length} customers? ${selectedCodingPartyIds.length - deletableIds.length} with prior receipts or revenue will be skipped.`))) return;
+      const deletionResult = deletePartiesBulk(deletableIds);
+      if (deletionResult.deleted !== deletableIds.length) {
+        window.alert(t(`تم حذف ${deletionResult.deleted} فقط من ${deletableIds.length} نتيجة بسبب اختلاف نطاق المؤسسة أو تحديث البيانات.`, `Deleted ${deletionResult.deleted} of ${deletableIds.length}; tenant scope or data changes prevented the rest.`));
+        successfullyProcessedIds = selectedCodingPartyIds.filter((id) => !protectedCustomerIds.has(id)).slice(0, deletionResult.deleted);
+      } else {
+        successfullyProcessedIds = deletableIds;
+      }
+    }
+    const affected = new Set(successfullyProcessedIds);
+    setCodingResults((current) => current?.filter((party) => !affected.has(party.id)) || current);
+    setCodingAction(null);
+    setSelectedCodingPartyIds([]);
+  };
+
+  const addPartyDuplicateIndex = useMemo(() => {
+    const defaultBranchId = branches[0]?.id || 'branch-cairo';
+    const canonicalCustomers = parties.map((party) => {
+      const branch = branches.find((item) => item.id === party.branchId || item.name === party.branchId || item.code === party.branchId);
+      return branch && party.branchId !== branch.id ? { ...party, branchId: branch.id } : party;
+    });
+    return buildCustomerDuplicateIndex(canonicalCustomers, defaultBranchId);
+  }, [parties, branches]);
+
+  const addPartyDuplicateMatches = useMemo(() => {
+    if (!newParty.name.trim()) return [];
+    const branchId = newParty.branchId || currentBranchId;
+    const branch = branches.find((item) => item.id === branchId || item.name === branchId || item.code === branchId);
+    return findCustomerDuplicates(addPartyDuplicateIndex, {
+      name: newParty.name,
+      nameEn: newParty.nameEn,
+      phone: newParty.phone,
+      fileCode: newParty.fileCode,
+      branchId: branch?.id || branchId,
+      systemCode: newParty.systemCode || newParty.paperCode,
+      paperCode: newParty.paperCode || newParty.systemCode,
+    }, branch?.id || branchId);
+  }, [addPartyDuplicateIndex, newParty, currentBranchId, branches]);
+
+  const handleRunDuplicateReview = async () => {
+    if (!duplicateReviewStartDate || !duplicateReviewEndDate || duplicateReviewStartDate > duplicateReviewEndDate) return;
+    const runId = ++duplicateReviewRunIdRef.current;
+    const yieldToBrowser = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+    setDuplicateReviewSubmitted(true);
+    setDuplicateReviewLoading(true);
+    setDuplicateReviewResults([]);
+    setDuplicateReviewProgress(0);
+    setDuplicateReviewVisibleCount(100);
+    const defaultBranchId = branches[0]?.id || 'branch-cairo';
+    const codedCustomers = parties.filter((party) =>
+      (party.type === 'Customer' || party.type === 'Both' || !party.type) && Boolean(party.customerCode || party.code)
+    );
+    const canonicalCustomers = codedCustomers.map((party) => {
+      const branch = branches.find((item) => item.id === party.branchId || item.name === party.branchId || item.code === party.branchId);
+      return branch && party.branchId !== branch.id ? { ...party, branchId: branch.id } : party;
+    });
+    const duplicateIndex = await buildCustomerDuplicateIndexAsync(canonicalCustomers, defaultBranchId, 200, (processed, total) => {
+      if (duplicateReviewRunIdRef.current === runId) setDuplicateReviewProgress(total ? Math.floor((processed / total) * 20) : 20);
+    }, true);
+    if (duplicateReviewRunIdRef.current !== runId) return;
+    const targets = canonicalCustomers.filter((party) => {
+      const codingDate = party.createdAt?.slice(0, 10) || '';
+      return codingDate >= duplicateReviewStartDate && codingDate <= duplicateReviewEndDate;
+    });
+    const targetIds = new Set(targets.map((party) => party.id));
+    const results: Array<{ party: Party; match: CustomerDuplicateMatch }> = [];
+    const progressInterval = Math.max(1, Math.floor(targets.length / 100));
+    for (let i = 0; i < targets.length; i++) {
+      const party = targets[i];
+      findCustomerNameDuplicates(duplicateIndex, party, party.branchId || defaultBranchId, party.id).forEach((match) => {
+        if (!targetIds.has(match.party.id) || party.id < match.party.id) results.push({ party, match });
+      });
+      if ((i + 1) % progressInterval === 0 || i === targets.length - 1) {
+        if (duplicateReviewRunIdRef.current !== runId) return;
+        setDuplicateReviewProgress(20 + (targets.length ? Math.floor(((i + 1) / targets.length) * 80) : 80));
+        await yieldToBrowser();
+      }
+    }
+    if (duplicateReviewRunIdRef.current === runId) {
+      setDuplicateReviewResults(results);
+      setDuplicateReviewLoading(false);
+      setDuplicateReviewProgress(100);
+    }
+  };
+
 
   const totalPages = Math.max(1, Math.ceil(filteredParties.length / itemsPerPage));
   const safeCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
@@ -292,7 +581,7 @@ export const PartiesView: React.FC = () => {
     }
   };
 
-  const handleSaveParty = () => {
+  const persistNewParty = () => {
     if (!newParty.name.trim() || !newParty.phone.trim()) {
       alert(t('يرجى كتابة الاسم ورقم الهاتف!', 'Please provide name and phone!'));
       return;
@@ -321,6 +610,7 @@ export const PartiesView: React.FC = () => {
     });
 
     setShowAddModal(false);
+    setShowAddDuplicateWarning(false);
     setNewParty({
       name: '',
       nameEn: '',
@@ -338,6 +628,18 @@ export const PartiesView: React.FC = () => {
       leadSource: 'Facebook Ads',
       creditLimit: 10000,
     });
+  };
+
+  const handleSaveParty = () => {
+    if (!newParty.name.trim() || !newParty.phone.trim()) {
+      alert(t('يرجى كتابة الاسم ورقم الهاتف!', 'Please provide name and phone!'));
+      return;
+    }
+    if (addPartyDuplicateMatches.length > 0) {
+      setShowAddDuplicateWarning(true);
+      return;
+    }
+    persistNewParty();
   };
 
   const handleEditClick = (party: Party) => {
@@ -386,7 +688,7 @@ export const PartiesView: React.FC = () => {
       const rowNum = index + 2; // Row number in Excel
 
       const branchName = String(row['اسم الفرع'] || row['الفرع'] || row['Branch'] || row['Branch Name'] || '').trim();
-      const customerCode = String(row['كود العميل'] || row['كود العميل (السيستم)'] || row['Customer Code'] || row['Client Code'] || '').trim();
+      const customerCode = String(row['كود العميل'] || row['Customer Code'] || row['Client Code'] || '').trim();
       const systemCode = String(row['كود السيستم'] || row['الكود الورقي'] || row['System Code'] || row['Paper Code'] || row['الكود الورقي للعميل'] || '').trim();
       const fileCode = String(row['كود الملف'] || row['رقم الملف'] || row['كود الملف الورقي'] || row['File Code'] || row['File Number'] || '').trim();
       const name = String(row['الاسم بالعربي'] || row['الاسم'] || row['Name'] || row['Full Name Ar'] || '').trim();
@@ -557,7 +859,8 @@ export const PartiesView: React.FC = () => {
           <button
             onClick={() => {
               const rows = filteredParties.map((p) => ({
-                'كود النظام': p.systemCode || '',
+                'Customer Code': p.customerCode || p.code || '',
+                'System Code': p.systemCode || '',
                 'الاسم بالعربي': p.name,
                 'الاسم بالإنجليزية': p.nameEn || '',
                 'رقم الهاتف': p.phone,
@@ -575,6 +878,18 @@ export const PartiesView: React.FC = () => {
           </button>
 
           <button
+            onClick={() => {
+              setCodingResults(null);
+              setSelectedCodingPartyIds([]);
+              setCodingAction(null);
+              setShowDuplicateReview(true);
+            }}
+            className="flex items-center gap-1.5 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 px-3.5 py-2 text-xs font-bold text-amber-800 dark:text-amber-300 hover:bg-amber-100 transition-all cursor-pointer"
+          >
+            <AlertTriangle className="h-4 w-4" />
+            <span>{t('مراجعة تكويد العملاء', 'Review Customer Coding')}</span>
+          </button>
+          <button
             onClick={() => setShowAddModal(true)}
             className="flex items-center gap-1.5 rounded-xl bg-indigo-600 px-4 py-2 text-xs font-bold text-white shadow-md shadow-indigo-600/20 hover:bg-indigo-700 transition-all cursor-pointer"
           >
@@ -586,6 +901,16 @@ export const PartiesView: React.FC = () => {
 
       {/* Filter and Search Bar */}
       <div className="flex flex-col sm:flex-row gap-3 items-center justify-between rounded-2xl border border-slate-200 bg-white p-3.5 dark:border-slate-800 dark:bg-slate-900 shadow-xs">
+        <select
+          value={customerStatusFilter}
+          onChange={(event) => setCustomerStatusFilter(event.target.value as 'all' | 'active' | 'archived')}
+          aria-label={t('حالة العملاء', 'Customer status')}
+          className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+        >
+          <option value="all">{t('كل العملاء', 'All customers')} ({customers.length})</option>
+          <option value="active">{t('العملاء المفعّلة فقط', 'Active only')} ({customers.filter((party) => !party.isArchived && !party.mergedIntoPartyId).length})</option>
+          <option value="archived">{t('العملاء المؤرشفة فقط', 'Archived only')} ({customers.filter((party) => party.isArchived || party.mergedIntoPartyId).length})</option>
+        </select>
         <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
           <button
             onClick={() => setActiveFilter('ALL')}
@@ -595,7 +920,7 @@ export const PartiesView: React.FC = () => {
                 : 'text-slate-600 dark:text-slate-400'
             }`}
           >
-            {t('كافة المرضى والعملاء', 'All Patients')} ({customers.length})
+            {t('كافة المرضى والعملاء', 'All Patients')} ({statusFilteredCustomers.length})
           </button>
           <button
             onClick={() => setActiveFilter('WITH_BALANCE')}
@@ -605,7 +930,7 @@ export const PartiesView: React.FC = () => {
                 : 'text-slate-600 dark:text-slate-400'
             }`}
           >
-            {t('عملاء بأرصدة غير مسواة', 'With Balance')} ({customers.filter((c) => c.balance !== 0).length})
+            {t('عملاء بأرصدة غير مسواة', 'With Balance')} ({statusFilteredCustomers.filter((c) => c.balance !== 0).length})
           </button>
           <button
             onClick={() => setActiveFilter('ZERO_BALANCE')}
@@ -615,7 +940,7 @@ export const PartiesView: React.FC = () => {
                 : 'text-slate-600 dark:text-slate-400'
             }`}
           >
-            {t('أرصدة مسواة (صفر)', 'Zero Balance')} ({customers.filter((c) => c.balance === 0).length})
+            {t('أرصدة مسواة (صفر)', 'Zero Balance')} ({statusFilteredCustomers.filter((c) => c.balance === 0).length})
           </button>
         </div>
 
@@ -1068,6 +1393,145 @@ export const PartiesView: React.FC = () => {
         </div>
       )}
 
+      {showDuplicateReview && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-xs">
+          <div className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex items-center justify-between border-b border-slate-100 p-4 dark:border-slate-800">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-amber-600" />
+                <h3 className="font-black text-slate-900 dark:text-white">{t('مراجعة تكويد العملاء', 'Customer Coding Review')}</h3>
+              </div>
+              <button type="button" onClick={() => { duplicateReviewRunIdRef.current++; setDuplicateReviewLoading(false); setShowDuplicateReview(false); }} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-4 overflow-y-auto p-4">
+              <section className="space-y-3 rounded-xl border border-slate-200 p-3 dark:border-slate-700">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                  <input value={codingFilters.query} onChange={(e) => setCodingFilters({ ...codingFilters, query: e.target.value })} placeholder={t('بحث في جميع بيانات العميل', 'Search all customer data')} className="rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs dark:border-slate-700 dark:bg-slate-800" />
+                  <MultiSelectFilter label={t('الفروع', 'Branches')} selectAllLabel={t('تحديد الكل', 'Select all')} clearLabel={t('مسح الاختيار', 'Clear selection')} emptyLabel={t('لا توجد اختيارات', 'No options')} searchLabel={t('ابحث في الاختيارات', 'Search options')} options={branches.map((branch) => ({ value: branch.id, label: branch.name }))} selected={codingFilters.branchIds} onChange={(branchIds) => setCodingFilters({ ...codingFilters, branchIds, customerCodes: [], systemCodes: [], fileCodes: [] })} />
+                  <MultiSelectFilter label={t('حالة العميل', 'Customer status')} selectAllLabel={t('تحديد الكل', 'Select all')} clearLabel={t('مسح الاختيار', 'Clear selection')} emptyLabel={t('لا توجد اختيارات', 'No options')} searchLabel={t('ابحث في الاختيارات', 'Search options')} options={[{ value: 'active', label: t('مفعل', 'Active') }, { value: 'archived', label: t('مؤرشف', 'Archived') }]} selected={codingFilters.statuses} onChange={(statuses) => setCodingFilters({ ...codingFilters, statuses, customerCodes: [], systemCodes: [], fileCodes: [] })} />
+                  <MultiSelectFilter label={t('كود العميل', 'Customer code')} selectAllLabel={t('تحديد الكل', 'Select all')} clearLabel={t('مسح الاختيار', 'Clear selection')} emptyLabel={t('لا توجد اختيارات', 'No options')} searchLabel={t('ابحث في الاختيارات', 'Search options')} options={codingPartyOptions.customerCodes} selected={codingFilters.customerCodes} onChange={(customerCodes) => setCodingFilters({ ...codingFilters, customerCodes })} />
+                  <MultiSelectFilter label={t('كود السيستم', 'System code')} selectAllLabel={t('تحديد الكل', 'Select all')} clearLabel={t('مسح الاختيار', 'Clear selection')} emptyLabel={t('لا توجد اختيارات', 'No options')} searchLabel={t('ابحث في الاختيارات', 'Search options')} options={codingPartyOptions.systemCodes} selected={codingFilters.systemCodes} onChange={(systemCodes) => setCodingFilters({ ...codingFilters, systemCodes })} />
+                  <MultiSelectFilter label={t('كود الملف', 'File code')} selectAllLabel={t('تحديد الكل', 'Select all')} clearLabel={t('مسح الاختيار', 'Clear selection')} emptyLabel={t('لا توجد اختيارات', 'No options')} searchLabel={t('ابحث في الاختيارات', 'Search options')} options={codingPartyOptions.fileCodes} selected={codingFilters.fileCodes} onChange={(fileCodes) => setCodingFilters({ ...codingFilters, fileCodes })} />
+                  <input value={codingFilters.phone} onChange={(e) => setCodingFilters({ ...codingFilters, phone: e.target.value })} placeholder={t('رقم الهاتف', 'Phone')} className="rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs dark:border-slate-700 dark:bg-slate-800" />
+                  <label className="text-[11px] font-bold">{t('تاريخ التسجيل من', 'Created from')}<input type="date" value={codingFilters.dateFrom} onChange={(e) => setCodingFilters({ ...codingFilters, dateFrom: e.target.value })} className="mt-1 w-full rounded-lg border border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-800" /></label>
+                  <label className="text-[11px] font-bold">{t('تاريخ التسجيل إلى', 'Created to')}<input type="date" value={codingFilters.dateTo} onChange={(e) => setCodingFilters({ ...codingFilters, dateTo: e.target.value })} className="mt-1 w-full rounded-lg border border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-800" /></label>
+                  <button type="button" onClick={runCodingSearch} className="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-bold text-white">{t('بحث', 'Search')}</button>
+                </div>
+                {codingResults && <>
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3 dark:border-slate-700">
+                    <label className="flex items-center gap-2 text-xs font-bold"><input type="checkbox" checked={codingResults.length > 0 && codingResults.every((party) => selectedCodingPartyIds.includes(party.id))} onChange={(e) => setSelectedCodingPartyIds(e.target.checked ? codingResults.map((party) => party.id) : [])} />{t('تحديد الكل', 'Select all')} ({codingResults.length})</label>
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" disabled={!selectedCodingPartyIds.length} onClick={() => setCodingAction('archive')} className="rounded-lg bg-amber-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-40">{t('أرشيف', 'Archive')}</button>
+                      <button type="button" disabled={!selectedCodingPartyIds.length} onClick={() => setCodingAction('delete')} className="rounded-lg bg-rose-700 px-3 py-2 text-xs font-bold text-white disabled:opacity-40">{t('حذف نهائي', 'Permanent delete')}</button>
+                      <button type="button" disabled={selectedCodingPartyIds.length < 2} onClick={() => setCodingAction('merge')} className="rounded-lg bg-indigo-700 px-3 py-2 text-xs font-bold text-white disabled:opacity-40">{t('دمج', 'Merge')}</button>
+                      <button type="button" onClick={findSystemCodeMergeGroups} className="rounded-lg bg-violet-700 px-3 py-2 text-xs font-bold text-white">{t('دمج العملاء المتطابق كود السيستم', 'Merge customers with matching system codes')}</button>
+                    </div>
+                  </div>
+                  {systemCodeMergeGroups.length > 0 && <div className="space-y-3 rounded-lg border border-violet-200 bg-violet-50/70 p-3 dark:border-violet-900 dark:bg-violet-950/20">
+                    <div>
+                      <h4 className="text-sm font-black text-violet-900 dark:text-violet-200">{t('مجموعات كود السيستم المتطابق', 'Matching system-code groups')}</h4>
+                      <p className="mt-1 text-[11px] text-violet-800 dark:text-violet-300">{t('اختر ملفاً رئيسياً لكل كود. ستُؤرشف بقية الملفات، وتظل السجلات التاريخية كما هي.', 'Choose a primary file for each code. Other files will be archived; historical records remain unchanged.')}</p>
+                    </div>
+                    <div className="max-h-72 space-y-2 overflow-y-auto">
+                      {systemCodeMergeGroups.map((group, groupIndex) => (
+                        <div key={`${group.systemCode}-${groupIndex}`} className="grid gap-2 rounded-lg border border-violet-100 bg-white p-2 dark:border-violet-900 dark:bg-slate-900 sm:grid-cols-[minmax(100px,0.7fr)_2fr] sm:items-center">
+                          <div className="font-mono text-xs font-black">{group.systemCode}<div className="mt-1 text-[10px] font-normal text-slate-500">{group.parties.length} {t('ملفات', 'files')}</div></div>
+                          <label className="text-[11px] font-bold">{t('الملف الرئيسي', 'Primary file')}
+                            <select value={group.primaryId} onChange={(event) => setSystemCodeMergeGroups((current) => current.map((item, index) => index === groupIndex ? { ...item, primaryId: event.target.value } : item))} className="mt-1 w-full rounded-lg border border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-800">
+                              <option value="">{t('اختر الملف الرئيسي لهذه المجموعة', 'Choose this group’s primary file')}</option>
+                              {group.parties.map((party) => <option key={party.id} value={party.id}>{party.name} · {party.customerCode || party.code || '—'} · {party.phone || '—'}</option>)}
+                            </select>
+                          </label>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-[11px] font-bold">{systemCodeMergeGroups.reduce((total, group) => total + group.parties.length - 1, 0)} {t('ملف سيتم أرشفته', 'source files to archive')}</span>
+                      <div className="flex gap-2">
+                        <button type="button" disabled={systemCodeMergeGroups.some((group) => !group.primaryId)} onClick={mergeAllSystemCodeGroups} className="rounded-lg bg-violet-700 px-4 py-2 text-xs font-bold text-white disabled:opacity-40">{t('تأكيد دمج كل المجموعات', 'Merge all groups')}</button>
+                        <button type="button" onClick={() => setSystemCodeMergeGroups([])} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-bold dark:border-slate-700">{t('إلغاء', 'Cancel')}</button>
+                      </div>
+                    </div>
+                  </div>}
+                  {codingAction === 'merge' && <div className="grid gap-2 rounded-lg bg-indigo-50 p-3 dark:bg-indigo-950/30 sm:grid-cols-2">
+                    <label className="text-xs font-bold">{t('اختر الملف الرئيسي', 'Choose the primary file')}<select value={mergePrimaryId} onChange={(e) => setMergePrimaryId(e.target.value)} className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2 dark:border-slate-700 dark:bg-slate-800"><option value="">{t('اختر عميلاً محدداً', 'Select a selected customer')}</option>{selectedCodingParties.filter((party) => !party.isArchived).map((party) => <option key={party.id} value={party.id}>{party.name} — {party.customerCode || party.code || party.phone}</option>)}</select></label>
+                    <label className="text-xs font-bold">{t('شرح النقل (سيضاف لملاحظات الملف الرئيسي)', 'Merge note (added to primary file notes)')}<input value={mergeNote} onChange={(e) => setMergeNote(e.target.value)} className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2 dark:border-slate-700 dark:bg-slate-800" /></label>
+                    <p className="text-[11px] text-indigo-800 dark:text-indigo-200 sm:col-span-2">{t('المعاملات السابقة ستظل مرتبطة بملفاتها الأصلية دون أي تعديل، والدمج للاستخدام المستقبلي فقط.', 'Historical records remain linked to their original files unchanged. The merge applies to future use only.')}</p>
+                    <button type="button" disabled={!mergePrimaryId} onClick={handleCodingAction} className="rounded-lg bg-indigo-700 px-3 py-2 text-xs font-bold text-white disabled:opacity-40">{t('تأكيد الدمج', 'Confirm merge')}</button>
+                    <button type="button" onClick={() => setCodingAction(null)} className="rounded-lg border px-3 py-2 text-xs font-bold">{t('إلغاء', 'Cancel')}</button>
+                  </div>}
+                  <div className="max-h-72 overflow-auto rounded-lg border border-slate-200 dark:border-slate-700"><table className="w-full text-xs"><thead className="sticky top-0 bg-slate-100 dark:bg-slate-800"><tr><th className="p-2"></th><th className="p-2">{t('العميل', 'Customer')}</th><th className="p-2">{t('الأكواد', 'Codes')}</th><th className="p-2">{t('الهاتف', 'Phone')}</th><th className="p-2">{t('الفرع', 'Branch')}</th><th className="p-2">{t('الحالة', 'Status')}</th></tr></thead><tbody>{codingResults.slice(0, 500).map((party) => <tr key={party.id} className="border-t border-slate-100 dark:border-slate-800"><td className="p-2"><input type="checkbox" checked={selectedCodingPartyIds.includes(party.id)} onChange={(e) => setSelectedCodingPartyIds((ids) => e.target.checked ? [...ids, party.id] : ids.filter((id) => id !== party.id))} /></td><td className="p-2">{party.name}<div className="text-[10px] text-slate-500">{party.nameEn}</div></td><td className="p-2">{[party.customerCode || party.code, party.systemCode, party.fileCode].filter(Boolean).join(' · ')}</td><td className="p-2">{party.phone}</td><td className="p-2">{branches.find((branch) => branch.id === party.branchId)?.name || party.branchId || '—'}</td><td className="p-2">{party.isArchived ? t('مؤرشف', 'Archived') : t('مفعل', 'Active')}</td></tr>)}</tbody></table>{codingResults.length > 500 && <p className="p-2 text-center text-xs">{t('أول 500 نتيجة ظاهرة لتحسين الأداء. استخدم فلاتر أدق.', 'Showing first 500 results for performance. Narrow the filters.')}</p>}</div>
+                </>}
+              </section>
+              {codingAction && codingAction !== 'merge' && <div className="flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs dark:bg-amber-950/30"><span>{codingAction === 'archive' ? t('تأكيد أرشفة العملاء المحددين؟', 'Confirm archiving selected customers?') : t('الحذف النهائي متاح فقط دون سجلات مالية أو تشغيلية سابقة.', 'Permanent deletion is allowed only when no previous financial or operational records exist.')}</span><button type="button" onClick={handleCodingAction} className="rounded bg-slate-900 px-3 py-1.5 font-bold text-white">{t('تأكيد', 'Confirm')}</button><button type="button" onClick={() => setCodingAction(null)} className="rounded border px-3 py-1.5">{t('إلغاء', 'Cancel')}</button></div>}
+              <section className="space-y-3 rounded-xl border border-amber-200 p-3 dark:border-amber-900">
+              <h4 className="flex items-center gap-2 text-sm font-black text-amber-800 dark:text-amber-300"><AlertTriangle className="h-4 w-4" />{t('مراجعة تكرار العملاء', 'Review Customer Duplicates')}</h4>
+              <div className="grid grid-cols-1 items-end gap-3 sm:grid-cols-[1fr_1fr_auto]">
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                  {t('من تاريخ التكويد', 'Coded From')}
+                  <input type="date" value={duplicateReviewStartDate} disabled={duplicateReviewLoading} onChange={(event) => { duplicateReviewRunIdRef.current++; setDuplicateReviewLoading(false); setDuplicateReviewStartDate(event.target.value); setDuplicateReviewSubmitted(false); setDuplicateReviewResults([]); }} className="mt-1 w-full rounded-lg border border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-800" />
+                </label>
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                  {t('إلى تاريخ التكويد', 'Coded To')}
+                  <input type="date" value={duplicateReviewEndDate} disabled={duplicateReviewLoading} onChange={(event) => { duplicateReviewRunIdRef.current++; setDuplicateReviewLoading(false); setDuplicateReviewEndDate(event.target.value); setDuplicateReviewSubmitted(false); setDuplicateReviewResults([]); }} className="mt-1 w-full rounded-lg border border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-800" />
+                </label>
+                <button type="button" disabled={duplicateReviewLoading || !duplicateReviewStartDate || !duplicateReviewEndDate || duplicateReviewStartDate > duplicateReviewEndDate} onClick={handleRunDuplicateReview} className="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-40">
+                  <CalendarDays className="mr-1 inline h-4 w-4" />{t('مراجعة النتائج', 'Review Results')}
+                </button>
+              </div>
+
+              {duplicateReviewStartDate && duplicateReviewEndDate && duplicateReviewStartDate > duplicateReviewEndDate && (
+                <p className="text-xs font-bold text-rose-600">{t('تاريخ البداية يجب أن يكون قبل تاريخ النهاية.', 'Start date must be on or before the end date.')}</p>
+              )}
+
+              {duplicateReviewLoading && <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4 text-center text-sm font-bold text-indigo-800 dark:border-indigo-900 dark:bg-indigo-950/30 dark:text-indigo-300">Checking coded customers... {duplicateReviewProgress}%<div className="mt-2 h-2 overflow-hidden rounded-full bg-indigo-100 dark:bg-indigo-900"><div className="h-full bg-indigo-600 transition-all" style={{ width: `${duplicateReviewProgress}%` }} /></div></div>}
+
+              {duplicateReviewSubmitted && !duplicateReviewLoading && (
+                duplicateReviewResults.length === 0 ? (
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-5 text-center text-sm font-bold text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300">
+                    {t('لا توجد حالات تكرار مطابقة في الفترة المحددة.', 'No duplicate matches found in the selected period.')}
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
+                    <table className="w-full text-xs text-left rtl:text-right">
+                      <thead className="bg-slate-50 font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                        <tr>
+                          <th className="p-2">{t('العميل المكود في الفترة', 'Coded Customer in Range')}</th>
+                          <th className="p-2">{t('العميل المطابق', 'Matching Customer')}</th>
+                          <th className="p-2">{t('الفرع', 'Branch')}</th>
+                          <th className="p-2">{t('سبب التطابق', 'Match Reason')}</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                        {duplicateReviewResults.slice(0, duplicateReviewVisibleCount).map(({ party, match }) => {
+                          const branch = branches.find((item) => item.id === party.branchId || item.name === party.branchId);
+                          return (
+                            <tr key={`${party.id}-${match.party.id}`}>
+                              <td className="p-2"><strong>{party.customerCode || party.code || '—'}</strong> · {party.name}<div className="font-mono text-slate-500">{party.phone}</div></td>
+                              <td className="p-2"><strong>{match.party.customerCode || match.party.code || '—'}</strong> · {match.party.name}<div className="font-mono text-slate-500">{match.party.phone}</div></td>
+                              <td className="p-2">{branch?.name || party.branchId || '—'}</td>
+                              <td className="p-2">{match.reasons.map((reason) => reason === 'name' ? t(`الاسم ${Math.round(match.nameSimilarity! * 100)}%`, `Name ${Math.round(match.nameSimilarity! * 100)}%`) : reason === 'phone' ? t(`الهاتف ${Math.round(match.phoneSimilarity! * 100)}%`, `Phone ${Math.round(match.phoneSimilarity! * 100)}%`) : reason === 'systemCode' ? t('كود السيستم مطابق تماماً', 'Exact System Code') : t('كود الملف / الورقي مطابق تماماً', 'Exact File / Paper Code')).join(' · ')}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )
+              )}
+              {duplicateReviewSubmitted && !duplicateReviewLoading && duplicateReviewVisibleCount < duplicateReviewResults.length && (
+                <button type="button" onClick={() => setDuplicateReviewVisibleCount((count) => count + 100)} className="w-full rounded-lg border border-slate-200 px-4 py-2 text-xs font-bold text-slate-700 dark:border-slate-700 dark:text-slate-200">
+                  Show more ({Math.min(100, duplicateReviewResults.length - duplicateReviewVisibleCount)})
+                </button>
+              )}
+              </section>
+            </div>
+          </div>
+        </div>
+      )}
       {/* ADD PARTY / PATIENT MODAL */}
       {showAddModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-xs">
@@ -1253,6 +1717,24 @@ export const PartiesView: React.FC = () => {
                   className="w-full rounded-xl border border-slate-200 bg-white dark:bg-slate-800 p-2 outline-none dark:border-slate-700 dark:text-white text-xs"
                 />
               </div>
+
+              {showAddDuplicateWarning && addPartyDuplicateMatches.length > 0 && (
+                <div className="space-y-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
+                  <div className="flex items-center gap-2 font-bold"><AlertTriangle className="h-4 w-4" />Possible duplicate customers found in this branch.</div>
+                  {addPartyDuplicateMatches.slice(0, 5).map(({ party, reasons }) => (
+                    <div key={party.id} className="rounded-lg bg-white/70 p-2 dark:bg-slate-900/60">
+                      <div className="font-bold">{party.customerCode || party.code || '—'} · {party.name}</div>
+                      <div>{party.phone} · {reasons.map((reason) => reason === 'name' ? 'Name similarity' : reason === 'phone' ? 'Phone similarity' : reason === 'systemCode' ? 'Same System Code' : 'Same File Code').join(', ')}</div>
+                    </div>
+                  ))}
+                  <div className="flex gap-2">
+                    <button type="button" onClick={() => setShowAddDuplicateWarning(false)} className="flex-1 rounded-lg border border-amber-300 px-3 py-2 font-bold">Dismiss</button>
+                    <button type="button" onClick={persistNewParty} className="flex-1 rounded-lg bg-amber-700 px-3 py-2 font-bold text-white">Create New Anyway</button>
+                  </div>
+                </div>
+              )}
+
+
 
               <div className="flex items-center gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
                 <button

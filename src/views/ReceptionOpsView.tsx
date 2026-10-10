@@ -297,7 +297,7 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
     return parties.filter((p) => {
       // 1. Must be a Customer (not Supplier only)
       const isCustomer = p.type === 'Customer' || p.type === 'Both';
-      if (!isCustomer) return false;
+      if (!isCustomer || p.isArchived || p.mergedIntoPartyId) return false;
 
       // 2. Must be coded in active branch
       if (currentBranchId) {

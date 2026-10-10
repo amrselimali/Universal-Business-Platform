@@ -356,6 +356,9 @@ export interface Party {
   archivedAt?: string;
   archivedBy?: string;
   archiveReason?: string;
+  mergedIntoPartyId?: string;
+  mergedFromPartyIds?: string[];
+  mergeNotes?: string;
 }
 
 // Legacy Patient interface for backward compatibility
@@ -652,6 +655,7 @@ export interface ShiftRunRow {
   dayName?: string; // اليوم (السبت، الأحد...)
   customerId?: string;
   patientId?: string;
+  customerCode?: string;
   systemCode?: string; // كود العميل السيستم
   customerName?: string; // اسم العميل
   patientName?: string; // اسم المريض
@@ -673,6 +677,9 @@ export interface ShiftRunRow {
   description?: string; // الشرح
   appointmentId?: string;
   notes?: string;
+  receiptArchivedAt?: string;
+  receiptArchivedBy?: string;
+  receiptVoucherId?: string;
 
   // الربط المحاسبي وعكس القيود
   journalEntryId?: string; // قيد الإيراد
@@ -982,6 +989,7 @@ export interface CashReceiptVoucher {
   amount: number;
   currency: string;
   paymentMethod: 'Cash' | 'Card' | 'Transfer' | 'Check';
+  paymentMethodLabel?: string;
   bankOrSafeAccountId?: string;
   bankName?: string;
   checkNumber?: string;
@@ -996,6 +1004,9 @@ export interface CashReceiptVoucher {
   isReplaced?: boolean;
   replacedByVoucherId?: string;
   reversalJournalEntryId?: string;
+  isArchived?: boolean;
+  archivedAt?: string;
+  archivedBy?: string;
   createdAt: string;
 }
 

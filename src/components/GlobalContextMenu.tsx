@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   ExternalLink,
-  Calendar,
   Sparkles,
   Users,
   LayoutDashboard,
@@ -59,8 +58,8 @@ export const GlobalContextMenu: React.FC<GlobalContextMenuProps> = ({ currentVie
 
   useEffect(() => {
     const handleContextMenu = (e: MouseEvent) => {
-      // If user holds Shift, allow standard browser context menu
-      if (e.shiftKey) return;
+      // Let the browser handle right-clicks on the Booking Management screen.
+      if (currentView === 'bookings' || e.shiftKey) return;
 
       // Avoid blocking standard text input select/cut/copy if user right-clicks on an <input> or <textarea> with selected text
       const target = e.target as HTMLElement;
@@ -106,7 +105,7 @@ export const GlobalContextMenu: React.FC<GlobalContextMenuProps> = ({ currentVie
       window.removeEventListener('mousedown', handleClickOutside);
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, []);
+  }, [currentView]);
 
   const openInNewTab = (viewId: string) => {
     const url = `${window.location.origin}${window.location.pathname}?view=${viewId}`;
@@ -181,8 +180,8 @@ export const GlobalContextMenu: React.FC<GlobalContextMenuProps> = ({ currentVie
           </div>
 
           <div className="py-1 space-y-0.5">
-            {/* Primary Action: Open current screen in new tab */}
-            <button
+            {/* Keep the custom new-tab action for other views only. */}
+            {currentView !== 'bookings' && <button
               type="button"
               onClick={() => openInNewTab(currentView)}
               className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-left rtl:text-right font-bold text-white bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 shadow-md shadow-indigo-500/20 cursor-pointer transition-all active:scale-[0.98]"
@@ -201,23 +200,12 @@ export const GlobalContextMenu: React.FC<GlobalContextMenuProps> = ({ currentVie
               <span className="text-[9px] font-mono bg-white/20 px-1.5 py-0.5 rounded text-white">
                 New Tab
               </span>
-            </button>
+            </button>}
 
             {/* Quick Open Core Screens */}
             <div className="pt-1.5 pb-0.5 px-3 text-[10px] font-bold text-slate-400 dark:text-slate-500">
               {t('فتح شاشات رئيسية أخرى في تبويب جديد:', 'Open other views in new tab:')}
             </div>
-
-            {currentView !== 'bookings' && canAccessView('bookings') && (
-              <button
-                type="button"
-                onClick={() => openInNewTab('bookings')}
-                className="w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800/80 cursor-pointer transition-colors"
-              >
-                <Calendar className="h-3.5 w-3.5 text-indigo-500 shrink-0" />
-                <span className="truncate">{t('جدول الحجوزات والمتابعات', 'Bookings & Follow-ups')}</span>
-              </button>
-            )}
 
             {currentView !== 'pos' && canAccessView('pos') && (
               <button

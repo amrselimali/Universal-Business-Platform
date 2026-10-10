@@ -23,6 +23,7 @@ import {
   Sparkles,
   FileSpreadsheet,
   Download,
+  Archive,
 } from 'lucide-react';
 import {
   ExcelDataTransferModal,
@@ -32,6 +33,15 @@ import {
 } from '../components/ExcelDataTransferModal';
 
 const collectionExcelColumns: ExcelColumnConfig[] = [
+  {
+    key: 'customerCode',
+    labelAr: 'كود العميل',
+    labelEn: 'Customer Code',
+    required: true,
+    type: 'text',
+    sampleValue: '1',
+    instructions: 'الكود المسلسل للعميل من شاشة إدارة العملاء',
+  },
   {
     key: 'customerName',
     labelAr: 'اسم العميل / المسدد',
@@ -79,6 +89,15 @@ const collectionExcelColumns: ExcelColumnConfig[] = [
     instructions: 'طريقة الدفع (نقداً (كاش)، فيزا / بطاقة بنكية، إنستاباي، فودافون كاش...)',
   },
   {
+    key: 'paymentMethodCode',
+    labelAr: 'كود طريقة التحصيل',
+    labelEn: 'Payment Method Code',
+    required: true,
+    type: 'text',
+    sampleValue: 'PM-01',
+    instructions: 'الكود المسجل لطريقة التحصيل في شاشة إدارة طرق التحصيل والسداد',
+  },
+  {
     key: 'serviceName',
     labelAr: 'الخدمة / البيان',
     labelEn: 'Service / Purpose',
@@ -113,10 +132,13 @@ interface ReceiptDisplayItem {
   sourceShiftId: string;
   shiftNumber: string;
   shiftStatus: 'Open' | 'Closed';
+  branchId: string;
+  branchName: string;
   shiftDate: string;
   date: string;
   dayName?: string;
   customerId?: string;
+  customerCode?: string;
   customerName: string;
   patientPhone?: string;
   systemCode?: string;
@@ -126,11 +148,12 @@ interface ReceiptDisplayItem {
   serviceName: string;
   description?: string;
   notes?: string;
-  source: 'pos' | 'reception_ops';
+  source: 'pos' | 'reception_ops' | 'cash_receipt';
   sourceLabelAr: string;
   isCancelled: boolean;
   isModified: boolean;
   isRefund: boolean;
+  isArchived: boolean;
 }
 
 export const CollectionReceiptsView: React.FC = () => {
@@ -140,6 +163,7 @@ export const CollectionReceiptsView: React.FC = () => {
     branches,
     receptionShifts,
     allReceptionShifts,
+    cashReceipts,
     activeReceptionShift,
     parties,
     paymentMethods,
@@ -148,8 +172,9 @@ export const CollectionReceiptsView: React.FC = () => {
     t,
     editCollectionReceipt,
     cancelCollectionReceipt,
-    addCashReceipt,
-    addShiftRunRow,
+    archiveCollectionReceipts,
+    postUnpostedCollectionReceipts,
+    addCollectionReceiptsBulk,
   } = usePlatform();
 
   // Search & Filter States
@@ -159,6 +184,10 @@ export const CollectionReceiptsView: React.FC = () => {
   const [selectedSource, setSelectedSource] = useState<'all' | 'pos' | 'reception_ops'>('all');
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string>('all');
   const [selectedShiftStatus, setSelectedShiftStatus] = useState<'all' | 'Open' | 'Closed'>('all');
+  const [receiptArchiveView, setReceiptArchiveView] = useState<'active' | 'archived' | 'all'>('active');
+  const [showColumnFilters, setShowColumnFilters] = useState(false);
+  const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
+  const [selectedReceiptIds, setSelectedReceiptIds] = useState<Set<string>>(() => new Set());
 
   // Date Range Filter
   const [startDate, setStartDate] = useState<string>('');
@@ -257,10 +286,13 @@ export const CollectionReceiptsView: React.FC = () => {
           sourceShiftId: shift.id,
           shiftNumber: shift.shiftNumber,
           shiftStatus: shift.status,
+          branchId: shift.branchId,
+          branchName: branches.find((branch) => branch.id === shift.branchId)?.name || shift.branchId || '—',
           shiftDate: shift.openedAt ? shift.openedAt.split('T')[0] : shift.shiftDate,
           date: row.date || (shift.openedAt ? shift.openedAt.split('T')[0] : shift.shiftDate),
           dayName: row.dayName,
           customerId: row.customerId,
+          customerCode: (row as any).customerCode || parties.find((p) => p.id === (row.customerId || row.patientId))?.customerCode || parties.find((p) => p.id === (row.customerId || row.patientId))?.code,
           customerName: row.customerName || row.patientName || 'عميل نقدي عام',
           patientPhone: row.patientPhone,
           systemCode: row.systemCode,
@@ -275,17 +307,65 @@ export const CollectionReceiptsView: React.FC = () => {
           isCancelled,
           isModified,
           isRefund,
+          isArchived: Boolean(row.receiptArchivedAt),
         });
+      });
+    });
+
+    const shiftReceiptVoucherIds = new Set(branchShifts.flatMap((shift) => shift.runRows.map((row) => row.receiptVoucherId).filter(Boolean) as string[]));
+    cashReceipts.forEach((receipt) => {
+      if (!receipt.partyId || (currentBranchId && receipt.branchId !== currentBranchId)) return;
+      if (shiftReceiptVoucherIds.has(receipt.id)) return;
+      const matchingLegacyRunRow = branchShifts.some((shift) => shift.runRows.some((row) =>
+        (row.customerId === receipt.partyId || row.patientId === receipt.partyId) &&
+        (row.date || shift.shiftDate) === receipt.date &&
+        Math.abs(Number(row.collectedAmount || 0) - Number(receipt.amount || 0)) < 0.01 &&
+        (row.notes?.includes('استيراد تحصيل إكسيل') || receipt.description.startsWith(row.serviceName))
+      ));
+      if (matchingLegacyRunRow) return;
+      const linkedParty = parties.find((party) => party.id === receipt.partyId);
+      const receiptMethodLabel = receipt.paymentMethodLabel || (receipt.paymentMethod === 'Cash' ? t('نقداً (كاش)', 'Cash')
+        : receipt.paymentMethod === 'Card' ? t('بطاقة', 'Card')
+          : receipt.paymentMethod === 'Check' ? t('شيك', 'Check') : t('تحويل', 'Transfer'));
+      list.push({
+        id: receipt.id,
+        receiptNumber: receipt.voucherNumber,
+        sourceShiftId: '',
+        shiftNumber: '—',
+        shiftStatus: 'Closed',
+        branchId: receipt.branchId,
+        branchName: branches.find((branch) => branch.id === receipt.branchId)?.name || receipt.branchId || '—',
+        shiftDate: receipt.date,
+        date: receipt.date,
+        customerId: receipt.partyId,
+        customerCode: linkedParty?.customerCode || linkedParty?.code,
+        customerName: receipt.receivedFrom,
+        patientPhone: linkedParty?.phone,
+        systemCode: linkedParty?.systemCode,
+        collectedAmount: Number(receipt.amount) || 0,
+        totalRevenue: 0,
+        paymentMethod: receiptMethodLabel,
+        serviceName: receipt.description,
+        description: receipt.referenceInvoiceNo,
+        notes: receipt.journalEntryId ? t('مرحل محاسبياً', 'Posted to accounts') : t('غير مرحل محاسبياً', 'Not posted to accounts'),
+        source: 'cash_receipt',
+        sourceLabelAr: t('سند قبض', 'Cash receipt voucher'),
+        isCancelled: receipt.status === 'cancelled',
+        isModified: Boolean(receipt.isReplaced),
+        isRefund: false,
+        isArchived: Boolean(receipt.isArchived),
       });
     });
 
     // Sort newest first
     return list.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [allReceptionShifts, tenant?.id, currentBranchId]);
+  }, [allReceptionShifts, tenant?.id, currentBranchId, parties, branches, cashReceipts, t]);
 
   // Apply Search & Filters
   const filteredReceipts = useMemo(() => {
     return allReceipts.filter((item) => {
+      if (receiptArchiveView === 'active' && item.isArchived) return false;
+      if (receiptArchiveView === 'archived' && !item.isArchived) return false;
       // 1. Customer Filter
       if (selectedCustomerId !== 'all') {
         if (item.customerId !== selectedCustomerId) return false;
@@ -330,6 +410,24 @@ export const CollectionReceiptsView: React.FC = () => {
         if (!matchesText) return false;
       }
 
+      const matchesColumn = (key: string, value: unknown) => {
+        const query = (columnFilters[key] || '').trim().toLocaleLowerCase();
+        return !query || String(value ?? '').toLocaleLowerCase().includes(query);
+      };
+      const columnValues: Record<string, unknown> = {
+        receiptNumber: item.receiptNumber,
+        date: item.date,
+        customer: `${item.customerCode || ''} ${item.customerName} ${item.systemCode || ''} ${item.patientPhone || ''}`,
+        branch: item.branchName,
+        source: item.sourceLabelAr,
+        shift: `${item.shiftNumber} ${item.shiftStatus === 'Open' ? 'مفتوح' : 'مغلق'}`,
+        amount: item.collectedAmount,
+        paymentMethod: item.paymentMethod,
+        service: `${item.serviceName} ${item.description || ''} ${item.notes || ''}`,
+        receiptStatus: `${item.isArchived ? 'مؤرشف archived' : 'نشط active'} ${item.isCancelled ? 'ملغي cancelled' : ''} ${item.isModified ? 'معدل modified' : ''} ${item.isRefund ? 'استرداد refund' : ''}`,
+      };
+      if (Object.entries(columnValues).some(([key, value]) => !matchesColumn(key, value))) return false;
+
       return true;
     });
   }, [
@@ -341,7 +439,40 @@ export const CollectionReceiptsView: React.FC = () => {
     startDate,
     endDate,
     searchTerm,
+    columnFilters,
+    receiptArchiveView,
   ]);
+
+  const allVisibleSelected = filteredReceipts.length > 0 && filteredReceipts.every((receipt) => selectedReceiptIds.has(receipt.id));
+  const handleToggleSelectAll = () => {
+    setSelectedReceiptIds((current) => {
+      const next = new Set(current);
+      if (allVisibleSelected) filteredReceipts.forEach((receipt) => next.delete(receipt.id));
+      else filteredReceipts.forEach((receipt) => next.add(receipt.id));
+      return next;
+    });
+  };
+  const handleArchiveSelected = () => {
+    const idsToArchive = filteredReceipts
+      .filter((receipt) => selectedReceiptIds.has(receipt.id) && !receipt.isArchived)
+      .map((receipt) => receipt.id);
+    if (!idsToArchive.length) return;
+    if (!window.confirm(t(`هل تريد أرشفة ${idsToArchive.length} إيصال محدد؟ لن تتغير أي بيانات مالية أو تشغيلية.`, `Archive ${idsToArchive.length} selected receipts? No financial or operational data will change.`))) return;
+    archiveCollectionReceipts(idsToArchive);
+    setSelectedReceiptIds((current) => {
+      const next = new Set(current);
+      idsToArchive.forEach((id) => next.delete(id));
+      return next;
+    });
+  };
+
+  const handlePostUnpostedReceipts = () => {
+    const result = postUnpostedCollectionReceipts(activeBranch?.id);
+    alert(t(
+      `تم ترحيل ${result.posted} سند، وتم تخطي ${result.skipped} سند لوجود قيد مرتبط به مسبقاً.`,
+      `Posted ${result.posted} receipts; skipped ${result.skipped} because a related shift journal already exists.`
+    ));
+  };
 
   // KPI Calculations (Based exclusively on collected receipts, not total revenue!)
   const stats = useMemo(() => {
@@ -521,11 +652,15 @@ export const CollectionReceiptsView: React.FC = () => {
     rawRows.forEach((row, index) => {
       const rowNum = index + 2;
 
+      const customerCode = String(row['كود العميل'] || row['Customer Code'] || '').trim();
+      const matchedCustomer = parties.find((p) => (p.type === 'Customer' || p.type === 'Both' || !p.type) && [p.customerCode, p.code].some((code) => String(code || '').trim() === customerCode));
       const customerName = String(row['اسم العميل / المسدد'] || row['العميل'] || row['اسم العميل'] || row['Customer Name'] || '').trim();
       const patientPhone = String(row['رقم الهاتف'] || row['الموبايل'] || row['الهاتف'] || row['Phone Number'] || '').trim();
       const rawDate = String(row['تاريخ التحصيل'] || row['التاريخ'] || row['Collection Date'] || row['Date'] || '').trim();
       const rawAmount = row['المبلغ المحصل'] !== undefined && row['المبلغ المحصل'] !== '' ? row['المبلغ المحصل'] : (row['Collected Amount'] || row['المبلغ'] || 0);
-      const paymentMethod = String(row['طريقة السداد'] || row['طريقة الدفع'] || row['Payment Method'] || 'نقداً (كاش)').trim();
+      const paymentMethodCode = String(row['كود طريقة التحصيل'] || row['كود طريقة السداد'] || row['Payment Method Code'] || '').trim();
+      const matchedPaymentMethod = paymentMethods.find((method) => String(method.code || '').trim().toLowerCase() === paymentMethodCode.toLowerCase());
+      const paymentMethod = String(row['طريقة السداد'] || row['طريقة الدفع'] || row['Payment Method'] || '').trim();
       const serviceName = String(row['الخدمة / البيان'] || row['البيان'] || row['الخدمة'] || row['Service / Purpose'] || 'تحصيل نقدية').trim();
       const receiptNumber = String(row['رقم الإيصال الدفتري'] || row['رقم الإيصال'] || row['Receipt Number'] || '').trim();
       const notes = String(row['ملاحظات التحصيل'] || row['ملاحظات'] || row['Notes'] || '').trim();
@@ -541,6 +676,10 @@ export const CollectionReceiptsView: React.FC = () => {
         });
       }
 
+      if (!customerCode || !matchedCustomer) {
+        errors.push({ rowNumber: rowNum, columnKey: 'customerCode', columnLabelAr: 'كود العميل', enteredValue: customerCode, reasonAr: 'كود العميل غير موجود في إدارة العملاء. يتم التحقق من العملاء النشطين وغير النشطين.' });
+      }
+
       // Validate Date
       let cleanDate = rawDate;
       if (rawDate.includes('T')) cleanDate = rawDate.split('T')[0];
@@ -553,6 +692,9 @@ export const CollectionReceiptsView: React.FC = () => {
           enteredValue: rawDate,
           reasonAr: 'تاريخ التحصيل غير صحيح، يجب أن يكون بصيغة YYYY-MM-DD (مثال: 2026-10-01)',
         });
+      }
+      else if (cleanDate > new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10)) {
+        errors.push({ rowNumber: rowNum, columnKey: 'date', columnLabelAr: 'تاريخ التحصيل', enteredValue: cleanDate, reasonAr: 'تاريخ التحصيل لا يجوز أن يتجاوز تاريخ اليوم.' });
       }
 
       // Validate Collected Amount
@@ -568,70 +710,87 @@ export const CollectionReceiptsView: React.FC = () => {
       }
 
       // Validate Payment Method
-      if (!paymentMethod) {
+      if (!paymentMethodCode || !matchedPaymentMethod) {
         errors.push({
           rowNumber: rowNum,
           columnKey: 'paymentMethod',
-          columnLabelAr: 'طريقة السداد',
-          enteredValue: paymentMethod,
-          reasonAr: 'طريقة السداد إلزامية (نقداً، بطاقة، إنستاباي، فودافون كاش...)',
+          columnLabelAr: 'كود طريقة التحصيل',
+          enteredValue: paymentMethodCode,
+          reasonAr: 'يجب إدخال كود طريقة تحصيل موجود في شاشة إدارة طرق التحصيل والسداد.',
         });
       }
 
       validRows.push({
+        customerCode,
+        customerId: matchedCustomer?.id,
         customerName,
         patientPhone,
         date: cleanDate,
-        collectedAmount: isNaN(amountNum) ? 0 : amountNum,
-        paymentMethod: paymentMethod || 'نقداً (كاش)',
+        collectedAmount: Number.isFinite(amountNum) ? amountNum : 0,
+        paymentMethod: matchedPaymentMethod?.nameAr || paymentMethod,
+        paymentMethodCode,
         serviceName,
         receiptNumber,
         notes,
       });
     });
 
+    const allRowsAsIs = rawRows.map((row) => {
+      const customerCode = String(row['كود العميل'] || row['Customer Code'] || '').trim();
+      const customer = parties.find((p) => (p.type === 'Customer' || p.type === 'Both') && [p.customerCode, p.code].some((code) => String(code || '').trim() === customerCode));
+      const methodCode = String(row['كود طريقة التحصيل'] || row['كود طريقة السداد'] || row['Payment Method Code'] || '').trim();
+      const method = paymentMethods.find((pm) => String(pm.code || '').trim().toLowerCase() === methodCode.toLowerCase());
+      return {
+        customerCode,
+        customerId: customer?.id,
+        customerName: String(row['اسم العميل / المسدد'] || row['العميل'] || row['اسم العميل'] || row['Customer Name'] || ''),
+        patientPhone: String(row['رقم الهاتف'] || row['الموبايل'] || row['الهاتف'] || row['Phone Number'] || ''),
+        date: String(row['تاريخ التحصيل'] || row['التاريخ'] || row['Collection Date'] || row['Date'] || ''),
+        collectedAmount: row['المبلغ المحصل'] ?? row['Collected Amount'] ?? row['المبلغ'] ?? '',
+        paymentMethod: String(row['طريقة السداد'] || row['طريقة الدفع'] || row['Payment Method'] || methodCode),
+        paymentMethodCode: methodCode,
+        serviceName: String(row['الخدمة / البيان'] || row['البيان'] || row['الخدمة'] || row['Service / Purpose'] || ''),
+        receiptNumber: String(row['رقم الإيصال الدفتري'] || row['رقم الإيصال'] || row['Receipt Number'] || ''),
+        notes: String(row['ملاحظات التحصيل'] || row['ملاحظات'] || row['Notes'] || ''),
+      };
+    });
+
     return {
       totalRows: rawRows.length,
       errors,
       validRows: errors.length === 0 ? validRows : [],
+      allRowsAsIs,
     };
   };
 
   const handleConfirmCollectionImport = (validRows: any[]) => {
     const branchToUse = activeBranch?.id || (branches[0]?.id || 'branch-cairo');
-    validRows.forEach((row) => {
-      // 1. Add as formal Cash Receipt Voucher
-      addCashReceipt({
+    const result = addCollectionReceiptsBulk(validRows.map((row) => {
+      const linkedPaymentMethod = paymentMethods.find((pm) => pm.code === row.paymentMethodCode);
+      const paymentType = linkedPaymentMethod?.type === 'Cash' ? 'Cash' : linkedPaymentMethod?.type === 'Card' ? 'Card' : 'Transfer';
+      return {
+        tenantId: tenant?.id || 'tenant-eg-001',
         branchId: branchToUse,
+        partyId: row.customerId,
         receivedFrom: row.customerName,
-        amount: row.collectedAmount,
-        currency: 'EGP',
-        paymentMethod: row.paymentMethod,
-        depositAccount: row.paymentMethod.includes('نقداً') ? '1111' : '1112',
-        description: `${row.serviceName} - ${row.notes || 'استيراد إكسيل للتحصيلات'}`,
-        receiverName: 'استيراد بيانات',
+        amount: Number(row.collectedAmount),
         date: row.date,
-        time: '12:00:00',
-        bankName: row.paymentMethod.includes('نقداً') ? undefined : row.paymentMethod,
-      });
-
-      // 2. If current open shift exists, also reflect as run row
-      if (currentOpenShift) {
-        addShiftRunRow(currentOpenShift.id, {
-          patientName: row.customerName,
-          customerName: row.customerName,
-          patientPhone: row.patientPhone,
-          serviceName: row.serviceName,
-          consumedQuantity: 1,
-          unitPrice: row.collectedAmount,
-          totalRevenue: row.collectedAmount,
-          paymentMethod: row.paymentMethod,
-          collectedAmount: row.collectedAmount,
-          date: row.date,
-          notes: row.notes || 'استيراد تحصيل إكسيل',
-        });
-      }
-    });
+        paymentMethod: paymentType,
+        paymentMethodLabel: linkedPaymentMethod?.nameAr || row.paymentMethod,
+        paymentAccountId: linkedPaymentMethod?.linkedAccountId,
+        serviceName: row.serviceName,
+        receiptNumber: row.receiptNumber,
+        notes: row.notes,
+        patientPhone: row.patientPhone,
+        customerCode: row.customerCode,
+        systemCode: parties.find((party) => party.id === row.customerId)?.systemCode,
+      };
+    }), currentOpenShift?.id);
+    if (!result.success) {
+      alert(result.error || t('تعذر ترحيل إيصالات التحصيل.', 'Could not post collection receipts.'));
+      return;
+    }
+    alert(t(`تم استيراد وترحيل ${result.created} إيصال بنجاح.`, `Imported and posted ${result.created} receipts successfully.`));
   };
 
   return (
@@ -916,11 +1075,64 @@ export const CollectionReceiptsView: React.FC = () => {
             </select>
           </div>
         </div>
+
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+          <button
+            type="button"
+            onClick={() => setShowColumnFilters((shown) => !shown)}
+            className="inline-flex items-center gap-2 rounded-xl border border-slate-200 dark:border-slate-700 px-3 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800"
+          >
+            <Filter className="h-4 w-4" />
+            {showColumnFilters ? t('إخفاء فلاتر الأعمدة', 'Hide column filters') : t('فلترة حسب الأعمدة', 'Filter by columns')}
+          </button>
+          <select
+            value={receiptArchiveView}
+            onChange={(event) => setReceiptArchiveView(event.target.value as typeof receiptArchiveView)}
+            className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-xs font-bold text-slate-700 dark:text-slate-200"
+          >
+            <option value="active">{t('الإيصالات النشطة', 'Active receipts')}</option>
+            <option value="archived">{t('الإيصالات المؤرشفة', 'Archived receipts')}</option>
+            <option value="all">{t('كل الإيصالات', 'All receipts')}</option>
+          </select>
+        </div>
+        {showColumnFilters && (
+          <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-2 rounded-2xl border border-slate-200 dark:border-slate-700 p-3">
+            {[
+              ['receiptNumber', t('رقم الإيصال', 'Receipt number')],
+              ['receiptStatus', t('حالة الإيصال', 'Receipt status')],
+              ['date', t('التاريخ', 'Date')],
+              ['customer', t('العميل / الكود / الهاتف', 'Customer / code / phone')],
+              ['branch', t('الفرع', 'Branch')],
+              ['source', t('المصدر', 'Source')],
+              ['shift', t('رقم الشيفت / حالته', 'Shift / status')],
+              ['amount', t('قيمة التحصيل', 'Collected amount')],
+              ['paymentMethod', t('طريقة التحصيل', 'Payment method')],
+              ['service', t('البيان / الخدمة / الملاحظات', 'Service / description / notes')],
+            ].map(([key, label]) => (
+              <label key={key} className="space-y-1 text-[10px] font-bold text-slate-500 dark:text-slate-400">
+                <span>{label}</span>
+                <input
+                  value={columnFilters[key] || ''}
+                  onChange={(event) => setColumnFilters((current) => ({ ...current, [key]: event.target.value }))}
+                  placeholder={t('اكتب للفلترة...', 'Type to filter...')}
+                  className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-2 text-xs font-normal text-slate-800 dark:text-white outline-none focus:border-blue-500"
+                />
+              </label>
+            ))}
+            <button
+              type="button"
+              onClick={() => setColumnFilters({})}
+              className="self-end rounded-lg px-3 py-2 text-xs font-bold text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-950/40"
+            >
+              {t('مسح فلاتر الأعمدة', 'Clear column filters')}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Receipts Table Card */}
       <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden">
-        <div className="p-4 px-6 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+        <div className="p-4 px-6 border-b border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <h2 className="text-sm font-black text-slate-800 dark:text-white">
               {t('سجل إيصالات التحصيل المسددة للفرع', 'Recorded Customer Collection Receipts')}
@@ -929,18 +1141,44 @@ export const CollectionReceiptsView: React.FC = () => {
               {filteredReceipts.length} {t('إيصال', 'receipts')}
             </span>
           </div>
-          <span className="text-[11px] text-slate-400">
-            {t('عرض قيمة التحصيل الفعلي المودع بالخزينة', 'Displaying actual money collected')}
-          </span>
+          <div className="flex items-center gap-3">
+            <span className="text-[11px] text-slate-400">
+              {t('عرض قيمة التحصيل الفعلي المودع بالخزينة', 'Displaying actual money collected')}
+            </span>
+            <span className="text-xs font-bold text-slate-600 dark:text-slate-300">
+              {selectedReceiptIds.size ? `${selectedReceiptIds.size} ${t('محدد', 'selected')}` : ''}
+            </span>
+            <button
+              type="button"
+              onClick={handlePostUnpostedReceipts}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-blue-200 dark:border-blue-800 px-3 py-2 text-xs font-bold text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-950/40"
+            >
+              <RefreshCw className="h-4 w-4" />
+              {t('ترحيل غير المرحل', 'Post unposted')}
+            </button>
+            <button
+              type="button"
+              disabled={!filteredReceipts.some((receipt) => selectedReceiptIds.has(receipt.id) && !receipt.isArchived)}
+              onClick={handleArchiveSelected}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-amber-600 px-3 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-40 hover:bg-amber-700"
+            >
+              <Archive className="h-4 w-4" />
+              {t('أرشفة المحدد', 'Archive selected')}
+            </button>
+          </div>
         </div>
 
         <div className="overflow-x-auto">
           <table className="w-full text-right text-xs">
             <thead className="bg-slate-50/80 dark:bg-slate-800/50 text-slate-500 font-bold border-b border-slate-200 dark:border-slate-700/60">
               <tr>
+                <th className="p-3.5 px-4 text-center">
+                  <input type="checkbox" aria-label={t('تحديد كل النتائج', 'Select all results')} checked={allVisibleSelected} onChange={handleToggleSelectAll} />
+                </th>
                 <th className="p-3.5 px-4">{t('رقم الإيصال', 'Receipt No.')}</th>
                 <th className="p-3.5 px-4">{t('التاريخ', 'Date')}</th>
                 <th className="p-3.5 px-4">{t('العميل', 'Customer')}</th>
+                <th className="p-3.5 px-4">{t('الفرع', 'Branch')}</th>
                 <th className="p-3.5 px-4">{t('المصدر', 'Source')}</th>
                 <th className="p-3.5 px-4">{t('شيفت الإصدار', 'Issued Shift')}</th>
                 <th className="p-3.5 px-4 text-emerald-700 dark:text-emerald-400 font-black">
@@ -954,7 +1192,7 @@ export const CollectionReceiptsView: React.FC = () => {
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {filteredReceipts.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="py-12 text-center text-slate-400">
+                  <td colSpan={11} className="py-12 text-center text-slate-400">
                     <Receipt className="w-10 h-10 mx-auto text-slate-300 mb-2 opacity-50" />
                     <p className="font-bold text-sm">{t('لا توجد إيصالات تحصيل مطابقة للشروط المحددة', 'No matching collection receipts found')}</p>
                     <p className="text-xs text-slate-400 mt-1">
@@ -972,10 +1210,28 @@ export const CollectionReceiptsView: React.FC = () => {
                         item.isCancelled ? 'opacity-50 bg-rose-50/20' : ''
                       }`}
                     >
+                      <td className="p-3.5 px-4 text-center">
+                        <input
+                          type="checkbox"
+                          aria-label={`${t('تحديد الإيصال', 'Select receipt')} ${item.receiptNumber}`}
+                          checked={selectedReceiptIds.has(item.id)}
+                          onChange={(event) => setSelectedReceiptIds((current) => {
+                            const next = new Set(current);
+                            if (event.target.checked) next.add(item.id);
+                            else next.delete(item.id);
+                            return next;
+                          })}
+                        />
+                      </td>
                       {/* Receipt Number */}
                       <td className="p-3.5 px-4 font-mono font-bold text-slate-900 dark:text-white">
                         <div className="flex items-center gap-1.5">
                           <span>{item.receiptNumber}</span>
+                          {item.isArchived && (
+                            <span className="rounded px-1.5 py-0.5 text-[10px] font-bold bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200">
+                              {t('مؤرشف', 'Archived')}
+                            </span>
+                          )}
                           {item.isCancelled && (
                             <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300">
                               {t('ملغي', 'Cancelled')}
@@ -997,12 +1253,16 @@ export const CollectionReceiptsView: React.FC = () => {
 
                       {/* Customer */}
                       <td className="p-3.5 px-4">
+                        <div className="text-[10px] font-mono text-indigo-600 dark:text-indigo-400">{t('كود العميل', 'Customer Code')}: {item.customerCode || '—'}</div>
                         <div className="font-bold text-slate-900 dark:text-white">{item.customerName}</div>
                         <div className="text-[10px] text-slate-400 flex items-center gap-2">
                           {item.systemCode && <span>{item.systemCode}</span>}
                           {item.patientPhone && <span>{item.patientPhone}</span>}
                         </div>
                       </td>
+
+                      {/* Branch */}
+                      <td className="p-3.5 px-4 whitespace-nowrap text-slate-700 dark:text-slate-300">{item.branchName}</td>
 
                       {/* Source */}
                       <td className="p-3.5 px-4">
@@ -1075,7 +1335,13 @@ export const CollectionReceiptsView: React.FC = () => {
 
                       {/* Actions: Edit & Cancel */}
                       <td className="p-3.5 px-4 text-center whitespace-nowrap">
-                        {!item.isCancelled ? (
+                        {item.source === 'cash_receipt' ? (
+                          <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400">
+                            {item.notes?.includes('Not posted') || item.notes?.includes('غير مرحل')
+                              ? t('بانتظار الترحيل', 'Awaiting posting')
+                              : t('سند قبض', 'Cash receipt voucher')}
+                          </span>
+                        ) : !item.isCancelled ? (
                           <div className="flex items-center justify-center gap-1.5">
                             {/* Edit Button */}
                             <button
@@ -1394,6 +1660,8 @@ export const CollectionReceiptsView: React.FC = () => {
         descriptionAr="استيراد وتصدير إيصالات التحصيل السابقة مع الفحص الخلوي الذكي لمطابقة المبالغ والعملاء"
         columns={collectionExcelColumns}
         currentDataForExport={filteredReceipts.map((r) => ({
+          customerCode: r.customerCode || parties.find((p) => p.id === r.customerId)?.customerCode || parties.find((p) => p.id === r.customerId)?.code || '',
+          paymentMethodCode: paymentMethods.find((pm) => pm.nameAr === r.paymentMethod || pm.nameEn === r.paymentMethod)?.code || '',
           customerName: r.customerName,
           patientPhone: r.patientPhone || '',
           date: r.date,

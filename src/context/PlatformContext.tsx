@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useRef } from 'react';
 import {
   Tenant,
   CleanCompanySetupParams,
@@ -109,6 +109,57 @@ import {
 } from '../data/initialData';
 import { NeonService } from '../services/neonService';
 import { autoTranslateArabic } from '../utils/translator';
+
+const normalizeCustomerPartyCodes = (parties: Party[]): Party[] => {
+  const hasCashSupplier = parties.some((party) =>
+    party.id === 'party-s-cash' ||
+    party.nameEn?.includes('Cash Supplier') ||
+    party.name.includes('\u0645\u0648\u0631\u062f \u0643\u0627\u0634') ||
+    party.name.includes('\u0645\u0648\u0631\u062f \u0646\u0642\u062f\u064a')
+  );
+  const cashSupplier = INITIAL_PARTIES.find((party) => party.id === 'party-s-cash');
+  const partiesToNormalize = hasCashSupplier || !cashSupplier ? parties : [cashSupplier, ...parties];
+  const isCustomer = (party: Party) => party.type === 'Customer' || party.type === 'Both';
+  const differsFromSystemCode = (party: Party, candidate: string) =>
+    ![party.systemCode, party.paperCode].some((systemCode) =>
+      Boolean(systemCode) &&
+      (candidate === systemCode || (/^\d+$/.test(systemCode!) && Number(candidate) === Number(systemCode)))
+    );
+  const hasValidIndependentSerial = (party: Party, candidate?: string) =>
+    typeof candidate === 'string' &&
+    /^\d+$/.test(candidate) &&
+    Number.isSafeInteger(Number(candidate)) &&
+    Number(candidate) > 0 &&
+    differsFromSystemCode(party, candidate);
+  const validStoredCodes = new Set(
+    partiesToNormalize
+      .filter(isCustomer)
+      .map((party) => [party.customerCode, party.code].find((code) => hasValidIndependentSerial(party, code)))
+      .filter((code): code is string => Boolean(code))
+      .map((code) => String(Number(code)))
+  );
+  const claimedCodes = new Set<string>();
+  let nextCustomerSerial = Array.from(validStoredCodes).reduce((highest, code) => Math.max(highest, Number(code)), 0) + 1;
+
+  return partiesToNormalize.map((party) => {
+    const candidate = [party.customerCode, party.code].find((code) => hasValidIndependentSerial(party, code));
+    let customerCode = isCustomer(party) && candidate ? String(Number(candidate)) : undefined;
+    if (isCustomer(party)) {
+      if (!customerCode || claimedCodes.has(customerCode)) {
+        while (claimedCodes.has(String(nextCustomerSerial))) nextCustomerSerial++;
+        customerCode = String(nextCustomerSerial++);
+      }
+      claimedCodes.add(customerCode);
+    }
+
+    return {
+      ...party,
+      branchId: party.branchId || 'branch-cairo',
+      customerCode: customerCode || party.customerCode,
+      code: customerCode || party.code || party.customerCode,
+    };
+  });
+};
 
 interface CheckoutPayload {
   customerId: string;
@@ -266,9 +317,12 @@ interface PlatformContextType {
   addParty: (party: Omit<Party, 'id' | 'tenantId'>) => Party;
   updateParty: (id: string, data: Partial<Party>) => void;
   archiveParty: (id: string, reason?: string) => void;
+  mergeCustomerParties: (primaryId: string, sourceIds: string[], note?: string) => void;
+  mergeCustomerPartiesBulk: (groups: Array<{ primaryId: string; sourceIds: string[]; note?: string }>) => { groups: number; sources: number };
   restoreParty: (id: string) => void;
   deleteParty: (id: string) => void;
-  importPartiesBulk: (partiesList: Omit<Party, 'id' | 'tenantId'>[]) => Promise<{ count: number; success: boolean }>;
+  deletePartiesBulk: (ids: string[]) => { deleted: number };
+  importPartiesBulk: (partiesList: Omit<Party, 'id' | 'tenantId'>[]) => Promise<{ count: number; success: boolean; customerCodes: string[] }>;
   importPartiesFromExcel: (rows: Array<{
     customerCode?: string;
     paperCode?: string;
@@ -328,7 +382,7 @@ interface PlatformContextType {
       transferredToMainTreasury?: boolean;
     }
   ) => void;
-  addShiftRunRow: (shiftId: string, row: Omit<ShiftRunRow, 'id'>) => void;
+  addShiftRunRow: (shiftId: string, row: Omit<ShiftRunRow, 'id'>, options?: { skipAccounting?: boolean }) => void;
   updateShiftRunRow: (shiftId: string, rowId: string, data: Partial<ShiftRunRow>) => void;
   removeShiftRunRow: (shiftId: string, rowId: string) => void;
   editCollectionReceipt: (params: {
@@ -343,6 +397,8 @@ interface PlatformContextType {
     sourceShiftId: string;
     reason: string;
   }) => { success: boolean; error?: string };
+  archiveCollectionReceipts: (receiptIds: string[]) => void;
+  postUnpostedCollectionReceipts: (branchId?: string) => { posted: number; skipped: number };
   addShiftExpense: (shiftId: string, expense: Omit<ShiftExpense, 'id'>) => void;
   removeShiftExpense: (shiftId: string, expenseId: string) => void;
   updateShiftBalancing: (
@@ -447,7 +503,27 @@ interface PlatformContextType {
   // Vouchers, Tax Invoices & Stock Notes (السندات والفواتير الضريبية وأذون المخزن)
   cashReceipts: CashReceiptVoucher[];
   allCashReceipts: CashReceiptVoucher[];
-  addCashReceipt: (data: Omit<CashReceiptVoucher, 'id' | 'voucherNumber' | 'createdAt'>) => CashReceiptVoucher;
+  addCashReceipt: (
+    data: Omit<CashReceiptVoucher, 'id' | 'voucherNumber' | 'createdAt'>,
+    options?: { accountingTreatment?: 'customer_collection'; accountingAccountId?: string }
+  ) => CashReceiptVoucher;
+  addCollectionReceiptsBulk: (items: Array<{
+    tenantId: string;
+    branchId: string;
+    partyId: string;
+    receivedFrom: string;
+    amount: number;
+    date: string;
+    paymentMethod: CashReceiptVoucher['paymentMethod'];
+    paymentMethodLabel: string;
+    paymentAccountId?: string;
+    serviceName: string;
+    receiptNumber?: string;
+    notes?: string;
+    patientPhone?: string;
+    customerCode?: string;
+    systemCode?: string;
+  }>, shiftId?: string) => { success: boolean; created: number; error?: string };
   deleteCashReceipt: (id: string) => void;
 
   cashPayments: CashPaymentVoucher[];
@@ -942,10 +1018,6 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     localStorage.setItem('erp_accounts', JSON.stringify(allAccounts));
   }, [allAccounts]);
 
-  useEffect(() => {
-    localStorage.setItem('erp_journals', JSON.stringify(allJournals));
-  }, [allJournals]);
-
   const accounts = allAccounts.filter((a) => a.tenantId === tenant?.id);
   const journalEntries = allJournals.filter((j) => j.tenantId === tenant?.id);
 
@@ -1322,36 +1394,13 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          const hasCashSupplier = parsed.some((p: Party) => p.name.includes('مورد كاش') || p.name.includes('مورد نقدي'));
-          let custSeq = 1;
-          const rawList = hasCashSupplier ? parsed : [cashSupplier, ...parsed];
-          return rawList.map((p: Party) => {
-            let normalizedCustCode = p.customerCode;
-            if (p.type === 'Customer' || p.type === 'Both') {
-              if (!normalizedCustCode || normalizedCustCode.startsWith('CUST-') || (p.systemCode && normalizedCustCode === p.systemCode)) {
-                normalizedCustCode = String(custSeq++);
-              } else if (normalizedCustCode.startsWith('C-')) {
-                const digits = normalizedCustCode.replace(/\D/g, '');
-                const num = parseInt(digits, 10);
-                normalizedCustCode = isNaN(num) || num >= 1000 ? String(custSeq++) : String(num);
-              }
-            }
-            return {
-              ...p,
-              branchId: p.branchId || 'branch-cairo',
-              customerCode: normalizedCustCode || p.customerCode,
-              code: normalizedCustCode || p.code || p.customerCode,
-            };
-          });
+          return normalizeCustomerPartyCodes(parsed);
         }
       }
     } catch (e) {
       console.error('Failed to load parties:', e);
     }
-    return INITIAL_PARTIES.map((p) => ({
-      ...p,
-      branchId: p.branchId || 'branch-cairo',
-    }));
+    return normalizeCustomerPartyCodes(INITIAL_PARTIES);
   });
 
   useEffect(() => {
@@ -1360,25 +1409,38 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const parties = allParties.filter((p) => p.tenantId === tenant?.id);
 
-  // Serialized Customer Code Generator (مسريل من 1 وملوش علاقة بكود السيستم)
+  const customerCodeSequenceRef = useRef(0);
+
+  const getUsedCustomerCodes = (partiesToCheck = allParties): Set<string> => new Set(
+    partiesToCheck
+      .filter((p) => p.type === 'Customer' || p.type === 'Both')
+      .map((p) => p.customerCode && p.customerCode !== p.systemCode
+        ? p.customerCode
+        : p.code && p.code !== p.systemCode ? p.code : '')
+      .filter((code) => /^\d+$/.test(code) && Number.isSafeInteger(Number(code)))
+      .map((code) => String(Number(code)))
+  );
+
+  const allocateCustomerCode = (usedCodes = getUsedCustomerCodes()): string => {
+    let highest = customerCodeSequenceRef.current;
+    usedCodes.forEach((code) => {
+      const serial = Number(code);
+      if (Number.isSafeInteger(serial) && serial > highest) highest = serial;
+    });
+    let next = highest + 1;
+    while (usedCodes.has(String(next))) next++;
+    customerCodeSequenceRef.current = next;
+    return String(next);
+  };
+
+  // Numeric application Customer Code; independent from System Code.
   const getNextCustomerAppCode = (): string => {
-    let maxSerial = 0;
-    const custParties = allParties.filter((p) => p.type === 'Customer' || p.type === 'Both');
-    for (const p of custParties) {
-      if (!p.customerCode) continue;
-      // Completely independent of systemCode: ignore systemCode values or CUST- prefix
-      if (p.systemCode && p.customerCode === p.systemCode) continue;
-      if (p.customerCode.startsWith('CUST-') || p.customerCode.startsWith('BR-')) continue;
-      const digitsOnly = p.customerCode.replace(/\D/g, '');
-      if (digitsOnly) {
-        const val = parseInt(digitsOnly, 10);
-        if (!isNaN(val) && val < 1000 && val > maxSerial) {
-          maxSerial = val;
-        }
-      }
-    }
-    const nextNum = Math.max(1, maxSerial + 1);
-    return String(nextNum);
+    const usedCodes = getUsedCustomerCodes();
+    let highest = customerCodeSequenceRef.current;
+    usedCodes.forEach((code) => { highest = Math.max(highest, Number(code)); });
+    let next = highest + 1;
+    while (usedCodes.has(String(next))) next++;
+    return String(next);
   };
 
   // System Code Generator based on Company preferences
@@ -1402,21 +1464,30 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const importPartiesBulk = async (
     partiesList: Omit<Party, 'id' | 'tenantId'>[]
-  ): Promise<{ count: number; success: boolean }> => {
-    if (!partiesList || partiesList.length === 0) return { count: 0, success: true };
+  ): Promise<{ count: number; success: boolean; customerCodes: string[] }> => {
+    if (!partiesList || partiesList.length === 0) return { count: 0, success: true, customerCodes: [] };
 
     const currentTenant = tenant || INITIAL_TENANT;
     const defaultBranchId = activeBranch?.id || branches[0]?.id || 'branch-cairo';
     const startNum = currentTenant.customerStartNumber || 1000;
-    const existingCount = allParties.filter((p) => p.type === 'Customer' || p.type === 'Both').length;
+    const existingCustomerCount = allParties.filter((p) => p.type === 'Customer' || p.type === 'Both').length;
+    const usedCustomerCodes = getUsedCustomerCodes();
     const nowIso = new Date().toISOString();
     const batchId = Date.now();
 
     const newParties: Party[] = partiesList.map((p, idx) => {
       const branchId = p.branchId || defaultBranchId;
       const nameEn = p.nameEn || autoTranslateArabic(p.name);
-      const customerCode = p.customerCode || String(existingCount + idx + 1);
-      const systemCode = p.systemCode || p.paperCode || `CUST-${startNum + existingCount + idx + 1}`;
+      const requestedCustomerCode = p.customerCode || p.code || '';
+      const normalizedRequestedCode = /^\d+$/.test(requestedCustomerCode) && Number.isSafeInteger(Number(requestedCustomerCode)) && Number(requestedCustomerCode) > 0
+        ? String(Number(requestedCustomerCode))
+        : '';
+      const customerCode = normalizedRequestedCode && !usedCustomerCodes.has(normalizedRequestedCode)
+        ? normalizedRequestedCode
+        : allocateCustomerCode(usedCustomerCodes);
+      usedCustomerCodes.add(customerCode);
+      customerCodeSequenceRef.current = Math.max(customerCodeSequenceRef.current, Number(customerCode));
+      const systemCode = p.systemCode || p.paperCode || `CUST-${startNum + existingCustomerCount + idx + 1}`;
       const paperCode = p.paperCode || p.systemCode || systemCode;
       const fileCode = p.fileCode || p.fileNumber || customerCode;
       const uniqueId = `party-${batchId}-${idx}-${Math.random().toString(36).substring(2, 7)}`;
@@ -1483,13 +1554,21 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       }, 500);
     }
 
-    return { count: newParties.length, success: true };
+    return { count: newParties.length, success: true, customerCodes: newParties.map((p) => p.customerCode || '') };
   };
 
   const addParty = (partyData: Omit<Party, 'id' | 'tenantId'>): Party => {
     const nameEn = partyData.nameEn || autoTranslateArabic(partyData.name);
     const branchId = partyData.branchId || activeBranch?.id || branches[0]?.id || 'branch-cairo';
-    const customerCode = partyData.customerCode || getNextCustomerAppCode();
+    const usedCustomerCodes = getUsedCustomerCodes();
+    const requestedCustomerCode = partyData.customerCode || partyData.code || '';
+    const normalizedRequestedCode = /^\d+$/.test(requestedCustomerCode) && Number.isSafeInteger(Number(requestedCustomerCode)) && Number(requestedCustomerCode) > 0
+      ? String(Number(requestedCustomerCode))
+      : '';
+    const customerCode = normalizedRequestedCode && !usedCustomerCodes.has(normalizedRequestedCode)
+      ? normalizedRequestedCode
+      : allocateCustomerCode(usedCustomerCodes);
+    customerCodeSequenceRef.current = Math.max(customerCodeSequenceRef.current, Number(customerCode));
     // System Code: contains currently entered data (formerly paperCode)
     const systemCode = partyData.systemCode || partyData.paperCode || getNextCustomerSystemCode(branchId);
     const paperCode = partyData.paperCode || partyData.systemCode || systemCode;
@@ -1540,7 +1619,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const nameEn = data.nameEn || (data.name ? autoTranslateArabic(data.name) : prevParty?.nameEn);
 
     setAllParties((prev) =>
-      prev.map((p) => (p.id === id ? { ...p, ...data, nameEn: nameEn || p.nameEn } : p))
+      prev.map((p) => (p.id === id ? { ...p, ...data, customerCode: p.customerCode || p.code, code: p.customerCode || p.code, nameEn: nameEn || p.nameEn } : p))
     );
     recordAudit({
       entityType: 'Party',
@@ -1577,6 +1656,106 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       reason,
       diffSummary: `أرشفة العميل (${prevParty.name})`,
     });
+  };
+
+  const mergeCustomerParties = (primaryId: string, sourceIds: string[], note = '') => {
+    const primary = allParties.find((party) => party.id === primaryId && party.tenantId === tenant?.id);
+    if (!primary || primary.isArchived) return;
+    const sources = allParties.filter((party) => sourceIds.includes(party.id) && party.id !== primaryId && party.tenantId === primary.tenantId && !party.isArchived);
+    if (!sources.length) return;
+    const sourceIdsToMerge = sources.map((party) => party.id);
+    const sourceSummary = sources.map((party) => `${party.name} (${party.customerCode || party.code || party.systemCode || party.id})`).join('، ');
+    const mergeNote = [primary.mergeNotes, note.trim(), `ملفات مدمجة للعرض: ${sourceSummary}`].filter(Boolean).join('\n');
+    setAllParties((prev) => prev.map((party) => {
+      if (party.id === primaryId) return {
+        ...party,
+        mergedFromPartyIds: [...new Set([...(party.mergedFromPartyIds || []), ...sourceIdsToMerge])],
+        mergeNotes: mergeNote,
+        medicalNotes: [party.medicalNotes, note.trim() ? `ملاحظة نقل: ${note.trim()}` : ''].filter(Boolean).join('\n'),
+      };
+      if (!sourceIdsToMerge.includes(party.id)) return party;
+      return {
+        ...party,
+        isArchived: true,
+        mergedIntoPartyId: primaryId,
+        archivedAt: new Date().toISOString(),
+        archivedBy: currentUser?.name || 'Admin',
+        archiveReason: `دمج للعرض والاستخدام المستقبلي ضمن ملف ${primary.name}. السجلات التاريخية لم تتغير.`,
+      };
+    }));
+    recordAudit({
+      entityType: 'Party', entityId: primaryId, entityName: primary.name, actionType: 'UPDATE',
+      reason: note, diffSummary: `دمج ${sources.length} ملف عميل في ${primary.name} للعرض والاستخدام المستقبلي فقط`,
+      previousState: primary,
+      newState: { mergedFromPartyIds: [...new Set([...(primary.mergedFromPartyIds || []), ...sourceIdsToMerge])], mergeNotes: mergeNote },
+    });
+  };
+
+  const mergeCustomerPartiesBulk = (
+    groups: Array<{ primaryId: string; sourceIds: string[]; note?: string }>
+  ): { groups: number; sources: number } => {
+    const partiesById = new Map(allParties.map((party) => [party.id, party]));
+    const sourceToPrimary = new Map<string, string>();
+    const primaryUpdates = new Map<string, { sourceIds: string[]; notes: string[]; sourceSummary: string[] }>();
+
+    groups.forEach(({ primaryId, sourceIds, note = '' }) => {
+      const primary = partiesById.get(primaryId);
+      if (!primary || primary.tenantId !== tenant?.id || primary.isArchived || primary.mergedIntoPartyId) return;
+      const validSources = sourceIds
+        .map((id) => partiesById.get(id))
+        .filter((party): party is Party => Boolean(party && party.tenantId === primary.tenantId && party.id !== primaryId && !party.isArchived && !party.mergedIntoPartyId));
+      if (!validSources.length) return;
+      const update = primaryUpdates.get(primaryId) || { sourceIds: [], notes: [], sourceSummary: [] };
+      validSources.forEach((source) => {
+        sourceToPrimary.set(source.id, primaryId);
+        update.sourceIds.push(source.id);
+        update.sourceSummary.push(`${source.name} (${source.customerCode || source.code || source.systemCode || source.id})`);
+      });
+      if (note.trim()) update.notes.push(note.trim());
+      primaryUpdates.set(primaryId, update);
+    });
+
+    if (!sourceToPrimary.size) return { groups: 0, sources: 0 };
+    const timestamp = new Date().toISOString();
+    setAllParties((prev) => prev.map((party) => {
+      const primaryUpdate = primaryUpdates.get(party.id);
+      if (primaryUpdate) {
+        const uniqueSourceIds = [...new Set([...(party.mergedFromPartyIds || []), ...primaryUpdate.sourceIds])];
+        const sourceNote = primaryUpdate.sourceSummary.length ? `ملفات مدمجة للعرض: ${primaryUpdate.sourceSummary.join('، ')}` : '';
+        const mergeNotes = [party.mergeNotes, ...primaryUpdate.notes, sourceNote].filter(Boolean).join('\n');
+        return {
+          ...party,
+          mergedFromPartyIds: uniqueSourceIds,
+          mergeNotes,
+          medicalNotes: [party.medicalNotes, ...primaryUpdate.notes.map((value) => `ملاحظة نقل: ${value}`)].filter(Boolean).join('\n'),
+        };
+      }
+      const primaryId = sourceToPrimary.get(party.id);
+      if (!primaryId) return party;
+      const primary = partiesById.get(primaryId)!;
+      return {
+        ...party,
+        isArchived: true,
+        mergedIntoPartyId: primaryId,
+        archivedAt: timestamp,
+        archivedBy: currentUser?.name || 'Admin',
+        archiveReason: `دمج للعرض والاستخدام المستقبلي ضمن ملف ${primary.name}. السجلات التاريخية لم تتغير.`,
+      };
+    }));
+    const sourceCount = sourceToPrimary.size;
+    recordAudit({
+      entityType: 'Party',
+      entityId: `bulk-merge-${Date.now()}`,
+      entityName: `دمج جماعي لمجموعات العملاء (${primaryUpdates.size})`,
+      actionType: 'UPDATE',
+      diffSummary: `دمج ${sourceCount} ملف مصدر ضمن ${primaryUpdates.size} ملفات رئيسية حسب تطابق كود السيستم`,
+      newState: { groupCount: primaryUpdates.size, sourceCount },
+    });
+    logUserActivity(
+      'parties', 'العملاء والمرضى', 'Customers', 'دمج جماعي حسب كود السيستم', 'Bulk merge by system code',
+      `تم دمج ${sourceCount} ملف ضمن ${primaryUpdates.size} مجموعات، مع إبقاء السجلات التاريخية كما هي.`
+    );
+    return { groups: primaryUpdates.size, sources: sourceCount };
   };
 
   const restoreParty = (id: string) => {
@@ -1616,6 +1795,35 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         `تم حذف العميل/المورد نهائياً: ${p.name}`
       );
     }
+  };
+
+  const deletePartiesBulk = (ids: string[]): { deleted: number } => {
+    const uniqueIds = new Set(ids);
+    const deletedParties = allParties.filter((party) =>
+      uniqueIds.has(party.id) && party.tenantId === tenant?.id
+    );
+    if (deletedParties.length === 0) return { deleted: 0 };
+
+    const deletedIds = new Set(deletedParties.map((party) => party.id));
+    setAllParties((prev) => prev.filter((party) => !deletedIds.has(party.id)));
+    recordAudit({
+      branchId: activeBranch?.id,
+      entityType: 'Party',
+      entityId: `bulk-delete-${Date.now()}`,
+      entityName: `حذف جماعي للعملاء (${deletedParties.length})`,
+      actionType: 'DELETE',
+      details: `تم حذف ${deletedParties.length} عميل نهائياً في عملية حذف جماعي.`,
+      diffSummary: `حذف نهائي مجمع لعدد ${deletedParties.length} عميل`,
+    });
+    logUserActivity(
+      'parties',
+      'العملاء والموردين',
+      'Parties',
+      'حذف جماعي للعملاء',
+      'Bulk delete customers',
+      `تم حذف ${deletedParties.length} عميل نهائياً في عملية جماعية واحدة.`
+    );
+    return { deleted: deletedParties.length };
   };
 
   const addClientOffer = (partyId: string, offer: Omit<ClientOffer, 'id' | 'purchaseDate' | 'status'>): ClientOffer => {
@@ -1735,10 +1943,13 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const importCustomersFromExcel = (rows: any[]) => {
     importPartiesFromExcel(
       rows.map((r) => ({
+        customerCode: r.customerCode,
         name: r.name,
         nameEn: r.nameEn,
         phone: r.phone,
         paperCode: r.paperCode,
+        systemCode: r.systemCode,
+        fileCode: r.fileCode,
         leadSource: r.leadSource,
         type: 'Customer' as const,
       }))
@@ -1765,6 +1976,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const activeTenantId = tenant?.id || INITIAL_TENANT.id;
 
     const newPartiesToAdd: Party[] = [];
+    const usedCustomerCodes = getUsedCustomerCodes();
 
     rows.forEach((row, idx) => {
       if (!row.name || !row.name.trim()) {
@@ -1787,7 +1999,15 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           (b) => b.name.includes(row.branchName || '') || b.nameEn.toLowerCase().includes((row.branchName || '').toLowerCase())
         );
         const nameEn = row.nameEn || autoTranslateArabic(row.name);
-        const custCode = row.customerCode || String(parties.length + newPartiesToAdd.length + 1);
+        const requestedCustomerCode = row.customerCode || '';
+        const normalizedRequestedCode = /^\d+$/.test(requestedCustomerCode) && Number.isSafeInteger(Number(requestedCustomerCode)) && Number(requestedCustomerCode) > 0
+          ? String(Number(requestedCustomerCode))
+          : '';
+        const custCode = normalizedRequestedCode && !usedCustomerCodes.has(normalizedRequestedCode)
+          ? normalizedRequestedCode
+          : allocateCustomerCode(usedCustomerCodes);
+        usedCustomerCodes.add(custCode);
+        customerCodeSequenceRef.current = Math.max(customerCodeSequenceRef.current, Number(custCode));
         const sysCode = row.systemCode || row.paperCode || getNextCustomerSystemCode(branchMatch?.id);
         const paperCode = row.paperCode || row.systemCode || sysCode;
         const fileCode = row.fileCode || custCode;
@@ -1879,11 +2099,14 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     let isMounted = true;
     const hydrateDatasets = async () => {
       try {
-        const [idbApts, idbFups, idbPlans, idbParties] = await Promise.all([
+        const [idbApts, idbFups, idbPlans, idbParties, idbJournals, idbReceptionShifts, idbCashReceipts] = await Promise.all([
           idbGet<Appointment[]>('erp_appointments'),
           idbGet<PatientFollowUp[]>('erp_patient_follow_ups'),
           idbGet<TreatmentPlan[]>('erp_treatment_plans'),
           idbGet<Party[]>('erp_parties'),
+          idbGet<JournalEntry[]>('erp_journals'),
+          idbGet<ReceptionShift[]>('erp_reception_shifts'),
+          idbGet<CashReceiptVoucher[]>('erp_cash_receipts'),
         ]);
 
         if (!isMounted) return;
@@ -1898,7 +2121,28 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           setAllTreatmentPlans((curr) => (idbPlans.length >= curr.length ? idbPlans : curr));
         }
         if (Array.isArray(idbParties) && idbParties.length > 0) {
-          setAllParties((curr) => (idbParties.length >= curr.length ? idbParties : curr));
+          setAllParties((curr) => (idbParties.length >= curr.length ? normalizeCustomerPartyCodes(idbParties) : curr));
+        }
+        if (Array.isArray(idbJournals) && idbJournals.length > 0) {
+          setAllJournals((curr) => {
+            const journalsById = new Map(curr.map((journal) => [journal.id, journal]));
+            idbJournals.forEach((journal) => journalsById.set(journal.id, journal));
+            return Array.from(journalsById.values());
+          });
+        }
+        if (Array.isArray(idbReceptionShifts) && idbReceptionShifts.length > 0) {
+          setAllReceptionShifts((curr) => {
+            const shiftsById = new Map(idbReceptionShifts.map((shift) => [shift.id, shift]));
+            curr.forEach((shift) => shiftsById.set(shift.id, shift));
+            return Array.from(shiftsById.values());
+          });
+        }
+        if (Array.isArray(idbCashReceipts) && idbCashReceipts.length > 0) {
+          setAllCashReceipts((curr) => {
+            const receiptsById = new Map(curr.map((receipt) => [receipt.id, receipt]));
+            idbCashReceipts.forEach((receipt) => receiptsById.set(receipt.id, receipt));
+            return Array.from(receiptsById.values());
+          });
         }
       } catch (err) {
         console.warn('Storage hydration error:', err);
@@ -1917,6 +2161,13 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (!isStorageHydrated) return;
     persistDataset('erp_appointments', allAppointments);
   }, [allAppointments, isStorageHydrated]);
+
+  useEffect(() => {
+    if (!isStorageHydrated) return;
+    void idbSet('erp_journals', allJournals).then((saved) => {
+      if (!saved) console.error('Failed to persist accounting journals to IndexedDB. The current in-memory data is preserved.');
+    });
+  }, [allJournals, isStorageHydrated]);
 
   useEffect(() => {
     if (!isStorageHydrated) return;
@@ -1941,7 +2192,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           if (Array.isArray(parsed)) setAllPatientFollowUps(parsed);
         } else if (e.key === 'erp_parties') {
           const parsed = JSON.parse(e.newValue);
-          if (Array.isArray(parsed)) setAllParties(parsed);
+          if (Array.isArray(parsed)) setAllParties(normalizeCustomerPartyCodes(parsed));
         } else if (e.key === 'erp_reception_shifts') {
           const parsed = JSON.parse(e.newValue);
           if (Array.isArray(parsed)) setAllReceptionShifts(parsed);
@@ -2076,10 +2327,12 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const serviceNameEn = aptData.serviceNameEn || autoTranslateArabic(aptData.serviceNameAr);
     const party = aptData.patientId ? allParties.find((p) => p.id === aptData.patientId) : undefined;
     const branchId = aptData.branchId || party?.branchId || activeBranch?.id || 'branch-cairo';
-    const customerCode = aptData.customerCode || party?.customerCode || party?.code || '';
-    const systemCode = aptData.systemCode || party?.systemCode || party?.paperCode || '';
-    const paperCode = aptData.paperCode || party?.paperCode || party?.systemCode || '';
-    const fileCode = aptData.fileCode || party?.fileCode || party?.fileNumber || '';
+    const customerCode = party?.customerCode ||
+      (party?.code !== party?.systemCode && party?.code !== party?.paperCode ? party?.code : undefined) ||
+      aptData.customerCode || '';
+    const systemCode = party?.systemCode || aptData.systemCode || party?.paperCode || aptData.paperCode || '';
+    const paperCode = party?.paperCode || party?.systemCode || aptData.paperCode || aptData.systemCode || '';
+    const fileCode = party?.fileCode || party?.fileNumber || aptData.fileCode || '';
 
     const newApt: Appointment = {
       ...aptData,
@@ -2735,8 +2988,11 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   });
 
   useEffect(() => {
-    localStorage.setItem('erp_reception_shifts', JSON.stringify(allReceptionShifts));
-  }, [allReceptionShifts]);
+    if (!isStorageHydrated) return;
+    void idbSet('erp_reception_shifts', allReceptionShifts).then((saved) => {
+      if (!saved) console.error('Failed to persist reception shifts to IndexedDB. The current in-memory data is preserved.');
+    });
+  }, [allReceptionShifts, isStorageHydrated]);
 
   const receptionShifts = allReceptionShifts.filter((s) => s.tenantId === tenant?.id);
   const activeReceptionShift = useMemo(() => {
@@ -3282,7 +3538,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     );
   };
 
-  const addShiftRunRow = (shiftId: string, rowData: Omit<ShiftRunRow, 'id'>) => {
+  const addShiftRunRow = (shiftId: string, rowData: Omit<ShiftRunRow, 'id'>, options?: { skipAccounting?: boolean }) => {
     // 1. Period Lock Check
     const rowDate = rowData.date || new Date().toISOString().split('T')[0];
     const periodCheck = validatePeriodDate(rowDate, activeBranch?.id);
@@ -3304,13 +3560,31 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     };
 
     // 2. Real-time Accounting Entry for Revenue
-    const pm = allPaymentMethods.find(
-      (p) => p.nameAr === rowData.paymentMethod || p.id === rowData.paymentMethod || p.nameEn === rowData.paymentMethod
+    const normalizedMethodName = String(rowData.paymentMethod || '').trim().toLocaleLowerCase().replace(/[\s()\-_\/]/g, '');
+    const shiftBranchId = allReceptionShifts.find((shift) => shift.id === shiftId)?.branchId || activeBranch?.id;
+    const availableMethods = allPaymentMethods.filter((method) =>
+      method.tenantId === tenant?.id && (!method.branchId || method.branchId === shiftBranchId)
     );
+    const exactPaymentMethod = availableMethods.find((method) =>
+      [method.nameAr, method.nameEn, method.id, method.code].some((value) =>
+        value?.trim().toLocaleLowerCase().replace(/[\s()\-_\/]/g, '') === normalizedMethodName
+      )
+    );
+    const inferredPaymentType: PaymentMethod['type'] | undefined = /cash|نقد|كاش/.test(normalizedMethodName)
+      ? 'Cash'
+      : /card|visa|بطاق|فيزا/.test(normalizedMethodName)
+        ? 'Card'
+        : /transfer|bank|تحويل|انستاباي|إنستاباي/.test(normalizedMethodName)
+          ? 'Transfer'
+          : undefined;
+    const pm = exactPaymentMethod || (inferredPaymentType
+      ? availableMethods.find((method) => method.branchId === shiftBranchId && method.type === inferredPaymentType)
+        || availableMethods.find((method) => method.type === inferredPaymentType)
+      : undefined);
     const cust = allParties.find((p) => p.id === newRow.customerId || p.id === newRow.patientId);
     const prod = allProducts.find((p) => p.id === newRow.serviceId || p.nameAr === newRow.serviceName);
 
-    const revLines = buildRevenueJournalLines({
+    const revLines = options?.skipAccounting ? [] : buildRevenueJournalLines({
       accounts: allAccounts,
       paymentMethod: pm,
       customer: cust,
@@ -3335,7 +3609,9 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
 
     // 3. Real-time Inventory Depletion & Direct Cost Accounting Entry
-    const { totalCost, stockDeductions } = calculateItemCostAndDeductions(prod, newRow.consumedQuantity || 1, allProducts);
+    const { totalCost, stockDeductions } = options?.skipAccounting
+      ? { totalCost: 0, stockDeductions: [] }
+      : calculateItemCostAndDeductions(prod, newRow.consumedQuantity || 1, allProducts);
     const targetWhId = activeWarehouse?.id || allWarehouses.find((w) => w.branchId === activeBranch?.id)?.id || allWarehouses[0]?.id || 'wh-1';
 
     if (stockDeductions.length > 0) {
@@ -3484,6 +3760,26 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         return shift;
       })
     );
+  };
+
+  const archiveCollectionReceipts = (receiptIds: string[]): void => {
+    const ids = new Set(receiptIds);
+    if (ids.size === 0) return;
+    const archivedAt = new Date().toISOString();
+    const linkedVoucherIds = new Set(allReceptionShifts.flatMap((shift) => shift.runRows
+      .filter((row) => ids.has(row.id) && row.receiptVoucherId)
+      .map((row) => row.receiptVoucherId as string)));
+    setAllReceptionShifts((prev) => prev.map((shift) => ({
+      ...shift,
+      runRows: shift.runRows.map((row) => {
+        if (!ids.has(row.id) || row.receiptArchivedAt) return row;
+        return { ...row, receiptArchivedAt: archivedAt, receiptArchivedBy: currentUser?.name || 'Admin' };
+      }),
+    })));
+    setAllCashReceipts((prev) => prev.map((receipt) => {
+      if ((!ids.has(receipt.id) && !linkedVoucherIds.has(receipt.id)) || receipt.isArchived) return receipt;
+      return { ...receipt, isArchived: true, archivedAt, archivedBy: currentUser?.name || 'Admin' };
+    }));
   };
 
   const removeShiftRunRow = (shiftId: string, rowId: string) => {
@@ -7610,6 +7906,14 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
     return INITIAL_CASH_RECEIPTS;
   });
+  const cashReceiptNumberCounter = useRef(0);
+
+  useEffect(() => {
+    if (!isStorageHydrated) return;
+    void idbSet('erp_cash_receipts', allCashReceipts).then((saved) => {
+      if (!saved) console.error('Failed to persist cash receipts to IndexedDB. The current in-memory data is preserved.');
+    });
+  }, [allCashReceipts, isStorageHydrated]);
 
   const [allCashPayments, setAllCashPayments] = useState<CashPaymentVoucher[]>(() => {
     try {
@@ -7674,20 +7978,44 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const goodsReceipts = allGoodsReceipts.filter((grn) => grn.tenantId === tenant.id);
   const goodsIssues = allGoodsIssues.filter((gin) => gin.tenantId === tenant.id);
 
-  const addCashReceipt = (data: Omit<CashReceiptVoucher, 'id' | 'voucherNumber' | 'createdAt'>): CashReceiptVoucher => {
-    const nextSeq = allCashReceipts.length + 1;
+  const addCashReceipt = (
+    data: Omit<CashReceiptVoucher, 'id' | 'voucherNumber' | 'createdAt'>,
+    options?: { accountingTreatment?: 'customer_collection'; accountingAccountId?: string }
+  ): CashReceiptVoucher => {
+    cashReceiptNumberCounter.current = Math.max(cashReceiptNumberCounter.current, allCashReceipts.length) + 1;
+    const nextSeq = cashReceiptNumberCounter.current;
     const padSeq = String(nextSeq).padStart(4, '0');
     const voucherNumber = `CR-${new Date().getFullYear()}-${padSeq}`;
-    const newReceipt: CashReceiptVoucher = {
+    let newReceipt: CashReceiptVoucher = {
       ...data,
       id: `rv-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
       voucherNumber,
       createdAt: new Date().toISOString(),
     };
 
-    const updated = [newReceipt, ...allCashReceipts];
-    setAllCashReceipts(updated);
-    localStorage.setItem('erp_cash_receipts', JSON.stringify(updated));
+    if (options?.accountingTreatment === 'customer_collection') {
+      const party = allParties.find((candidate) => candidate.id === data.partyId);
+      const journalLines = buildCashReceiptJournalLines({
+        accounts: allAccounts,
+        amount: Number(data.amount) || 0,
+        cashOrBankAccountId: options.accountingAccountId || data.bankOrSafeAccountId,
+        party,
+        memo: `تحصيل العميل ${data.receivedFrom} - سند ${voucherNumber}`,
+      });
+      const journal = postJournalEntryWithSync({
+        tenantId: data.tenantId,
+        branchId: data.branchId,
+        entryNumber: `JV-CR-${Date.now().toString().slice(-6)}`,
+        date: data.date,
+        description: `تحصيل نقدية من العميل ${data.receivedFrom}`,
+        isPosted: true,
+        sourceDocument: `سند قبض ${voucherNumber}`,
+        lines: journalLines,
+      });
+      newReceipt = { ...newReceipt, journalEntryId: journal.id };
+    }
+
+    setAllCashReceipts((prev) => [newReceipt, ...prev]);
 
     logUserActivity(
       'fiscal_documents',
@@ -7701,10 +8029,348 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return newReceipt;
   };
 
+  const addCollectionReceiptsBulk = (
+    items: Array<{
+      tenantId: string;
+      branchId: string;
+      partyId: string;
+      receivedFrom: string;
+      amount: number;
+      date: string;
+      paymentMethod: CashReceiptVoucher['paymentMethod'];
+      paymentMethodLabel: string;
+      paymentAccountId?: string;
+      serviceName: string;
+      receiptNumber?: string;
+      notes?: string;
+      patientPhone?: string;
+      customerCode?: string;
+      systemCode?: string;
+    }>,
+    shiftId?: string
+  ): { success: boolean; created: number; error?: string } => {
+    if (items.length === 0) return { success: true, created: 0 };
+    const targetShift = shiftId ? allReceptionShifts.find((shift) => shift.id === shiftId && shift.status === 'Open') : undefined;
+    if (shiftId && !targetShift) return { success: false, created: 0, error: 'الشيفت المفتوح المحدد غير موجود.' };
+
+    for (const item of items) {
+      const periodCheck = validatePeriodDate(item.date, item.branchId);
+      if (!periodCheck.allowed) return { success: false, created: 0, error: periodCheck.message };
+    }
+
+    const nextSequence = Math.max(cashReceiptNumberCounter.current, allCashReceipts.length);
+    const groupedJournals = new Map<string, { tenantId: string; branchId: string; date: string; lines: JournalLine[] }>();
+    const receipts: CashReceiptVoucher[] = [];
+    const runRows: ShiftRunRow[] = [];
+
+    items.forEach((item, index) => {
+      const sequence = nextSequence + index + 1;
+      const voucherNumber = `CR-${new Date().getFullYear()}-${String(sequence).padStart(4, '0')}`;
+      const receiptId = `rv-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      const receipt: CashReceiptVoucher = {
+        id: receiptId,
+        voucherNumber,
+        tenantId: item.tenantId,
+        branchId: item.branchId,
+        partyId: item.partyId,
+        receivedFrom: item.receivedFrom,
+        amount: Number(item.amount),
+        currency: 'EGP',
+        paymentMethod: item.paymentMethod,
+        paymentMethodLabel: item.paymentMethodLabel,
+        bankOrSafeAccountId: item.paymentAccountId,
+        referenceInvoiceNo: item.receiptNumber || undefined,
+        description: `${item.serviceName} - ${item.notes || 'استيراد إكسيل للتحصيلات'}`,
+        receiverName: 'استيراد بيانات',
+        date: item.date,
+        time: '12:00:00',
+        status: 'active',
+        createdAt: new Date().toISOString(),
+      };
+
+      const groupKey = `${item.tenantId}|${item.branchId}|${item.date}`;
+      let group = groupedJournals.get(groupKey);
+      if (!group) {
+        group = { tenantId: item.tenantId, branchId: item.branchId, date: item.date, lines: [] };
+        groupedJournals.set(groupKey, group);
+      }
+      group.lines.push(...buildCashReceiptJournalLines({
+        accounts: allAccounts,
+        amount: Number(item.amount),
+        cashOrBankAccountId: item.paymentAccountId,
+        party: allParties.find((party) => party.id === item.partyId),
+        memo: `تحصيل العميل ${item.receivedFrom} - سند ${voucherNumber}`,
+      }));
+      receipts.push(receipt);
+
+      if (targetShift) {
+        runRows.push({
+          id: `run-row-col-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+          date: item.date,
+          customerId: item.partyId,
+          patientId: item.partyId,
+          customerCode: item.customerCode,
+          systemCode: item.systemCode,
+          customerName: item.receivedFrom,
+          patientName: item.receivedFrom,
+          patientPhone: item.patientPhone,
+          serviceName: item.serviceName,
+          consumedQuantity: 0,
+          unitPrice: 0,
+          totalRevenue: 0,
+          paymentMethod: item.paymentMethodLabel,
+          collectedAmount: Number(item.amount),
+          notes: item.notes || 'استيراد تحصيل إكسيل',
+          receiptVoucherId: receipt.id,
+        });
+      }
+    });
+
+    const timestamp = Date.now();
+    const journalEntries = Array.from(groupedJournals.values()).map((group, index) => buildJournalEntry({
+      tenantId: group.tenantId,
+      branchId: group.branchId,
+      prefix: `JV-CR-IMPORT-${index + 1}`,
+      date: group.date,
+      description: `ترحيل إيصالات تحصيل العملاء (${group.date})`,
+      sourceDocument: `استيراد إيصالات التحصيل - دفعة ${timestamp}`,
+      lines: group.lines,
+    }));
+    const journalByGroup = new Map<string, JournalEntry>();
+    Array.from(groupedJournals.keys()).forEach((key, index) => journalByGroup.set(key, journalEntries[index]));
+    const updatedReceipts = receipts.map((receipt) => ({
+      ...receipt,
+      journalEntryId: journalByGroup.get(`${receipt.tenantId}|${receipt.branchId}|${receipt.date}`)?.id,
+    }));
+    if (targetShift) {
+      runRows.forEach((row, index) => {
+        const receipt = updatedReceipts[index];
+        row.journalEntryId = receipt.journalEntryId;
+      });
+    }
+
+    const allJournalLines = journalEntries.flatMap((entry) => entry.lines);
+    applyJournalLinesToAccounts(allJournalLines);
+    setAllJournals((prev) => [...journalEntries, ...prev]);
+    setAllCashReceipts((prev) => [...updatedReceipts, ...prev]);
+    cashReceiptNumberCounter.current = nextSequence + items.length;
+    if (targetShift && runRows.length) {
+      setAllReceptionShifts((prev) => prev.map((shift) => {
+        if (shift.id !== targetShift.id) return shift;
+        const nextRows = [...shift.runRows, ...runRows];
+        const activeRows = nextRows.filter((row) => !row.isReplaced);
+        const totalRevenue = activeRows.reduce((sum, row) => sum + (Number(row.totalRevenue) || 0), 0);
+        const totalCollected = activeRows.reduce((sum, row) => sum + (Number(row.collectedAmount) || 0), 0);
+        return {
+          ...shift,
+          runRows: nextRows,
+          totalRevenue,
+          totalCollected,
+          netShiftCash: totalCollected - shift.totalExpenses,
+        };
+      }));
+    }
+
+    logUserActivity(
+      'pos', 'إيصالات التحصيل', 'Collection Receipts',
+      'استيراد وترحيل إيصالات التحصيل', 'Import and post collection receipts',
+      `تم استيراد وترحيل ${updatedReceipts.length} إيصال تحصيل في ${journalEntries.length} قيد يومية حسب تاريخ الإيصال`
+    );
+    return { success: true, created: updatedReceipts.length };
+  };
+
+  const postUnpostedCollectionReceipts = (branchId?: string): { posted: number; skipped: number } => {
+    const targetBranchId = branchId || activeBranch?.id;
+    if (!targetBranchId) return { posted: 0, skipped: 0 };
+    const unpostedRows = allReceptionShifts
+      .filter((shift) => shift.tenantId === tenant?.id && shift.branchId === targetBranchId)
+      .flatMap((shift) => shift.runRows
+        .filter((row) => !row.journalEntryId && !row.receiptArchivedAt && !row.isReplaced && Number(row.collectedAmount) > 0 && !row.notes?.includes('ملغي') && !row.serviceName?.includes('(ملغي)'))
+        .map((row) => ({ shift, row })));
+    const candidates = allCashReceipts.filter((receipt) =>
+      receipt.tenantId === tenant?.id &&
+      receipt.status === 'active' &&
+      !receipt.isArchived &&
+      Boolean(receipt.partyId) &&
+      !receipt.journalEntryId &&
+      receipt.branchId === targetBranchId
+    );
+    const postingGroups = new Map<string, {
+      tenantId: string;
+      branchId: string;
+      date: string;
+      lines: JournalLine[];
+      receiptIds: Set<string>;
+      runRowIds: Set<string>;
+    }>();
+    const linkedRunRowIds = new Set<string>();
+    let skipped = 0;
+    const getPostingGroup = (tenantId: string, date: string) => {
+      const key = `${tenantId}|${targetBranchId}|${date}`;
+      let group = postingGroups.get(key);
+      if (!group) {
+        group = { tenantId, branchId: targetBranchId, date, lines: [], receiptIds: new Set(), runRowIds: new Set() };
+        postingGroups.set(key, group);
+      }
+      return group;
+    };
+
+    const matchMethod = (value: string, targetBranchId: string) => {
+      const normalizedValue = value.trim().toLocaleLowerCase().replace(/[\s()\-_\/]/g, '');
+      const methods = allPaymentMethods.filter((method) => method.tenantId === tenant?.id && (!method.branchId || method.branchId === targetBranchId));
+      const exact = methods.find((method) => [method.id, method.code, method.nameAr, method.nameEn]
+        .some((candidate) => candidate?.trim().toLocaleLowerCase().replace(/[\s()\-_\/]/g, '') === normalizedValue));
+      if (exact) return exact;
+      const looksCash = /cash|نقد|كاش/.test(normalizedValue);
+      const looksCard = /card|visa|بطاق|فيزا/.test(normalizedValue);
+      const looksTransfer = /transfer|bank|تحويل|انستاباي|إنستاباي/.test(normalizedValue);
+      const type: PaymentMethod['type'] | undefined = looksCash ? 'Cash' : looksCard ? 'Card' : looksTransfer ? 'Transfer' : undefined;
+      return type ? methods.find((method) => method.branchId === targetBranchId && method.type === type)
+        || methods.find((method) => method.type === type) : undefined;
+    };
+
+    unpostedRows.forEach(({ shift, row }) => {
+      const postingDate = row.date || shift.shiftDate;
+      const periodCheck = validatePeriodDate(postingDate, shift.branchId);
+      if (!periodCheck.allowed) {
+        skipped += 1;
+        return;
+      }
+      const linkedVoucher = allCashReceipts.find((receipt) =>
+        receipt.tenantId === shift.tenantId && receipt.branchId === shift.branchId && receipt.partyId &&
+        (receipt.id === row.receiptVoucherId || (
+          receipt.partyId === (row.customerId || row.patientId) && receipt.date === (row.date || shift.shiftDate) &&
+          Math.abs(Number(receipt.amount || 0) - Number(row.collectedAmount || 0)) < 0.01
+        ))
+      );
+      const method = matchMethod(row.paymentMethod || '', shift.branchId);
+      const isCustomerSettlement = Boolean(linkedVoucher || row.receiptVoucherId || row.notes?.includes('استيراد تحصيل إكسيل'));
+      const lines = isCustomerSettlement
+        ? buildCashReceiptJournalLines({
+            accounts: allAccounts,
+            amount: Number(row.collectedAmount) || 0,
+            cashOrBankAccountId: method?.linkedAccountId || linkedVoucher?.bankOrSafeAccountId,
+            party: allParties.find((party) => party.id === (row.customerId || row.patientId)),
+            memo: `ترحيل تحصيل العميل ${row.customerName || row.patientName || ''} من سجل الشيفت ${shift.shiftNumber}`,
+          })
+        : buildRevenueJournalLines({
+            accounts: allAccounts,
+            paymentMethod: method,
+            customer: allParties.find((party) => party.id === (row.customerId || row.patientId)),
+            productOrService: allProducts.find((product) => product.id === row.serviceId || product.nameAr === row.serviceName),
+            totalRevenue: Number(row.totalRevenue) || 0,
+            collectedAmount: Number(row.collectedAmount) || 0,
+            memo: `ترحيل إيصال ${row.serviceName} للعميل ${row.customerName || row.patientName || ''}`,
+          });
+      const group = getPostingGroup(shift.tenantId, postingDate);
+      group.lines.push(...lines);
+      group.runRowIds.add(row.id);
+      if (linkedVoucher) {
+        linkedRunRowIds.add(row.id);
+        group.receiptIds.add(linkedVoucher.id);
+      }
+    });
+
+    candidates.forEach((receipt) => {
+      const coveredByUnpostedRow = unpostedRows.some(({ shift, row }) =>
+        shift.branchId === receipt.branchId && shift.tenantId === receipt.tenantId &&
+        (row.receiptVoucherId === receipt.id || (
+          (row.customerId === receipt.partyId || row.patientId === receipt.partyId) &&
+          (row.date || shift.shiftDate) === receipt.date &&
+          Math.abs(Number(row.collectedAmount || 0) - Number(receipt.amount || 0)) < 0.01
+        ))
+      );
+      if (coveredByUnpostedRow) {
+        return;
+      }
+      const alreadyPostedFromShift = allReceptionShifts.some((shift) =>
+        shift.tenantId === receipt.tenantId && shift.branchId === receipt.branchId && shift.runRows.some((row) =>
+          row.journalEntryId &&
+          (row.customerId === receipt.partyId || row.patientId === receipt.partyId) &&
+          (row.date || shift.shiftDate) === receipt.date &&
+          Math.abs(Number(row.collectedAmount || 0) - Number(receipt.amount || 0)) < 0.01
+        )
+      );
+      if (alreadyPostedFromShift) {
+        skipped += 1;
+        return;
+      }
+      const periodCheck = validatePeriodDate(receipt.date, receipt.branchId);
+      if (!periodCheck.allowed) {
+        skipped += 1;
+        return;
+      }
+
+      const expectedType: PaymentMethod['type'] = receipt.paymentMethod === 'Cash'
+        ? 'Cash'
+        : receipt.paymentMethod === 'Card'
+          ? 'Card'
+          : receipt.paymentMethod === 'Check'
+            ? 'Transfer'
+            : 'Transfer';
+      const methodsForBranch = allPaymentMethods.filter((method) =>
+        method.tenantId === receipt.tenantId && (method.branchId === receipt.branchId || !method.branchId)
+      );
+      const method = methodsForBranch.find((item) => item.nameAr === receipt.paymentMethodLabel || item.nameEn === receipt.paymentMethodLabel)
+        || methodsForBranch.find((item) => item.type === expectedType && item.branchId === receipt.branchId)
+        || methodsForBranch.find((item) => item.type === expectedType);
+      const lines = buildCashReceiptJournalLines({
+        accounts: allAccounts,
+        amount: Number(receipt.amount) || 0,
+        cashOrBankAccountId: receipt.bankOrSafeAccountId || method?.linkedAccountId,
+        party: allParties.find((item) => item.id === receipt.partyId),
+        memo: `ترحيل تحصيل عميل ${receipt.receivedFrom} - سند ${receipt.voucherNumber}`,
+      });
+      const group = getPostingGroup(receipt.tenantId, receipt.date);
+      group.lines.push(...lines);
+      group.receiptIds.add(receipt.id);
+    });
+
+    if (postingGroups.size > 0) {
+      const groupList = Array.from(postingGroups.entries());
+      const journalEntries = groupList.map(([, group], index) => buildJournalEntry({
+        tenantId: group.tenantId,
+        branchId: group.branchId,
+        prefix: `JV-CR-BULK-${index + 1}`,
+        date: group.date,
+        description: `ترحيل حركات التحصيل غير المرحلة (${group.date})`,
+        sourceDocument: `ترحيل جماعي لحركات التحصيل بتاريخ ${group.date}`,
+        lines: group.lines,
+      }));
+      const receiptJournalIds = new Map<string, string>();
+      const rowJournalIds = new Map<string, string>();
+      groupList.forEach(([, group], index) => {
+        group.receiptIds.forEach((id) => receiptJournalIds.set(id, journalEntries[index].id));
+        group.runRowIds.forEach((id) => rowJournalIds.set(id, journalEntries[index].id));
+      });
+      const allJournalLines = journalEntries.flatMap((entry) => entry.lines);
+      applyJournalLinesToAccounts(allJournalLines);
+      setAllJournals((prev) => [...journalEntries, ...prev]);
+      const postedAt = new Date().toISOString();
+      setAllCashReceipts((prev) => prev.map((receipt) => receiptJournalIds.has(receipt.id)
+        ? { ...receipt, journalEntryId: receiptJournalIds.get(receipt.id) }
+        : receipt));
+      setAllReceptionShifts((prev) => prev.map((shift) => ({
+        ...shift,
+        runRows: shift.runRows.map((row) => rowJournalIds.has(row.id)
+          ? { ...row, journalEntryId: rowJournalIds.get(row.id) }
+          : row),
+      })));
+      const postedCount = receiptJournalIds.size + [...rowJournalIds.keys()].filter((id) => !linkedRunRowIds.has(id)).length;
+      logUserActivity(
+        'fiscal_documents', 'السندات والفواتير', 'Fiscal Documents',
+        'ترحيل سندات تحصيل قديمة', 'Backfill customer collection vouchers',
+        `تم ترحيل ${postedCount} حركة تحصيل غير مرحلة في ${journalEntries.length} قيد يومية بتاريخ ${postedAt}`
+      );
+      return { posted: postedCount, skipped };
+    }
+
+    return { posted: 0, skipped };
+  };
+
   const deleteCashReceipt = (id: string) => {
     const updated = allCashReceipts.filter((r) => r.id !== id);
     setAllCashReceipts(updated);
-    localStorage.setItem('erp_cash_receipts', JSON.stringify(updated));
   };
 
   const addCashPayment = (data: Omit<CashPaymentVoucher, 'id' | 'voucherNumber' | 'createdAt'>): CashPaymentVoucher => {
@@ -8411,8 +9077,11 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         addParty,
         updateParty,
         archiveParty,
+        mergeCustomerParties,
+        mergeCustomerPartiesBulk,
         restoreParty,
         deleteParty,
+        deletePartiesBulk,
         importPartiesBulk,
         importPartiesFromExcel,
         importCustomersFromExcel,
@@ -8449,6 +9118,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         removeShiftRunRow,
         editCollectionReceipt,
         cancelCollectionReceipt,
+        archiveCollectionReceipts,
+        postUnpostedCollectionReceipts,
         addShiftExpense,
         removeShiftExpense,
         updateShiftBalancing,
@@ -8493,6 +9164,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         cashReceipts,
         allCashReceipts,
         addCashReceipt,
+        addCollectionReceiptsBulk,
         deleteCashReceipt,
         cashPayments,
         allCashPayments,

@@ -2,7 +2,7 @@
 
 ## Last Updated
 
-2026-10-08
+2026-10-10
 
 ## Project
 
@@ -19,6 +19,123 @@ The project is an actively developed React/TypeScript business platform.
 The application currently contains multiple operational, financial, inventory, medical/service, staff, payroll, booking, fiscal, notification, and administration modules.
 
 The project is being developed toward a cloud-native architecture using Neon PostgreSQL.
+
+## Collection Receipt Excel Numeric Handling — 2026-10-10
+
+- Fixed Excel collection import values reaching accounting code as strings: revenue journal construction now safely converts revenue and collection amounts to finite numbers before rounding, and the import explicitly normalizes amounts before adding shift rows.
+- Validation: `npm run build` passed; Vite reports the existing large-chunk warning.
+
+## Journal Storage Quota — 2026-10-10
+
+- Accounting journals now persist in IndexedDB instead of writing the full journal history into the `erp_journals` localStorage key. Startup hydration merges IndexedDB journal entries with the legacy localStorage data by entry ID, preserving existing records during migration.
+- If IndexedDB persistence fails, the app retains current journal data in memory and reports the persistence failure instead of crashing the receipt import with a quota exception.
+- Reception shifts and their detailed run rows now use the same IndexedDB persistence path. Startup merges stored shifts by ID with the legacy localStorage values, preventing quota failures as run history grows.
+- The reception-shift persistence effect is placed after its state initialization to avoid a temporal-dead-zone startup exception. Production build passes.
+
+## Collection Receipt Column Filters and Archive — 2026-10-10
+
+- Added optional per-column filters for receipt number/status, date, customer identifiers/contact, branch, source, shift/status, collected amount, payment method, and service/description/notes.
+- Added select-all for the current filtered result set, bulk receipt archiving, and active/archived/all display modes. Archiving marks receipt rows only and does not alter financial totals or journal entries.
+- The receipt table now shows the branch name in a dedicated column.
+- Validation: `npm run build` passed; Vite reports the existing large-chunk warning. `git diff --check` passed.
+
+## Collection Receipt Accounting Posting — 2026-10-10
+
+- Excel collection imports now create posted journal entries that debit each payment method's linked cash/bank account and credit the matched customer's receivable account. Entries are grouped by branch and receipt date, and are created even when no reception shift is open.
+- When a shift is open, one batched run-sheet update adds receipt-only rows (`totalRevenue: 0`) linked to the voucher journal IDs, preventing duplicate cash debits and revenue.
+- Collection Receipts includes customer cash vouchers that are not already represented by a run-sheet row. A branch-scoped “Post unposted” action backfills eligible unposted vouchers and run-sheet receipt rows by their original date, skipping historical receipts that already have a linked shift journal or fall in a locked period.
+- Cash receipts now persist in IndexedDB and hydrate alongside legacy localStorage records to support bulk imports beyond localStorage quota.
+- Validation: `npm run build` passed; Vite reports the existing large-chunk warning. `git diff --check` passed.
+- TypeScript check remains blocked by existing diagnostics elsewhere (Branch/Tenant `nameAr` references and context properties in Clinics, Neon Hub, Parties, and POS views); no diagnostics point to the collection posting changes.
+
+## Latest Completed Request — 2026-10-08
+
+## Customer Coding Review and Safe Merge — 2026-10-10
+
+- Added a Customer Coding Review modal with searchable customer fields, branch/status/code/phone/date filters, select-all, and bulk archive, guarded permanent delete, and merge actions.
+- Branch/status and each identifier filter support multiple selections. The customer-code, system-code, and file-code dropdown options are populated from customer records and narrowed by selected branches. Duplicate review has its own section title.
+- Every multi-select dropdown has an option search. Select-all/clear applies to the currently visible choices and preserves selected values outside the current dropdown search.
+- Customer Management has a separate all/active/archived status filter with counts. Permanent deletion remains permanent, so deleted profiles are not retained for a deleted-only list.
+- Detailed booking/follow-up history for a merged customer resolves linked files from both primary and archived records and matches historical records by linked IDs or legacy name/phone/code fields, without rewriting transaction rows.
+- The detailed history customer search excludes archived/merged profiles and resolves matching legacy transaction records to their active primary customer.
+- Customer Coding Review can group active customers with matching System Codes and merge all groups in one operation after the user selects each group's primary file.
+- Merge selects one active primary customer, records the source customer IDs and transfer note on the primary profile, and archives the source profiles. Existing bookings and follow-ups continue to reference their original customer IDs; the primary profile's booking/follow-up history view includes merged source IDs without changing historical rows.
+- Archived/merged customers are excluded from customer selection in Bookings and Reception Operations.
+- Permanent deletion skips customers with linked active cash receipts, posted/refunded revenue invoices, active specialized tax invoices, or revenue/collection operation rows. Bulk deletion uses a single customer-state update and consolidated audit/activity entries for large batches.
+- Validation: production build passed. `tsc --noEmit` continues to report existing repository-wide type errors; the touched customer review lines produced no diagnostics. The app's customer persistence currently uses local state/local storage and IndexedDB; the existing Neon party service has no update/delete path for party lifecycle operations.
+
+- Collection Receipts now display the linked customer's serialized Customer Code before the customer name, and Excel export includes the customer serial and registered payment method code.
+- Collection import validates customer codes against customer records including archived customers, payment method codes against Payment Methods, and rejects dates later than the local current date. Validation errors are shown before confirmation; the existing explicit force-upload option retains rows with their entered values for upload as-is.
+- Imported valid receipts link to the matched customer and use the registered payment method's category for cash receipt posting.
+- Validation: not run in this request.
+
+## Earlier Completed Request — 2026-10-08
+
+- Added same-branch customer duplicate detection to quick booking intake: name and phone similarity of at least 80%, or exact System Code / File Code match. The warning lets staff select an existing customer or explicitly continue creating a new coded customer linked to the active branch.
+- Added the same duplicate warning before Customer Management creates a customer, with a confirmation option to create a new record anyway.
+- The date-range review begins only after pressing Review Results, compares names only (Arabic and English name fields), stays within each branch, and scans in yielding batches.
+- Optimized the 80% name similarity matcher to retrieve candidates through the rarest necessary bigrams and stop edit-distance checks as soon as a pair cannot meet the threshold. Matching pairs within the selected target range are processed once.
+- Validation: npm run build passed. npm run lint remains blocked by existing TypeScript errors outside the new duplicate detection and UI logic.
+- Limitation: the review period uses the customer record's createdAt date because the model has no separate coding timestamp.
+
+- Detailed booking and follow-up rows now show Customer Code, System Code, File Code, branch, and date in aligned columns, sourced from the linked Customer Management record. Fixed table layouts and wrapped content display every column without horizontal scrolling. The profile summary uses the same customer fields; branch name comes from the linked customer's branch assignment.
+- Validation: `npm run build` passed. `npm run lint` remains blocked by existing repository-wide TypeScript errors; no new diagnostic points to the detailed history changes.
+
+- Booking Management Customer Code, System Code, and File Code columns now use the linked Customer Management record as their primary values. Booking creation, edit, follow-up display, and Excel export use the same source precedence.
+- Validation: production build passed; repository TypeScript check remains blocked by existing errors documented in CHANGELOG.md.
+
+- Corrected legacy Customer Code normalization to retain valid unique numeric serials and repair missing, duplicate, or System Code-matching values without resetting valid codes. Booking and follow-up displays now prioritize the linked customer's independent serial and reject a Customer Code equal to its System Code.
+- Booking Management agenda uses fixed-width wrapping columns with a 72vh internal vertical scroll area and no horizontal table scrolling.
+- Validation: `npm run build` passed; TypeScript validation status is recorded in the latest changelog entry.
+
+- Booking Management agenda heading now reads "Customer Code" in Arabic and English. Removed its fixed-height internal vertical scrolling; the table expands naturally and the top/bottom shortcuts scroll the page.
+- Validation for this follow-up: `npm run build` (see latest changelog entry).
+
+- Customer Codes are numeric serials independent from System Codes. New customer creation and bulk imports check existing and in-batch numeric codes before allocation; editing preserves the stored Customer Code.
+- Customer import no longer treats System Code as Customer Code, and Customer Management CSV/Excel exports include both identifiers separately.
+- Booking and follow-up import/export mappings carry Customer Code and System Code independently, including generated customer codes returned from bulk import.
+- Removed the rendered Created By column from the follow-up table and patient follow-up history table; `createdBy` remains on records and in import/export data.
+- Removed the Booking Management heading's explicit new-tab behavior, custom context-menu launch actions, and sidebar's dedicated new-tab icon for bookings. Ordinary navigation remains.
+- Preserved Add New Booking and New Follow-up actions for past and today bookings.
+- Validation: `npm run build` passes. `npm run lint` (`tsc --noEmit`) remains failing with numerous existing type errors across the repository; no errors were reported on the changed Customer Code generator/import/export code.
+
+### Files changed
+
+- `src/context/PlatformContext.tsx`
+- `src/views/PartiesView.tsx`
+- `src/views/BookingsFollowUpView.tsx`
+- `src/components/GlobalContextMenu.tsx`
+- `src/components/Sidebar.tsx`
+- `PROJECT_STATE.md`
+- `CHANGELOG.md`
+
+### Remaining known limitation
+
+- Repository-wide TypeScript checking is not clean. Existing type errors remain in unrelated modules and in pre-existing parts of `BookingsFollowUpView.tsx` and `PlatformContext.tsx`.
+
+## Latest Completed Request — 2026-10-08
+
+- Customer Codes are numeric serials independent from System Codes. New customer creation and bulk imports check existing and in-batch numeric codes before allocation; editing preserves the stored Customer Code.
+- Customer import no longer treats System Code as Customer Code, and Customer Management CSV/Excel exports include both identifiers separately.
+- Booking and follow-up import/export mappings carry Customer Code and System Code independently, including generated customer codes returned from bulk import.
+- Removed the rendered Created By column from the follow-up table and patient follow-up history table; `createdBy` remains on records and in import/export data.
+- Removed the Booking Management heading's explicit new-tab behavior, custom context-menu launch actions, and sidebar's dedicated new-tab icon for bookings. Ordinary navigation remains.
+- Preserved Add New Booking and New Follow-up actions for past and today bookings.
+- Validation: `npm run build` passes. `npm run lint` (`tsc --noEmit`) remains failing with numerous existing type errors across the repository; no errors were reported on the changed Customer Code generator/import/export code.
+
+### Files changed
+
+- `src/context/PlatformContext.tsx`
+- `src/views/PartiesView.tsx`
+- `src/views/BookingsFollowUpView.tsx`
+- `src/components/GlobalContextMenu.tsx`
+- `src/components/Sidebar.tsx`
+- `PROJECT_STATE.md`
+- `CHANGELOG.md`
+
+### Remaining known limitation
+
+- Repository-wide TypeScript checking is not clean. Existing type errors remain in unrelated modules and in pre-existing parts of `BookingsFollowUpView.tsx` and `PlatformContext.tsx`.
 
 ---
 

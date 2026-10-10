@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { usePlatform } from '../context/PlatformContext';
 import { Appointment, TreatmentPlan, Party, PatientFollowUp, StaffWorkSchedule, StaffMember } from '../types';
 import { autoTranslateArabic } from '../utils/translator';
+import { buildCustomerDuplicateIndex, findCustomerDuplicates } from '../utils/customerDuplicateDetection';
 import { shareViaWhatsApp, generateBookingWhatsAppText } from '../utils/exportUtils';
 import {
   Calendar,
@@ -554,7 +555,9 @@ export const BookingsFollowUpView: React.FC = () => {
   // Quick Customer Creation Form State
   const [quickCustName, setQuickCustName] = useState('');
   const [quickCustPhone, setQuickCustPhone] = useState('');
-  const [quickCustPaperCode, setQuickCustPaperCode] = useState('');
+  const [quickCustSystemCode, setQuickCustSystemCode] = useState('');
+  const [quickCustFileCode, setQuickCustFileCode] = useState('');
+  const [showQuickDuplicateWarning, setShowQuickDuplicateWarning] = useState(false);
   const [quickCustLeadSource, setQuickCustLeadSource] = useState('Facebook Ads');
   const [quickCustNotes, setQuickCustNotes] = useState('');
 
@@ -639,9 +642,26 @@ export const BookingsFollowUpView: React.FC = () => {
   }, [parties]);
 
   // Helper: Find Party by patient name or ID in O(1)
-  const getPartyForPatient = (pId?: string, pName?: string) => {
+  const getPartyForPatient = (pId?: string, pName?: string, pPhone?: string) => {
     return (pId ? partyMap.byId.get(pId) : undefined) ||
+           (pPhone ? partyMap.byPhone.get(pPhone.trim()) : undefined) ||
            (pName ? partyMap.byName.get(pName.toLowerCase().trim()) : undefined);
+  };
+
+  const getCustomerSerial = (
+    party: Party | undefined,
+    rowCustomerCode?: string,
+    rowSystemCode?: string,
+    rowPaperCode?: string
+  ) => {
+    const systemCodes = [party?.systemCode, party?.paperCode, rowSystemCode, rowPaperCode].filter(
+      (systemCode): systemCode is string => Boolean(systemCode)
+    );
+    const candidates = [party?.customerCode, party?.code, rowCustomerCode];
+    return candidates.find((code) =>
+      Boolean(code) && /^\d+$/.test(code!) && Number.isSafeInteger(Number(code)) && Number(code) > 0 &&
+      !systemCodes.some((systemCode) => systemCode === code || (/^\d+$/.test(systemCode) && Number(systemCode) === Number(code)))
+    ) || '';
   };
 
   // Ultra-Fast O(1) Future Status Lookup Maps for upcoming events
@@ -714,7 +734,7 @@ export const BookingsFollowUpView: React.FC = () => {
   const branchCustomers = React.useMemo(() => {
     return parties.filter((p) => {
       const isCustomer = p.type === 'Customer' || p.type === 'Both';
-      if (!isCustomer) return false;
+      if (!isCustomer || p.isArchived || p.mergedIntoPartyId) return false;
       if (currentBranchId) {
         const matchesBranch =
           p.branchId === currentBranchId ||
@@ -974,11 +994,12 @@ export const BookingsFollowUpView: React.FC = () => {
   }, [branchStaffMembers]);
 
   // Quick Action: Open Add Follow-Up for a specific Patient
-  const handleOpenAddFollowUpForPatient = (patientIdParam?: string, patientNameParam?: string, patientPhoneParam?: string, systemCodeParam?: string) => {
+  const handleOpenAddFollowUpForPatient = (patientIdParam?: string, patientNameParam?: string, patientPhoneParam?: string, systemCodeParam?: string, customerCodeParam?: string) => {
     setFupPatientId(patientIdParam || '');
     setFupPatientName(patientNameParam || '');
     setFupPatientPhone(patientPhoneParam || '');
     setFupSystemCode(systemCodeParam || '');
+    setFupCustomerCode(customerCodeParam || '');
     setFupDate(tomorrowIso);
     setFupReason('متابعة دورية وتذكير');
     setFupNotes('');
@@ -987,7 +1008,7 @@ export const BookingsFollowUpView: React.FC = () => {
   };
 
   // Quick Action: Open Add Booking for a specific Patient
-  const handleOpenAddBookingForPatient = (patientIdParam?: string, patientNameParam?: string, patientPhoneParam?: string, systemCodeParam?: string, leadSourceParam?: string) => {
+  const handleOpenAddBookingForPatient = (patientIdParam?: string, patientNameParam?: string, patientPhoneParam?: string, systemCodeParam?: string, leadSourceParam?: string, customerCodeParam?: string) => {
     if (patientIdParam) {
       handleSelectExistingPatient(patientIdParam);
     } else {
@@ -995,6 +1016,7 @@ export const BookingsFollowUpView: React.FC = () => {
       setPatientName(patientNameParam || '');
       setPatientPhone(patientPhoneParam || '');
       setSystemCode(systemCodeParam || '');
+      setCustomerCode(customerCodeParam || '');
       setLeadSource(leadSourceParam || 'زيارة مباشرة للفرع');
     }
     setAptDate(todayIso);
@@ -1023,23 +1045,38 @@ export const BookingsFollowUpView: React.FC = () => {
     }
   };
 
-  // Quick Customer Creation
-  const handleQuickAddCustomerSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!quickCustName.trim() || !quickCustPhone.trim()) {
-      alert(t('يرجى إدخال اسم العميل ورقم هاتفه!', 'Please enter customer name and phone!'));
-      return;
-    }
+  const quickCustomerDuplicateIndex = React.useMemo(
+    () => buildCustomerDuplicateIndex(parties.map((party) => {
+      const branch = branches.find((item) => item.id === party.branchId || item.name === party.branchId || item.code === party.branchId);
+      return branch && party.branchId !== branch.id ? { ...party, branchId: branch.id } : party;
+    }), branches[0]?.id || currentBranchId),
+    [parties, branches, currentBranchId]
+  );
+  const quickCustomerDuplicateMatches = React.useMemo(
+    () => findCustomerDuplicates(
+      quickCustomerDuplicateIndex,
+      {
+        name: quickCustName.trim(),
+        phone: quickCustPhone.trim(),
+        systemCode: quickCustSystemCode.trim(),
+        fileCode: quickCustFileCode.trim(),
+        branchId: currentBranchId,
+      },
+      currentBranchId
+    ),
+    [quickCustomerDuplicateIndex, quickCustName, quickCustPhone, quickCustSystemCode, quickCustFileCode, currentBranchId]
+  );
 
+  const createQuickCustomerForBooking = () => {
     const newParty = addParty({
       name: quickCustName.trim(),
       nameEn: autoTranslateArabic(quickCustName),
       phone: quickCustPhone.trim(),
-      paperCode: quickCustPaperCode.trim() || undefined,
+      systemCode: quickCustSystemCode.trim() || undefined,
+      fileCode: quickCustFileCode.trim() || undefined,
       leadSource: quickCustLeadSource || 'زيارة مباشرة للفرع',
       medicalNotes: quickCustNotes.trim() || undefined,
       type: 'Customer',
-      category: 'Patient',
       branchId: currentBranchId,
       balance: 0,
       creditLimit: 5000,
@@ -1049,8 +1086,24 @@ export const BookingsFollowUpView: React.FC = () => {
     setShowQuickAddCustomerModal(false);
     setQuickCustName('');
     setQuickCustPhone('');
-    setQuickCustPaperCode('');
+    setQuickCustSystemCode('');
+    setQuickCustFileCode('');
     setQuickCustNotes('');
+    setShowQuickDuplicateWarning(false);
+  };
+
+  // Quick Customer Creation
+  const handleQuickAddCustomerSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!quickCustName.trim() || !quickCustPhone.trim()) {
+      alert(t('يرجى إدخال اسم العميل ورقم هاتفه!', 'Please enter customer name and phone!'));
+      return;
+    }
+    if (quickCustomerDuplicateMatches.length > 0) {
+      setShowQuickDuplicateWarning(true);
+      return;
+    }
+    createQuickCustomerForBooking();
   };
 
   // Submit Add Booking
@@ -1139,14 +1192,15 @@ export const BookingsFollowUpView: React.FC = () => {
 
   // Open Edit Modal for Booking
   const handleOpenEditApt = (apt: Appointment) => {
-    const party = parties.find(p => p.id === apt.patientId);
+    const party = getPartyForPatient(apt.patientId, apt.patientName, apt.patientPhone);
     setSelectedApt(apt);
     setPatientId(apt.patientId || '');
     setPatientName(apt.patientName);
     setPatientPhone(apt.patientPhone || '');
-    setSystemCode(apt.systemCode || party?.systemCode || apt.paperCode || party?.paperCode || '');
-    setCustomerCode(apt.customerCode || party?.customerCode || party?.code || '');
-    setFileCode(apt.fileCode || party?.fileCode || party?.fileNumber || '');
+    setSystemCode(party?.systemCode || apt.systemCode || party?.paperCode || apt.paperCode || '');
+    const customerSerial = getCustomerSerial(party, apt.customerCode, apt.systemCode, apt.paperCode);
+    setCustomerCode(customerSerial);
+    setFileCode(party?.fileCode || party?.fileNumber || apt.fileCode || '');
     setDoctorId(apt.doctorId || '');
     setDoctorName(apt.doctorName || '');
     setServiceNameAr(apt.serviceNameAr);
@@ -1192,7 +1246,7 @@ export const BookingsFollowUpView: React.FC = () => {
       patientPhone: patientPhone.trim(),
       systemCode,
       paperCode: selectedApt.paperCode || systemCode,
-      customerCode: customerCode || systemCode,
+      customerCode: customerCode,
       fileCode,
       doctorId: doctorId || undefined,
       doctorName: resolvedDoctorName,
@@ -1264,7 +1318,7 @@ export const BookingsFollowUpView: React.FC = () => {
   };
 
   const handleOpen360 = (apt: Appointment) => {
-    const party = parties.find((p) => p.name === apt.patientName || p.phone === apt.patientPhone);
+    const party = getPartyForPatient(apt.patientId, apt.patientName, apt.patientPhone);
     if (party) {
       setSelectedPatientFor360(party);
     } else {
@@ -1272,11 +1326,14 @@ export const BookingsFollowUpView: React.FC = () => {
         id: apt.patientId || 'temp',
         tenantId: tenant.id,
         name: apt.patientName,
+        nameEn: apt.patientName,
         phone: apt.patientPhone || 'غير مسجل',
         type: 'Customer',
+        customerCode: getCustomerSerial(undefined, apt.customerCode, apt.systemCode, apt.paperCode),
         systemCode: apt.systemCode || 'CUST-TEMP',
         leadSource: apt.leadSource,
         createdAt: apt.createdAt,
+        balance: 0,
       });
     }
     setShowPatient360Modal(true);
@@ -1285,7 +1342,7 @@ export const BookingsFollowUpView: React.FC = () => {
   // Add Follow-Up Form Submit
   const handleAddFollowUpSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const p = getPartyForPatient(fupPatientId, fupPatientName);
+    const p = getPartyForPatient(fupPatientId, fupPatientName, fupPatientPhone);
     const resolvedCustCode = p?.customerCode || p?.code || fupCustomerCode || '';
     const resolvedSysCode = fupSystemCode || p?.systemCode || p?.paperCode || `CUST-${Date.now().toString().slice(-4)}`;
     const resolvedPaperCode = p?.paperCode || p?.systemCode || resolvedSysCode;
@@ -1517,10 +1574,8 @@ export const BookingsFollowUpView: React.FC = () => {
           row['كود العميل (التطبيق)'] ??
           row['كود العميل'] ??
           row['كود التطبيق'] ??
-          row['كود العميل (السيستم)'] ??
           row['Customer App Code'] ??
           row['Customer Code'] ??
-          row['Code'] ??
           ''
         ).trim();
 
@@ -1652,7 +1707,7 @@ export const BookingsFollowUpView: React.FC = () => {
             if (!patientPhone) patientPhone = matchedParty.phone || '';
           }
         } else if (customerCode) {
-          matchedParty = partiesBySystemCode.get(customerCode.toLowerCase());
+          matchedParty = partiesByCustomerCode.get(customerCode.toLowerCase());
           if (matchedParty) {
             if (!patientName) patientName = matchedParty.name;
             if (!patientPhone) patientPhone = matchedParty.phone || '';
@@ -1669,7 +1724,7 @@ export const BookingsFollowUpView: React.FC = () => {
           matchedParty = partiesByName.get(patientName.toLowerCase());
         }
 
-        const resolvedCustomerCode = matchedParty?.systemCode || customerCode || (matchedParty ? matchedParty.systemCode || matchedParty.id : '');
+        const resolvedCustomerCode = matchedParty?.customerCode || matchedParty?.code || customerCode || '';
         const resolvedPatientId = matchedParty?.id;
 
         // Validate patient name
@@ -1843,6 +1898,7 @@ export const BookingsFollowUpView: React.FC = () => {
 
         const bookingRecord = {
           paperCode,
+          systemCode: matchedParty?.systemCode || systemCode,
           customerCode: resolvedCustomerCode,
           patientId: resolvedPatientId,
           patientName,
@@ -1875,6 +1931,7 @@ export const BookingsFollowUpView: React.FC = () => {
 
         const asIsBookingRecord = {
           paperCode: paperCode || '',
+          systemCode: matchedParty?.systemCode || systemCode,
           customerCode: resolvedCustomerCode || customerCode || '',
           patientId: resolvedPatientId || '',
           patientName: patientName || '',
@@ -1939,9 +1996,11 @@ export const BookingsFollowUpView: React.FC = () => {
 
           newPartiesList.push({
             name: row.patientName || '',
+            nameEn: autoTranslateArabic(row.patientName || ''),
             phone: row.patientPhone || '',
             paperCode: row.paperCode || undefined,
-            systemCode: resolvedCustomerCode || undefined,
+            customerCode: row.customerCode || undefined,
+            systemCode: row.systemCode || undefined,
             type: 'Customer',
             branchId: branchToUse,
             leadSource: 'استيراد إكسيل',
@@ -1955,8 +2014,8 @@ export const BookingsFollowUpView: React.FC = () => {
         patientName: row.patientName || '',
         patientPhone: row.patientPhone || '',
         paperCode: row.paperCode || undefined,
-        systemCode: resolvedCustomerCode || row.customerCode || '',
-        customerCode: resolvedCustomerCode || row.customerCode || '',
+        systemCode: row.systemCode || '',
+        customerCode: row.customerCode || '',
         date: row.date || '',
         time: row.time || (row.startTime && row.endTime ? `${row.startTime} - ${row.endTime}` : (row.startTime || row.endTime || '')),
         startTime: row.startTime || '',
@@ -1975,7 +2034,15 @@ export const BookingsFollowUpView: React.FC = () => {
     });
 
     if (newPartiesList.length > 0) {
-      await importPartiesBulk(newPartiesList);
+      const importResult = await importPartiesBulk(newPartiesList);
+      const codeByPartyId = new Map<string, string>();
+      Array.from(createdPartiesKeyMap.values()).forEach((partyId, idx) => {
+        if (importResult.customerCodes[idx]) codeByPartyId.set(partyId, importResult.customerCodes[idx]);
+      });
+      appointmentsToCreate.forEach((appointment) => {
+        const importedCode = codeByPartyId.get(appointment.patientId || '');
+        if (importedCode) appointment.customerCode = importedCode;
+      });
     }
 
     await importAppointmentsBulk(appointmentsToCreate);
@@ -2047,10 +2114,8 @@ export const BookingsFollowUpView: React.FC = () => {
           row['كود العميل (التطبيق)'] ??
           row['كود العميل'] ??
           row['كود التطبيق'] ??
-          row['كود العميل (السيستم)'] ??
           row['Customer App Code'] ??
           row['Customer Code'] ??
-          row['Code'] ??
           ''
         ).trim();
 
@@ -2140,7 +2205,7 @@ export const BookingsFollowUpView: React.FC = () => {
             if (!patientPhone) patientPhone = matchedParty.phone || '';
           }
         } else if (customerCode) {
-          matchedParty = partiesBySystemCode.get(customerCode.toLowerCase());
+          matchedParty = partiesByCustomerCode.get(customerCode.toLowerCase());
           if (matchedParty) {
             if (!patientName) patientName = matchedParty.name;
             if (!patientPhone) patientPhone = matchedParty.phone || '';
@@ -2157,7 +2222,7 @@ export const BookingsFollowUpView: React.FC = () => {
           matchedParty = partiesByName.get(patientName.toLowerCase());
         }
 
-        const resolvedCustomerCode = matchedParty?.systemCode || customerCode || (matchedParty ? matchedParty.systemCode || matchedParty.id : '');
+        const resolvedCustomerCode = matchedParty?.customerCode || matchedParty?.code || customerCode || '';
         const resolvedPatientId = matchedParty?.id;
 
         if (!patientName || patientName.length < 2) {
@@ -2237,6 +2302,7 @@ export const BookingsFollowUpView: React.FC = () => {
 
         const followUpRecord = {
           paperCode,
+          systemCode: matchedParty?.systemCode || systemCode,
           customerCode: resolvedCustomerCode,
           patientId: resolvedPatientId,
           patientName,
@@ -2262,6 +2328,7 @@ export const BookingsFollowUpView: React.FC = () => {
 
         const asIsFollowUpRecord = {
           paperCode: paperCode || '',
+          systemCode: matchedParty?.systemCode || systemCode,
           customerCode: resolvedCustomerCode || customerCode || '',
           patientId: resolvedPatientId || '',
           patientName: patientName || '',
@@ -2318,9 +2385,11 @@ export const BookingsFollowUpView: React.FC = () => {
 
           newPartiesList.push({
             name: row.patientName || '',
+            nameEn: autoTranslateArabic(row.patientName || ''),
             phone: row.patientPhone || '',
             paperCode: row.paperCode || undefined,
-            systemCode: resolvedCustomerCode || undefined,
+            customerCode: row.customerCode || undefined,
+            systemCode: row.systemCode || undefined,
             type: 'Customer',
             branchId: branchToUse,
             leadSource: 'استيراد إكسيل للمتابعات',
@@ -2334,8 +2403,8 @@ export const BookingsFollowUpView: React.FC = () => {
         patientName: row.patientName || '',
         patientPhone: row.patientPhone || '',
         paperCode: row.paperCode || undefined,
-        systemCode: resolvedCustomerCode || row.customerCode || '',
-        customerCode: resolvedCustomerCode || row.customerCode || '',
+        systemCode: row.systemCode || '',
+        customerCode: row.customerCode || '',
         branchId: branchToUse,
         followUpDate: row.followUpDate || '',
         followUpTime: row.followUpTime || '',
@@ -2348,7 +2417,15 @@ export const BookingsFollowUpView: React.FC = () => {
     });
 
     if (newPartiesList.length > 0) {
-      await importPartiesBulk(newPartiesList);
+      const importResult = await importPartiesBulk(newPartiesList);
+      const codeByPartyId = new Map<string, string>();
+      Array.from(createdPartiesKeyMap.values()).forEach((partyId, idx) => {
+        if (importResult.customerCodes[idx]) codeByPartyId.set(partyId, importResult.customerCodes[idx]);
+      });
+      fupsToCreate.forEach((followUp) => {
+        const importedCode = codeByPartyId.get(followUp.patientId || '');
+        if (importedCode) followUp.customerCode = importedCode;
+      });
     }
 
     await importFollowUpsBulk(fupsToCreate);
@@ -2371,20 +2448,11 @@ export const BookingsFollowUpView: React.FC = () => {
             <div>
               <div
                 className="flex items-center gap-2 cursor-pointer select-none"
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  window.open('?view=bookings', '_blank');
-                }}
-                title={t('كليك يمين لفتح شاشة إدارة الحجوزات في تبويب جديد', 'Right click to open bookings management in a new tab')}
+                title={t('إدارة الحجوزات', 'Bookings Management')}
               >
                 <a
                   href="?view=bookings"
-                  target="_blank"
-                  rel="noopener noreferrer"
                   className="text-lg md:text-xl font-black text-slate-900 dark:text-white hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
-                  onClick={(e) => {
-                    e.preventDefault();
-                  }}
                 >
                   {t('إدارة الحجوزات', 'Bookings Management')}
                 </a>
@@ -2408,7 +2476,9 @@ export const BookingsFollowUpView: React.FC = () => {
             onClick={() => {
               setQuickCustName('');
               setQuickCustPhone('');
-              setQuickCustPaperCode('');
+              setQuickCustSystemCode('');
+              setQuickCustFileCode('');
+              setShowQuickDuplicateWarning(false);
               setQuickCustNotes('');
               setShowQuickAddCustomerModal(true);
             }}
@@ -2724,14 +2794,31 @@ export const BookingsFollowUpView: React.FC = () => {
 
           <div
             id="bookings-table-scroll-container"
-            className="overflow-x-auto max-h-[72vh] overflow-y-auto relative custom-scrollbar border-t border-slate-100 dark:border-slate-800"
+            className="relative max-h-[72vh] overflow-x-hidden overflow-y-auto border-t border-slate-100 dark:border-slate-800 [&_th]:px-1.5 [&_td]:px-1.5 [&_th]:py-2 [&_td]:py-2 [&_th]:whitespace-normal [&_td]:whitespace-normal [&_th]:break-words [&_td]:break-words"
           >
-            <table className="w-full text-xs text-left rtl:text-right">
+            <table className="w-full table-fixed text-[10px] text-left rtl:text-right">
+              <colgroup>
+                <col style={{ width: '3%' }} />
+                <col style={{ width: '6%' }} />
+                <col style={{ width: '5%' }} />
+                <col style={{ width: '6%' }} />
+                <col style={{ width: '5%' }} />
+                <col style={{ width: '11%' }} />
+                <col style={{ width: '8%' }} />
+                <col style={{ width: '7%' }} />
+                <col style={{ width: '7%' }} />
+                <col style={{ width: '6%' }} />
+                <col style={{ width: '5%' }} />
+                <col style={{ width: '5%' }} />
+                <col style={{ width: '6%' }} />
+                <col style={{ width: '6%' }} />
+                <col style={{ width: '14%' }} />
+              </colgroup>
               <thead className="sticky top-0 z-10 bg-slate-100 dark:bg-slate-800 shadow-xs text-slate-700 dark:text-slate-300 font-bold uppercase border-b border-slate-200 dark:border-slate-700">
                 <tr>
                   <th className="p-3.5">#</th>
                   <th className="p-3.5">{t('الفرع', 'Branch')}</th>
-                  <th className="p-3.5">{t('كود العميل (التطبيق)', 'Customer Code')}</th>
+                  <th className="p-3.5">{t('كود العميل', 'Customer Code')}</th>
                   <th className="p-3.5">{t('كود السيستم', 'System Code')}</th>
                   <th className="p-3.5">{t('كود الملف', 'File Code')}</th>
                   <th className="p-3.5">{t('المريض والهاتف', 'Patient & Phone')}</th>
@@ -2756,12 +2843,12 @@ export const BookingsFollowUpView: React.FC = () => {
                   </tr>
                 ) : (
                   paginatedAppointments.map((apt, idx) => {
-                    const party = getPartyForPatient(apt.patientId, apt.patientName);
+                    const party = getPartyForPatient(apt.patientId, apt.patientName, apt.patientPhone);
                     const branchObj = branches.find((b) => b.id === (apt.branchId || party?.branchId)) || activeBranch;
                     const branchName = branchObj?.name || 'الفرع الرئيسي';
-                    const customerAppCode = apt.customerCode || party?.customerCode || party?.code || '—';
-                    const systemCodeDisplay = apt.systemCode || party?.systemCode || apt.paperCode || party?.paperCode || '—';
-                    const fileCodeDisplay = apt.fileCode || party?.fileCode || party?.fileNumber || '—';
+                    const customerAppCode = getCustomerSerial(party, apt.customerCode, apt.systemCode, apt.paperCode);
+                    const systemCodeDisplay = party?.systemCode || apt.systemCode || party?.paperCode || apt.paperCode || '—';
+                    const fileCodeDisplay = party?.fileCode || party?.fileNumber || apt.fileCode || '—';
                     const creationDate = party?.createdAt
                       ? party.createdAt.split('T')[0]
                       : apt.createdAt ? apt.createdAt.split('T')[0] : '2026-01-15';
@@ -2804,9 +2891,9 @@ export const BookingsFollowUpView: React.FC = () => {
                           </span>
                         </td>
 
-                        {/* Customer App Code (Serialized) */}
+                        {/* Customer Code (Serialized) */}
                         <td className="p-3.5 font-mono font-bold whitespace-nowrap">
-                          <span className="px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800" title={t('كود العميل (كود التطبيق مسريل آلياً)', 'Customer App Code')}>
+                          <span className="px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800" title={t('كود العميل', 'Customer Code')}>
                             {customerAppCode}
                           </span>
                         </td>
@@ -2984,7 +3071,7 @@ export const BookingsFollowUpView: React.FC = () => {
 
                         {/* Actions */}
                         <td className="p-3.5 text-center">
-                          <div className="flex items-center justify-center gap-1">
+                          <div className="flex flex-wrap items-center justify-center gap-0.5">
                             {/* Detailed Patient History */}
                             <button
                               onClick={() => handleOpenPatientHistory(apt.patientId, apt.patientName, apt.patientPhone)}
@@ -2996,7 +3083,7 @@ export const BookingsFollowUpView: React.FC = () => {
 
                             {/* Action to Add New Follow-up for this Patient (متاح لجميع المواعيد السابقة والجديدة) */}
                             <button
-                              onClick={() => handleOpenAddFollowUpForPatient(party?.id || apt.patientId, apt.patientName, apt.patientPhone, custCode)}
+                              onClick={() => handleOpenAddFollowUpForPatient(party?.id || apt.patientId, apt.patientName, apt.patientPhone, systemCodeDisplay, customerAppCode)}
                               className="p-1.5 text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 rounded-lg transition-colors cursor-pointer"
                               title={t('إضافة متابعة جديدة لهذا العميل', 'Add New Follow-up for this Patient')}
                             >
@@ -3007,7 +3094,7 @@ export const BookingsFollowUpView: React.FC = () => {
                               <>
                                 {/* Past appointment: Only adding new booking is allowed */}
                                 <button
-                                  onClick={() => handleOpenAddBookingForPatient(party?.id || apt.patientId, apt.patientName, apt.patientPhone, custCode, activeLeadSource)}
+                                  onClick={() => handleOpenAddBookingForPatient(party?.id || apt.patientId, apt.patientName, apt.patientPhone, systemCodeDisplay, activeLeadSource, customerAppCode)}
                                   className="p-1.5 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 rounded-lg transition-colors cursor-pointer"
                                   title={t('إضافة حجز جديد لهذا العميل', 'Add New Booking for this Client')}
                                 >
@@ -3279,12 +3366,13 @@ export const BookingsFollowUpView: React.FC = () => {
                   </tr>
                 ) : (
                   nextDayAppointments.map((apt, idx) => {
-                    const party = getPartyForPatient(apt.patientId, apt.patientName);
+                    const party = getPartyForPatient(apt.patientId, apt.patientName, apt.patientPhone);
                     const creationDate = party?.createdAt
                       ? party.createdAt.split('T')[0]
                       : apt.createdAt ? apt.createdAt.split('T')[0] : '2026-01-15';
                     const activeLeadSource = apt.leadSource || party?.leadSource || '';
-                    const custCode = apt.systemCode || party?.systemCode || `CUST-${1000 + idx}`;
+                    const customerAppCode = getCustomerSerial(party, apt.customerCode, apt.systemCode, apt.paperCode);
+                    const systemCodeDisplay = party?.systemCode || apt.systemCode || party?.paperCode || apt.paperCode || '—';
                     const isConfirmed = apt.status === 'Confirmed';
                     const doctorScheduled = isDoctorScheduledForTomorrow(apt.doctorId, apt.doctorName);
 
@@ -3326,9 +3414,10 @@ export const BookingsFollowUpView: React.FC = () => {
                             <Eye className="h-3 w-3 text-slate-400" />
                           </button>
                           <div className="text-[11px] text-slate-500 flex items-center gap-2 mt-0.5">
-                            <span className="font-mono font-semibold text-emerald-600 bg-emerald-50 dark:bg-emerald-950/50 px-1 rounded">
-                              {custCode}
+                            <span className="font-mono font-semibold text-indigo-600 bg-indigo-50 dark:bg-indigo-950/50 px-1 rounded">
+                              {t('كود العميل:', 'Customer Code:')} {customerAppCode}
                             </span>
+                            <span className="font-mono text-amber-700 dark:text-amber-300">{t('السيستم:', 'System:')} {systemCodeDisplay}</span>
                             <span>{apt.patientPhone || '-'}</span>
                             {apt.patientPhone && (
                               <button
@@ -3442,7 +3531,7 @@ export const BookingsFollowUpView: React.FC = () => {
 
                             {/* Action to Add New Follow-up for this Patient */}
                             <button
-                              onClick={() => handleOpenAddFollowUpForPatient(party?.id || apt.patientId, apt.patientName, apt.patientPhone, custCode)}
+                              onClick={() => handleOpenAddFollowUpForPatient(party?.id || apt.patientId, apt.patientName, apt.patientPhone, systemCodeDisplay, customerAppCode)}
                               className="p-1.5 text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 rounded-lg transition-colors cursor-pointer"
                               title={t('إضافة متابعة جديدة لهذا العميل', 'Add New Follow-up for this Patient')}
                             >
@@ -3536,7 +3625,6 @@ export const BookingsFollowUpView: React.FC = () => {
                   <th className="p-3">{t('المصدر وتاريخ التكويد', 'Source & Creation Date')}</th>
                   <th className="p-3">{t('تاريخ وتوقيت المتابعة', 'Due Date & Time')}</th>
                   <th className="p-3">{t('موضوع وسبب المتابعة', 'Follow-up Topic / Reason')}</th>
-                  <th className="p-3">{t('المسؤول / التابع لـ', 'Created By')}</th>
                   <th className="p-3">{t('حالة العميل القادمة', 'Future Status')}</th>
                   <th className="p-3">{t('حالة المتابعة', 'Follow-up Status')}</th>
                 </tr>
@@ -3544,19 +3632,19 @@ export const BookingsFollowUpView: React.FC = () => {
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {filteredFollowUps.length === 0 ? (
                   <tr>
-                    <td colSpan={12} className="py-12 text-center text-slate-400">
+                    <td colSpan={11} className="py-12 text-center text-slate-400">
                       <MessageSquare className="h-8 w-8 text-slate-300 dark:text-slate-700 mx-auto mb-2" />
                       <p>{t('لا توجد متابعات مطابقة للفترة المحددة.', 'No follow-ups recorded.')}</p>
                     </td>
                   </tr>
                 ) : (
                   paginatedFollowUps.map((fup, idx) => {
-                    const party = getPartyForPatient(fup.patientId, fup.patientName);
+                    const party = getPartyForPatient(fup.patientId, fup.patientName, fup.patientPhone);
                     const branchObj = branches.find((b) => b.id === (fup.branchId || party?.branchId)) || activeBranch;
                     const branchName = branchObj?.name || 'الفرع الرئيسي';
-                    const customerAppCode = fup.customerCode || party?.customerCode || party?.code || '—';
-                    const systemCodeDisplay = fup.systemCode || party?.systemCode || fup.paperCode || party?.paperCode || '—';
-                    const fileCodeDisplay = fup.fileCode || party?.fileCode || party?.fileNumber || '—';
+                    const customerAppCode = getCustomerSerial(party, fup.customerCode, fup.systemCode, fup.paperCode);
+                    const systemCodeDisplay = party?.systemCode || fup.systemCode || party?.paperCode || fup.paperCode || '—';
+                    const fileCodeDisplay = party?.fileCode || party?.fileNumber || fup.fileCode || '—';
                     const creationDate = party?.createdAt
                       ? party.createdAt.split('T')[0]
                       : fup.createdAt ? fup.createdAt.split('T')[0] : '2026-01-20';
@@ -3662,11 +3750,6 @@ export const BookingsFollowUpView: React.FC = () => {
                             {fup.reason || <span className="text-slate-400 font-normal italic text-[11px]">— (فارغ)</span>}
                           </div>
                           {fup.notes && <div className="text-[10px] text-slate-500 mt-0.5">{fup.notes}</div>}
-                        </td>
-
-                        {/* Created By */}
-                        <td className="p-3 text-slate-600 dark:text-slate-300">
-                          {fup.createdBy || 'فريق المتابعة'}
                         </td>
 
                         {/* Customer Future Status */}
@@ -4829,7 +4912,7 @@ export const BookingsFollowUpView: React.FC = () => {
                       type="text"
                       readOnly
                       disabled
-                      value={customerCode || selectedApt.customerCode || '—'}
+                      value={customerCode || '—'}
                       className="w-full px-2 py-1.5 text-xs rounded-lg bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 font-mono font-bold cursor-not-allowed select-none"
                     />
                   </div>
@@ -5629,7 +5712,7 @@ export const BookingsFollowUpView: React.FC = () => {
                     {selectedPatientFor360.name}
                   </h3>
                   <p className="text-xs text-slate-400">
-                    {t('كود العميل:', 'Code:')} {selectedPatientFor360.systemCode || selectedPatientFor360.paperCode || '-'} • {selectedPatientFor360.phone} • {t('تاريخ التكويد:', 'Created:')} {selectedPatientFor360.createdAt?.split('T')[0] || '-'}
+                    {t('كود العميل:', 'Customer Code:')} {selectedPatientFor360.customerCode || selectedPatientFor360.code || '—'} • {t('كود السيستم:', 'System Code:')} {selectedPatientFor360.systemCode || selectedPatientFor360.paperCode || '—'} • {selectedPatientFor360.phone} • {t('تاريخ التكويد:', 'Created:')} {selectedPatientFor360.createdAt?.split('T')[0] || '-'}
                   </p>
                 </div>
               </div>
@@ -5739,7 +5822,7 @@ export const BookingsFollowUpView: React.FC = () => {
                   className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-indigo-600"
                 >
                   <option value="">{t('اختر المريض...', 'Select Patient...')}</option>
-                  {parties.map((p) => (
+                  {parties.filter((party) => !party.isArchived && !party.mergedIntoPartyId).map((p) => (
                     <option key={p.id} value={p.id}>
                       {p.name}
                     </option>
@@ -5857,7 +5940,7 @@ export const BookingsFollowUpView: React.FC = () => {
                   required
                   autoFocus
                   value={quickCustName}
-                  onChange={(e) => setQuickCustName(e.target.value)}
+                  onChange={(e) => { setQuickCustName(e.target.value); setShowQuickDuplicateWarning(false); }}
                   placeholder="مثال: ياسمين محمود السيد"
                   className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-indigo-600 font-bold"
                 />
@@ -5872,7 +5955,7 @@ export const BookingsFollowUpView: React.FC = () => {
                     type="tel"
                     required
                     value={quickCustPhone}
-                    onChange={(e) => setQuickCustPhone(e.target.value)}
+                    onChange={(e) => { setQuickCustPhone(e.target.value); setShowQuickDuplicateWarning(false); }}
                     placeholder="010xxxxxxxx"
                     className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-indigo-600 font-mono font-bold"
                   />
@@ -5880,18 +5963,29 @@ export const BookingsFollowUpView: React.FC = () => {
 
                 <div>
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    {t('كود الملف الورقي (اختياري)', 'Paper File Code (Optional)')}
+                    {t('كود الملف (اختياري)', 'File Code (Optional)')}
                   </label>
                   <input
                     type="text"
-                    value={quickCustPaperCode}
-                    onChange={(e) => setQuickCustPaperCode(e.target.value)}
+                    value={quickCustFileCode}
+                    onChange={(e) => { setQuickCustFileCode(e.target.value); setShowQuickDuplicateWarning(false); }}
                     placeholder="مثال: F-204"
                     className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-indigo-600 font-mono"
                   />
                 </div>
               </div>
 
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  {t('كود السيستم (اختياري)', 'System Code (Optional)')}
+                </label>
+                <input
+                  type="text"
+                  value={quickCustSystemCode}
+                  onChange={(e) => { setQuickCustSystemCode(e.target.value); setShowQuickDuplicateWarning(false); }}
+                  className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-indigo-600 font-mono"
+                />
+              </div>
               <div>
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                   {t('مصدر العميل / جهة الإحالة *', 'Lead Source *')}
@@ -5924,6 +6018,32 @@ export const BookingsFollowUpView: React.FC = () => {
                 />
               </div>
 
+              {showQuickDuplicateWarning && quickCustomerDuplicateMatches.length > 0 && (
+                <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950/30">
+                  <div className="mb-2 flex items-start gap-2 text-xs font-bold text-amber-900 dark:text-amber-200">
+                    <AlertTriangle className="h-4 w-4 shrink-0" />
+                    <span>{t('تم العثور على عملاء محتملين مكررين في نفس الفرع. راجع النتائج قبل إنشاء سجل جديد.', 'Possible duplicates found in the same branch. Review before creating another customer.')}</span>
+                  </div>
+                  <div className="max-h-40 space-y-2 overflow-y-auto">
+                    {quickCustomerDuplicateMatches.map((match) => (
+                      <div key={match.party.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white p-2 text-[11px] dark:bg-slate-900">
+                        <div>
+                          <div className="font-bold text-slate-900 dark:text-white">{match.party.name} · {match.party.phone}</div><div className="text-slate-500">{t('كود العميل', 'Customer Code')}: {match.party.customerCode || match.party.code || '—'} · {t('كود السيستم', 'System Code')}: {match.party.systemCode || match.party.paperCode || '—'} · {t('كود الملف', 'File Code')}: {match.party.fileCode || match.party.fileNumber || '—'}</div>
+                          <div className="text-slate-600 dark:text-slate-300">
+                            {match.reasons.map((reason) => reason === 'name' ? t('الاسم (تطابق 80% أو أكثر)', 'Name (80%+ match)') : reason === 'phone' ? t('الهاتف (تطابق 80% أو أكثر)', 'Phone (80%+ match)') : reason === 'systemCode' ? t('كود السيستم مطابق', 'Exact System Code') : t('كود الملف / الورقي مطابق', 'Exact File / Paper Code')).join(' · ')}
+                          </div>
+                        </div>
+                        <button type="button" onClick={() => { handleSelectExistingPatient(match.party.id); setShowQuickAddCustomerModal(false); setShowQuickDuplicateWarning(false); }} className="rounded-lg bg-indigo-600 px-2.5 py-1.5 font-bold text-white">
+                          {t('استخدم هذا العميل', 'Use This Customer')}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  <button type="button" onClick={createQuickCustomerForBooking} className="mt-2 rounded-lg border border-amber-400 px-3 py-1.5 text-[11px] font-bold text-amber-900 dark:border-amber-700 dark:text-amber-200">
+                    {t('إنشاء عميل جديد رغم التنبيه', 'Create New Customer Anyway')}
+                  </button>
+                </div>
+              )}
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
                 <button
                   type="button"
@@ -5948,19 +6068,28 @@ export const BookingsFollowUpView: React.FC = () => {
       {showPatientHistoryModal && (() => {
         const historyPatient =
           (patientHistoryData?.patientId ? partyMap.byId.get(patientHistoryData.patientId) : undefined) ||
-          (patientHistoryData?.patientName ? partyMap.byName.get(patientHistoryData.patientName.toLowerCase().trim()) : undefined) ||
           (patientHistoryData?.patientPhone ? partyMap.byPhone.get(patientHistoryData.patientPhone.trim()) : undefined) ||
-          parties.find(
-            (p) =>
-              (patientHistoryData?.patientId && p.id === patientHistoryData.patientId) ||
-              (patientHistoryData?.patientName && p.name.toLowerCase() === patientHistoryData.patientName.toLowerCase()) ||
-              (patientHistoryData?.patientPhone && p.phone === patientHistoryData.patientPhone)
-          );
-
+          (patientHistoryData?.patientName ? partyMap.byName.get(patientHistoryData.patientName.toLowerCase().trim()) : undefined);
         const hasSelectedPatient = Boolean(historyPatient || patientHistoryData?.patientName);
+        const historyBranchName = historyPatient?.branchId
+          ? branches.find((branch) => branch.id === historyPatient.branchId || branch.name === historyPatient.branchId)?.name
+          : undefined;
+        const historyCustomerCode = historyPatient?.customerCode || historyPatient?.code;
+        const historySystemCode = historyPatient?.systemCode || historyPatient?.paperCode;
+        const historyFileCode = historyPatient?.fileCode || historyPatient?.fileNumber;
+
 
         // Instant Multi-Field Patient Search (Search by System Code, Paper Code, Phone, or Name across parties, bookings & followups)
         const qSearch = patientHistorySearch.trim().toLowerCase();
+        const resolveActiveHistoryParty = (partyId?: string, name?: string, phone?: string): Party | undefined => {
+          let party = getPartyForPatient(partyId, name, phone);
+          const visited = new Set<string>();
+          while (party?.mergedIntoPartyId && !visited.has(party.id)) {
+            visited.add(party.id);
+            party = partyMap.byId.get(party.mergedIntoPartyId);
+          }
+          return party && !party.isArchived && !party.mergedIntoPartyId ? party : undefined;
+        };
         const matchingSearchPatients = (() => {
           if (!qSearch) return [];
           const matched: Party[] = [];
@@ -5970,13 +6099,16 @@ export const BookingsFollowUpView: React.FC = () => {
           for (let i = 0; i < parties.length; i++) {
             const p = parties[i];
             const isCust = p.type === 'Customer' || p.type === 'Both' || !p.type;
-            if (!isCust) continue;
+            if (!isCust || p.isArchived || p.mergedIntoPartyId) continue;
             const matches =
               Boolean(p.name && p.name.toLowerCase().includes(qSearch)) ||
               Boolean(p.phone && p.phone.includes(qSearch)) ||
               Boolean(p.systemCode && p.systemCode.toLowerCase().includes(qSearch)) ||
               Boolean(p.paperCode && p.paperCode.toLowerCase().includes(qSearch)) ||
-              Boolean(p.code && p.code.toLowerCase().includes(qSearch));
+              Boolean(p.code && p.code.toLowerCase().includes(qSearch)) ||
+              Boolean(p.customerCode && p.customerCode.toLowerCase().includes(qSearch)) ||
+              Boolean(p.fileCode && p.fileCode.toLowerCase().includes(qSearch)) ||
+              Boolean(p.fileNumber && p.fileNumber.toLowerCase().includes(qSearch));
             if (matches) {
               const k = p.id || p.phone || p.name;
               if (!seenKeys.has(k)) {
@@ -5997,19 +6129,11 @@ export const BookingsFollowUpView: React.FC = () => {
               Boolean(a.customerCode && a.customerCode.toLowerCase().includes(qSearch)) ||
               Boolean(a.paperCode && a.paperCode.toLowerCase().includes(qSearch));
             if (matches) {
-              const k = a.patientPhone || a.patientName.toLowerCase().trim();
-              if (!seenKeys.has(k)) {
+              const activeParty = resolveActiveHistoryParty(a.patientId, a.patientName, a.patientPhone);
+              const k = activeParty?.id;
+              if (activeParty && k && !seenKeys.has(k)) {
                 seenKeys.add(k);
-                matched.push({
-                  id: a.patientId || `apt-cust-${i}`,
-                  name: a.patientName,
-                  phone: a.patientPhone || '',
-                  systemCode: a.systemCode || a.customerCode,
-                  paperCode: a.paperCode,
-                  type: 'Customer',
-                  branchId: a.branchId,
-                  balance: 0,
-                } as Party);
+                matched.push(activeParty);
                 if (matched.length >= 30) return matched;
               }
             }
@@ -6025,19 +6149,11 @@ export const BookingsFollowUpView: React.FC = () => {
               Boolean(f.customerCode && f.customerCode.toLowerCase().includes(qSearch)) ||
               Boolean(f.paperCode && f.paperCode.toLowerCase().includes(qSearch));
             if (matches) {
-              const k = f.patientPhone || f.patientName.toLowerCase().trim();
-              if (!seenKeys.has(k)) {
+              const activeParty = resolveActiveHistoryParty(f.patientId, f.patientName, f.patientPhone);
+              const k = activeParty?.id;
+              if (activeParty && k && !seenKeys.has(k)) {
                 seenKeys.add(k);
-                matched.push({
-                  id: f.patientId || `fup-cust-${i}`,
-                  name: f.patientName,
-                  phone: f.patientPhone || '',
-                  systemCode: f.systemCode || f.customerCode,
-                  paperCode: f.paperCode,
-                  type: 'Customer',
-                  branchId: f.branchId,
-                  balance: 0,
-                } as Party);
+                matched.push(activeParty);
                 if (matched.length >= 30) return matched;
               }
             }
@@ -6048,13 +6164,50 @@ export const BookingsFollowUpView: React.FC = () => {
 
         const selectedSysCode = historyPatient?.systemCode || patientHistoryData?.systemCode;
         const selectedPaperCode = historyPatient?.paperCode || patientHistoryData?.paperCode;
+        const mergedChildrenByParent = new Map<string, string[]>();
+        parties.forEach((party) => {
+          if (!party.mergedIntoPartyId) return;
+          const children = mergedChildrenByParent.get(party.mergedIntoPartyId) || [];
+          children.push(party.id);
+          mergedChildrenByParent.set(party.mergedIntoPartyId, children);
+        });
+        const historyPartyIds = new Set<string>([
+          historyPatient?.id,
+          ...(historyPatient?.mergedFromPartyIds || []),
+          patientHistoryData?.patientId,
+        ].filter((id): id is string => Boolean(id)));
+        const pendingPartyIds = [...historyPartyIds];
+        while (pendingPartyIds.length) {
+          const partyId = pendingPartyIds.pop()!;
+          const party = partyMap.byId.get(partyId);
+          const linkedIds = [
+            ...(party?.mergedFromPartyIds || []),
+            ...(mergedChildrenByParent.get(partyId) || []),
+            ...(party?.mergedIntoPartyId ? [party.mergedIntoPartyId] : []),
+          ];
+          linkedIds.forEach((linkedId) => {
+            if (!historyPartyIds.has(linkedId)) {
+              historyPartyIds.add(linkedId);
+              pendingPartyIds.push(linkedId);
+            }
+          });
+        }
+        const familyParties = parties.filter((party) => historyPartyIds.has(party.id));
+        const normalizeIdentity = (value?: string) => value?.trim().toLocaleLowerCase() || '';
+        const familyNames = new Set(familyParties.map((party) => normalizeIdentity(party.name)).filter(Boolean));
+        const familyPhones = new Set(familyParties.flatMap((party) => [party.phone, party.altPhone].map((value) => value?.trim()).filter((value): value is string => Boolean(value))));
+        const familyCodes = new Set(familyParties.flatMap((party) => [party.customerCode, party.code, party.systemCode, party.paperCode, party.fileCode, party.fileNumber].map(normalizeIdentity).filter(Boolean)));
+        if (selectedSysCode) familyCodes.add(normalizeIdentity(selectedSysCode));
+        if (selectedPaperCode) familyCodes.add(normalizeIdentity(selectedPaperCode));
 
         const currentBookings = hasSelectedPatient
           ? appointments
               .filter(
                 (a) =>
-                  (patientHistoryData?.patientId && a.patientId === patientHistoryData.patientId) ||
-                  (historyPatient?.id && a.patientId === historyPatient.id) ||
+                  historyPartyIds.has(a.patientId) ||
+                  familyNames.has(normalizeIdentity(a.patientName)) ||
+                  Boolean(a.patientPhone && familyPhones.has(a.patientPhone.trim())) ||
+                  [a.customerCode, a.systemCode, a.paperCode, a.fileCode].some((code) => Boolean(code && familyCodes.has(normalizeIdentity(code)))) ||
                   (patientHistoryData?.patientName && a.patientName && a.patientName.toLowerCase() === patientHistoryData.patientName.toLowerCase()) ||
                   (historyPatient?.name && a.patientName && a.patientName.toLowerCase() === historyPatient.name.toLowerCase()) ||
                   (historyPatient?.phone && a.patientPhone && a.patientPhone === historyPatient.phone) ||
@@ -6069,8 +6222,10 @@ export const BookingsFollowUpView: React.FC = () => {
           ? patientFollowUps
               .filter(
                 (f) =>
-                  (patientHistoryData?.patientId && f.patientId === patientHistoryData.patientId) ||
-                  (historyPatient?.id && f.patientId === historyPatient.id) ||
+                  Boolean(f.patientId && historyPartyIds.has(f.patientId)) ||
+                  familyNames.has(normalizeIdentity(f.patientName)) ||
+                  Boolean(f.patientPhone && familyPhones.has(f.patientPhone.trim())) ||
+                  [f.customerCode, f.systemCode, f.paperCode, f.fileCode].some((code) => Boolean(code && familyCodes.has(normalizeIdentity(code)))) ||
                   (patientHistoryData?.patientName && f.patientName && f.patientName.toLowerCase() === patientHistoryData.patientName.toLowerCase()) ||
                   (historyPatient?.name && f.patientName && f.patientName.toLowerCase() === historyPatient.name.toLowerCase()) ||
                   (historyPatient?.phone && f.patientPhone && f.patientPhone === historyPatient.phone) ||
@@ -6172,7 +6327,7 @@ export const BookingsFollowUpView: React.FC = () => {
                           }}
                           className="w-full text-start p-2 rounded-lg hover:bg-indigo-50 dark:hover:bg-indigo-950/60 flex items-center justify-between gap-3 transition-colors cursor-pointer border border-transparent hover:border-indigo-200 dark:hover:border-indigo-800"
                         >
-                          <div className="flex items-center gap-2">
+                          <div className="flex flex-wrap items-center gap-2">
                             <span className="font-bold text-xs text-slate-900 dark:text-white">{p.name}</span>
                             {p.phone && <span className="font-mono text-[11px] text-slate-500">{p.phone}</span>}
                           </div>
@@ -6225,16 +6380,21 @@ export const BookingsFollowUpView: React.FC = () => {
                             <span className="font-black text-slate-900 dark:text-white text-base">
                               {patientHistoryData?.patientName || historyPatient?.name}
                             </span>
-                            {(historyPatient?.systemCode || historyPatient?.paperCode) && (
-                              <div className="flex items-center gap-1">
-                                {historyPatient.systemCode && (
-                                  <span className="px-2 py-0.5 text-[11px] font-mono font-bold bg-indigo-100 text-indigo-800 dark:bg-indigo-950/80 dark:text-indigo-300 rounded-md">
-                                    سيستم: {historyPatient.systemCode}
+                            {(historyCustomerCode || historySystemCode || historyFileCode) && (
+                              <div className="flex flex-wrap items-center gap-1">
+                                {historyCustomerCode && (
+                                  <span className="px-2 py-0.5 text-[11px] font-mono font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 rounded-md">
+                                    {t('كود العميل', 'Customer Code')}: {historyCustomerCode}
                                   </span>
                                 )}
-                                {historyPatient.paperCode && (
+                                {historySystemCode && (
+                                  <span className="px-2 py-0.5 text-[11px] font-mono font-bold bg-indigo-100 text-indigo-800 dark:bg-indigo-950/80 dark:text-indigo-300 rounded-md">
+                                    {t('كود السيستم', 'System Code')}: {historySystemCode}
+                                  </span>
+                                )}
+                                {historyFileCode && (
                                   <span className="px-2 py-0.5 text-[11px] font-mono font-bold bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300 rounded-md">
-                                    ورقي: {historyPatient.paperCode}
+                                    {t('كود الملف', 'File Code')}: {historyFileCode}
                                   </span>
                                 )}
                               </div>
@@ -6277,7 +6437,7 @@ export const BookingsFollowUpView: React.FC = () => {
                             <span>•</span>
                             <span>{t('المصدر:', 'Source:')} <strong className="text-slate-700 dark:text-slate-300">{historyPatient?.leadSource || 'زيارة مباشرة'}</strong></span>
                             <span>•</span>
-                            <span>{t('الفرع:', 'Branch:')} <strong className="text-slate-700 dark:text-slate-300">{historyPatient?.branchId || activeBranch?.name || 'الرئيسي'}</strong></span>
+                            <span>{t('الفرع:', 'Branch:')} <strong className="text-slate-700 dark:text-slate-300">{historyBranchName || '—'}</strong></span>
                             <span>•</span>
                             <span>{t('تاريخ التكويد:', 'Created:')} <strong className="font-mono text-slate-700 dark:text-slate-300">{historyPatient?.createdAt?.split('T')[0] || '2026-01-15'}</strong></span>
                           </div>
@@ -6359,18 +6519,26 @@ export const BookingsFollowUpView: React.FC = () => {
                       <p>{t('لا توجد أي حجوزات مسجلة لهذا المريض حتى الآن.', 'No bookings found for this patient.')}</p>
                     </div>
                   ) : (
-                    <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
-                      <table className="w-full text-xs text-left rtl:text-right">
+                    <div className="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800">
+                      <table className="w-full table-fixed text-[10px] text-left rtl:text-right">
+                        <colgroup>
+                          <col style={{ width: '3%' }} /><col style={{ width: '7%' }} /><col style={{ width: '7%' }} /><col style={{ width: '7%' }} /><col style={{ width: '8%' }} /><col style={{ width: '10%' }} /><col style={{ width: '10%' }} /><col style={{ width: '9%' }} /><col style={{ width: '7%' }} /><col style={{ width: '11%' }} /><col style={{ width: '11%' }} /><col style={{ width: '10%' }} />
+                        </colgroup>
+
                         <thead className="bg-slate-50 dark:bg-slate-800 text-slate-500 font-bold uppercase border-b border-slate-200 dark:border-slate-700">
                           <tr>
-                            <th className="p-3">#</th>
-                            <th className="p-3">{t('تاريخ وتوقيت الحجز', 'Booking Date & Time')}</th>
-                            <th className="p-3">{t('الخدمة / الجلسة', 'Service / Session')}</th>
-                            <th className="p-3">{t('الطبيب المعالج', 'Doctor')}</th>
-                            <th className="p-3">{t('حالة الحجز', 'Status')}</th>
-                            <th className="p-3">{t('سبب الإلغاء / عدم الحضور', 'Cancellation / No-Show Reason')}</th>
-                            <th className="p-3">{t('ملاحظات الحجز', 'Booking Notes')}</th>
-                            <th className="p-3">{t('تاريخ التسجيل', 'Created At')}</th>
+                            <th className="px-1 py-2 align-top break-words">#</th>
+                            <th className="px-1 py-2 align-top break-words">{t('كود العميل', 'Customer Code')}</th>
+                            <th className="px-1 py-2 align-top break-words">{t('كود السيستم', 'System Code')}</th>
+                            <th className="px-1 py-2 align-top break-words">{t('كود الملف', 'File Code')}</th>
+                            <th className="px-1 py-2 align-top break-words">{t('الفرع', 'Branch')}</th>
+                            <th className="px-1 py-2 align-top break-words">{t('تاريخ وتوقيت الحجز', 'Booking Date & Time')}</th>
+                            <th className="px-1 py-2 align-top break-words">{t('الخدمة / الجلسة', 'Service / Session')}</th>
+                            <th className="px-1 py-2 align-top break-words">{t('الطبيب المعالج', 'Doctor')}</th>
+                            <th className="px-1 py-2 align-top break-words">{t('حالة الحجز', 'Status')}</th>
+                            <th className="px-1 py-2 align-top break-words">{t('سبب الإلغاء / عدم الحضور', 'Cancellation / No-Show Reason')}</th>
+                            <th className="px-1 py-2 align-top break-words">{t('ملاحظات الحجز', 'Booking Notes')}</th>
+                            <th className="px-1 py-2 align-top break-words">{t('تاريخ التسجيل', 'Created At')}</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -6385,21 +6553,25 @@ export const BookingsFollowUpView: React.FC = () => {
 
                             return (
                               <tr key={b.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
-                                <td className="p-3 font-semibold text-slate-400">{idx + 1}</td>
-                                <td className="p-3">
+                                <td className="px-1 py-2 align-top break-words font-semibold text-slate-400">{idx + 1}</td>
+                                <td className="px-1 py-2 align-top break-words font-mono">{historyCustomerCode || '—'}</td>
+                                <td className="px-1 py-2 align-top break-words font-mono">{historySystemCode || '—'}</td>
+                                <td className="px-1 py-2 align-top break-words font-mono">{historyFileCode || '—'}</td>
+                                <td className="px-1 py-2 align-top break-words">{historyBranchName || '—'}</td>
+                                <td className="px-1 py-2 align-top break-words">
                                   <div className="font-bold text-slate-900 dark:text-white">{b.date}</div>
                                   <div className="text-[11px] text-indigo-600 dark:text-indigo-400 font-semibold">{b.time}</div>
                                 </td>
-                                <td className="p-3 font-bold text-slate-800 dark:text-slate-200">
+                                <td className="px-1 py-2 align-top break-words font-bold text-slate-800 dark:text-slate-200">
                                   {b.serviceNameAr}
                                 </td>
-                                <td className="p-3 font-semibold text-slate-700 dark:text-slate-300">
+                                <td className="px-1 py-2 align-top break-words font-semibold text-slate-700 dark:text-slate-300">
                                   <div className="flex items-center gap-1">
                                     <Stethoscope className="h-3.5 w-3.5 text-indigo-500 shrink-0" />
                                     <span>{b.doctorName || 'د. استشاري'}</span>
                                   </div>
                                 </td>
-                                <td className="p-3">
+                                <td className="px-1 py-2 align-top break-words">
                                   <span className={`inline-block px-2.5 py-0.5 rounded-lg text-[11px] font-bold border ${badge}`}>
                                     {b.status === 'Scheduled' && t('حجز مبدئي', 'Tentative')}
                                     {b.status === 'Confirmed' && t('حجز مؤكد', 'Confirmed')}
@@ -6408,7 +6580,7 @@ export const BookingsFollowUpView: React.FC = () => {
                                     {b.status === 'Cancelled' && t('ملغي', 'Cancelled')}
                                   </span>
                                 </td>
-                                <td className="p-3">
+                                <td className="px-1 py-2 align-top break-words">
                                   {b.cancellationReason && (
                                     <span className="text-rose-600 text-xs font-semibold block">{b.cancellationReason}</span>
                                   )}
@@ -6419,10 +6591,10 @@ export const BookingsFollowUpView: React.FC = () => {
                                     <span className="text-slate-400 text-xs font-mono">-</span>
                                   )}
                                 </td>
-                                <td className="p-3 text-slate-600 dark:text-slate-400 max-w-xs">
+                                <td className="px-1 py-2 align-top break-words text-slate-600 dark:text-slate-400 max-w-xs">
                                   {b.notes || '-'}
                                 </td>
-                                <td className="p-3 text-slate-400 font-mono text-[11px]">
+                                <td className="px-1 py-2 align-top break-words text-slate-400 font-mono text-[11px]">
                                   {b.createdAt ? b.createdAt.split('T')[0] : b.date}
                                 </td>
                               </tr>
@@ -6454,18 +6626,25 @@ export const BookingsFollowUpView: React.FC = () => {
                       <p>{t('لا توجد أي متابعات مسجلة لهذا المريض حتى الآن.', 'No follow-up calls or reminders found for this patient.')}</p>
                     </div>
                   ) : (
-                    <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
-                      <table className="w-full text-xs text-left rtl:text-right">
+                    <div className="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800">
+                      <table className="w-full table-fixed text-[10px] text-left rtl:text-right">
+                        <colgroup>
+                          <col style={{ width: '3%' }} /><col style={{ width: '7%' }} /><col style={{ width: '7%' }} /><col style={{ width: '7%' }} /><col style={{ width: '8%' }} /><col style={{ width: '8%' }} /><col style={{ width: '9%' }} /><col style={{ width: '13%' }} /><col style={{ width: '8%' }} /><col style={{ width: '15%' }} /><col style={{ width: '15%' }} />
+                        </colgroup>
+
                         <thead className="bg-slate-50 dark:bg-slate-800 text-slate-500 font-bold uppercase border-b border-slate-200 dark:border-slate-700">
                           <tr>
-                            <th className="p-3">#</th>
-                            <th className="p-3">{t('تاريخ المتابعة المستحق', 'Due Date')}</th>
-                            <th className="p-3">{t('نوع وتصنيف المتابعة', 'Type')}</th>
-                            <th className="p-3">{t('موضوع وسبب المتابعة', 'Reason / Subject')}</th>
-                            <th className="p-3">{t('حالة المتابعة', 'Status')}</th>
-                            <th className="p-3">{t('ملاحظات ونتائج التواصل', 'Notes & Result')}</th>
-                            <th className="p-3">{t('المسؤول / التابع له', 'Created By')}</th>
-                            <th className="p-3 text-center">{t('إجراء', 'Action')}</th>
+                            <th className="px-1 py-2 align-top break-words">#</th>
+                            <th className="px-1 py-2 align-top break-words">{t('كود العميل', 'Customer Code')}</th>
+                            <th className="px-1 py-2 align-top break-words">{t('كود السيستم', 'System Code')}</th>
+                            <th className="px-1 py-2 align-top break-words">{t('كود الملف', 'File Code')}</th>
+                            <th className="px-1 py-2 align-top break-words">{t('الفرع', 'Branch')}</th>
+                            <th className="px-1 py-2 align-top break-words">{t('تاريخ المتابعة المستحق', 'Due Date')}</th>
+                            <th className="px-1 py-2 align-top break-words">{t('نوع وتصنيف المتابعة', 'Type')}</th>
+                            <th className="px-1 py-2 align-top break-words">{t('موضوع وسبب المتابعة', 'Reason / Subject')}</th>
+                            <th className="px-1 py-2 align-top break-words">{t('حالة المتابعة', 'Status')}</th>
+                            <th className="px-1 py-2 align-top break-words">{t('ملاحظات ونتائج التواصل', 'Notes & Result')}</th>
+                            <th className="px-1 py-2 align-top break-words text-center">{t('إجراء', 'Action')}</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -6480,11 +6659,15 @@ export const BookingsFollowUpView: React.FC = () => {
 
                             return (
                               <tr key={f.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
-                                <td className="p-3 font-semibold text-slate-400">{idx + 1}</td>
-                                <td className="p-3 font-bold text-slate-900 dark:text-white">
+                                <td className="px-1 py-2 align-top break-words font-semibold text-slate-400">{idx + 1}</td>
+                                <td className="px-1 py-2 align-top break-words font-mono">{historyCustomerCode || '—'}</td>
+                                <td className="px-1 py-2 align-top break-words font-mono">{historySystemCode || '—'}</td>
+                                <td className="px-1 py-2 align-top break-words font-mono">{historyFileCode || '—'}</td>
+                                <td className="px-1 py-2 align-top break-words">{historyBranchName || '—'}</td>
+                                <td className="px-1 py-2 align-top break-words font-bold text-slate-900 dark:text-white">
                                   {f.followUpDate}
                                 </td>
-                                <td className="p-3">
+                                <td className="px-1 py-2 align-top break-words">
                                   <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
                                     {f.type === 'Inquiry' && t('استفسار', 'Inquiry')}
                                     {f.type === 'PostTreatment' && t('اطمئنان بعد الجلسة', 'Post Treatment')}
@@ -6493,10 +6676,10 @@ export const BookingsFollowUpView: React.FC = () => {
                                     {f.type === 'General' && t('متابعة عامة', 'General')}
                                   </span>
                                 </td>
-                                <td className="p-3 font-bold text-slate-800 dark:text-slate-200">
+                                <td className="px-1 py-2 align-top break-words font-bold text-slate-800 dark:text-slate-200">
                                   {f.reason}
                                 </td>
-                                <td className="p-3">
+                                <td className="px-1 py-2 align-top break-words">
                                   <span className={`inline-block px-2 py-0.5 rounded-lg text-[10px] font-bold border ${badge}`}>
                                     {f.status === 'Pending' && t('قيد الانتظار', 'Pending')}
                                     {f.status === 'Contacted' && t('تم التواصل', 'Contacted')}
@@ -6505,13 +6688,10 @@ export const BookingsFollowUpView: React.FC = () => {
                                     {f.status === 'Cancelled' && t('اعتذر / ملغي', 'Cancelled')}
                                   </span>
                                 </td>
-                                <td className="p-3 text-slate-600 dark:text-slate-400 max-w-xs">
+                                <td className="px-1 py-2 align-top break-words text-slate-600 dark:text-slate-400 max-w-xs">
                                   {f.notes || '-'}
                                 </td>
-                                <td className="p-3 text-slate-500 text-xs">
-                                  {f.createdBy || 'فريق المتابعة'}
-                                </td>
-                                <td className="p-3 text-center">
+                                <td className="px-1 py-2 align-top break-words text-center">
                                   <button
                                     onClick={() => {
                                       setPatientHistoryData(null);
@@ -6595,14 +6775,14 @@ export const BookingsFollowUpView: React.FC = () => {
           const range = getAppointmentTimeRange(a);
           const sTime = a.startTime || (range.startMin !== null ? formatMinutesTo24h(range.startMin) : (a.time ? a.time.split(' - ')[0] : '10:00'));
           const eTime = a.endTime || (range.endMin !== null ? formatMinutesTo24h(range.endMin) : (a.time && a.time.includes(' - ') ? a.time.split(' - ')[1] : '10:45'));
-          const party = parties.find((p) => p.id === a.patientId || p.systemCode === a.systemCode || p.systemCode === a.customerCode || p.customerCode === a.customerCode);
+          const party = parties.find((p) => p.id === a.patientId || p.systemCode === a.systemCode || p.customerCode === a.customerCode || p.code === a.customerCode);
           const branchObj = branches.find((b) => b.id === (a.branchId || party?.branchId)) || activeBranch;
           return {
             branchName: branchObj?.name || activeBranch?.name || 'الفرع الرئيسي',
-            customerCode: a.customerCode || party?.customerCode || party?.code || '',
-            systemCode: a.systemCode || a.paperCode || party?.systemCode || party?.paperCode || '',
-            fileCode: a.fileCode || party?.fileCode || party?.fileNumber || '',
-            paperCode: a.paperCode || party?.paperCode || a.systemCode || party?.systemCode || '',
+            customerCode: getCustomerSerial(party, a.customerCode, a.systemCode, a.paperCode) || '',
+            systemCode: party?.systemCode || a.systemCode || party?.paperCode || a.paperCode || '',
+            fileCode: party?.fileCode || party?.fileNumber || a.fileCode || '',
+            paperCode: party?.paperCode || party?.systemCode || a.paperCode || a.systemCode || '',
             patientName: a.patientName,
             patientPhone: a.patientPhone || '',
             date: a.date,
@@ -6631,14 +6811,14 @@ export const BookingsFollowUpView: React.FC = () => {
         descriptionAr="استيراد وتصدير جدول المتابعات والتذكير مع الفحص الخلوي الذكي وربط كود العميل آلياً بدون تجميد المتصفح"
         columns={followUpsExcelColumns}
         currentDataForExport={filteredFollowUps.map((f) => {
-          const party = parties.find((p) => p.id === f.patientId || p.systemCode === f.systemCode || p.systemCode === f.customerCode || p.customerCode === f.customerCode);
+          const party = parties.find((p) => p.id === f.patientId || p.systemCode === f.systemCode || p.customerCode === f.customerCode || p.code === f.customerCode);
           const branchObj = branches.find((b) => b.id === (f.branchId || party?.branchId)) || activeBranch;
           return {
             branchName: branchObj?.name || activeBranch?.name || 'الفرع الرئيسي',
-            customerCode: f.customerCode || party?.customerCode || party?.code || '',
-            systemCode: f.systemCode || f.paperCode || party?.systemCode || party?.paperCode || '',
-            fileCode: f.fileCode || party?.fileCode || party?.fileNumber || '',
-            paperCode: f.paperCode || party?.paperCode || f.systemCode || party?.systemCode || '',
+            customerCode: getCustomerSerial(party, f.customerCode, f.systemCode, f.paperCode) || '',
+            systemCode: party?.systemCode || f.systemCode || party?.paperCode || f.paperCode || '',
+            fileCode: party?.fileCode || party?.fileNumber || f.fileCode || '',
+            paperCode: party?.paperCode || party?.systemCode || f.paperCode || f.systemCode || '',
             patientName: f.patientName,
             patientPhone: f.patientPhone || '',
             followUpDate: f.followUpDate,

@@ -19,7 +19,7 @@ export function createJournalLine(
   index: number
 ): JournalLine {
   return {
-    id: `jl-${Date.now()}-${index}-${Math.random().toString(36).substring(2, 5)}`,
+    id: `jl-${Date.now()}-${index}-${Math.random().toString(36).substring(2, 10)}`,
     accountId: acc.id,
     accountCode: acc.code,
     accountNameAr: acc.nameAr,
@@ -186,8 +186,11 @@ export function buildRevenueJournalLines(params: {
   memo: string;
 }): JournalLine[] {
   const lines: JournalLine[] = [];
-  const total = Number(params.totalRevenue.toFixed(2));
-  const collected = Number(params.collectedAmount.toFixed(2));
+  // Values may originate from Excel/JSON storage, where numeric fields can be strings.
+  const totalRevenue = Number(params.totalRevenue);
+  const collectedAmount = Number(params.collectedAmount);
+  const total = Number((Number.isFinite(totalRevenue) ? totalRevenue : 0).toFixed(2));
+  const collected = Number((Number.isFinite(collectedAmount) ? collectedAmount : 0).toFixed(2));
   const receivable = Number(Math.max(0, total - collected).toFixed(2));
 
   let lineIdx = 1;

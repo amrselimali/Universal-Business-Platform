@@ -394,7 +394,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate }) => 
                     </a>
 
                     {/* Dedicated Open in New Tab Button on hover */}
-                    <a
+                    {item.id !== 'bookings' && <a
                       href={`?view=${item.id}`}
                       target="_blank"
                       rel="noopener noreferrer"
@@ -407,7 +407,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate }) => 
                       onClick={(e) => e.stopPropagation()}
                     >
                       <ExternalLink className="h-3 w-3" />
-                    </a>
+                    </a>}
                   </div>
                 );
               })}
