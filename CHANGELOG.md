@@ -4,6 +4,7 @@
 
 ## Customer Control Account and Trial Balance Reconciliation
 
+- The Chart of Accounts no longer lists legacy generated customer subledgers individually (`acc-customer-*` IDs with `1120-*` account codes); the existing party and journal transaction data remains intact.
 - Collection receipt postings now use only the exact tenant-scoped account `2000` as the receivable control account and the payment method's linked cash/bank account for the debit. Missing/duplicate/misclassified control accounts, missing payment mappings, invalid amounts, and duplicate supplied receipt reference numbers are rejected before any receipt or journal is saved.
 - Removed automatic per-customer chart account creation from direct receipt posting. Existing generated customer subledgers are retired only if the journal-linked balances are reclassified to `2000`, their projected balance is zero, and no party or journal line still references them. Historical receipt credit lines are changed only when their voucher marker is unambiguous; locked periods are not modified.
 - Customer receipts preserve system/customer codes for statement identity. Direct receipt vouchers are the single source of their statement movement; linked reception rows and their shared journal are suppressed to prevent duplicate customer credits. Shared account `2000` is not treated as a unique account for generic party statement matching, and existing supplier links for `Both` parties are preserved.
