@@ -251,8 +251,9 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
       cashReceipts.forEach((rcpt) => {
         if (rcpt.status === 'cancelled') return;
         const matchRcpt =
-          rcpt.partyId === currentParty.id ||
-          (rcpt.receivedFrom && rcpt.receivedFrom.toLowerCase().trim() === pName);
+          rcpt.partyId
+            ? rcpt.partyId === currentParty.id
+            : Boolean(rcpt.receivedFrom && rcpt.receivedFrom.toLowerCase().trim() === pName);
 
         if (matchRcpt) {
           const amt = Number(rcpt.amount) || 0;
@@ -332,29 +333,47 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
       });
     }
 
+    const receiptJournalIds = new Set(
+      cashReceipts
+        .filter((receipt) => receipt.partyId === currentParty.id && receipt.status !== 'cancelled')
+        .map((receipt) => receipt.journalEntryId)
+        .filter((journalId): journalId is string => Boolean(journalId))
+    );
+
     // 3. Journal Entries mentioning this party
     journalEntries.forEach((entry) => {
       if (entry.entryNumber?.startsWith('JV-MNT')) return;
+      const isCollectionPosting = entry.sourceDocument?.startsWith('إيصالات التحصيل -') || false;
 
-      const matchesEntry =
-        entry.description.toLowerCase().includes(pName) ||
-        entry.lines.some((l) => l.memo?.toLowerCase().includes(pName));
-
-      if (matchesEntry) {
-        entry.lines.forEach((l) => {
-          if (l.memo?.toLowerCase().includes(pName)) {
-            rawMovements.push({
-              date: entry.date,
-              docNumber: entry.entryNumber,
-              docType: 'JournalEntry',
-              docTypeAr: 'تسوية قيد يومية',
-              description: l.memo || entry.description,
-              debit: l.debit,
-              credit: l.credit,
-            });
-          }
-        });
+      const matchingLines = entry.lines.filter(
+        (line) => isCollectionPosting
+          ? line.accountId === currentParty.accountId && Number(line.credit) > 0
+          : line.accountId === currentParty.accountId || line.memo?.toLowerCase().includes(pName)
+      );
+      if (receiptJournalIds.has(entry.id)) return;
+      if (isCollectionPosting) {
+        const matchingReceipts = cashReceipts.filter(
+          (receipt) => receipt.partyId === currentParty.id && receipt.status !== 'cancelled' &&
+            (receipt.journalEntryId === entry.id || entry.lines.some((line) => line.memo?.includes(receipt.voucherNumber)))
+        );
+        const receiptAmount = matchingReceipts.reduce((sum, receipt) => sum + (Number(receipt.amount) || 0), 0);
+        const journalCredit = matchingLines.reduce((sum, line) => sum + (Number(line.credit) || 0), 0);
+        if (receiptAmount > 0 && Math.abs(receiptAmount - journalCredit) < 0.01) return;
       }
+
+      matchingLines.forEach((line) => {
+        rawMovements.push({
+          date: entry.date,
+          docNumber: entry.entryNumber,
+          docType: 'JournalEntry',
+          docTypeAr: isCollectionPosting
+            ? 'قيد إيصال تحصيل'
+            : 'تسوية قيد يومية',
+          description: line.memo || entry.description,
+          debit: line.debit,
+          credit: line.credit,
+        });
+      });
     });
 
     rawMovements.sort((a, b) => a.date.localeCompare(b.date));

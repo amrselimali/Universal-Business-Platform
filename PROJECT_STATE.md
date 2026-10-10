@@ -23,11 +23,15 @@ The project is being developed toward a cloud-native architecture using Neon Pos
 ## Collection Receipt Direct Accounting & Customer Quantity Crediting — 2026-10-10
 
 - Collection receipts recorded or imported from the Collection Receipts screen now bypass reception shift run sheets entirely (`receptionShifts` remain unaffected) and post directly to the General Ledger and chart of accounts.
-- Journal entries record the payment method account (cash/bank) as Debit and the matched Customer as Credit by the receipt amount.
+- Journal entries debit the selected payment-method account and credit the customer's own subsidiary receivable account by the receipt amount.
+- If a customer has no linked account, posting creates a receivable subaccount beneath account 1120, identifies it with the generated Customer Code, and links it to the customer profile before creating journal lines.
+- Receipt posting credits the Party balance snapshot. On first hydration, existing unlocked direct receipt vouchers are reconciled once, linked to existing customer-code subledgers where available, and any missing journal is created as a balanced cash/customer entry; any existing voucher-linked journal credit still on shared account 1120 is reclassified without adding another cash debit. Locked periods are not modified.
+- Customer statements include only the customer's receivable credit from a direct collection journal if its voucher movement is missing, and suppress duplicates when the voucher is present; the matching cash debit is never counted as a customer movement.
+- Trial balance rows and totals are derived from posted journal entries, avoiding double-counting parent and subsidiary account balances; the balanced status compares actual posted debits and credits.
 - Collection receipts now require/support selecting the service, product/package, and booked quantity (`serviceName`, `productId`, `productName`, `bookedQuantity`).
 - Added a dedicated "Record Collection Receipt" modal in Collection Receipts view, allowing direct entry of customer, amount, receipt date, payment method, product, service, booked quantity, and notes.
-- Customer accounts statement (`PartyStatementModal`) reflects collection receipts directly as credit transactions and updates the customer's booked quantity balance (credit quantity) under customer packages and offers.
-- Validation: `compile_applet` passed.
+- Customer account statements (`PartyStatementModal`) reflect each collection receipt once as a credit transaction and include the purchased service/product quantity under customer packages and offers; the corresponding direct-posting journal is excluded from the generic journal movement list to prevent duplicate statement credits.
+- Validation: `npm run build` passed. `npm run lint` remains blocked by existing repository-wide TypeScript diagnostics; none point to the customer account-linking or direct receipt posting changes.
 
 ## Collection Receipt Excel Numeric Handling — 2026-10-10
 

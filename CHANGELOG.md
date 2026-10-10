@@ -5,11 +5,15 @@
 ## Collection Receipt Direct Accounting & Customer Quantity Crediting
 
 - Collection receipts recorded or imported from the Collection Receipts screen are no longer routed or posted into reception shift operational sheets.
-- Receipts now post directly to the General Ledger and chart of accounts: the selected payment method / treasury account is debited, and the matched customer account is credited with the receipt amount.
+- Receipts post directly to the General Ledger and chart of accounts: the selected payment method / treasury account is debited, and the matched customer's subsidiary receivable account is credited with the receipt amount.
+- Customers without a linked receivable account receive one automatically under account 1120, identified by their generated Customer Code, and the account is linked to the customer profile before posting.
+- Posting reduces the customer's displayed balance by the receipt amount; existing unlocked direct receipts are reconciled once, linked to an existing customer-code subledger where available, and any unposted receipt is posted with a balanced cash/customer journal. Old shared-receivable credit lines are reclassified without duplicating their cash debit; locked periods are not changed.
+- Customer statements now show only the customer's receivable credit from direct receipt journals when no voucher movement exists, while de-duplicating linked vouchers and never counting the matching cash debit against the customer.
+- Trial balance rows and totals now derive from posted journal lines, avoiding parent/subaccount balance duplication; the status indicator reflects whether the posted journal balances actually balance.
 - Collection receipts now require selecting or specifying the service, product/package, and booked quantity.
 - Added a full manual recording modal ("تسجيل إيصال تحصيل") directly in Collection Receipts with customer lookup, payment method, service, product selection, and booked quantity.
-- In Customer Account Statements (`PartyStatementModal`), collection receipts appear as direct credit transactions, and the customer's booked quantity is added as a credit quantity balance under client packages and offers.
-- Validation: Production build passed without regression.
+- In Customer Account Statements (`PartyStatementModal`), collection receipts appear once as direct credit transactions, and the purchased service/product quantity is added to the customer's quantity balance under client packages and offers.
+- Validation: `npm run build` passed. `npm run lint` remains blocked by existing repository-wide TypeScript diagnostics; none point to the customer account-linking or direct receipt posting changes.
 
 # 2026-10-10
 
