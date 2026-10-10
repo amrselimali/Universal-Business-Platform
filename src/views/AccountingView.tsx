@@ -138,7 +138,16 @@ export const AccountingView: React.FC = () => {
   const trialBalanceDiagnostics = useMemo(() => {
     const unbalancedEntries: Array<{ id: string; entryNumber: string; date: string; debit: number; credit: number; difference: number }> = [];
     const unmappedLines: Array<{ entryNumber: string; accountId: string; accountCode: string; debit: number; credit: number }> = [];
+    const unmappedAccountTotals = new Map<string, {
+      accountId: string;
+      accountCode: string;
+      lineCount: number;
+      debit: number;
+      credit: number;
+    }>();
     let unmappedLineCount = 0;
+    let unmappedDebitTotal = 0;
+    let unmappedCreditTotal = 0;
     let resolvedByLegacyCodeCount = 0;
     filteredJournalEntries.filter((entry) => entry.isPosted).forEach((entry) => {
       let debit = 0;
@@ -146,18 +155,34 @@ export const AccountingView: React.FC = () => {
       entry.lines.forEach((line) => {
         const lineDebit = Number(line.debit);
         const lineCredit = Number(line.credit);
-        debit += Number.isFinite(lineDebit) ? lineDebit : 0;
-        credit += Number.isFinite(lineCredit) ? lineCredit : 0;
+        const safeDebit = Number.isFinite(lineDebit) ? lineDebit : 0;
+        const safeCredit = Number.isFinite(lineCredit) ? lineCredit : 0;
+        debit += safeDebit;
+        credit += safeCredit;
         const resolvedAccount = resolveJournalLineAccount(line, accounts, entry.tenantId, entry.branchId);
         if (!resolvedAccount) {
           unmappedLineCount += 1;
+          unmappedDebitTotal += safeDebit;
+          unmappedCreditTotal += safeCredit;
+          const groupKey = `${line.accountId}|${line.accountCode.trim()}`;
+          const totals = unmappedAccountTotals.get(groupKey) || {
+            accountId: line.accountId,
+            accountCode: line.accountCode.trim(),
+            lineCount: 0,
+            debit: 0,
+            credit: 0,
+          };
+          totals.lineCount += 1;
+          totals.debit += safeDebit;
+          totals.credit += safeCredit;
+          unmappedAccountTotals.set(groupKey, totals);
           if (unmappedLines.length < 50) {
             unmappedLines.push({
               entryNumber: entry.entryNumber,
               accountId: line.accountId,
               accountCode: line.accountCode,
-              debit: Number.isFinite(lineDebit) ? lineDebit : 0,
-              credit: Number.isFinite(lineCredit) ? lineCredit : 0,
+              debit: safeDebit,
+              credit: safeCredit,
             });
           }
         } else if (resolvedAccount.id !== line.accountId) {
@@ -169,7 +194,19 @@ export const AccountingView: React.FC = () => {
         unbalancedEntries.push({ id: entry.id, entryNumber: entry.entryNumber, date: entry.date, debit, credit, difference });
       }
     });
-    return { unbalancedEntries, unmappedLines, unmappedLineCount, resolvedByLegacyCodeCount };
+    const unmappedAccountGroups = Array.from(unmappedAccountTotals.values())
+      .sort((a, b) => (b.debit + b.credit) - (a.debit + a.credit))
+      .slice(0, 50);
+    return {
+      unbalancedEntries,
+      unmappedLines,
+      unmappedLineCount,
+      unmappedDebitTotal,
+      unmappedCreditTotal,
+      unmappedAccountGroups,
+      unmappedAccountGroupCount: unmappedAccountTotals.size,
+      resolvedByLegacyCodeCount,
+    };
   }, [accounts, filteredJournalEntries]);
 
   const totalDebits = trialBalanceAccounts.reduce((sum, account) => sum + Math.max(0, account.balance), 0);
@@ -1249,6 +1286,48 @@ export const AccountingView: React.FC = () => {
                 {' '}
                 {t('سطر بحساب غير مربوط', 'lines with unmapped accounts')}
               </h4>
+              {trialBalanceDiagnostics.unmappedLineCount > 0 && (
+                <>
+                  <p className="text-rose-800 dark:text-rose-300">
+                    {t(
+                      `حركة الحسابات غير المربوطة: مدين ${formatMoney(trialBalanceDiagnostics.unmappedDebitTotal)}، دائن ${formatMoney(trialBalanceDiagnostics.unmappedCreditTotal)}. هذه الحركات مستبعدة من إجمالي الميزان.`,
+                      `Unmapped account movements: ${formatMoney(trialBalanceDiagnostics.unmappedDebitTotal)} debit and ${formatMoney(trialBalanceDiagnostics.unmappedCreditTotal)} credit. These movements are excluded from trial-balance totals.`
+                    )}
+                  </p>
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[620px] text-start">
+                      <thead className="text-rose-700 dark:text-rose-300">
+                        <tr>
+                          <th className="py-1 text-start">{t('كود الحساب المفقود', 'Missing account code')}</th>
+                          <th className="py-1 text-start">{t('المعرّف القديم', 'Legacy account ID')}</th>
+                          <th className="py-1 text-end">{t('عدد الحركات', 'Lines')}</th>
+                          <th className="py-1 text-end">{t('إجمالي المدين', 'Total debits')}</th>
+                          <th className="py-1 text-end">{t('إجمالي الدائن', 'Total credits')}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {trialBalanceDiagnostics.unmappedAccountGroups.map((group) => (
+                          <tr key={`${group.accountId}-${group.accountCode}`} className="border-t border-rose-200/70 dark:border-rose-900/50">
+                            <td className="py-1.5 font-mono">{group.accountCode || '—'}</td>
+                            <td className="py-1.5 font-mono">{group.accountId || '—'}</td>
+                            <td className="py-1.5 text-end font-mono">{group.lineCount}</td>
+                            <td className="py-1.5 text-end font-mono">{formatMoney(group.debit)}</td>
+                            <td className="py-1.5 text-end font-mono">{formatMoney(group.credit)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {trialBalanceDiagnostics.unmappedAccountGroupCount > trialBalanceDiagnostics.unmappedAccountGroups.length && (
+                      <p className="pt-2 text-slate-600 dark:text-slate-400">
+                        {t(
+                          `المعروض أعلى ${trialBalanceDiagnostics.unmappedAccountGroups.length} مجموعة حركة من أصل ${trialBalanceDiagnostics.unmappedAccountGroupCount}، مرتبة حسب إجمالي الحركة.`,
+                          `Showing the ${trialBalanceDiagnostics.unmappedAccountGroups.length} largest movement groups out of ${trialBalanceDiagnostics.unmappedAccountGroupCount}, sorted by total movement.`
+                        )}
+                      </p>
+                    )}
+                  </div>
+                </>
+              )}
               {trialBalanceDiagnostics.unbalancedEntries.length > 0 && (
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[560px] text-start">
