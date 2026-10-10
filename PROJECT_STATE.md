@@ -20,6 +20,15 @@ The application currently contains multiple operational, financial, inventory, m
 
 The project is being developed toward a cloud-native architecture using Neon PostgreSQL.
 
+## Collection Receipt Direct Accounting & Customer Quantity Crediting — 2026-10-10
+
+- Collection receipts recorded or imported from the Collection Receipts screen now bypass reception shift run sheets entirely (`receptionShifts` remain unaffected) and post directly to the General Ledger and chart of accounts.
+- Journal entries record the payment method account (cash/bank) as Debit and the matched Customer as Credit by the receipt amount.
+- Collection receipts now require/support selecting the service, product/package, and booked quantity (`serviceName`, `productId`, `productName`, `bookedQuantity`).
+- Added a dedicated "Record Collection Receipt" modal in Collection Receipts view, allowing direct entry of customer, amount, receipt date, payment method, product, service, booked quantity, and notes.
+- Customer accounts statement (`PartyStatementModal`) reflects collection receipts directly as credit transactions and updates the customer's booked quantity balance (credit quantity) under customer packages and offers.
+- Validation: `compile_applet` passed.
+
 ## Collection Receipt Excel Numeric Handling — 2026-10-10
 
 - Fixed Excel collection import values reaching accounting code as strings: revenue journal construction now safely converts revenue and collection amounts to finite numbers before rounding, and the import explicitly normalizes amounts before adding shift rows.

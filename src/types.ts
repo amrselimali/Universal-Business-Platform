@@ -996,6 +996,12 @@ export interface CashReceiptVoucher {
   checkDate?: string;
   referenceInvoiceNo?: string;
   description: string;
+  serviceId?: string;
+  serviceName?: string;
+  productId?: string;
+  productName?: string;
+  quantity?: number;
+  bookedQuantity?: number;
   costCenter?: string;
   receiverName: string;
   clientSignature?: string;

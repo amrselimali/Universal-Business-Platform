@@ -64,6 +64,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
     parties,
     invoices,
     receptionShifts,
+    cashReceipts,
     journalEntries,
     deviceMaintenanceRecords,
     consumeClientOfferSession,
@@ -245,6 +246,32 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
           }
         });
       });
+
+      // Direct Collection Receipts / Cash Receipt Vouchers (سندات وإيصالات التحصيل المسجلة للعميل)
+      cashReceipts.forEach((rcpt) => {
+        if (rcpt.status === 'cancelled') return;
+        const matchRcpt =
+          rcpt.partyId === currentParty.id ||
+          (rcpt.receivedFrom && rcpt.receivedFrom.toLowerCase().trim() === pName);
+
+        if (matchRcpt) {
+          const amt = Number(rcpt.amount) || 0;
+          if (amt > 0) {
+            const bookedInfo = (rcpt.bookedQuantity || rcpt.quantity) ? ` [كمية محجوزة: ${rcpt.bookedQuantity || rcpt.quantity}]` : '';
+            const serviceDesc = rcpt.serviceName || rcpt.description || 'إيصال تحصيل نقدية';
+            rawMovements.push({
+              date: rcpt.date,
+              docNumber: rcpt.voucherNumber || rcpt.referenceInvoiceNo || `CR-${rcpt.id.slice(-5)}`,
+              docType: 'Invoice',
+              docTypeAr: 'إيصال تحصيل نقدية (دائن)',
+              description: `${serviceDesc}${bookedInfo}`,
+              debit: 0,
+              credit: amt,
+              paymentMethod: rcpt.paymentMethodLabel || (rcpt.paymentMethod === 'Cash' ? 'نقداً (كاش)' : rcpt.paymentMethod === 'Card' ? 'بطاقة' : 'تحويل'),
+            });
+          }
+        }
+      });
     }
 
     // 2. Gather Supplier Movements
@@ -368,7 +395,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
       totalDebits: sumDebits,
       totalCredits: sumCredits,
     };
-  }, [currentParty, invoices, receptionShifts, journalEntries, deviceMaintenanceRecords, filterStart, filterEnd]);
+  }, [currentParty, invoices, receptionShifts, cashReceipts, journalEntries, deviceMaintenanceRecords, filterStart, filterEnd]);
 
   // QUANTITY & SESSIONS ANALYSIS (كشف حساب الكميات والباقات)
   const clientOffers = useMemo(() => {

@@ -2,6 +2,17 @@
 
 # 2026-10-10
 
+## Collection Receipt Direct Accounting & Customer Quantity Crediting
+
+- Collection receipts recorded or imported from the Collection Receipts screen are no longer routed or posted into reception shift operational sheets.
+- Receipts now post directly to the General Ledger and chart of accounts: the selected payment method / treasury account is debited, and the matched customer account is credited with the receipt amount.
+- Collection receipts now require selecting or specifying the service, product/package, and booked quantity.
+- Added a full manual recording modal ("تسجيل إيصال تحصيل") directly in Collection Receipts with customer lookup, payment method, service, product selection, and booked quantity.
+- In Customer Account Statements (`PartyStatementModal`), collection receipts appear as direct credit transactions, and the customer's booked quantity is added as a credit quantity balance under client packages and offers.
+- Validation: Production build passed without regression.
+
+# 2026-10-10
+
 ## Collection Receipt Accounting Posting
 
 - Excel collection imports now post date-grouped journal entries debiting each linked payment-method account and crediting the matched customer's receivable account, including when no reception shift is open.

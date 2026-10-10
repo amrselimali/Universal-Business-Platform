@@ -24,6 +24,8 @@ import {
   FileSpreadsheet,
   Download,
   Archive,
+  Plus,
+  Package,
 } from 'lucide-react';
 import {
   ExcelDataTransferModal,
@@ -107,6 +109,24 @@ const collectionExcelColumns: ExcelColumnConfig[] = [
     instructions: 'البيان أو الجلسة المحصل عنها المبلغ',
   },
   {
+    key: 'productName',
+    labelAr: 'المنتج / الصنف البيعي',
+    labelEn: 'Product / Item',
+    required: false,
+    type: 'text',
+    sampleValue: 'جلسة ليزر كانديلا فول بودي',
+    instructions: 'اسم المنتج أو الباقة المرتبطة بالتحصيل',
+  },
+  {
+    key: 'bookedQuantity',
+    labelAr: 'الكمية المحجوزة',
+    labelEn: 'Booked Quantity',
+    required: false,
+    type: 'number',
+    sampleValue: 1,
+    instructions: 'عدد الجلسات أو الوحدات المحجوزة للعميل (تقيد في حساب العميل دائنة بالكمية)',
+  },
+  {
     key: 'receiptNumber',
     labelAr: 'رقم الإيصال الدفتري',
     labelEn: 'Receipt Number',
@@ -145,7 +165,11 @@ interface ReceiptDisplayItem {
   collectedAmount: number; // قيمة التحصيل
   totalRevenue: number;
   paymentMethod: string;
+  serviceId?: string;
   serviceName: string;
+  productId?: string;
+  productName?: string;
+  bookedQuantity?: number;
   description?: string;
   notes?: string;
   source: 'pos' | 'reception_ops' | 'cash_receipt';
@@ -166,6 +190,7 @@ export const CollectionReceiptsView: React.FC = () => {
     cashReceipts,
     activeReceptionShift,
     parties,
+    products,
     paymentMethods,
     formatMoney,
     language,
@@ -194,6 +219,18 @@ export const CollectionReceiptsView: React.FC = () => {
   const [endDate, setEndDate] = useState<string>('');
 
   // Modals state
+  const [showAddReceiptModal, setShowAddReceiptModal] = useState<boolean>(false);
+  const [newReceiptCustomer, setNewReceiptCustomer] = useState<string>('');
+  const [newReceiptAmount, setNewReceiptAmount] = useState<string>('');
+  const [newReceiptDate, setNewReceiptDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
+  const [newReceiptMethodId, setNewReceiptMethodId] = useState<string>('');
+  const [newReceiptService, setNewReceiptService] = useState<string>('');
+  const [newReceiptProductId, setNewReceiptProductId] = useState<string>('');
+  const [newReceiptQuantity, setNewReceiptQuantity] = useState<number>(1);
+  const [newReceiptNumber, setNewReceiptNumber] = useState<string>('');
+  const [newReceiptNotes, setNewReceiptNotes] = useState<string>('');
+  const [newReceiptError, setNewReceiptError] = useState<string | null>(null);
+
   const [selectedReceiptForEdit, setSelectedReceiptForEdit] = useState<ReceiptDisplayItem | null>(null);
   const [editAmount, setEditAmount] = useState<number>(0);
   const [editPaymentMethod, setEditPaymentMethod] = useState<string>('');
@@ -345,9 +382,13 @@ export const CollectionReceiptsView: React.FC = () => {
         collectedAmount: Number(receipt.amount) || 0,
         totalRevenue: 0,
         paymentMethod: receiptMethodLabel,
-        serviceName: receipt.description,
+        serviceId: receipt.serviceId,
+        serviceName: receipt.serviceName || receipt.description,
+        productId: receipt.productId,
+        productName: receipt.productName,
+        bookedQuantity: receipt.bookedQuantity || receipt.quantity,
         description: receipt.referenceInvoiceNo,
-        notes: receipt.journalEntryId ? t('مرحل محاسبياً', 'Posted to accounts') : t('غير مرحل محاسبياً', 'Not posted to accounts'),
+        notes: receipt.journalEntryId ? t('مرحل محاسبياً (شجرة الحسابات)', 'Posted to accounts') : t('غير مرحل محاسبياً', 'Not posted to accounts'),
         source: 'cash_receipt',
         sourceLabelAr: t('سند قبض', 'Cash receipt voucher'),
         isCancelled: receipt.status === 'cancelled',
@@ -528,6 +569,85 @@ export const CollectionReceiptsView: React.FC = () => {
     }
   };
 
+  // Handlers for New Receipt Registration
+  const handleOpenAddReceipt = () => {
+    setNewReceiptCustomer('');
+    setNewReceiptAmount('');
+    setNewReceiptDate(new Date().toISOString().split('T')[0]);
+    setNewReceiptMethodId(paymentMethods[0]?.id || '');
+    setNewReceiptService('');
+    setNewReceiptProductId('');
+    setNewReceiptQuantity(1);
+    setNewReceiptNumber('');
+    setNewReceiptNotes('');
+    setNewReceiptError(null);
+    setShowAddReceiptModal(true);
+  };
+
+  const handleSaveNewReceipt = (e: React.FormEvent) => {
+    e.preventDefault();
+    const amountNum = parseFloat(newReceiptAmount);
+    if (isNaN(amountNum) || amountNum <= 0) {
+      setNewReceiptError(t('يرجى إدخال مبلغ صحيح وموجب أكبر من الصفر للإيصال.', 'Please enter a valid positive collected amount.'));
+      return;
+    }
+    if (!newReceiptCustomer) {
+      setNewReceiptError(t('يرجى اختيار العميل المسدد.', 'Please select the customer.'));
+      return;
+    }
+    const matchedCustomer = parties.find((p) => p.id === newReceiptCustomer);
+    if (!matchedCustomer) {
+      setNewReceiptError(t('العميل المحدد غير موجود.', 'Selected customer not found.'));
+      return;
+    }
+    const matchedMethod = paymentMethods.find((m) => m.id === newReceiptMethodId) || paymentMethods[0];
+    const matchedProduct = products.find((prod) => prod.id === newReceiptProductId);
+    const serviceTitle = newReceiptService.trim() || matchedProduct?.nameAr || t('خدمة واستشارة طبية', 'Medical Service / Consultation');
+    const productTitle = matchedProduct?.nameAr || newReceiptService.trim() || t('جلسة علاجية', 'Treatment Session');
+    const qty = Math.max(1, Number(newReceiptQuantity) || 1);
+
+    const branchToUse = activeBranch?.id || (branches[0]?.id || 'branch-cairo');
+    const paymentType = matchedMethod?.type === 'Cash' ? 'Cash' : matchedMethod?.type === 'Card' ? 'Card' : 'Transfer';
+
+    const result = addCollectionReceiptsBulk([
+      {
+        tenantId: tenant?.id || 'tenant-eg-001',
+        branchId: branchToUse,
+        partyId: matchedCustomer.id,
+        receivedFrom: matchedCustomer.name,
+        amount: amountNum,
+        date: newReceiptDate,
+        paymentMethod: paymentType,
+        paymentMethodLabel: matchedMethod?.nameAr || matchedMethod?.nameEn || 'نقداً (كاش)',
+        paymentAccountId: matchedMethod?.linkedAccountId,
+        serviceId: matchedProduct?.id,
+        serviceName: serviceTitle,
+        productId: matchedProduct?.id,
+        productName: productTitle,
+        bookedQuantity: qty,
+        quantity: qty,
+        receiptNumber: newReceiptNumber.trim() || undefined,
+        notes: newReceiptNotes.trim() || undefined,
+        patientPhone: matchedCustomer.phone,
+        customerCode: matchedCustomer.customerCode || matchedCustomer.code,
+        systemCode: matchedCustomer.systemCode,
+      },
+    ]);
+
+    if (!result.success) {
+      setNewReceiptError(result.error || t('تعذر تسجيل إيصال التحصيل.', 'Could not record collection receipt.'));
+      return;
+    }
+
+    setShowAddReceiptModal(false);
+    alert(
+      t(
+        `تم تسجيل إيصال التحصيل وترحيله مباشرة للحسابات العامة بدائنية العميل (${matchedCustomer.name}) بقيمة ${formatMoney(amountNum)} وكمية محجوزة دائنة (${qty}) بنجاح.`,
+        `Collection receipt posted directly to general ledger and credited ${matchedCustomer.name} with ${formatMoney(amountNum)} and booked quantity (${qty}).`
+      )
+    );
+  };
+
   // Handlers for Edit
   const handleOpenEdit = (receipt: ReceiptDisplayItem) => {
     if (!currentOpenShift) {
@@ -662,6 +782,10 @@ export const CollectionReceiptsView: React.FC = () => {
       const matchedPaymentMethod = paymentMethods.find((method) => String(method.code || '').trim().toLowerCase() === paymentMethodCode.toLowerCase());
       const paymentMethod = String(row['طريقة السداد'] || row['طريقة الدفع'] || row['Payment Method'] || '').trim();
       const serviceName = String(row['الخدمة / البيان'] || row['البيان'] || row['الخدمة'] || row['Service / Purpose'] || 'تحصيل نقدية').trim();
+      const rawProduct = String(row['المنتج / الصنف البيعي'] || row['المنتج'] || row['الصنف'] || row['Product / Item'] || row['Product'] || '').trim();
+      const matchedProduct = products.find((prod) => prod.nameAr === rawProduct || prod.nameEn === rawProduct || prod.sku === rawProduct || prod.id === rawProduct);
+      const rawQty = row['الكمية المحجوزة'] !== undefined && row['الكمية المحجوزة'] !== '' ? row['الكمية المحجوزة'] : (row['الكمية'] || row['Booked Quantity'] || row['Quantity'] || 1);
+      const parsedQty = Math.max(1, Number(rawQty) || 1);
       const receiptNumber = String(row['رقم الإيصال الدفتري'] || row['رقم الإيصال'] || row['Receipt Number'] || '').trim();
       const notes = String(row['ملاحظات التحصيل'] || row['ملاحظات'] || row['Notes'] || '').trim();
 
@@ -730,6 +854,9 @@ export const CollectionReceiptsView: React.FC = () => {
         paymentMethod: matchedPaymentMethod?.nameAr || paymentMethod,
         paymentMethodCode,
         serviceName,
+        productId: matchedProduct?.id,
+        productName: matchedProduct?.nameAr || rawProduct || serviceName,
+        bookedQuantity: parsedQty,
         receiptNumber,
         notes,
       });
@@ -740,6 +867,8 @@ export const CollectionReceiptsView: React.FC = () => {
       const customer = parties.find((p) => (p.type === 'Customer' || p.type === 'Both') && [p.customerCode, p.code].some((code) => String(code || '').trim() === customerCode));
       const methodCode = String(row['كود طريقة التحصيل'] || row['كود طريقة السداد'] || row['Payment Method Code'] || '').trim();
       const method = paymentMethods.find((pm) => String(pm.code || '').trim().toLowerCase() === methodCode.toLowerCase());
+      const prodName = String(row['المنتج / الصنف البيعي'] || row['المنتج'] || row['الصنف'] || row['Product / Item'] || row['Product'] || '');
+      const matchedProd = products.find((prod) => prod.nameAr === prodName || prod.nameEn === prodName || prod.sku === prodName);
       return {
         customerCode,
         customerId: customer?.id,
@@ -750,6 +879,9 @@ export const CollectionReceiptsView: React.FC = () => {
         paymentMethod: String(row['طريقة السداد'] || row['طريقة الدفع'] || row['Payment Method'] || methodCode),
         paymentMethodCode: methodCode,
         serviceName: String(row['الخدمة / البيان'] || row['البيان'] || row['الخدمة'] || row['Service / Purpose'] || ''),
+        productId: matchedProd?.id,
+        productName: prodName,
+        bookedQuantity: row['الكمية المحجوزة'] ?? row['الكمية'] ?? row['Booked Quantity'] ?? row['Quantity'] ?? 1,
         receiptNumber: String(row['رقم الإيصال الدفتري'] || row['رقم الإيصال'] || row['Receipt Number'] || ''),
         notes: String(row['ملاحظات التحصيل'] || row['ملاحظات'] || row['Notes'] || ''),
       };
@@ -779,18 +911,22 @@ export const CollectionReceiptsView: React.FC = () => {
         paymentMethodLabel: linkedPaymentMethod?.nameAr || row.paymentMethod,
         paymentAccountId: linkedPaymentMethod?.linkedAccountId,
         serviceName: row.serviceName,
+        productId: row.productId,
+        productName: row.productName,
+        bookedQuantity: Number(row.bookedQuantity) || 1,
+        quantity: Number(row.bookedQuantity) || 1,
         receiptNumber: row.receiptNumber,
         notes: row.notes,
         patientPhone: row.patientPhone,
         customerCode: row.customerCode,
         systemCode: parties.find((party) => party.id === row.customerId)?.systemCode,
       };
-    }), currentOpenShift?.id);
+    }));
     if (!result.success) {
       alert(result.error || t('تعذر ترحيل إيصالات التحصيل.', 'Could not post collection receipts.'));
       return;
     }
-    alert(t(`تم استيراد وترحيل ${result.created} إيصال بنجاح.`, `Imported and posted ${result.created} receipts successfully.`));
+    alert(t(`تم استيراد وترحيل ${result.created} إيصال بنجاح والتأثير مباشرة على شجرة الحسابات وحسابات العملاء بالكميات الدائنة.`, `Imported and posted ${result.created} receipts directly to general ledger and customer accounts credit quantity.`));
   };
 
   return (
@@ -846,6 +982,16 @@ export const CollectionReceiptsView: React.FC = () => {
               </div>
             </div>
           )}
+
+          {/* Register New Collection Receipt Button */}
+          <button
+            onClick={handleOpenAddReceipt}
+            className="flex items-center gap-1.5 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 text-xs font-bold transition-all cursor-pointer shadow-xs"
+            title={t('تسجيل إيصال تحصيل جديد يؤثر مباشرة على الحسابات والكميات المحجوزة للعميل', 'Register new collection receipt affecting accounts & booked quantities directly')}
+          >
+            <Plus className="h-4 w-4" />
+            <span>{t('تسجيل إيصال تحصيل', 'Record Collection Receipt')}</span>
+          </button>
 
           {/* Excel Import / Export Button */}
           <button
@@ -1316,10 +1462,22 @@ export const CollectionReceiptsView: React.FC = () => {
                         </span>
                       </td>
 
-                      {/* Description & Service */}
+                      {/* Description, Service & Quantity */}
                       <td className="p-3.5 px-4 max-w-xs">
                         <div className="font-semibold text-slate-800 dark:text-slate-200 truncate" title={item.serviceName}>
                           {item.serviceName}
+                        </div>
+                        <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+                          {item.productName && item.productName !== item.serviceName && (
+                            <span className="text-[10px] text-slate-500 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.2 rounded font-medium truncate max-w-[140px]" title={item.productName}>
+                              {item.productName}
+                            </span>
+                          )}
+                          {item.bookedQuantity !== undefined && item.bookedQuantity > 0 && (
+                            <span className="text-[10px] font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 px-1.5 py-0.2 rounded font-mono">
+                              {t('كمية محجوزة دائنة:', 'Booked:')} {item.bookedQuantity}
+                            </span>
+                          )}
                         </div>
                         {item.description && (
                           <div className="text-[10px] text-slate-400 truncate mt-0.5" title={item.description}>
@@ -1651,7 +1809,218 @@ export const CollectionReceiptsView: React.FC = () => {
         </div>
       )}
 
-      {/* EXCEL DATA TRANSFER & VALIDATION MODAL FOR COLLECTIONS */}
+      {/* MODAL 3: Record New Collection Receipt (تسجيل إيصال تحصيل جديد) */}
+      {showAddReceiptModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-lg w-full p-6 border border-slate-200 dark:border-slate-800 shadow-xl space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-xl bg-blue-50 dark:bg-blue-950 text-blue-600">
+                  <Plus className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900 dark:text-white">
+                    {t('تسجيل إيصال تحصيل جديد', 'Record New Collection Receipt')}
+                  </h3>
+                  <span className="text-xs text-slate-400">
+                    {t('ترحيل فوري لشجرة الحسابات (الخزينة مدينة، والعميل دائن بالقيمة والكميات)', 'Direct posting: Cash/Bank debit, Customer credit with amount & booked quantity')}
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAddReceiptModal(false)}
+                className="p-2 rounded-xl text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {newReceiptError && (
+              <div className="p-3 bg-rose-50 text-rose-700 text-xs rounded-xl font-bold flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{newReceiptError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleSaveNewReceipt} className="space-y-3.5">
+              {/* Customer selection */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  {t('العميل / المسدد *', 'Customer / Payer *')}
+                </label>
+                <select
+                  required
+                  value={newReceiptCustomer}
+                  onChange={(e) => setNewReceiptCustomer(e.target.value)}
+                  className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-blue-600 text-slate-800 dark:text-white"
+                >
+                  <option value="">{t('-- اختر العميل --', '-- Select Customer --')}</option>
+                  {branchCustomers.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} {c.customerCode ? `[كود: ${c.customerCode}]` : ''} {c.phone ? `(${c.phone})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Amount & Date */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    {t('المبلغ المحصل (ج.م) *', 'Collected Amount *')}
+                  </label>
+                  <input
+                    type="number"
+                    step="any"
+                    min="0.01"
+                    required
+                    value={newReceiptAmount}
+                    onChange={(e) => setNewReceiptAmount(e.target.value)}
+                    placeholder="0.00"
+                    className="w-full px-3 py-2 text-sm font-black font-mono rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-blue-600 text-emerald-600 dark:text-emerald-400"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    {t('تاريخ التحصيل *', 'Receipt Date *')}
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={newReceiptDate}
+                    max={new Date().toISOString().split('T')[0]}
+                    onChange={(e) => setNewReceiptDate(e.target.value)}
+                    className="w-full px-3 py-2 text-xs font-mono rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-blue-600 text-slate-800 dark:text-white"
+                  />
+                </div>
+              </div>
+
+              {/* Payment Method */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  {t('طريقة التحصيل والسداد (الخزينة/الحساب المدين) *', 'Payment Method (Debit Account) *')}
+                </label>
+                <select
+                  required
+                  value={newReceiptMethodId}
+                  onChange={(e) => setNewReceiptMethodId(e.target.value)}
+                  className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-blue-600 text-slate-800 dark:text-white"
+                >
+                  {paymentMethods.map((pm) => (
+                    <option key={pm.id} value={pm.id}>
+                      {pm.nameAr} {pm.code ? `(${pm.code})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Product / Item */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  {t('المنتج / الصنف البيعي أو الباقة', 'Product / Package')}
+                </label>
+                <select
+                  value={newReceiptProductId}
+                  onChange={(e) => {
+                    setNewReceiptProductId(e.target.value);
+                    const prod = products.find((p) => p.id === e.target.value);
+                    if (prod && !newReceiptService) {
+                      setNewReceiptService(prod.nameAr);
+                    }
+                  }}
+                  className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-blue-600 text-slate-800 dark:text-white"
+                >
+                  <option value="">{t('-- اختياري: اختر الصنف أو الخدمة المعرفة --', '-- Optional: Select defined product/service --')}</option>
+                  {products.map((prod) => (
+                    <option key={prod.id} value={prod.id}>
+                      {prod.nameAr} {prod.sku ? `(${prod.sku})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Service Title & Quantity */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    {t('اسم الخدمة / البيان *', 'Service / Purpose *')}
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={newReceiptService}
+                    onChange={(e) => setNewReceiptService(e.target.value)}
+                    placeholder={t('مثال: جلسة ليزر / باقة جلسات علاجية', 'e.g. Laser Session / Treatment Package')}
+                    className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-blue-600 text-slate-800 dark:text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    {t('الكمية المحجوزة الدائنة *', 'Booked Qty *')}
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    required
+                    value={newReceiptQuantity}
+                    onChange={(e) => setNewReceiptQuantity(parseInt(e.target.value) || 1)}
+                    className="w-full px-3 py-2 text-xs font-bold font-mono rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-blue-600 text-indigo-600 dark:text-indigo-400"
+                  />
+                  <span className="text-[10px] text-slate-400 mt-0.5 block">
+                    {t('تقيد دائنة للعميل', 'Credited to client')}
+                  </span>
+                </div>
+              </div>
+
+              {/* Receipt Number & Notes */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    {t('رقم الإيصال الدفتري (اختياري)', 'Manual Receipt No. (Optional)')}
+                  </label>
+                  <input
+                    type="text"
+                    value={newReceiptNumber}
+                    onChange={(e) => setNewReceiptNumber(e.target.value)}
+                    placeholder="REC-1001"
+                    className="w-full px-3 py-2 text-xs font-mono rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-blue-600 text-slate-800 dark:text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    {t('ملاحظات التحصيل', 'Notes')}
+                  </label>
+                  <input
+                    type="text"
+                    value={newReceiptNotes}
+                    onChange={(e) => setNewReceiptNotes(e.target.value)}
+                    placeholder={t('ملاحظات أو تفاصيل إضافية...', 'Additional notes...')}
+                    className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-blue-600 text-slate-800 dark:text-white"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowAddReceiptModal(false)}
+                  className="px-4 py-2 text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition cursor-pointer"
+                >
+                  {t('إلغاء', 'Cancel')}
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition cursor-pointer shadow-xs"
+                >
+                  {t('حفظ وترحيل الإيصال للحسابات', 'Save & Post Collection Receipt')}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       <ExcelDataTransferModal
         isOpen={showExcelModal}
         onClose={() => setShowExcelModal(false)}

@@ -517,13 +517,18 @@ interface PlatformContextType {
     paymentMethod: CashReceiptVoucher['paymentMethod'];
     paymentMethodLabel: string;
     paymentAccountId?: string;
+    serviceId?: string;
     serviceName: string;
+    productId?: string;
+    productName?: string;
+    quantity?: number;
+    bookedQuantity?: number;
     receiptNumber?: string;
     notes?: string;
     patientPhone?: string;
     customerCode?: string;
     systemCode?: string;
-  }>, shiftId?: string) => { success: boolean; created: number; error?: string };
+  }>) => { success: boolean; created: number; error?: string };
   deleteCashReceipt: (id: string) => void;
 
   cashPayments: CashPaymentVoucher[];
@@ -8040,18 +8045,20 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       paymentMethod: CashReceiptVoucher['paymentMethod'];
       paymentMethodLabel: string;
       paymentAccountId?: string;
+      serviceId?: string;
       serviceName: string;
+      productId?: string;
+      productName?: string;
+      quantity?: number;
+      bookedQuantity?: number;
       receiptNumber?: string;
       notes?: string;
       patientPhone?: string;
       customerCode?: string;
       systemCode?: string;
-    }>,
-    shiftId?: string
+    }>
   ): { success: boolean; created: number; error?: string } => {
     if (items.length === 0) return { success: true, created: 0 };
-    const targetShift = shiftId ? allReceptionShifts.find((shift) => shift.id === shiftId && shift.status === 'Open') : undefined;
-    if (shiftId && !targetShift) return { success: false, created: 0, error: 'الشيفت المفتوح المحدد غير موجود.' };
 
     for (const item of items) {
       const periodCheck = validatePeriodDate(item.date, item.branchId);
@@ -8061,12 +8068,17 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const nextSequence = Math.max(cashReceiptNumberCounter.current, allCashReceipts.length);
     const groupedJournals = new Map<string, { tenantId: string; branchId: string; date: string; lines: JournalLine[] }>();
     const receipts: CashReceiptVoucher[] = [];
-    const runRows: ShiftRunRow[] = [];
+    const partyOffersMap = new Map<string, ClientOffer[]>();
 
     items.forEach((item, index) => {
       const sequence = nextSequence + index + 1;
       const voucherNumber = `CR-${new Date().getFullYear()}-${String(sequence).padStart(4, '0')}`;
       const receiptId = `rv-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      const bookedQty = Number(item.bookedQuantity || item.quantity) || 1;
+      const displayDesc = item.productName && item.productName !== item.serviceName
+        ? `${item.serviceName} - ${item.productName} (الكمية المحجوزة: ${bookedQty})`
+        : `${item.serviceName} (الكمية المحجوزة: ${bookedQty})`;
+
       const receipt: CashReceiptVoucher = {
         id: receiptId,
         voucherNumber,
@@ -8080,8 +8092,14 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         paymentMethodLabel: item.paymentMethodLabel,
         bankOrSafeAccountId: item.paymentAccountId,
         referenceInvoiceNo: item.receiptNumber || undefined,
-        description: `${item.serviceName} - ${item.notes || 'استيراد إكسيل للتحصيلات'}`,
-        receiverName: 'استيراد بيانات',
+        description: `${displayDesc}${item.notes ? ` - ${item.notes}` : ''}`,
+        serviceId: item.serviceId,
+        serviceName: item.serviceName,
+        productId: item.productId,
+        productName: item.productName,
+        quantity: bookedQty,
+        bookedQuantity: bookedQty,
+        receiverName: 'إدارة التحصيل',
         date: item.date,
         time: '12:00:00',
         status: 'active',
@@ -8099,30 +8117,32 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         amount: Number(item.amount),
         cashOrBankAccountId: item.paymentAccountId,
         party: allParties.find((party) => party.id === item.partyId),
-        memo: `تحصيل العميل ${item.receivedFrom} - سند ${voucherNumber}`,
+        memo: `تحصيل ${displayDesc} - العميل ${item.receivedFrom} - سند ${voucherNumber}`,
       }));
       receipts.push(receipt);
 
-      if (targetShift) {
-        runRows.push({
-          id: `run-row-col-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
-          date: item.date,
-          customerId: item.partyId,
-          patientId: item.partyId,
-          customerCode: item.customerCode,
-          systemCode: item.systemCode,
-          customerName: item.receivedFrom,
-          patientName: item.receivedFrom,
-          patientPhone: item.patientPhone,
-          serviceName: item.serviceName,
+      // Register booked service/product and quantity as credit in customer account (offers / sessions balance)
+      if (item.partyId && bookedQty > 0) {
+        const offerNameAr = item.serviceName || item.productName || 'خدمة / باقة محجوزة';
+        const offerNameEn = item.productName || item.serviceName || 'Booked Service / Package';
+        const clientOffer: ClientOffer = {
+          id: `off-rcpt-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 6)}`,
+          packageProductId: item.productId,
+          offerNameAr,
+          offerNameEn,
+          totalQuantity: bookedQty,
           consumedQuantity: 0,
-          unitPrice: 0,
-          totalRevenue: 0,
-          paymentMethod: item.paymentMethodLabel,
-          collectedAmount: Number(item.amount),
-          notes: item.notes || 'استيراد تحصيل إكسيل',
-          receiptVoucherId: receipt.id,
-        });
+          remainingQuantity: bookedQty,
+          unitPrice: bookedQty > 0 ? Number((Number(item.amount) / bookedQty).toFixed(2)) : Number(item.amount),
+          totalPrice: Number(item.amount),
+          purchaseDate: item.date,
+          status: 'Active',
+          serviceType: item.serviceName,
+          notes: `حجز وقيد دائن بالكمية من إيصال تحصيل رقم ${voucherNumber}${item.receiptNumber ? ` (دفتري: ${item.receiptNumber})` : ''}`,
+        };
+        const currentOffers = partyOffersMap.get(item.partyId) || [];
+        currentOffers.push(clientOffer);
+        partyOffersMap.set(item.partyId, currentOffers);
       }
     });
 
@@ -8130,10 +8150,10 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const journalEntries = Array.from(groupedJournals.values()).map((group, index) => buildJournalEntry({
       tenantId: group.tenantId,
       branchId: group.branchId,
-      prefix: `JV-CR-IMPORT-${index + 1}`,
+      prefix: `JV-CR-COL-${index + 1}`,
       date: group.date,
-      description: `ترحيل إيصالات تحصيل العملاء (${group.date})`,
-      sourceDocument: `استيراد إيصالات التحصيل - دفعة ${timestamp}`,
+      description: `ترحيل إيصالات تحصيل العملاء مباشرة للحسابات (${group.date})`,
+      sourceDocument: `إيصالات التحصيل - دفعة ${timestamp}`,
       lines: group.lines,
     }));
     const journalByGroup = new Map<string, JournalEntry>();
@@ -8142,39 +8162,32 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       ...receipt,
       journalEntryId: journalByGroup.get(`${receipt.tenantId}|${receipt.branchId}|${receipt.date}`)?.id,
     }));
-    if (targetShift) {
-      runRows.forEach((row, index) => {
-        const receipt = updatedReceipts[index];
-        row.journalEntryId = receipt.journalEntryId;
-      });
-    }
 
     const allJournalLines = journalEntries.flatMap((entry) => entry.lines);
     applyJournalLinesToAccounts(allJournalLines);
     setAllJournals((prev) => [...journalEntries, ...prev]);
     setAllCashReceipts((prev) => [...updatedReceipts, ...prev]);
     cashReceiptNumberCounter.current = nextSequence + items.length;
-    if (targetShift && runRows.length) {
-      setAllReceptionShifts((prev) => prev.map((shift) => {
-        if (shift.id !== targetShift.id) return shift;
-        const nextRows = [...shift.runRows, ...runRows];
-        const activeRows = nextRows.filter((row) => !row.isReplaced);
-        const totalRevenue = activeRows.reduce((sum, row) => sum + (Number(row.totalRevenue) || 0), 0);
-        const totalCollected = activeRows.reduce((sum, row) => sum + (Number(row.collectedAmount) || 0), 0);
-        return {
-          ...shift,
-          runRows: nextRows,
-          totalRevenue,
-          totalCollected,
-          netShiftCash: totalCollected - shift.totalExpenses,
-        };
-      }));
+
+    // Update parties with their new booked quantity offers in customer accounts
+    if (partyOffersMap.size > 0) {
+      setAllParties((prev) =>
+        prev.map((party) => {
+          const newOffers = partyOffersMap.get(party.id);
+          if (!newOffers || newOffers.length === 0) return party;
+          const existingOffers = party.offers || [];
+          return {
+            ...party,
+            offers: [...newOffers, ...existingOffers],
+          };
+        })
+      );
     }
 
     logUserActivity(
-      'pos', 'إيصالات التحصيل', 'Collection Receipts',
-      'استيراد وترحيل إيصالات التحصيل', 'Import and post collection receipts',
-      `تم استيراد وترحيل ${updatedReceipts.length} إيصال تحصيل في ${journalEntries.length} قيد يومية حسب تاريخ الإيصال`
+      'fiscal_documents', 'إيصالات التحصيل', 'Collection Receipts',
+      'تسجيل وترحيل إيصالات التحصيل مباشرة للحسابات', 'Post collection receipts directly to accounts',
+      `تم تسجيل وترحيل ${updatedReceipts.length} إيصال تحصيل مباشرة في الحسابات العامة وشجرة الحسابات وحسابات العملاء بدون ترحيلها لشيفت التشغيل`
     );
     return { success: true, created: updatedReceipts.length };
   };
