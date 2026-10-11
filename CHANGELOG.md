@@ -1,5 +1,23 @@
 # CHANGELOG
 
+# 2026-10-11
+
+## Chart of Accounts and General Ledger Balances from Posted Journals
+
+- Added 50-row pagination to Chart of Accounts, journal entries, General Ledger movements, and Trial Balance to limit rendered rows until the user navigates pages.
+- Chart of Accounts balances and revenue/expense summary totals are now derived from the same posted journal movements used by Trial Balance, rather than the separately stored account balance snapshots.
+- General Ledger now includes only posted entries, resolves historical account references with the same tenant/branch-aware matcher as Trial Balance, and no longer adds a stored account balance as an implicit opening balance.
+- These are report-time calculations only; account snapshots and historical journals are not modified. Unmapped journal lines remain reported as incomplete and excluded until safely reconciled. Pagination currently limits rendered items, not records already hydrated in the browser's local Context storage.
+
+# 2026-10-10
+
+## Journal Balance Validation and Trial Balance Status
+
+- New journals are validated before posting: amounts must be finite/non-negative, a line cannot have both debit and credit, and non-empty entry totals must be equal within one piastre.
+- Revenue-session posting rejects invalid amounts and collected amounts greater than revenue instead of creating a one-sided automatic journal. The reception form and Excel import show a validation error before recording the operation.
+- Trial Balance now labels the report as incomplete when lines reference missing chart accounts, rather than saying journals themselves are unbalanced. Unbalanced-entry diagnostics remain separate.
+- Existing journal records are not modified by the validation or status change.
+
 # 2026-10-10
 
 ## Legacy Account References in Trial Balance

@@ -120,7 +120,11 @@ export const PayrollView: React.FC = () => {
     e.preventDefault();
     if (!activeRun || !payingItem) return;
 
-    payPayrollItem(activeRun.id, payingItem.id, disburseMethod);
+    const result = payPayrollItem(activeRun.id, payingItem.id, disburseMethod);
+    if (!result.success) {
+      alert(result.error || 'تعذر تسجيل صرف الراتب');
+      return;
+    }
     setPayingItem(null);
   };
 
@@ -128,7 +132,11 @@ export const PayrollView: React.FC = () => {
     e.preventDefault();
     if (!activeRun) return;
 
-    payEntirePayrollRun(activeRun.id, bulkMethod);
+    const result = payEntirePayrollRun(activeRun.id, bulkMethod);
+    if (!result.success) {
+      alert(result.error || 'تعذر تسجيل صرف مسير الرواتب');
+      return;
+    }
     setShowDisburseAllModal(false);
   };
 

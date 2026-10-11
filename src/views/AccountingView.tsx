@@ -24,6 +24,7 @@ import {
   Building2,
 } from 'lucide-react';
 import { PartyStatementModal } from '../components/PartyStatementModal';
+import { PaginationControls } from '../components/PaginationControls';
 
 export const AccountingView: React.FC = () => {
   const {
@@ -48,6 +49,11 @@ export const AccountingView: React.FC = () => {
   // Multi-Branch Isolation state for Accounting (الفصل المحاسبي بين الفروع)
   const [selectedBranchId, setSelectedBranchId] = useState<string>('all');
   const [branchOnlyFilter, setBranchOnlyFilter] = useState<boolean>(false);
+  const [accountPage, setAccountPage] = useState(1);
+  const [generalLedgerPage, setGeneralLedgerPage] = useState(1);
+  const [trialBalancePage, setTrialBalancePage] = useState(1);
+  const [journalPage, setJournalPage] = useState(1);
+  const rowsPerPage = 50;
 
   // Account Modal State (Add / Edit)
   const [showAccountModal, setShowAccountModal] = useState<boolean>(false);
@@ -117,6 +123,11 @@ export const AccountingView: React.FC = () => {
       return entry.branchId === selectedBranchId;
     });
   }, [journalEntries, selectedBranchId]);
+  const paginatedJournalEntries = useMemo(
+    () => filteredJournalEntries.slice((journalPage - 1) * rowsPerPage, journalPage * rowsPerPage),
+    [filteredJournalEntries, journalPage]
+  );
+  useEffect(() => setJournalPage(1), [selectedBranchId]);
 
   const trialBalanceAccounts = useMemo(() => {
     const balances = new Map<string, number>();
@@ -211,25 +222,46 @@ export const AccountingView: React.FC = () => {
 
   const totalDebits = trialBalanceAccounts.reduce((sum, account) => sum + Math.max(0, account.balance), 0);
   const totalCredits = trialBalanceAccounts.reduce((sum, account) => sum + Math.max(0, -account.balance), 0);
-  const isTrialBalanceBalanced = Math.abs(totalDebits - totalCredits) < 0.01;
+  const hasUnmappedJournalLines = trialBalanceDiagnostics.unmappedLineCount > 0;
+  const hasUnbalancedJournalEntries = trialBalanceDiagnostics.unbalancedEntries.length > 0;
+  const isTrialBalanceBalanced = !hasUnmappedJournalLines && !hasUnbalancedJournalEntries &&
+    Math.abs(totalDebits - totalCredits) < 0.01;
+  const trialBalanceStatus = hasUnbalancedJournalEntries
+    ? 'unbalanced'
+    : hasUnmappedJournalLines
+      ? 'incomplete'
+      : isTrialBalanceBalanced
+        ? 'balanced'
+        : 'unbalanced';
 
   // Total Revenue & Expense for Net Profit
-  const totalRevenue = activeBranchAccounts
-    .filter((a) => a.type === 'Revenue')
-    .reduce((sum, a) => sum + a.balance, 0);
-  const totalExpense = activeBranchAccounts
-    .filter((a) => a.type === 'Expense')
-    .reduce((sum, a) => sum + a.balance, 0);
+  const journalBalanceByAccountId = useMemo(
+    () => new Map(trialBalanceAccounts.map((account) => [
+      account.id,
+      account.isDebitNormal ? account.balance : -account.balance,
+    ])),
+    [trialBalanceAccounts]
+  );
+  const totalRevenue = trialBalanceAccounts
+    .filter((account) => account.type === 'Revenue')
+    .reduce((sum, account) => sum + (account.isDebitNormal ? account.balance : -account.balance), 0);
+  const totalExpense = trialBalanceAccounts
+    .filter((account) => account.type === 'Expense')
+    .reduce((sum, account) => sum + (account.isDebitNormal ? account.balance : -account.balance), 0);
   const netIncome = totalRevenue - totalExpense;
 
   // Sorted accounts by account code (ترتيب شجرة الحسابات بكود الحساب)
   const sortedAccounts = useMemo(() => {
     return activeBranchAccounts
       .filter((account) => !account.code.startsWith('1120-'))
+      .map((account) => ({
+        ...account,
+        balance: journalBalanceByAccountId.get(account.id) ?? 0,
+      }))
       .sort((a, b) =>
         a.code.localeCompare(b.code, undefined, { numeric: true, sensitivity: 'base' })
       );
-  }, [activeBranchAccounts]);
+  }, [activeBranchAccounts, journalBalanceByAccountId]);
 
   // Filtered accounts for COA table (ordered by account code and search)
   const filteredAccounts = useMemo(() => {
@@ -245,6 +277,17 @@ export const AccountingView: React.FC = () => {
       return matchesType && matchesSearch;
     });
   }, [sortedAccounts, selectedType, searchQuery]);
+  const paginatedAccounts = useMemo(
+    () => filteredAccounts.slice((accountPage - 1) * rowsPerPage, accountPage * rowsPerPage),
+    [filteredAccounts, accountPage]
+  );
+  useEffect(() => setAccountPage(1), [selectedBranchId, selectedType, searchQuery]);
+
+  const paginatedTrialBalanceAccounts = useMemo(
+    () => trialBalanceAccounts.slice((trialBalancePage - 1) * rowsPerPage, trialBalancePage * rowsPerPage),
+    [trialBalanceAccounts, trialBalancePage]
+  );
+  useEffect(() => setTrialBalancePage(1), [trialBalanceAccounts]);
 
   // Open Add Account modal (optionally with parent preset)
   const handleOpenAddAccount = (parentId: string = '') => {
@@ -437,8 +480,10 @@ export const AccountingView: React.FC = () => {
     }[] = [];
 
     filteredJournalEntries.forEach((entry) => {
+      if (!entry.isPosted) return;
       entry.lines.forEach((line) => {
-        if (line.accountId === activeGLAccount.id) {
+        const resolvedAccount = resolveJournalLineAccount(line, accounts, entry.tenantId, entry.branchId);
+        if (resolvedAccount?.id === activeGLAccount.id) {
           allMatchingLines.push({
             journalId: entry.id,
             branchId: entry.branchId,
@@ -477,16 +522,6 @@ export const AccountingView: React.FC = () => {
       }
     });
 
-    // If no date filters, include initial account balance if it exceeds journal lines
-    if (!glDateFrom) {
-      const sumDebits = allMatchingLines.reduce((s, m) => s + m.debit, 0);
-      const sumCredits = allMatchingLines.reduce((s, m) => s + m.credit, 0);
-      const netJournals = isDebitNormal ? sumDebits - sumCredits : sumCredits - sumDebits;
-      if (activeGLAccount.balance > netJournals) {
-        opening = activeGLAccount.balance - netJournals;
-      }
-    }
-
     let running = opening;
     let periodDebits = 0;
     let periodCredits = 0;
@@ -514,7 +549,12 @@ export const AccountingView: React.FC = () => {
       totalCredits: periodCredits,
       endingBalance: running,
     };
-  }, [activeGLAccount, filteredJournalEntries, glDateFrom, glDateTo]);
+  }, [accounts, activeGLAccount, filteredJournalEntries, glDateFrom, glDateTo]);
+  const paginatedGeneralLedgerMovements = useMemo(
+    () => glData.movements.slice((generalLedgerPage - 1) * rowsPerPage, generalLedgerPage * rowsPerPage),
+    [glData.movements, generalLedgerPage]
+  );
+  useEffect(() => setGeneralLedgerPage(1), [activeGLAccount?.id, selectedBranchId, glDateFrom, glDateTo]);
 
   // Save manual journal
   const handleSaveManualEntry = () => {
@@ -786,6 +826,13 @@ export const AccountingView: React.FC = () => {
           </div>
 
           {/* Accounts Table with Action Buttons */}
+          <PaginationControls
+            currentPage={accountPage}
+            totalItems={filteredAccounts.length}
+            pageSize={rowsPerPage}
+            onPageChange={setAccountPage}
+            language={language}
+          />
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
@@ -795,12 +842,12 @@ export const AccountingView: React.FC = () => {
                   <th className="pb-3 font-bold text-start">{t('النوع', 'Type')}</th>
                   <th className="pb-3 font-bold text-start">{t('الفرع التابع', 'Branch')}</th>
                   <th className="pb-3 font-bold text-start">{t('طبيعة الحساب', 'Normal')}</th>
-                  <th className="pb-3 font-bold text-end">{t('الرصيد الحالي', 'Balance')}</th>
+                  <th className="pb-3 font-bold text-end">{t('الرصيد من القيود المرحلة', 'Posted Journal Balance')}</th>
                   <th className="pb-3 font-bold text-center">{t('الإجراءات', 'Actions')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-medium">
-                {filteredAccounts.map((acc) => {
+                {paginatedAccounts.map((acc) => {
                   const paddingClass = acc.level === 1 ? '' : acc.level === 2 ? 'ps-4' : 'ps-8';
                   return (
                     <tr
@@ -1049,6 +1096,14 @@ export const AccountingView: React.FC = () => {
             </div>
           )}
 
+          <PaginationControls
+            currentPage={generalLedgerPage}
+            totalItems={glData.movements.length}
+            pageSize={rowsPerPage}
+            onPageChange={setGeneralLedgerPage}
+            language={language}
+          />
+
           {/* Movements Ledger Table */}
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs dark:border-slate-800 dark:bg-slate-900">
             <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200 mb-3 flex items-center justify-between">
@@ -1092,7 +1147,7 @@ export const AccountingView: React.FC = () => {
                       </td>
                     </tr>
                   ) : (
-                    glData.movements.map((m) => (
+                    paginatedGeneralLedgerMovements.map((m) => (
                       <tr key={m.lineId} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
                         <td className="py-3 font-mono text-slate-500 whitespace-nowrap">{m.date}</td>
                         <td className="py-3 font-mono font-bold text-indigo-600 dark:text-indigo-400 whitespace-nowrap">
@@ -1173,7 +1228,14 @@ export const AccountingView: React.FC = () => {
           </div>
 
           <div className="space-y-4">
-            {filteredJournalEntries.map((entry) => (
+            <PaginationControls
+              currentPage={journalPage}
+              totalItems={filteredJournalEntries.length}
+              pageSize={rowsPerPage}
+              onPageChange={setJournalPage}
+              language={language}
+            />
+            {paginatedJournalEntries.map((entry) => (
               <div
                 key={entry.id}
                 className="rounded-xl border border-slate-200 bg-slate-50/50 p-4 dark:border-slate-800 dark:bg-slate-800/40 space-y-3"
@@ -1264,11 +1326,17 @@ export const AccountingView: React.FC = () => {
 
             <div className="flex items-center gap-2">
               <span className={`rounded-full px-3 py-1 text-xs font-bold ${
-                isTrialBalanceBalanced
+                trialBalanceStatus === 'balanced'
                   ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
-                  : 'bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300'
+                  : trialBalanceStatus === 'incomplete'
+                    ? 'bg-amber-100 text-amber-900 dark:bg-amber-950/60 dark:text-amber-300'
+                    : 'bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300'
               }`}>
-                {isTrialBalanceBalanced ? t('الميزان متوازن', 'Balanced') : t('الميزان غير متوازن', 'Out of balance')}
+                {trialBalanceStatus === 'balanced'
+                  ? t('الميزان متوازن', 'Balanced')
+                  : trialBalanceStatus === 'incomplete'
+                    ? t('الميزان غير مكتمل: حسابات غير مربوطة', 'Incomplete: unmapped accounts')
+                    : t('الميزان غير متوازن', 'Out of balance')}
               </span>
             </div>
           </div>
@@ -1286,6 +1354,14 @@ export const AccountingView: React.FC = () => {
                 {' '}
                 {t('سطر بحساب غير مربوط', 'lines with unmapped accounts')}
               </h4>
+              {!hasUnbalancedJournalEntries && hasUnmappedJournalLines && (
+                <p className="rounded-lg border border-amber-300 bg-amber-50 p-2 text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+                  {t(
+                    'القيود المرحلة متوازنة حسابيًا، لكن الميزان غير مكتمل لأن بعض سطورها تستخدم أكواد حسابات غير موجودة في الشجرة الحالية. لذلك لا يجوز اعتبار فرق إجمالي الميزان قيدًا غير موزون.',
+                    'Posted entries are mathematically balanced, but the trial balance is incomplete because some lines reference accounts missing from the current chart. The trial-balance total difference is not proof of an unbalanced journal.'
+                  )}
+                </p>
+              )}
               {trialBalanceDiagnostics.unmappedLineCount > 0 && (
                 <>
                   <p className="text-rose-800 dark:text-rose-300">
@@ -1381,6 +1457,13 @@ export const AccountingView: React.FC = () => {
             </p>
           )}
 
+          <PaginationControls
+            currentPage={trialBalancePage}
+            totalItems={trialBalanceAccounts.length}
+            pageSize={rowsPerPage}
+            onPageChange={setTrialBalancePage}
+            language={language}
+          />
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
@@ -1394,7 +1477,7 @@ export const AccountingView: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-medium">
-                {trialBalanceAccounts.map((acc) => (
+                {paginatedTrialBalanceAccounts.map((acc) => (
                   <tr key={acc.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
                     <td className="py-2.5 font-mono font-bold text-indigo-600 dark:text-indigo-400">{acc.code}</td>
                     <td className="py-2.5 text-slate-900 dark:text-white">
