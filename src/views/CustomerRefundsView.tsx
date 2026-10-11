@@ -10,8 +10,28 @@ import {
   Building2,
   Calendar,
   Download,
+  Upload,
   Trash2,
 } from 'lucide-react';
+
+import {
+  ExcelDataTransferModal,
+  ExcelColumnConfig,
+  CellValidationError,
+  ExcelValidationResult,
+} from '../components/ExcelDataTransferModal';
+
+const refundExcelColumns: ExcelColumnConfig[] = [
+  { key: 'customerCode', labelAr: 'كود العميل', labelEn: 'Customer Code', required: true, type: 'text', sampleValue: '1', instructions: 'الكود المسلسل الآلي للعميل من شاشة إدارة العملاء' },
+  { key: 'customerName', labelAr: 'اسم العميل', labelEn: 'Customer Name', required: true, type: 'text', sampleValue: 'أحمد محمود', instructions: 'الاسم الكامل للعميل' },
+  { key: 'amount', labelAr: 'القيمة المستردة', labelEn: 'Refund Value', required: true, type: 'number', sampleValue: 500, instructions: 'القيمة المستردة بالجنيه (رقم موجب أكبر من صفر)' },
+  { key: 'units', labelAr: 'عدد الوحدات', labelEn: 'Units', required: false, type: 'number', sampleValue: 2, instructions: 'عدد الوحدات المستردة (اختياري)' },
+  { key: 'unitPrice', labelAr: 'سعر الوحدة', labelEn: 'Unit Price', required: false, type: 'number', sampleValue: 250, instructions: 'سعر الوحدة (اختياري)' },
+  { key: 'serviceName', labelAr: 'الخدمة', labelEn: 'Service', required: false, type: 'text', sampleValue: 'استرداد جلسة ليزر', instructions: 'اسم الخدمة أو البند (اختياري)' },
+  { key: 'date', labelAr: 'تاريخ الاسترداد', labelEn: 'Refund Date', required: false, type: 'date', sampleValue: '2026-10-11', instructions: 'تاريخ الاسترداد بصيغة YYYY-MM-DD (افتراضيًا تاريخ اليوم)' },
+  { key: 'paymentMethodCode', labelAr: 'كود طريقة الصرف', labelEn: 'Payment Method Code', required: false, type: 'text', sampleValue: 'PM-01', instructions: 'كود طريقة الصرف (اختياري، افتراضيًا أول طريقة)' },
+  { key: 'notes', labelAr: 'ملاحظات', labelEn: 'Notes', required: false, type: 'text', sampleValue: '', instructions: 'ملاحظات إضافية (اختياري)' },
+];
 
 export const CustomerRefundsView: React.FC = () => {
   const {
@@ -48,6 +68,9 @@ export const CustomerRefundsView: React.FC = () => {
   const [notes, setNotes] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+
+  // Excel import modal
+  const [showExcelModal, setShowExcelModal] = useState(false);
 
   // Cancel modal state
   const [cancelTarget, setCancelTarget] = useState<string | null>(null);
@@ -152,6 +175,10 @@ export const CustomerRefundsView: React.FC = () => {
     const unitsNum = Number(units) || 0;
     const unitPriceNum = Number(unitPrice) || 0;
     const amountNum = Number(effectiveAmount) || 0;
+    if (!serviceName.trim()) {
+      setFormError(t('يرجى إدخال الخدمة.', 'Please enter the service.'));
+      return;
+    }
     if (unitsNum <= 0) {
       setFormError(t('عدد الوحدات المستردة يجب أن يكون أكبر من صفر.', 'Refunded units must be greater than zero.'));
       return;
@@ -220,6 +247,82 @@ export const CustomerRefundsView: React.FC = () => {
     });
   };
 
+  const validateRefundRows = (rawRows: any[]): ExcelValidationResult<any> => {
+    const errors: CellValidationError[] = [];
+    const validRows: any[] = [];
+    const allRowsAsIs: any[] = [];
+    rawRows.forEach((row, index) => {
+      const rowNumber = index + 2;
+      const errorsBefore = errors.length;
+      const customerCode = String(row['كود العميل'] || row['Customer Code'] || '').trim();
+      const customerName = String(row['اسم العميل'] || row['Customer Name'] || row['العميل'] || '').trim();
+      const amountRaw = row['القيمة المستردة'] ?? row['Refund Value'] ?? row['القيمة'] ?? '';
+      const amountNum = Number(amountRaw);
+      const matchedCustomer = parties.find((p) => (p.type === 'Customer' || p.type === 'Both') && [p.customerCode, p.code].some((c) => String(c || '').trim() === customerCode));
+      if (!customerCode || !matchedCustomer) {
+        errors.push({ rowNumber, columnKey: 'customerCode', columnLabelAr: 'كود العميل', enteredValue: customerCode, reasonAr: 'كود العميل المسلسل مطلوب ويجب أن يكون موجودًا في إدارة العملاء.' });
+      }
+      if (!customerName || customerName.length < 2) {
+        errors.push({ rowNumber, columnKey: 'customerName', columnLabelAr: 'اسم العميل', enteredValue: customerName, reasonAr: 'اسم العميل مطلوب.' });
+      }
+      if (!Number.isFinite(amountNum) || amountNum <= 0) {
+        errors.push({ rowNumber, columnKey: 'amount', columnLabelAr: 'القيمة المستردة', enteredValue: amountRaw, reasonAr: 'القيمة المستردة يجب أن تكون رقمًا أكبر من صفر.' });
+      }
+      const dateRaw = String(row['تاريخ الاسترداد'] ?? row['Refund Date'] ?? '').trim();
+      let cleanDate = dateRaw;
+      if (dateRaw.includes('T')) cleanDate = dateRaw.split('T')[0];
+      if (cleanDate && !/^\d{4}-\d{2}-\d{2}$/.test(cleanDate)) {
+        errors.push({ rowNumber, columnKey: 'date', columnLabelAr: 'تاريخ الاسترداد', enteredValue: dateRaw, reasonAr: 'صيغة التاريخ يجب أن تكون YYYY-MM-DD.' });
+      }
+      const parsed = {
+        customerId: matchedCustomer?.id,
+        customerCode,
+        customerName,
+        amount: Number.isFinite(amountNum) ? amountNum : 0,
+        units: Number(row['عدد الوحدات'] ?? row['Units'] ?? '') || 0,
+        unitPrice: Number(row['سعر الوحدة'] ?? row['Unit Price'] ?? '') || 0,
+        serviceName: String(row['الخدمة'] ?? row['Service'] ?? '').trim(),
+        date: cleanDate,
+        paymentMethodCode: String(row['كود طريقة الصرف'] ?? row['Payment Method Code'] ?? '').trim(),
+        notes: String(row['ملاحظات'] ?? row['Notes'] ?? '').trim(),
+      };
+      allRowsAsIs.push(parsed);
+      if (errors.length === errorsBefore) validRows.push(parsed);
+    });
+    return { totalRows: rawRows.length, errors, totalErrorsCount: errors.length, validRows, allRowsAsIs };
+  };
+
+  const handleConfirmRefundImport = (rows: any[]): boolean => {
+    let successCount = 0;
+    const failures: string[] = [];
+    rows.forEach((row, index) => {
+      const matchedMethod = paymentMethods.find((m) => String(m.code || '').trim().toLowerCase() === String(row.paymentMethodCode || '').trim().toLowerCase()) || paymentMethods[0];
+      const units = Number(row.units) > 0 ? Number(row.units) : 1;
+      const unitPrice = Number(row.unitPrice) > 0 ? Number(row.unitPrice) : Number((Number(row.amount) / units).toFixed(2));
+      const result = addCustomerRefund({
+        tenantId: tenant?.id || 'tenant-eg-001',
+        branchId: activeBranchId || branches[0]?.id || '',
+        partyId: row.customerId,
+        units,
+        unitPrice,
+        amount: Number(row.amount),
+        date: row.date || today,
+        paymentMethodId: matchedMethod?.id,
+        paymentMethodLabel: matchedMethod?.nameAr || matchedMethod?.nameEn || t('نقداً (كاش)', 'Cash'),
+        paymentAccountId: matchedMethod?.linkedAccountId,
+        serviceName: row.serviceName || undefined,
+        notes: row.notes || undefined,
+      });
+      if (result.success) successCount += 1;
+      else failures.push(`${index + 2}: ${result.error}`);
+    });
+    setNotice(t(
+      `تم استيراد ${successCount} سند استرداد بنجاح.${failures.length ? ` فشل ${failures.length} سطر.` : ''}`,
+      `Imported ${successCount} refund voucher(s).${failures.length ? ` ${failures.length} row(s) failed.` : ''}`
+    ));
+    return successCount > 0;
+  };
+
   return (
     <div className="space-y-5 p-4 md:p-6" dir={language === 'ar' ? 'rtl' : 'ltr'}>
       {/* Header */}
@@ -242,6 +345,14 @@ export const CustomerRefundsView: React.FC = () => {
             <Building2 className="h-3.5 w-3.5" />
             {activeBranch?.name || t('الفرع المفعّل', 'Active branch')}
           </span>
+          <button
+            type="button"
+            onClick={() => setShowExcelModal(true)}
+            className="flex items-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-100 dark:border-blue-900/50 dark:bg-blue-950/40 dark:text-blue-300"
+          >
+            <Upload className="h-3.5 w-3.5" />
+            {t('استيراد Excel', 'Import Excel')}
+          </button>
           <button
             type="button"
             onClick={exportRefunds}
@@ -530,7 +641,7 @@ export const CustomerRefundsView: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-xs font-bold text-slate-700 dark:text-slate-300">{t('الخدمة / البند', 'Service / Item')}</label>
+                  <label className="mb-1 block text-xs font-bold text-slate-700 dark:text-slate-300">{t('الخدمة / البند *', 'Service / Item *')}</label>
                   <input
                     type="text"
                     value={serviceName}
@@ -593,6 +704,30 @@ export const CustomerRefundsView: React.FC = () => {
           </div>
         </div>
       )}
+
+      <ExcelDataTransferModal
+        isOpen={showExcelModal}
+        onClose={() => setShowExcelModal(false)}
+        entityTitleAr="تسوية مستحقات عميل (استردادات)"
+        entityTitleEn="Customer Refunds"
+        descriptionAr="استيراد سندات الاسترداد: الشروط اللازمة كود العميل المسلسل + اسم العميل + القيمة، وباقي الأعمدة اختيارية."
+        columns={refundExcelColumns}
+        currentDataForExport={filteredRefunds.map((r) => ({
+          customerCode: r.customerCode || '',
+          customerName: r.customerName,
+          amount: r.amount,
+          units: r.units,
+          unitPrice: r.unitPrice,
+          serviceName: r.serviceName || '',
+          date: r.date,
+          paymentMethodCode: paymentMethods.find((m) => m.nameAr === r.paymentMethodLabel || m.nameEn === r.paymentMethodLabel)?.code || '',
+          notes: r.notes || '',
+        }))}
+        exportFileNamePrefix="سجل_استردادات_العملاء"
+        validator={validateRefundRows}
+        onConfirmImport={handleConfirmRefundImport}
+        branchName={activeBranch?.name || 'الفرع الحالي'}
+      />
     </div>
   );
 };

@@ -8573,6 +8573,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return INITIAL_CASH_RECEIPTS;
   });
   const cashReceiptNumberCounter = useRef(0);
+  const customerRefundNumberCounter = useRef(0);
   const customerAccountConsolidationRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -9351,7 +9352,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       return { success: false, error: t('لا يمكن أن يكون حساب العميل هو نفس حساب الصرف.', 'The customer account cannot be the same as the payment account.') };
     }
 
-    const refundNumber = `CRF-${new Date().getFullYear()}-${String(allCustomerRefunds.length + 1).padStart(4, '0')}`;
+    customerRefundNumberCounter.current = Math.max(customerRefundNumberCounter.current, allCustomerRefunds.length) + 1;
+    const refundNumber = `CRF-${new Date().getFullYear()}-${String(customerRefundNumberCounter.current).padStart(4, '0')}`;
     const journalLines: JournalLine[] = [
       createJournalLine(customerAccount, amount, 0, `استرداد للعميل ${party.name} - ${units} وحدة × ${unitPrice} - سند ${refundNumber}`, 1),
       createJournalLine(paymentAccount, 0, amount, `استرداد للعميل ${party.name} - صرف نقدية - سند ${refundNumber}`, 2),

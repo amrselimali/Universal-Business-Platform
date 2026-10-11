@@ -2,6 +2,15 @@
 
 # 2026-10-11
 
+## Customer Refunds — Excel import + stricter manual validation
+
+- Added Excel import (via the shared `ExcelDataTransferModal`) to the Customer Dues Settlement screen. Only **customer code (auto-serial)**, **customer name** and **value** are required; all other columns (units, unit price, service, date, payment-method code, notes) are optional and default sensibly.
+- Manual refund entry now requires **service**, **units** and **value**.
+- Bulk import now generates sequential refund voucher numbers (counter ref) so a batch does not reuse the same number.
+- Files: `src/views/CustomerRefundsView.tsx`, `src/context/PlatformContext.tsx`.
+
+# 2026-10-11
+
 ## New screen — Customer Dues Settlement (تسوية مستحقات عميل)
 
 - Added a dedicated screen listing all customer refunds, defaulting to **today's refunds** and scoped to the **active branch**.
