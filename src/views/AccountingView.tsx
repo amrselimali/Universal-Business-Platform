@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { usePlatform } from '../context/PlatformContext';
 import { Account, AccountType } from '../types';
 import { resolveJournalLineAccount } from '../services/accountingEngine';
