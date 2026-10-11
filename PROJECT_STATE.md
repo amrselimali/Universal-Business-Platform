@@ -1,5 +1,12 @@
 # PROJECT STATE
 
+## Forced Permanent Journal Deletion — 2026-10-11
+
+- General Journal now offers a forced permanent delete action for one or multiple entries. After explicit confirmation it bypasses accounting eligibility checks, including source link, period lock, posted state, and balance. A deletion reason is optional; the deleted entry itself and actor/action are recorded in audit/activity logs.
+- If the entry was posted, its account snapshot effect is reversed before removing it from journal storage. Exact-linked collection receipts receive a persisted `journalPostingSuppressed` flag so receipt hydration does not recreate the deleted entry.
+- This is deliberately a journal-only destructive override. It does not remove source vouchers or reverse unrelated inventory/customer/supplier/operational effects; the confirmation explains that impact. Use only when the user accepts that source and journal data may diverge.
+- The override still enforces tenant ownership and requires an explicit final confirmation. Runtime data is modified only when the user confirms the action in the app.
+
 ## Journal Source Details and Navigation — 2026-10-11
 
 - General Journal and the unbalanced-entry review now provide a source button that opens a popup with source-specific records and key details, including receipt/payment vouchers, invoices, shift operation rows and expenses, maintenance, inventory audits, payroll items, and goods receipts/issues.

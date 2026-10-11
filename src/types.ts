@@ -1015,6 +1015,7 @@ export interface CashReceiptVoucher {
   clientSignature?: string;
   status: 'active' | 'cancelled';
   journalEntryId?: string;
+  journalPostingSuppressed?: boolean;
   customerBalanceApplied?: boolean;
   isReplaced?: boolean;
   replacedByVoucherId?: string;

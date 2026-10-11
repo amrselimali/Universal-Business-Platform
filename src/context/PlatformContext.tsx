@@ -512,6 +512,7 @@ interface PlatformContextType {
   ) => { success: boolean; error?: string };
   voidUnlinkedJournalEntry: (entryId: string, reason: string) => { success: boolean; error?: string };
   reverseJournalEntries: (entryIds: string[], reason: string) => { success: boolean; reversed?: number; error?: string };
+  forceDeleteJournalEntries: (entryIds: string[], reason?: string) => { success: boolean; deleted?: number; error?: string };
   consolidateUnmappedJournalLines: (
     entryIds: string[],
     accountType: AccountType,
@@ -1185,8 +1186,66 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const deleteJournalEntry = (entryId: string) => {
     const entry = allJournals.find((j) => j.id === entryId);
     if (!entry) return;
-    applyJournalLinesToAccounts(entry.lines, true);
+    if (entry.isPosted) applyJournalLinesToAccounts(entry.lines, true);
     setAllJournals((prev) => prev.filter((j) => j.id !== entryId));
+  };
+
+  const forceDeleteJournalEntries = (
+    entryIds: string[],
+    reason?: string
+  ): { success: boolean; deleted?: number; error?: string } => {
+    const uniqueIds = Array.from(new Set(entryIds));
+    if (uniqueIds.length === 0) {
+      return { success: false, error: t('لم يتم تحديد أي قيود للحذف.', 'No journal entries were selected for deletion.') };
+    }
+    const entries = uniqueIds.map((entryId) => allJournals.find((entry) => entry.id === entryId));
+    const missingIndex = entries.findIndex((entry) => !entry);
+    if (missingIndex >= 0) {
+      return { success: false, error: t(`القيد المحدد (${uniqueIds[missingIndex]}) غير موجود.`, `Selected journal (${uniqueIds[missingIndex]}) was not found.`) };
+    }
+    const selectedEntries = entries.filter((entry): entry is JournalEntry => !!entry);
+    if (selectedEntries.some((entry) => entry.tenantId !== (tenant?.id || INITIAL_TENANT.id))) {
+      return { success: false, error: t('لا يمكن حذف قيود تابعة لكيان آخر.', 'Cannot delete journal entries belonging to another tenant.') };
+    }
+
+    const deletedEntryIds = new Set(selectedEntries.map((entry) => entry.id));
+    const linkedReceipts = allCashReceipts.filter((receipt) =>
+      receipt.tenantId === (tenant?.id || INITIAL_TENANT.id) &&
+      receipt.journalEntryId && deletedEntryIds.has(receipt.journalEntryId)
+    );
+    const retainedReceiptLinks = new Map(
+      linkedReceipts.map((receipt) => [receipt.id, receipt.journalEntryId])
+    );
+
+    setAllCashReceipts((previous) => previous.map((receipt) =>
+      retainedReceiptLinks.has(receipt.id)
+        ? { ...receipt, journalPostingSuppressed: true }
+        : receipt
+    ));
+    selectedEntries.forEach((entry) => {
+      if (entry.isPosted) applyJournalLinesToAccounts(entry.lines, true);
+      recordAudit({
+        branchId: entry.branchId,
+        entityType: 'JournalEntry',
+        entityId: entry.id,
+        entityName: `${entry.entryNumber} - ${entry.description}`,
+        actionType: 'DELETE',
+        reason: reason?.trim() || t('حذف إجباري بطلب المستخدم', 'Force-deleted at user request'),
+        diffSummary: t(
+          `تم حذف القيد نهائيًا مع عكس أثره من أرصدة الحسابات. كان مرحلًا: ${entry.isPosted ? 'نعم' : 'لا'}.`,
+          `Journal permanently deleted and its account balance effect reversed. Was posted: ${entry.isPosted ? 'yes' : 'no'}.`
+        ),
+        previousState: entry,
+        newState: null,
+      });
+      logUserActivity(
+        'accounting', 'المحاسبة', 'Accounting',
+        'حذف إجباري لقيد يومية', 'Force-delete journal entry',
+        `${entry.entryNumber}: ${reason?.trim() || 'No reason supplied'}`
+      );
+    });
+    setAllJournals((previous) => previous.filter((entry) => !deletedEntryIds.has(entry.id)));
+    return { success: true, deleted: selectedEntries.length };
   };
 
   const getJournalEntrySourceInfo = (entryId: string) => {
@@ -8675,7 +8734,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     });
 
     const reconciledReceipts = allCashReceipts.map((receipt) => {
-      if (receipt.status !== 'active' || !receipt.partyId) return receipt;
+      if (receipt.status !== 'active' || receipt.journalPostingSuppressed || !receipt.partyId) return receipt;
       const receiptParty = updatedParties.get(receipt.partyId) || allParties.find((party) => party.id === receipt.partyId);
       if (!receiptParty || (receiptParty.type !== 'Customer' && receiptParty.type !== 'Both')) return receipt;
       if (isDateLockedInPeriod(receipt.date, allPeriodLocks, receipt.tenantId, receipt.branchId).isLocked) return receipt;
@@ -10211,6 +10270,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         repairJournalEntryLines,
         voidUnlinkedJournalEntry,
         reverseJournalEntries,
+        forceDeleteJournalEntries,
         consolidateUnmappedJournalLines,
         auditRecords,
         allAuditRecords,
