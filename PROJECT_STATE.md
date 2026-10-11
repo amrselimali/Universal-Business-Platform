@@ -1,5 +1,12 @@
 # PROJECT STATE
 
+## Customer Refunds — Excel import + stricter manual validation — 2026-10-11
+
+- The Customer Dues Settlement screen now supports Excel import. Required columns: customer code (auto-serial), customer name, value; everything else is optional.
+- Manual entry requires service + units + value.
+- Added `customerRefundNumberCounter` so bulk-imported refunds get unique sequential voucher numbers.
+- Validation: tsc error count unchanged (126 pre-existing); vite build succeeded.
+
 ## New screen — Customer Dues Settlement — 2026-10-11
 
 - New view `CustomerRefundsView` (sidebar: "تسوية مستحقات عميل") lists customer refunds, defaults to today and filters by the active branch; supports customer search by name/customer code/system code/file code/paper code/phone and shows the selected customer's value + quantity balances.
