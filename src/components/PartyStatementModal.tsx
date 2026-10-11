@@ -124,6 +124,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
     language,
     tenant,
     activeBranch,
+    branches,
     accounts,
     parties,
     invoices,
@@ -142,6 +143,15 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
   const [selectedPartyId, setSelectedPartyId] = useState<string>(initialPartyId || '');
   const [partyTypeFilter, setPartyTypeFilter] = useState<'ALL' | 'Customer' | 'Supplier'>('ALL');
   const [partySearch, setPartySearch] = useState<string>('');
+
+  // Balance filters (All, Greater than, Less than, Equals, Debit only, Credit only, Zero only)
+  const [balanceFilterType, setBalanceFilterType] = useState<
+    'ALL' | 'GREATER_THAN' | 'LESS_THAN' | 'EQUALS' | 'DEBIT_ONLY' | 'CREDIT_ONLY' | 'ZERO_ONLY'
+  >('ALL');
+  const [balanceThreshold, setBalanceThreshold] = useState<string>('');
+
+  // Export scope options
+  const [exportScopeBranch, setExportScopeBranch] = useState<string>(branchId && branchId !== 'all' ? branchId : 'ALL');
 
   // Date range filters
   const [dateFilter, setDateFilter] = useState<'ALL' | 'THIS_MONTH' | 'LAST_MONTH' | 'THIS_YEAR' | 'CUSTOM'>('ALL');
@@ -168,8 +178,32 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
   const scopedRefunds = useMemo(() => (effectiveBranchScoped ? customerRefunds.filter((refund) => refund.branchId === effectiveBranchScoped) : customerRefunds), [customerRefunds, effectiveBranchScoped]);
   const scopedJournals = useMemo(() => (effectiveBranchScoped ? journalEntries.filter((entry) => entry.branchId === effectiveBranchScoped) : journalEntries), [journalEntries, effectiveBranchScoped]);
 
-  // Available filtered parties for dropdown (search by name, phone, customer code,
-  // system code, paper code, file code, or file number)
+  // Filter parties by type, search query, branch, and balance criteria
+  const matchesPartyBalance = (partyBalance: number) => {
+    const thresholdNum = parseFloat(balanceThreshold);
+    const hasThreshold = !isNaN(thresholdNum);
+    const b = Number(partyBalance || 0);
+
+    switch (balanceFilterType) {
+      case 'GREATER_THAN':
+        return hasThreshold ? b > thresholdNum : true;
+      case 'LESS_THAN':
+        return hasThreshold ? b < thresholdNum : true;
+      case 'EQUALS':
+        return hasThreshold ? Math.abs(b - thresholdNum) < 0.005 : true;
+      case 'DEBIT_ONLY':
+        return b > 0.005; // رصيد مدين (عليه مستحقات للشركة)
+      case 'CREDIT_ONLY':
+        return b < -0.005; // رصيد دائن (له مبالغ أو دفعات مقدمة)
+      case 'ZERO_ONLY':
+        return Math.abs(b) <= 0.005; // رصيد مساوي للصفر
+      case 'ALL':
+      default:
+        return true;
+    }
+  };
+
+  // Available filtered parties for dropdown and statement selection
   const availableParties = useMemo(() => {
     return parties.filter((p) => {
       const matchesType = partyTypeFilter === 'ALL' || p.type === partyTypeFilter || p.type === 'Both';
@@ -186,9 +220,12 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
         (p.paperCode && p.paperCode.toLowerCase().includes(q)) ||
         (p.fileCode && p.fileCode.toLowerCase().includes(q)) ||
         (p.fileNumber && p.fileNumber.toLowerCase().includes(q));
-      return matchesType && matchesSearch;
+      
+      const matchesBalance = matchesPartyBalance(p.balance);
+
+      return matchesType && matchesSearch && matchesBalance;
     });
-  }, [parties, partyTypeFilter, partySearch]);
+  }, [parties, partyTypeFilter, partySearch, balanceFilterType, balanceThreshold]);
 
   // Compute date range boundary dates
   const { filterStart, filterEnd } = useMemo(() => {
@@ -826,6 +863,84 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
       rows,
     });
   };
+
+  /**
+   * تصدير أرصدة العملاء حسب اختيار المستخدم:
+   * 1. الفرع بالكامل (أو كافة الفروع)
+   * 2. أو العملاء المطابقين للفلاتر النشطة (أكبر من، أصغر من، يساوي، إلخ)
+   * الأعمدة المصدرة:
+   * كود العميل | كود السيستم | الكود الورقي | اسم العميل | رقم التليفون | الرصيد | نوع الرصيد | تاريخ التكويد | اسم الفرع
+   */
+  const handleExportCustomersBalances = (scope: 'FILTERED' | 'FULL_BRANCH') => {
+    let targetList: Party[] = [];
+
+    if (scope === 'FILTERED') {
+      // تصدير العملاء الذين ينطبق عليهم الفلتر الحالي (البحث + الرصيد + نوع العميل)
+      targetList = availableParties.filter((p) => p.type === 'Customer' || p.type === 'Both');
+      // إذا كان المستخدم محدد فرع معين في نطاق التصدير
+      if (exportScopeBranch !== 'ALL') {
+        targetList = targetList.filter((p) => p.branchId === exportScopeBranch);
+      }
+    } else {
+      // تصدير الفرع بالكامل (أو كافة الفروع) دون تقييد بفلتر الرصيد
+      targetList = parties.filter((p) => p.type === 'Customer' || p.type === 'Both');
+      if (exportScopeBranch !== 'ALL') {
+        targetList = targetList.filter((p) => p.branchId === exportScopeBranch);
+      }
+    }
+
+    if (targetList.length === 0) {
+      alert(t('لا يوجد عملاء مطابقين لخيارات التصدير المحددة.', 'No customers match the export criteria.'));
+      return;
+    }
+
+    const branchName =
+      exportScopeBranch === 'ALL'
+        ? 'كافة_الفروع'
+        : branches.find((b) => b.id === exportScopeBranch)?.name || 'الفرع';
+
+    const safeBranchName = branchName.replace(/[\s/\\]+/g, '_');
+    const filenamePrefix = scope === 'FILTERED' ? 'أرصدة_العملاء_المفلترة' : 'أرصدة_عملاء_الفرع_بالكامل';
+
+    const headers = [
+      'كود العميل',
+      'كود السيستم',
+      'الكود الورقي',
+      'اسم العميل',
+      'رقم التليفون',
+      'الرصيد',
+      'طبيعة الرصيد',
+      'تاريخ التكويد',
+      'الفرع',
+    ];
+
+    const rows = targetList.map((p) => {
+      const b = Number(p.balance || 0);
+      const balanceNature =
+        b > 0.005 ? 'مدين (مستحق عليه)' : b < -0.005 ? 'دائن (رصيد له)' : 'متزن (صفر)';
+      const codingDate = p.createdAt ? p.createdAt.slice(0, 10) : '';
+      const matchedBranch = branches.find((b) => b.id === p.branchId);
+
+      return [
+        p.customerCode || p.code || '',
+        p.systemCode || '',
+        p.paperCode || p.fileCode || '',
+        p.name || '',
+        p.phone || p.altPhone || '',
+        b,
+        balanceNature,
+        codingDate,
+        matchedBranch?.nameAr || matchedBranch?.name || 'المركز الرئيسي',
+      ];
+    });
+
+    exportRowsToExcel({
+      filename: `${filenamePrefix}_${safeBranchName}`,
+      sheetName: 'CustomerBalances',
+      headers,
+      rows,
+    });
+  };
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 md:p-6 bg-slate-950/75 backdrop-blur-xs">
       <div className="flex flex-col w-full max-w-5xl h-[94vh] bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden print:m-0 print:h-auto print:max-w-none print:border-none print:shadow-none">
@@ -1060,6 +1175,115 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
               </div>
             </div>
           )}
+
+          {/* ADVANCED BALANCE FILTER & EXPORT BAR */}
+          <div className="md:col-span-12 flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-100 dark:border-slate-800 text-xs">
+            {/* Balance Filters */}
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[11px] font-black text-slate-500 flex items-center gap-1">
+                <Filter className="h-3.5 w-3.5 text-indigo-600" />
+                {t('فلتر رصيد العميل:', 'Balance Filter:')}
+              </span>
+
+              <select
+                value={balanceFilterType}
+                onChange={(e) => setBalanceFilterType(e.target.value as any)}
+                className="rounded-xl border border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800 px-2.5 py-1.5 text-xs font-bold text-slate-900 dark:text-white outline-none focus:border-indigo-600"
+              >
+                <option value="ALL">{t('كافة الأرصدة (بدون قيد)', 'All Balances')}</option>
+                <option value="GREATER_THAN">{t('الرصيد أكبر من >', 'Balance Greater Than >')}</option>
+                <option value="LESS_THAN">{t('الرصيد أصغر من <', 'Balance Less Than <')}</option>
+                <option value="EQUALS">{t('الرصيد يساوي =', 'Balance Equals =')}</option>
+                <option value="DEBIT_ONLY">{t('أرصدة مدينة فقط (عليه مستحقات)', 'Debit Balances Only')}</option>
+                <option value="CREDIT_ONLY">{t('أرصدة دائنة فقط (له رصيد)', 'Credit Balances Only')}</option>
+                <option value="ZERO_ONLY">{t('أرصدة صفرية (متزن)', 'Zero Balances Only')}</option>
+              </select>
+
+              {['GREATER_THAN', 'LESS_THAN', 'EQUALS'].includes(balanceFilterType) && (
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="number"
+                    step="any"
+                    value={balanceThreshold}
+                    onChange={(e) => setBalanceThreshold(e.target.value)}
+                    placeholder={t('أدخل قيمة الرصيد...', 'Enter amount...')}
+                    className="w-32 rounded-xl border border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800 px-2.5 py-1.5 text-xs font-bold font-mono text-slate-900 dark:text-white outline-none focus:border-indigo-600"
+                  />
+                  <span className="text-[11px] text-slate-400 font-bold">ج.م</span>
+                  {balanceThreshold && (
+                    <button
+                      type="button"
+                      onClick={() => setBalanceThreshold('')}
+                      className="p-1 rounded-lg text-slate-400 hover:text-rose-500 cursor-pointer"
+                      title={t('مسح القيمة', 'Clear value')}
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {balanceFilterType !== 'ALL' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setBalanceFilterType('ALL');
+                    setBalanceThreshold('');
+                  }}
+                  className="rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 px-2 py-1 text-[11px] font-bold text-slate-600 dark:text-slate-300 cursor-pointer transition-colors"
+                >
+                  {t('إلغاء فلتر الرصيد', 'Reset Filter')}
+                </button>
+              )}
+
+              <span className="text-[11px] font-bold text-slate-400">
+                ({availableParties.filter((p) => p.type === 'Customer' || p.type === 'Both').length} {t('عميل مطابق', 'matching customers')})
+              </span>
+            </div>
+
+            {/* Export Customer Balances (Full Branch OR Filtered) */}
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[11px] font-black text-slate-500 flex items-center gap-1">
+                <Building2 className="h-3.5 w-3.5 text-emerald-600" />
+                {t('فرع التصدير:', 'Export Branch:')}
+              </span>
+
+              <select
+                value={exportScopeBranch}
+                onChange={(e) => setExportScopeBranch(e.target.value)}
+                className="rounded-xl border border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800 px-2.5 py-1.5 text-xs font-bold text-slate-900 dark:text-white outline-none focus:border-emerald-600"
+              >
+                <option value="ALL">{t('كافة الفروع (الشركة بالكامل)', 'All Branches (Whole Company)')}</option>
+                {branches.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.nameAr || b.name}
+                  </option>
+                ))}
+              </select>
+
+              <button
+                type="button"
+                id="btn-export-filtered-balances"
+                onClick={() => handleExportCustomersBalances('FILTERED')}
+                title={t('تصدير إكسيل للعملاء المطابقين للفلاتر النشطة مع الكود والاسم والهاتف والرصيد وتاريخ التكويد', 'Export Excel for filtered customers with codes, name, phone, balance, and coding date')}
+                className="flex items-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 px-3 py-1.5 text-xs font-bold text-white shadow-xs cursor-pointer transition-all"
+              >
+                <Download className="h-3.5 w-3.5" />
+                <span>{t('تصدير العملاء المفلترين', 'Export Filtered Customers')}</span>
+              </button>
+
+              <button
+                type="button"
+                id="btn-export-full-branch-balances"
+                onClick={() => handleExportCustomersBalances('FULL_BRANCH')}
+                title={t('تصدير أرصدة الفرع المحدد بالكامل لجميع العملاء دون استثناء', 'Export all customer balances for the selected branch')}
+                className="flex items-center gap-1.5 rounded-xl bg-slate-700 hover:bg-slate-800 dark:bg-slate-750 dark:hover:bg-slate-650 px-3 py-1.5 text-xs font-bold text-white shadow-xs cursor-pointer transition-all"
+              >
+                <Download className="h-3.5 w-3.5" />
+                <span>{t('تصدير أرصدة الفرع بالكامل', 'Export Full Branch Balances')}</span>
+              </button>
+            </div>
+          </div>
 
 
         </div>

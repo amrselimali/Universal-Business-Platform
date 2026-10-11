@@ -10,14 +10,23 @@
 - Updated `PartyStatementModal.tsx` to handle shared control accounts (`1120` and `2000`) cleanly without individual memo leaks.
 - Files: `src/services/accountingEngine.ts`, `src/context/PlatformContext.tsx`, `src/components/PartyStatementModal.tsx`.
  
-+## Settlement View Default Today & Customer Statement Date Presentation
-+
-+- Updated Customer Dues Settlement (`CustomerRefundsView`): Now defaults to showing **today's settlements only** (`today`), with quick buttons for "All" or custom date ranges.
-+- Refactored Detailed Customer Statement (`PartyStatementModal`):
-+  - Removed the branch switching toggle and the extra "show receipts outside date" warning button.
-+  - Receipts uploaded/migrated display the transaction date as the upload date, while any irregular or original file date is cleanly preserved in the receipt notes and description (`[تاريخ الإيصال: ...]`) along with previous notes.
-+- Files: `src/views/CustomerRefundsView.tsx`, `src/components/PartyStatementModal.tsx`, `src/views/CollectionReceiptsView.tsx`.
-+
+## Detailed Customer Statement Balance Filters & Export Balances by Branch
+
+- Added interactive balance filters to the Customer Statement (`PartyStatementModal`):
+  - Filter types: All balances, Greater than (`>`), Less than (`<`), Equals (`=`), Debit balances only, Credit balances only, and Zero balances only.
+  - Live count of matching customers and instant synchronization with the customer dropdown selector.
+- Added comprehensive Excel export for customer balances:
+  - Supports exporting the **Full Branch** or **Filtered Customers** only.
+  - Columns exported: Customer Code (`كود العميل`), System Code (`كود السيستم`), Paper Code (`الكود الورقي`), Customer Name (`اسم العميل`), Phone Number (`رقم التليفون`), Balance (`الرصيد`), Balance Nature (`طبيعة الرصيد`), Coding Date (`تاريخ التكويد`), Branch Name (`الفرع`).
+- Files: `src/components/PartyStatementModal.tsx`.
+
+## Settlement View Default Today & Customer Statement Date Presentation
+
+- Updated Customer Dues Settlement (`CustomerRefundsView`): Now defaults to showing **today's settlements only** (`today`), with quick buttons for "All" or custom date ranges.
+- Refactored Detailed Customer Statement (`PartyStatementModal`):
+  - Removed the branch switching toggle and the extra "show receipts outside date" warning button.
+  - Receipts uploaded/migrated display the transaction date as the upload date, while any irregular or original file date is cleanly preserved in the receipt notes and description (`[تاريخ الإيصال: ...]`) along with previous notes.
+- Files: `src/views/CustomerRefundsView.tsx`, `src/components/PartyStatementModal.tsx`, `src/views/CollectionReceiptsView.tsx`.
 
 ## Customer Refunds Persistence & Detailed Statement Linking
 

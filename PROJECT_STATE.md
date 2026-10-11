@@ -21,6 +21,29 @@
   - All collection receipts are recorded using the upload date as the transaction date, while any original receipt date (from Excel import or input) is embedded directly into the explanation/description (`[تاريخ الإيصال: ...]`) alongside any previous notes.
 - Files: `src/views/CustomerRefundsView.tsx`, `src/components/PartyStatementModal.tsx`, `src/views/CollectionReceiptsView.tsx`. Validation: `compile_applet` passed.
 
+## Detailed Customer Statement Balance Filters & Export Balances by Branch — 2026-10-11
+
+- Added advanced balance filtering to the Customer Statement (`PartyStatementModal`):
+  - Filters available: Greater than (`>`), Less than (`<`), Equals (`=`), Debit balances only, Credit balances only, Zero balances only.
+  - Interactive threshold amount input with clear button and real-time count of matching customers.
+  - Dropdown selector automatically updates to reflect only customers matching the balance criteria.
+- Added Excel export for customer balances with branch selection:
+  - Branch selection: Full Branch (specific branch) or All Branches (entire company).
+  - Two export actions:
+    1. **تصدير العملاء المفلترين (Export Filtered Customers)**: Exports customers matching the current search, type, and balance filters.
+    2. **تصدير أرصدة الفرع بالكامل (Export Full Branch Balances)**: Exports all customers in the chosen branch without balance restriction.
+  - Exported Excel columns include:
+    - `كود العميل` (Customer Code)
+    - `كود السيستم` (System Code)
+    - `الكود الورقي` (Paper / File Code)
+    - `اسم العميل` (Customer Name)
+    - `رقم التليفون` (Phone Number)
+    - `الرصيد` (Balance)
+    - `طبيعة الرصيد` (Balance Nature - مدين / دائن / متزن)
+    - `تاريخ التكويد` (Coding Date)
+    - `الفرع` (Branch Name)
+- Files: `src/components/PartyStatementModal.tsx`. Validation: `compile_applet` passed.
+
 ## Customer Refunds Persistence & Comprehensive Statement Receipts Linking — 2026-10-11
 
 - Fixed Customer Dues Settlement (`CustomerRefundsView` / `allCustomerRefunds`) persistence: `erp_customer_refunds` was not loaded in `hydrateDatasets` and was mirrored only to IndexedDB without localStorage, causing imported movements to disappear upon refresh. Now fully hydrated from IndexedDB, mirrored safely to both localStorage and IndexedDB, with an automatic self-healing recovery from journal entries.
