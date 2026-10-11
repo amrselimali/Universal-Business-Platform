@@ -42,6 +42,7 @@ import {
   InventoryAudit,
   InventoryStaffLiability,
   CashReceiptVoucher,
+  CustomerRefundVoucher,
   CashPaymentVoucher,
   SpecializedTaxInvoice,
   GoodsReceiptVoucher,
@@ -559,6 +560,25 @@ interface PlatformContextType {
     systemCode?: string;
   }>) => { success: boolean; created: number; error?: string };
   deleteCashReceipt: (id: string) => void;
+
+  // Customer Refunds / Dues Settlement (تسوية مستحقات عميل واستردادات العملاء)
+  customerRefunds: CustomerRefundVoucher[];
+  allCustomerRefunds: CustomerRefundVoucher[];
+  addCustomerRefund: (data: {
+    tenantId: string;
+    branchId: string;
+    partyId: string;
+    units: number;
+    unitPrice: number;
+    amount: number;
+    date: string;
+    paymentMethodId?: string;
+    paymentMethodLabel: string;
+    paymentAccountId?: string;
+    serviceName?: string;
+    notes?: string;
+  }) => { success: boolean; refund?: CustomerRefundVoucher; error?: string };
+  cancelCustomerRefund: (id: string, reason: string) => { success: boolean; error?: string };
 
   cashPayments: CashPaymentVoucher[];
   allCashPayments: CashPaymentVoucher[];
@@ -8562,6 +8582,24 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     });
   }, [allCashReceipts, isStorageHydrated]);
 
+  // Customer Refunds / Dues Settlement (تسوية مستحقات عميل واستردادات العملاء)
+  const [allCustomerRefunds, setAllCustomerRefunds] = useState<CustomerRefundVoucher[]>(() => {
+    try {
+      const saved = localStorage.getItem('erp_customer_refunds');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed as CustomerRefundVoucher[];
+      }
+    } catch (e) {
+      console.error(e);
+    }
+    return [];
+  });
+  useEffect(() => {
+    if (!isStorageHydrated) return;
+    void idbSet('erp_customer_refunds', allCustomerRefunds);
+  }, [allCustomerRefunds, isStorageHydrated]);
+
   useEffect(() => {
     if (!isStorageHydrated) return;
 
@@ -8955,6 +8993,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   // Filtered lists by tenant
   const cashReceipts = allCashReceipts.filter((r) => r.tenantId === tenant.id);
+  const customerRefunds = allCustomerRefunds.filter((r) => r.tenantId === tenant.id);
   const cashPayments = allCashPayments.filter((p) => p.tenantId === tenant.id);
   const specializedTaxInvoices = allSpecializedTaxInvoices.filter((inv) => inv.tenantId === tenant.id);
   const goodsReceipts = allGoodsReceipts.filter((grn) => grn.tenantId === tenant.id);
@@ -9262,6 +9301,169 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       `تم تسجيل وترحيل ${updatedReceipts.length} إيصال تحصيل مباشرة في الحسابات العامة وشجرة الحسابات وحسابات العملاء بدون ترحيلها لشيفت التشغيل`
     );
     return { success: true, created: updatedReceipts.length };
+  };
+
+  const addCustomerRefund = (data: {
+    tenantId: string;
+    branchId: string;
+    partyId: string;
+    units: number;
+    unitPrice: number;
+    amount: number;
+    date: string;
+    paymentMethodId?: string;
+    paymentMethodLabel: string;
+    paymentAccountId?: string;
+    serviceName?: string;
+    notes?: string;
+  }): { success: boolean; refund?: CustomerRefundVoucher; error?: string } => {
+    const refundTenantId = data.tenantId || tenant?.id || INITIAL_TENANT.id;
+    const party = allParties.find((candidate) => candidate.id === data.partyId && candidate.tenantId === refundTenantId);
+    if (!party) return { success: false, error: t('العميل المحدد غير موجود أو لا يتبع هذا الكيان.', 'The selected customer was not found in this tenant.') };
+
+    const units = Number(data.units) || 0;
+    const unitPrice = Number(data.unitPrice) || 0;
+    const amount = Number(data.amount) || 0;
+    if (units <= 0) return { success: false, error: t('عدد الوحدات المستردة يجب أن يكون أكبر من صفر.', 'Refunded units must be greater than zero.') };
+    if (!Number.isFinite(amount) || amount <= 0) return { success: false, error: t('القيمة المستردة يجب أن تكون رقمًا موجبًا.', 'Refund value must be a positive number.') };
+    if (!data.date) return { success: false, error: t('يرجى تحديد تاريخ الاسترداد.', 'Please provide the refund date.') };
+
+    const periodCheck = validatePeriodDate(data.date, data.branchId);
+    if (!periodCheck.allowed) return { success: false, error: periodCheck.message };
+
+    const paymentAccount = allAccounts.find((account) =>
+      account.id === data.paymentAccountId && account.tenantId === refundTenantId &&
+        account.type === 'Asset' && account.isDebitNormal
+    );
+    if (!paymentAccount) {
+      return { success: false, error: t('طريقة الصرف المحددة غير مرتبطة بحساب خزينة/بنك صالح.', 'The selected payment method has no valid linked cash/bank account.') };
+    }
+
+    let customerAccount = allAccounts.find((account) => account.id === party.accountId && account.tenantId === refundTenantId);
+    if (!customerAccount) {
+      const control = resolveCustomerControlAccount(allAccounts, refundTenantId);
+      if (!control.account) {
+        return { success: false, error: `${t('تعذر تحديد حساب العميل:', 'Could not resolve the customer account:')} ${control.error}` };
+      }
+      customerAccount = control.account;
+    }
+    if (customerAccount.id === paymentAccount.id) {
+      return { success: false, error: t('لا يمكن أن يكون حساب العميل هو نفس حساب الصرف.', 'The customer account cannot be the same as the payment account.') };
+    }
+
+    const refundNumber = `CRF-${new Date().getFullYear()}-${String(allCustomerRefunds.length + 1).padStart(4, '0')}`;
+    const journalLines: JournalLine[] = [
+      createJournalLine(customerAccount, amount, 0, `استرداد للعميل ${party.name} - ${units} وحدة × ${unitPrice} - سند ${refundNumber}`, 1),
+      createJournalLine(paymentAccount, 0, amount, `استرداد للعميل ${party.name} - صرف نقدية - سند ${refundNumber}`, 2),
+    ];
+    const journal = postJournalEntryWithSync({
+      tenantId: refundTenantId,
+      branchId: data.branchId,
+      entryNumber: `JV-CRF-${Date.now().toString().slice(-6)}`,
+      date: data.date,
+      description: `استرداد مستحقات العميل ${party.name} بقيمة ${amount} و${units} وحدة`,
+      isPosted: true,
+      sourceDocument: `تسوية مستحقات عميل - سند ${refundNumber}`,
+      lines: journalLines,
+    });
+
+    const newRefund: CustomerRefundVoucher = {
+      id: `crf-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      voucherNumber: refundNumber,
+      date: data.date,
+      tenantId: refundTenantId,
+      branchId: data.branchId,
+      partyId: party.id,
+      customerCode: party.customerCode || party.code,
+      systemCode: party.systemCode,
+      customerName: party.name,
+      units,
+      unitPrice,
+      amount: Number(amount.toFixed(2)),
+      paymentMethodId: data.paymentMethodId,
+      paymentMethodLabel: data.paymentMethodLabel,
+      paymentAccountId: data.paymentAccountId,
+      serviceName: data.serviceName,
+      notes: data.notes,
+      status: 'active',
+      journalEntryId: journal.id,
+      createdAt: new Date().toISOString(),
+      createdBy: currentUser?.name,
+    };
+
+    setAllCustomerRefunds((prev) => [newRefund, ...prev]);
+
+    // Reduce the customer's remaining booked units (and total) across offers, newest first.
+    let unitsToReduce = units;
+    const updatedOffers = (party.offers || []).map((offer) => {
+      if (unitsToReduce <= 0) return offer;
+      const remaining = Number(offer.remainingQuantity || 0);
+      if (remaining <= 0) return offer;
+      const reduceBy = Math.min(remaining, unitsToReduce);
+      unitsToReduce -= reduceBy;
+      const newRemaining = remaining - reduceBy;
+      const newTotal = Math.max(newRemaining, Number(offer.totalQuantity || 0) - reduceBy);
+      return {
+        ...offer,
+        totalQuantity: newTotal,
+        remainingQuantity: newRemaining,
+        status: newRemaining <= 0 ? ('Consumed' as const) : offer.status,
+      };
+    });
+    setAllParties((prev) => prev.map((candidate) => candidate.id === party.id
+      ? { ...candidate, balance: Number((Number(candidate.balance || 0) + amount).toFixed(2)), offers: updatedOffers }
+      : candidate));
+
+    recordAudit({
+      branchId: data.branchId,
+      entityType: 'CustomerRefund',
+      entityId: newRefund.id,
+      entityName: `${refundNumber} - ${party.name}`,
+      actionType: 'CREATE',
+      diffSummary: `تسجيل استرداد للعميل ${party.name}: ${units} وحدة × ${unitPrice} = ${amount} ج.م`,
+      newState: newRefund,
+    });
+    logUserActivity(
+      'customer_refunds', 'تسوية مستحقات عميل', 'Customer Refunds',
+      'تسجيل استرداد عميل', 'Record customer refund',
+      `تم تسجيل استرداد ${refundNumber} للعميل ${party.name} بقيمة ${amount} و${units} وحدة`
+    );
+
+    return { success: true, refund: newRefund };
+  };
+
+  const cancelCustomerRefund = (id: string, reason: string): { success: boolean; error?: string } => {
+    const refund = allCustomerRefunds.find((candidate) => candidate.id === id);
+    if (!refund) return { success: false, error: t('سند الاسترداد غير موجود.', 'Refund voucher not found.') };
+    if (refund.status === 'cancelled') return { success: false, error: t('سند الاسترداد ملغي بالفعل.', 'Refund voucher is already cancelled.') };
+    if (!reason.trim()) return { success: false, error: t('يرجى إدخال سبب الإلغاء.', 'Please enter a cancellation reason.') };
+    const journal = allJournals.find((entry) => entry.id === refund.journalEntryId);
+    if (journal) {
+      applyJournalLinesToAccounts(journal.lines, true);
+      setAllJournals((prev) => prev.map((entry) => entry.id === journal.id ? { ...entry, isPosted: false, description: `${entry.description} [ملغي: ${reason}]` } : entry));
+    }
+    const party = allParties.find((candidate) => candidate.id === refund.partyId);
+    if (party) {
+      setAllParties((prev) => prev.map((candidate) => candidate.id === party.id
+        ? { ...candidate, balance: Number((Number(candidate.balance || 0) - Number(refund.amount || 0)).toFixed(2)) }
+        : candidate));
+    }
+    setAllCustomerRefunds((prev) => prev.map((candidate) => candidate.id === id ? { ...candidate, status: 'cancelled' } : candidate));
+    recordAudit({
+      branchId: refund.branchId,
+      entityType: 'CustomerRefund',
+      entityId: refund.id,
+      entityName: `${refund.voucherNumber} - ${refund.customerName}`,
+      actionType: 'CANCEL',
+      reason,
+      diffSummary: `إلغاء سند استرداد بقيمة ${refund.amount} - السبب: ${reason}`,
+    });
+    logUserActivity(
+      'customer_refunds', 'تسوية مستحقات عميل', 'Customer Refunds',
+      'إلغاء استرداد عميل', 'Cancel customer refund',
+      `تم إلغاء سند الاسترداد ${refund.voucherNumber} - السبب: ${reason}`
+    );
+    return { success: true };
   };
 
   const postUnpostedCollectionReceipts = (branchId?: string): { posted: number; skipped: number; errors: string[] } => {
@@ -10288,6 +10490,10 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         allCashReceipts,
         addCashReceipt,
         addCollectionReceiptsBulk,
+        allCustomerRefunds,
+        customerRefunds,
+        addCustomerRefund,
+        cancelCustomerRefund,
         deleteCashReceipt,
         cashPayments,
         allCashPayments,

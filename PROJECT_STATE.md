@@ -1,5 +1,12 @@
 # PROJECT STATE
 
+## New screen — Customer Dues Settlement — 2026-10-11
+
+- New view `CustomerRefundsView` (sidebar: "تسوية مستحقات عميل") lists customer refunds, defaults to today and filters by the active branch; supports customer search by name/customer code/system code/file code/paper code/phone and shows the selected customer's value + quantity balances.
+- New type `CustomerRefundVoucher`; context adds `allCustomerRefunds`, `customerRefunds`, `addCustomerRefund`, `cancelCustomerRefund`.
+- Posting rule: customer account **debit** / payment-method-linked account **credit**; posts to journal, COA and trial balance; reflected in the customer statement (value debit + negative quantity movement); refunded units reduce the customer's remaining package balance.
+- Validation: tsc error count unchanged (126 pre-existing); vite build succeeded.
+
 ## Accounting — Excel export + active-branch default — 2026-10-11
 
 - Excel (.xlsx) export buttons added to all five accounting areas (COA, General Ledger, General Journal, Trial Balance, Customer/Supplier Statements). Each exports the full filtered dataset with Arabic headers.

@@ -6,6 +6,7 @@ import {
   Package,
   Calculator,
   Receipt,
+  Undo2,
   Stethoscope,
   Users,
   SlidersHorizontal,
@@ -110,6 +111,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate }) => 
           labelAr: 'إيصالات التحصيل',
           labelEn: 'Collection Receipts',
           icon: Receipt,
+          alwaysShow: true,
+        },
+        {
+          id: 'customer_refunds',
+          labelAr: 'تسوية مستحقات عميل',
+          labelEn: 'Customer Refunds',
+          icon: Undo2,
           alwaysShow: true,
         },
         {
