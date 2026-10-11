@@ -1,5 +1,13 @@
 # PROJECT STATE
 
+## Historical Unmapped Account Consolidation — 2026-10-11
+
+- In Trial Balance, users can explicitly consolidate all unresolved lines in the selected branch scope into the tenant-wide temporary account `9999999` (`أرصدة تاريخية مجمعة - تحت المراجعة`).
+- Existing posted journal lines are reassigned to this account without changing amount, date, source voucher link, or debit/credit totals. Their original account ID/code are retained on each line and displayed in General Journal and General Ledger.
+- The confirmation requires a reason and lets the user choose the account type. The suggested/default type is credit-normal Liability because the current all-branch unresolved movement has a net credit; this is only a temporary classification, not a verified classification of the old accounts.
+- Operation is blocked for locked periods, duplicate code 9999999, or an existing account not matching the dedicated consolidation account. It is scoped to the active tenant and selected branch report; audit/activity logs record aggregate counts and totals.
+- The live/local browser ledger is not available to this workspace; no runtime journal/account data has been changed. An authorized user must run the confirmation on the updated application.
+
 ## Source-Aware Unbalanced Journal Review — 2026-10-11
 
 - Accounting now has a paginated control to review posted unbalanced entries, inspect their debit/credit lines, source references, and differences.

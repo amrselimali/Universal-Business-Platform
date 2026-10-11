@@ -39,6 +39,7 @@ export const AccountingView: React.FC = () => {
     getJournalEntrySourceInfo,
     repairJournalEntryLines,
     voidUnlinkedJournalEntry,
+    consolidateUnmappedJournalLines,
     language,
     tenant,
     branches,
@@ -114,6 +115,11 @@ export const AccountingView: React.FC = () => {
   const [voidingUnbalancedEntryId, setVoidingUnbalancedEntryId] = useState<string | null>(null);
   const [voidReason, setVoidReason] = useState('');
   const [voidError, setVoidError] = useState<string | null>(null);
+  const [showConsolidationDialog, setShowConsolidationDialog] = useState(false);
+  const [consolidationAccountType, setConsolidationAccountType] = useState<AccountType>('Liability');
+  const [consolidationReason, setConsolidationReason] = useState('');
+  const [consolidationError, setConsolidationError] = useState<string | null>(null);
+  const [consolidationResult, setConsolidationResult] = useState<string | null>(null);
 
   // Filtered accounts based on Selected Branch
   const activeBranchAccounts = useMemo(() => {
@@ -171,7 +177,9 @@ export const AccountingView: React.FC = () => {
     let unmappedLineCount = 0;
     let unmappedDebitTotal = 0;
     let unmappedCreditTotal = 0;
+    let unresolvedHistoricalLinkCount = 0;
     let resolvedByLegacyCodeCount = 0;
+    const tenantAccountIds = new Set(accounts.map((account) => account.id));
     filteredJournalEntries.filter((entry) => entry.isPosted).forEach((entry) => {
       let debit = 0;
       let credit = 0;
@@ -187,10 +195,15 @@ export const AccountingView: React.FC = () => {
           unmappedLineCount += 1;
           unmappedDebitTotal += safeDebit;
           unmappedCreditTotal += safeCredit;
-          const groupKey = `${line.accountId}|${line.accountCode.trim()}`;
+          if (line.accountId.trim() && !tenantAccountIds.has(line.accountId)) {
+            unresolvedHistoricalLinkCount += 1;
+          }
+          const displayedAccountId = line.historicalAccountId || line.accountId;
+          const displayedAccountCode = line.historicalAccountCode || line.accountCode;
+          const groupKey = `${displayedAccountId}|${displayedAccountCode.trim()}`;
           const totals = unmappedAccountTotals.get(groupKey) || {
-            accountId: line.accountId,
-            accountCode: line.accountCode.trim(),
+            accountId: displayedAccountId,
+            accountCode: displayedAccountCode.trim(),
             lineCount: 0,
             debit: 0,
             credit: 0,
@@ -202,8 +215,8 @@ export const AccountingView: React.FC = () => {
           if (unmappedLines.length < 50) {
             unmappedLines.push({
               entryNumber: entry.entryNumber,
-              accountId: line.accountId,
-              accountCode: line.accountCode,
+              accountId: displayedAccountId,
+              accountCode: displayedAccountCode,
               debit: safeDebit,
               credit: safeCredit,
             });
@@ -226,6 +239,7 @@ export const AccountingView: React.FC = () => {
       unmappedLineCount,
       unmappedDebitTotal,
       unmappedCreditTotal,
+      unresolvedHistoricalLinkCount,
       unmappedAccountGroups,
       unmappedAccountGroupCount: unmappedAccountTotals.size,
       resolvedByLegacyCodeCount,
@@ -236,6 +250,11 @@ export const AccountingView: React.FC = () => {
     [trialBalanceDiagnostics.unbalancedEntries, unbalancedPage]
   );
   useEffect(() => setUnbalancedPage(1), [selectedBranchId]);
+  useEffect(() => {
+    setConsolidationAccountType(
+      trialBalanceDiagnostics.unmappedCreditTotal >= trialBalanceDiagnostics.unmappedDebitTotal ? 'Liability' : 'Asset'
+    );
+  }, [selectedBranchId, trialBalanceDiagnostics.unmappedCreditTotal, trialBalanceDiagnostics.unmappedDebitTotal]);
 
   const totalDebits = trialBalanceAccounts.reduce((sum, account) => sum + Math.max(0, account.balance), 0);
   const totalCredits = trialBalanceAccounts.reduce((sum, account) => sum + Math.max(0, -account.balance), 0);
@@ -494,6 +513,8 @@ export const AccountingView: React.FC = () => {
       debit: number;
       credit: number;
       memo?: string;
+      historicalAccountId?: string;
+      historicalAccountCode?: string;
     }[] = [];
 
     filteredJournalEntries.forEach((entry) => {
@@ -512,6 +533,8 @@ export const AccountingView: React.FC = () => {
             debit: line.debit,
             credit: line.credit,
             memo: line.memo,
+            historicalAccountId: line.historicalAccountId,
+            historicalAccountCode: line.historicalAccountCode,
           });
         }
       });
@@ -642,6 +665,29 @@ export const AccountingView: React.FC = () => {
     setVoidReason('');
     setVoidError(null);
     setUnbalancedPage(1);
+  };
+
+  const handleConsolidateUnmappedLines = () => {
+    const result = consolidateUnmappedJournalLines(
+      filteredJournalEntries.filter((entry) => entry.isPosted).map((entry) => entry.id),
+      consolidationAccountType,
+      consolidationReason
+    );
+    if (!result.success) {
+      setConsolidationError(result.error || t('تعذر تجميع الحركات غير المربوطة.', 'Could not consolidate unmapped movements.'));
+      return;
+    }
+    if (result.lines === 0) {
+      setConsolidationError(t('لا توجد سطور غير مربوطة قابلة للتجميع في النطاق الحالي.', 'No eligible unmapped lines were found in the current scope.'));
+      return;
+    }
+    setConsolidationError(null);
+    setConsolidationResult(t(
+      `تم تجميع ${result.lines} سطرًا من ${result.affectedEntries} قيد في الحساب 9999999. المدين ${formatMoney(result.debit)} والدائن ${formatMoney(result.credit)}.`,
+      `Consolidated ${result.lines} lines from ${result.affectedEntries} journals into account 9999999. Debit ${formatMoney(result.debit)} and credit ${formatMoney(result.credit)}.`
+    ));
+    setShowConsolidationDialog(false);
+    setConsolidationReason('');
   };
 
   return (
@@ -1245,6 +1291,12 @@ export const AccountingView: React.FC = () => {
                         <td className="py-3">
                           <div className="text-slate-900 dark:text-white font-semibold">{m.description}</div>
                           {m.memo && <div className="text-[11px] text-slate-400 mt-0.5">{m.memo}</div>}
+                          {m.historicalAccountCode && (
+                            <div className="mt-0.5 text-[10px] text-amber-700 dark:text-amber-300">
+                              {t('الحساب التاريخي الأصلي:', 'Original historical account:')} {m.historicalAccountCode}
+                              {m.historicalAccountId ? ` (${m.historicalAccountId})` : ''}
+                            </div>
+                          )}
                         </td>
                         <td className="py-3 text-end font-mono font-bold text-emerald-600">
                           {m.debit > 0 ? formatMoney(m.debit) : '-'}
@@ -1371,6 +1423,12 @@ export const AccountingView: React.FC = () => {
                               {l.accountCode}
                             </span>
                             {language === 'ar' ? l.accountNameAr : l.accountNameEn}
+                            {l.historicalAccountCode && (
+                              <div className="mt-0.5 text-[10px] text-amber-700 dark:text-amber-300">
+                                {t('الحساب التاريخي الأصلي:', 'Original historical account:')} {l.historicalAccountCode}
+                                {l.historicalAccountId ? ` (${l.historicalAccountId})` : ''}
+                              </div>
+                            )}
                           </td>
                           <td className="py-2 text-slate-500">{l.memo || '-'}</td>
                           <td className="py-2 text-end font-mono font-bold text-emerald-600">
@@ -1517,6 +1575,34 @@ export const AccountingView: React.FC = () => {
                   </table>
                 </div>
               )}
+              {trialBalanceDiagnostics.unmappedLineCount > 0 && (
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+                  <div>
+                    <p className="font-bold">
+                      {t(
+                        `هناك ${trialBalanceDiagnostics.unmappedLineCount} سطرًا بحسابات لا يمكن مطابقتها في الشجرة.`,
+                        `${trialBalanceDiagnostics.unmappedLineCount} lines reference accounts that cannot be matched in this chart.`
+                      )}
+                    </p>
+                    <p className="mt-0.5">
+                      {t(
+                        'يمكن تجميع السطور غير المربوطة الظاهرة في النطاق الحالي تحت حساب مستقل 9999999، مع حفظ الكود والمعرّف الأصليين بكل سطر.',
+                        'Consolidate the unmapped lines in the current scope under account 9999999 while preserving each original code and ID on the journal line.'
+                      )}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setConsolidationError(null);
+                      setShowConsolidationDialog(true);
+                    }}
+                    className="rounded-lg bg-amber-700 px-3 py-2 text-xs font-bold text-white hover:bg-amber-800"
+                  >
+                    {t('تجميع في الحساب 9999999', 'Consolidate into account 9999999')}
+                  </button>
+                </div>
+              )}
               {trialBalanceDiagnostics.unmappedLines.length > 0 && (
                 <div className="space-y-1 text-rose-800 dark:text-rose-300">
                   <p className="font-semibold">
@@ -1606,6 +1692,87 @@ export const AccountingView: React.FC = () => {
                 </tr>
               </tfoot>
             </table>
+          </div>
+        </div>
+      )}
+
+      {consolidationResult && activeTab === 'trial_balance' && (
+        <div className="fixed bottom-5 end-5 z-[80] flex max-w-lg items-start gap-3 rounded-xl border border-emerald-300 bg-emerald-50 p-4 text-xs font-semibold text-emerald-800 shadow-lg dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-200">
+          <CheckCircle2 className="h-4 w-4 shrink-0" />
+          <span>{consolidationResult}</span>
+          <button type="button" onClick={() => setConsolidationResult(null)} aria-label={t('إغلاق', 'Dismiss')}><X className="h-4 w-4" /></button>
+        </div>
+      )}
+
+      {showConsolidationDialog && (
+        <div className="fixed inset-0 z-[75] flex items-center justify-center bg-black/60 p-3 backdrop-blur-sm">
+          <div className="w-full max-w-xl space-y-4 rounded-2xl border border-amber-200 bg-white p-5 shadow-2xl dark:border-amber-900/60 dark:bg-slate-900">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-base font-black text-slate-900 dark:text-white">
+                  {t('تجميع الحركات غير المربوطة في حساب 9999999', 'Consolidate Unmapped Movements into 9999999')}
+                </h2>
+                <p className="mt-1 text-xs text-slate-500">
+                  {t('النطاق الحالي:', 'Current scope:')} {selectedBranchId === 'all'
+                    ? t('كل الفروع', 'All branches')
+                    : selectedBranchId === 'general'
+                      ? t('الحسابات العامة', 'General accounts')
+                      : branches.find((branch) => branch.id === selectedBranchId)?.name || selectedBranchId}
+                </p>
+              </div>
+              <button type="button" onClick={() => setShowConsolidationDialog(false)} className="rounded-lg p-1 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800" aria-label={t('إغلاق', 'Close')}>
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
+              <p className="font-bold">
+                {t(
+                  `سيتم إعادة ربط ${trialBalanceDiagnostics.unmappedLineCount} سطرًا من القيود المرحلة، منها ${trialBalanceDiagnostics.unresolvedHistoricalLinkCount} سطر بمعرّف حساب قديم غير موجود. المدين ${formatMoney(trialBalanceDiagnostics.unmappedDebitTotal)} والدائن ${formatMoney(trialBalanceDiagnostics.unmappedCreditTotal)}.`,
+                  `${trialBalanceDiagnostics.unmappedLineCount} posted journal lines will be reassigned, including ${trialBalanceDiagnostics.unresolvedHistoricalLinkCount} lines with stale account IDs. Debit ${formatMoney(trialBalanceDiagnostics.unmappedDebitTotal)} and credit ${formatMoney(trialBalanceDiagnostics.unmappedCreditTotal)}.`
+                )}
+              </p>
+              <p className="mt-1">
+                {t(
+                  'لن تتغير مبالغ أو تواريخ القيود. سيُحفظ الكود والمعرّف الأصليان داخل كل سطر للمراجعة، ويظل الحساب 9999999 حسابًا مؤقتًا مجمعًا وليس تصحيحًا لتصنيف الحسابات الأصلية.',
+                  'Journal amounts and dates will not change. Each original account code and ID will be retained on its line for review. Account 9999999 is a temporary consolidation, not a determination of the original accounts’ classifications.'
+                )}
+              </p>
+            </div>
+            <label className="block space-y-1 text-xs font-bold text-slate-700 dark:text-slate-200">
+              <span>{t('تصنيف حساب التجميع (يمكن تغييره لاحقًا بعد المراجعة)', 'Consolidation account type (can be changed after review)')}</span>
+              <select
+                value={consolidationAccountType}
+                onChange={(event) => setConsolidationAccountType(event.target.value as AccountType)}
+                className="w-full rounded-lg border border-slate-200 bg-white p-2 dark:border-slate-700 dark:bg-slate-800"
+              >
+                <option value="Liability">{t('التزامات - دائن بطبيعته (مقترح لصافي الحركة الحالي)', 'Liability - credit-normal (suggested for the current net movement)')}</option>
+                <option value="Asset">{t('أصول - مدين بطبيعته', 'Asset - debit-normal')}</option>
+                <option value="Equity">{t('حقوق ملكية - دائن بطبيعته', 'Equity - credit-normal')}</option>
+              </select>
+            </label>
+            <label className="block space-y-1 text-xs font-bold text-slate-700 dark:text-slate-200">
+              <span>{t('سبب التجميع (إلزامي للتدقيق)', 'Reason for consolidation (required for audit)')}</span>
+              <input
+                value={consolidationReason}
+                onChange={(event) => setConsolidationReason(event.target.value)}
+                className="w-full rounded-lg border border-slate-200 bg-white p-2 dark:border-slate-700 dark:bg-slate-800"
+                placeholder={t('مثال: تجميع أكواد تاريخية بعد مراجعة الشجرة', 'Example: consolidate historical codes after reviewing the chart')}
+              />
+            </label>
+            {consolidationError && <p role="alert" className="rounded-lg bg-rose-50 p-2 text-xs text-rose-700 dark:bg-rose-950/30 dark:text-rose-300">{consolidationError}</p>}
+            <div className="flex justify-end gap-2 border-t border-slate-200 pt-3 dark:border-slate-800">
+              <button type="button" onClick={() => setShowConsolidationDialog(false)} className="rounded-lg px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800">
+                {t('رجوع دون تغيير', 'Cancel')}
+              </button>
+              <button
+                type="button"
+                disabled={!consolidationReason.trim() || trialBalanceDiagnostics.unmappedLineCount === 0}
+                onClick={handleConsolidateUnmappedLines}
+                className="rounded-lg bg-amber-700 px-4 py-2 text-xs font-bold text-white hover:bg-amber-800 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {t('تجميع الآن في 9999999', 'Consolidate now into 9999999')}
+              </button>
+            </div>
           </div>
         </div>
       )}

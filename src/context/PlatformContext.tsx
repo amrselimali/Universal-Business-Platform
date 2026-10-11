@@ -9,6 +9,7 @@ import {
   StockLevel,
   StockMovement,
   Account,
+  AccountType,
   Party,
   ModuleDefinition,
   SalesInvoice,
@@ -75,6 +76,7 @@ import {
   findCustomerReceiptJournalIndex,
   assertBalancedJournalLines,
   resolveAccount,
+  resolveJournalLineAccount,
   createJournalLine,
 } from '../services/accountingEngine';
 import {
@@ -509,6 +511,11 @@ interface PlatformContextType {
     reason: string
   ) => { success: boolean; error?: string };
   voidUnlinkedJournalEntry: (entryId: string, reason: string) => { success: boolean; error?: string };
+  consolidateUnmappedJournalLines: (
+    entryIds: string[],
+    accountType: AccountType,
+    reason: string
+  ) => { success: boolean; lines: number; affectedEntries: number; debit: number; credit: number; accountId?: string; error?: string };
   deleteJournalEntry: (entryId: string) => void;
 
   // Audit Trail & User Activity Logs (سجل التعديلات، المحذوفات، ونشاطات المستخدمين)
@@ -1305,6 +1312,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         return {
           id: entry.lines[index]?.id || `line-repair-${Date.now()}-${index}`,
           accountId: account.id,
+          historicalAccountId: entry.lines[index]?.historicalAccountId,
+          historicalAccountCode: entry.lines[index]?.historicalAccountCode,
           accountCode: account.code,
           accountNameAr: account.nameAr,
           accountNameEn: account.nameEn,
@@ -1388,6 +1397,183 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       `${entry.entryNumber}: ${reason.trim()}`
     );
     return { success: true };
+  };
+
+  const consolidateUnmappedJournalLines = (
+    entryIds: string[],
+    accountType: AccountType,
+    reason: string
+  ): { success: boolean; lines: number; affectedEntries: number; debit: number; credit: number; accountId?: string; error?: string } => {
+    const result = { success: false, lines: 0, affectedEntries: 0, debit: 0, credit: 0 };
+    if (!reason.trim()) return { ...result, error: t('يرجى تسجيل سبب التجميع.', 'Enter a reason for consolidating the unmapped lines.') };
+    if (accountType === 'Revenue' || accountType === 'Expense') {
+      return { ...result, error: t('يجب تصنيف الحساب التجميعي ضمن حسابات الميزانية لا الإيرادات أو المصروفات.', 'The consolidation account must be a balance-sheet account, not revenue or expense.') };
+    }
+    const selectedIds = new Set(entryIds);
+    const candidates = allJournals.filter((entry) =>
+      selectedIds.has(entry.id) &&
+      entry.tenantId === tenant?.id &&
+      entry.isPosted
+    ).flatMap((entry) => {
+      const lines = entry.lines.filter((line) =>
+        !resolveJournalLineAccount(line, allAccounts, entry.tenantId, entry.branchId)
+      );
+      return lines.length > 0 ? [{ entry, lines }] : [];
+    });
+
+    if (candidates.length === 0) {
+      return { ...result, success: true };
+    }
+
+    const lockedEntry = candidates.find(({ entry }) => !validatePeriodDate(entry.date, entry.branchId).allowed);
+    if (lockedEntry) {
+      const lockResult = validatePeriodDate(lockedEntry.entry.date, lockedEntry.entry.branchId);
+      return {
+        ...result,
+        error: lockResult.message || t('تعذر تجميع سطور قيود داخل فترة مقفلة.', 'Cannot consolidate journal lines in a locked accounting period.'),
+      };
+    }
+
+    const tenantId = tenant?.id || INITIAL_TENANT.id;
+    const targetCode = '9999999';
+    const targetNameAr = 'أرصدة تاريخية مجمعة - تحت المراجعة';
+    const targetNameEn = 'Consolidated Historical Balances - Under Review';
+    const existingTargets = allAccounts.filter((account) =>
+      account.tenantId === tenantId && account.code.trim() === targetCode
+    );
+    if (existingTargets.length > 1) {
+      return { ...result, error: t('يوجد أكثر من حساب بالكود 9999999 لهذا الكيان؛ أزل التكرار قبل التجميع.', 'Multiple accounts with code 9999999 exist for this tenant. Resolve duplicates before consolidation.') };
+    }
+    const debitNormal = accountType === 'Asset';
+    let targetAccount = existingTargets[0];
+    if (targetAccount) {
+      if (targetAccount.branchId && targetAccount.branchId !== 'all') {
+        return { ...result, error: t('الحساب 9999999 الموجود خاص بفرع؛ يلزم حساب عام لتجميع حركات جميع الفروع.', 'The existing 9999999 account is branch-specific; a general account is required for consolidated movements.') };
+      }
+      if (targetAccount.nameAr !== targetNameAr || targetAccount.nameEn !== targetNameEn) {
+        return { ...result, error: t('الكود 9999999 مستخدم بالفعل لحساب آخر. لم يتم تعديل الحساب أو القيود.', 'Code 9999999 is already assigned to another account. No account or journal was changed.') };
+      }
+      const hasNonConsolidationMovements = allJournals.some((entry) =>
+        entry.tenantId === tenantId && entry.lines.some((line) =>
+          line.accountId === targetAccount?.id && !line.historicalAccountCode
+        )
+      );
+      if (hasNonConsolidationMovements) {
+        return { ...result, error: t('الحساب 9999999 يحتوي حركات غير ناتجة عن هذا التجميع؛ لم تتم إضافة الحركات لتجنب خلط الأرصدة.', 'Account 9999999 contains movements not created by this consolidation; no lines were added to avoid mixing balances.') };
+      }
+      if (targetAccount.type !== accountType || targetAccount.isDebitNormal !== debitNormal) {
+        return { ...result, error: t('تصنيف الحساب 9999999 الموجود لا يطابق التصنيف المختار. لم يتم تغيير الحساب.', 'The existing 9999999 account classification differs from the selected type. No changes were made.') };
+      }
+    }
+
+    let debit = 0;
+    let credit = 0;
+    const changedIds = new Set<string>();
+    if (!targetAccount) {
+      const newAccount: Account = {
+        id: `acc-historical-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        tenantId,
+        code: targetCode,
+        nameAr: targetNameAr,
+        nameEn: targetNameEn,
+        type: accountType,
+        level: 1,
+        balance: 0,
+        isDebitNormal: debitNormal,
+      };
+      targetAccount = newAccount;
+    }
+    const consolidationAccount = targetAccount;
+    const invalidLine = candidates.flatMap((candidate) => candidate.lines)
+      .find((line) => {
+        const debitAmount = Number(line.debit);
+        const creditAmount = Number(line.credit);
+        return !Number.isFinite(debitAmount) || !Number.isFinite(creditAmount) ||
+          debitAmount < 0 || creditAmount < 0 ||
+          (debitAmount > 0 && creditAmount > 0);
+      });
+    if (invalidLine) {
+      return { ...result, error: t('يوجد سطر غير صالح في القيود المختارة؛ لم يتم تغيير أي قيد.', 'An invalid journal line was found in the selected entries; no journal was changed.') };
+    }
+
+    const candidateByEntryId = new Map(candidates.map((candidate) => [candidate.entry.id, candidate]));
+    const updatedJournals = allJournals.map((entry) => {
+      const candidate = candidateByEntryId.get(entry.id);
+      if (!candidate) return entry;
+      const unmappedLines = new Set(candidate.lines);
+      const lines = entry.lines.map((line) => {
+        if (!unmappedLines.has(line)) return line;
+        debit += Number(line.debit) || 0;
+        credit += Number(line.credit) || 0;
+        return {
+          ...line,
+          historicalAccountId: line.historicalAccountId || line.accountId || undefined,
+          historicalAccountCode: line.historicalAccountCode || line.accountCode || undefined,
+          accountId: consolidationAccount.id,
+          accountCode: targetCode,
+          accountNameAr: targetNameAr,
+          accountNameEn: targetNameEn,
+        };
+      });
+      changedIds.add(entry.id);
+      return { ...entry, lines };
+    });
+    const lineCount = candidates.reduce((count, candidate) => count + candidate.lines.length, 0);
+    if (lineCount === 0) return { ...result, success: true };
+
+    const accountDelta = debitNormal ? debit - credit : credit - debit;
+    const resultingBalance = Number(((Number(consolidationAccount.balance) || 0) + accountDelta).toFixed(2));
+    const consolidatedAccount = { ...consolidationAccount, balance: resultingBalance };
+    if (existingTargets.length === 0) {
+      setAllAccounts((previous) => [...previous, consolidatedAccount]);
+      recordAudit({
+        entityType: 'Account',
+        entityId: consolidatedAccount.id,
+        entityName: `${targetCode} - ${targetNameAr}`,
+        actionType: 'CREATE',
+        reason: reason.trim(),
+        diffSummary: t(
+          `إنشاء حساب تجميعي مؤقت لتجميع ${lineCount} سطر تاريخي غير مربوط.`,
+          `Created a temporary consolidation account for ${lineCount} unmapped historical lines.`
+        ),
+        newState: consolidatedAccount,
+      });
+    } else {
+      setAllAccounts((previous) => previous.map((account) =>
+        account.id === consolidatedAccount.id ? consolidatedAccount : account
+      ));
+      recordAudit({
+        entityType: 'Account',
+        entityId: consolidatedAccount.id,
+        entityName: `${targetCode} - ${targetNameAr}`,
+        actionType: 'UPDATE',
+        reason: reason.trim(),
+        diffSummary: t(
+          `تحديث رصيد حساب التجميع بعد إضافة ${lineCount} سطر تاريخي غير مربوط.`,
+          `Updated the consolidation account balance after adding ${lineCount} unmapped historical lines.`
+        ),
+        previousState: targetAccount,
+        newState: consolidatedAccount,
+      });
+    }
+    setAllJournals(updatedJournals);
+    recordAudit({
+      entityType: 'JournalEntry',
+      entityId: `bulk-consolidate-${Date.now()}`,
+      entityName: t('تجميع قيود بحساب تاريخي مؤقت', 'Consolidate unmapped journals under a temporary account'),
+      actionType: 'UPDATE',
+      reason: reason.trim(),
+      diffSummary: t(
+        `تم ربط ${lineCount} سطرًا غير مربوط بالحساب ${targetCode} من ${changedIds.size} قيد؛ إجمالي الحركات دون تغيير: مدين ${debit.toFixed(2)} ودائن ${credit.toFixed(2)}.`,
+        `Assigned ${lineCount} unmapped lines to account ${targetCode} across ${changedIds.size} journals; movement totals unchanged: ${debit.toFixed(2)} debit and ${credit.toFixed(2)} credit.`
+      ),
+    });
+    logUserActivity(
+      'accounting', 'المحاسبة', 'Accounting',
+      'تجميع الحركات غير المربوطة', 'Consolidate unmapped journal lines',
+      `${lineCount} lines in ${changedIds.size} posted journals assigned to ${targetCode}; debit ${debit.toFixed(2)}, credit ${credit.toFixed(2)}; reason: ${reason.trim()}`
+    );
+    return { success: true, lines: lineCount, affectedEntries: changedIds.size, debit, credit, accountId: consolidationAccount.id };
   };
 
   const postJournalEntryWithSync = (entry: Omit<JournalEntry, 'id' | 'createdAt'>): JournalEntry => {
@@ -9909,6 +10095,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         getJournalEntrySourceInfo,
         repairJournalEntryLines,
         voidUnlinkedJournalEntry,
+        consolidateUnmappedJournalLines,
         auditRecords,
         allAuditRecords,
         userActivityLogs,
