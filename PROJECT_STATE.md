@@ -1,5 +1,11 @@
 # PROJECT STATE
 
+## Import date handling fix — 2026-10-11
+
+- Imported collection receipts and refunds were being dropped when the file date was not `YYYY-MM-DD`, so they never showed in the detailed customer statements.
+- Now the importer posts with the upload date and keeps the file date in the notes; the date column is optional in both importers.
+- Files: `src/views/CollectionReceiptsView.tsx`, `src/views/CustomerRefundsView.tsx`. Validation: tsc error count unchanged (126 pre-existing); vite build ok.
+
 ## Customer Refunds — Excel import + stricter manual validation — 2026-10-11
 
 - The Customer Dues Settlement screen now supports Excel import. Required columns: customer code (auto-serial), customer name, value; everything else is optional.
