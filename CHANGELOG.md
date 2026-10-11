@@ -2,6 +2,16 @@
 
 # 2026-10-11
 
+## Detailed Customer Account — Collection Receipt Quantity & Service Movements
+
+- Added a per-customer "Quantity & Service Movements from Collection Receipts" table inside the QUANTITY mode of the detailed customer account (`PartyStatementModal`).
+- The table reads directly from the receipt records (service name, booked quantity, value, collection method, voucher number, date), so every collection receipt appears line by line regardless of its source (direct entry, Excel import, migration posting).
+- The table respects the statement's active date-range filter and shows totals for booked quantity and value.
+- No change to the chart of accounts: the journal posting (debit = payment-method account, credit = unified customer control account 2000) is untouched. This only adds the detailed-account movement view.
+- Files: `src/components/PartyStatementModal.tsx`.
+
+# 2026-10-11
+
 ## Forced Permanent Journal Deletion
 
 - Added per-entry and bulk forced deletion from the General Journal. It intentionally bypasses accounting eligibility checks such as source linkage, period lock, posting state, and journal balance, while retaining a final confirmation and optional audit reason.

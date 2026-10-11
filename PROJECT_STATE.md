@@ -1,5 +1,13 @@
 # PROJECT STATE
 
+## Detailed Customer Account — Collection Receipt Quantity & Service Movements — 2026-10-11
+
+- Collection receipts now appear line by line in the detailed customer account (`PartyStatementModal`, QUANTITY mode) as a dedicated "Quantity & Service Movements" table: date, voucher number, service, booked quantity, value, and collection method, plus totals.
+- The table is built directly from the receipt records, so it shows receipts from every source (direct entry, Excel import, migration posting) and honours the statement's date-range filter.
+- The chart of accounts is deliberately unchanged: the journal entry still debits the payment-method-linked account and credits the unified customer control account `2000`. The detailed customer account is a separate, per-customer movement view and does not alter the consolidation design.
+- Decision: the "customer account" the owner referred to is the detailed/statement account (identified by the auto-serial customer code), not a per-customer chart-of-accounts account. No change to customer account consolidation was made.
+- Files: `src/components/PartyStatementModal.tsx`. Validation: `tsc --noEmit` error count unchanged (126 pre-existing) and `vite build` succeeded.
+
 ## Forced Permanent Journal Deletion — 2026-10-11
 
 - General Journal now offers a forced permanent delete action for one or multiple entries. After explicit confirmation it bypasses accounting eligibility checks, including source link, period lock, posted state, and balance. A deletion reason is optional; the deleted entry itself and actor/action are recorded in audit/activity logs.
