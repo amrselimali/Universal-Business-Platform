@@ -1,5 +1,12 @@
 # PROJECT STATE
 
+## Accounting — Excel export + active-branch default — 2026-10-11
+
+- Excel (.xlsx) export buttons added to all five accounting areas (COA, General Ledger, General Journal, Trial Balance, Customer/Supplier Statements). Each exports the full filtered dataset with Arabic headers.
+- `selectedBranchId` now defaults to the active branch (`activeBranch.id`); manual switching to all-branches/HQ is still available.
+- `PartyStatementModal` gained an optional `branchId` prop; when opened from Accounting it is branch-scoped, otherwise it keeps the previous all-branch behaviour.
+- New util: `src/utils/excelExport.ts`. Validation: tsc error count unchanged (126 pre-existing), vite build ok.
+
 ## Performance fix — fast bulk selection in General Journal — 2026-10-11
 
 - "Select all filtered entries" no longer freezes the app on large filters. Root cause: O(n²) `includes` checks over up to 40k selected ids, plus resolving each selected entry's source on every render.
