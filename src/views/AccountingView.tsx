@@ -3,6 +3,7 @@ import { usePlatform } from '../context/PlatformContext';
 import { Account, AccountType } from '../types';
 import { resolveJournalLineAccount } from '../services/accountingEngine';
 import { autoTranslateArabic } from '../utils/translator';
+import { exportRowsToExcel } from '../utils/excelExport';
 import {
   BookOpen,
   Scale,
@@ -23,6 +24,7 @@ import {
   ExternalLink,
   Building2,
   RotateCcw,
+  Download,
 } from 'lucide-react';
 import { PartyStatementModal } from '../components/PartyStatementModal';
 import { PaginationControls } from '../components/PaginationControls';
@@ -63,7 +65,7 @@ export const AccountingView: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState<string>('');
 
   // Multi-Branch Isolation state for Accounting (الفصل المحاسبي بين الفروع)
-  const [selectedBranchId, setSelectedBranchId] = useState<string>('all');
+  const [selectedBranchId, setSelectedBranchId] = useState<string>(activeBranch?.id || 'all');
   const [branchOnlyFilter, setBranchOnlyFilter] = useState<boolean>(false);
   const [accountPage, setAccountPage] = useState(1);
   const [generalLedgerPage, setGeneralLedgerPage] = useState(1);
@@ -986,6 +988,96 @@ export const AccountingView: React.FC = () => {
     setConsolidationReason('');
   };
 
+  // ---------------------------------------------------------------------------
+  // Excel export handlers (تصدير إكسل) — export the full filtered dataset of the
+  // active tab (not just the visible page), scoped to the selected branch.
+  // ---------------------------------------------------------------------------
+  const exportChartOfAccounts = () => {
+    exportRowsToExcel({
+      filename: 'شجرة_الحسابات',
+      sheetName: 'Chart of Accounts',
+      headers: ['كود الحساب', 'اسم الحساب', 'النوع', 'الفرع التابع', 'طبيعة الحساب', 'الرصيد من القيود المرحلة'],
+      rows: filteredAccounts.map((acc) => [
+        acc.code,
+        language === 'ar' ? acc.nameAr : acc.nameEn,
+        acc.type,
+        acc.branchId ? (branches.find((b) => b.id === acc.branchId)?.name || acc.branchNameAr || acc.branchId) : t('عام (كل الفروع)', 'Shared / HQ'),
+        acc.isDebitNormal ? t('مدين', 'Debit') : t('دائن', 'Credit'),
+        Number(acc.balance || 0),
+      ]),
+    });
+  };
+
+  const exportGeneralLedger = () => {
+    const rows: (string | number)[][] = [];
+    rows.push([t('--- رصيد بداية الفترة المنقول ---', '--- Opening Balance Carried Forward ---'), '', '', '', '', '', '', '', Number(glData.openingBalance || 0)]);
+    glData.movements.forEach((m) => {
+      rows.push([
+        m.date,
+        m.entryNumber,
+        m.branchId ? (branches.find((b) => b.id === m.branchId)?.name || m.branchId) : t('عام', 'HQ'),
+        m.sourceDocument || t('قيد يومية عام', 'General JV'),
+        m.description,
+        m.memo || '',
+        Number(m.debit || 0),
+        Number(m.credit || 0),
+        Number(m.runningBalance || 0),
+      ]);
+    });
+    rows.push([t('إجمالي حركات الفترة والرصيد الختامي', 'Total Period Movements & Closing Balance'), '', '', '', '', '', Number(glData.totalDebits || 0), Number(glData.totalCredits || 0), Number(glData.endingBalance || 0)]);
+    exportRowsToExcel({
+      filename: `دفتر_الأستاذ_${activeGLAccount?.code || ''}`,
+      sheetName: 'General Ledger',
+      headers: ['التاريخ', 'رقم القيد', 'الفرع', 'المستند المرجعي', 'البيان والشرح', 'ملاحظات السطر', 'مدين', 'دائن', 'الرصيد التراكمي'],
+      rows,
+    });
+  };
+
+  const exportGeneralJournal = () => {
+    const rows: (string | number)[][] = [];
+    filteredJournalTabEntries.forEach((entry) => {
+      const branchName = entry.branchId ? (branches.find((b) => b.id === entry.branchId)?.name || entry.branchId) : t('عام', 'HQ');
+      if (entry.lines.length === 0) {
+        rows.push([entry.entryNumber, entry.date, branchName, entry.sourceDocument || '', entry.description, '', '', '', 0, 0]);
+      }
+      entry.lines.forEach((line) => {
+        rows.push([
+          entry.entryNumber,
+          entry.date,
+          branchName,
+          entry.sourceDocument || '',
+          entry.description,
+          line.accountCode,
+          language === 'ar' ? line.accountNameAr : line.accountNameEn,
+          line.memo || '',
+          Number(line.debit || 0),
+          Number(line.credit || 0),
+        ]);
+      });
+    });
+    exportRowsToExcel({
+      filename: 'دفتر_اليومية_العامة',
+      sheetName: 'General Journal',
+      headers: ['رقم القيد', 'التاريخ', 'الفرع', 'المستند المرجعي', 'البيان', 'كود الحساب', 'اسم الحساب', 'ملاحظات السطر', 'مدين', 'دائن'],
+      rows,
+    });
+  };
+
+  const exportTrialBalance = () => {
+    exportRowsToExcel({
+      filename: 'ميزان_المراجعة',
+      sheetName: 'Trial Balance',
+      headers: ['كود الحساب', 'اسم الحساب', 'النوع', 'الفرع', 'رصيد مدين', 'رصيد دائن'],
+      rows: trialBalanceAccounts.map((acc) => [
+        acc.code,
+        language === 'ar' ? acc.nameAr : acc.nameEn,
+        acc.type,
+        acc.branchId ? (branches.find((b) => b.id === acc.branchId)?.name || acc.branchNameAr || acc.branchId) : t('عام', 'HQ'),
+        acc.balance > 0 ? Number(acc.balance) : 0,
+        acc.balance < 0 ? Number(-acc.balance) : 0,
+      ]),
+    });
+  };
   return (
     <div className="space-y-6">
       {/* Top Header & Actions */}
@@ -1185,6 +1277,7 @@ export const AccountingView: React.FC = () => {
       {/* TAB: CUSTOMER & SUPPLIER STATEMENTS */}
       {activeTab === 'statements' && (
         <PartyStatementModal
+          branchId={selectedBranchId}
           onClose={() => setActiveTab('coa')}
         />
       )}
@@ -1204,6 +1297,15 @@ export const AccountingView: React.FC = () => {
                 className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2 ps-9 pe-4 text-xs font-medium outline-none focus:border-indigo-500 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
               />
             </div>
+
+            <button
+              type="button"
+              onClick={exportChartOfAccounts}
+              className="flex items-center justify-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-100 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-300 shrink-0 transition-colors"
+            >
+              <Download className="h-3.5 w-3.5" />
+              <span>{t('تصدير Excel', 'Export Excel')}</span>
+            </button>
 
             <div className="flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto">
               {selectedBranchId !== 'all' && selectedBranchId !== 'general' && (
@@ -1390,6 +1492,15 @@ export const AccountingView: React.FC = () => {
                 ))}
               </select>
             </div>
+
+            <button
+              type="button"
+              onClick={exportGeneralLedger}
+              className="flex items-center justify-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-100 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-300 shrink-0 transition-colors"
+            >
+              <Download className="h-3.5 w-3.5" />
+              <span>{t('تصدير Excel', 'Export Excel')}</span>
+            </button>
 
             {/* Date Filters */}
             <div className="flex flex-wrap items-center gap-2">
@@ -1648,7 +1759,17 @@ export const AccountingView: React.FC = () => {
                   : t('عرض جميع قيود اليومية لجميع الفروع والمراكز.', 'Displaying all journal entries across all branches.')}
               </p>
             </div>
-            <span className="text-xs text-slate-400">{filteredJournalTabEntries.length} {t('قيد مطابق', 'matching entries')}</span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-400">{filteredJournalTabEntries.length} {t('قيد مطابق', 'matching entries')}</span>
+            <button
+              type="button"
+              onClick={exportGeneralJournal}
+              className="flex items-center justify-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-100 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-300 shrink-0 transition-colors"
+            >
+              <Download className="h-3.5 w-3.5" />
+              <span>{t('تصدير Excel', 'Export Excel')}</span>
+            </button>
+            </div>
           </div>
 
           <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950/40">
@@ -1983,6 +2104,14 @@ export const AccountingView: React.FC = () => {
             </div>
 
             <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={exportTrialBalance}
+              className="flex items-center justify-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-100 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-300 shrink-0 transition-colors"
+            >
+              <Download className="h-3.5 w-3.5" />
+              <span>{t('تصدير Excel', 'Export Excel')}</span>
+            </button>
               <span className={`rounded-full px-3 py-1 text-xs font-bold ${
                 trialBalanceStatus === 'balanced'
                   ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'

@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { usePlatform } from '../context/PlatformContext';
+import { exportRowsToExcel } from '../utils/excelExport';
 import { Party, ClientOffer } from '../types';
 import {
   FileText,
@@ -29,11 +30,13 @@ import {
   Check,
   ChevronDown,
   Info,
+  Download,
 } from 'lucide-react';
 
 interface PartyStatementModalProps {
   initialPartyId?: string | null;
   initialMode?: 'VALUE' | 'QUANTITY';
+  branchId?: string;
   onClose: () => void;
 }
 
@@ -53,6 +56,7 @@ interface StatementLine {
 export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
   initialPartyId,
   initialMode = 'VALUE',
+  branchId,
   onClose,
 }) => {
   const {
@@ -93,6 +97,14 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
   const [actionNotice, setActionNotice] = useState<string | null>(null);
 
   const currentParty = parties.find((p) => p.id === selectedPartyId);
+
+  // Branch isolation (الفلترة حسب الفرع): when a specific branch is provided (e.g. the
+  // active branch when opened from Accounting), only that branch's documents are included.
+  const branchScoped = branchId && branchId !== 'all' && branchId !== 'general' ? branchId : null;
+  const scopedInvoices = useMemo(() => (branchScoped ? invoices.filter((inv) => inv.branchId === branchScoped) : invoices), [invoices, branchScoped]);
+  const scopedShifts = useMemo(() => (branchScoped ? receptionShifts.filter((shift) => shift.branchId === branchScoped) : receptionShifts), [receptionShifts, branchScoped]);
+  const scopedReceipts = useMemo(() => (branchScoped ? cashReceipts.filter((rcpt) => rcpt.branchId === branchScoped) : cashReceipts), [cashReceipts, branchScoped]);
+  const scopedJournals = useMemo(() => (branchScoped ? journalEntries.filter((entry) => entry.branchId === branchScoped) : journalEntries), [journalEntries, branchScoped]);
 
   // Available filtered parties for dropdown (search by name, phone, customer code,
   // system code, paper code, file code, or file number)
@@ -171,7 +183,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
     // 1. Gather Customer Movements
     if (currentParty.type === 'Customer' || currentParty.type === 'Both') {
       // Invoices
-      invoices.forEach((inv) => {
+      scopedInvoices.forEach((inv) => {
         const matchCustomer =
           inv.customerId === currentParty.id ||
           (inv.customerName && inv.customerName.toLowerCase().trim() === pName);
@@ -210,7 +222,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
       });
 
       // Reception Shift Run Rows
-      receptionShifts.forEach((shift) => {
+      scopedShifts.forEach((shift) => {
         shift.runRows.forEach((row) => {
           const matchRow =
             row.customerId === currentParty.id ||
@@ -223,7 +235,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
           if (matchRow) {
             const rowDate = row.date || shift.shiftDate || shift.openedAt.slice(0, 10);
             const revenue = row.totalRevenue || 0;
-            const linkedReceipt = cashReceipts.find((receipt) =>
+            const linkedReceipt = scopedReceipts.find((receipt) =>
               receipt.status !== 'cancelled' && receipt.partyId === currentParty.id &&
               (receipt.id === row.receiptVoucherId ||
                 (Boolean(receipt.journalEntryId) && receipt.journalEntryId === row.journalEntryId &&
@@ -262,7 +274,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
       });
 
       // Direct Collection Receipts / Cash Receipt Vouchers (سندات وإيصالات التحصيل المسجلة للعميل)
-      cashReceipts.forEach((rcpt) => {
+      scopedReceipts.forEach((rcpt) => {
         if (rcpt.status === 'cancelled') return;
         const matchRcpt =
           rcpt.partyId
@@ -293,7 +305,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
 
     // 2. Gather Supplier Movements
     if (currentParty.type === 'Supplier' || currentParty.type === 'Both') {
-      receptionShifts.forEach((shift) => {
+      scopedShifts.forEach((shift) => {
         shift.expenses.forEach((exp) => {
           const matchSupplier =
             exp.supplierId === currentParty.id ||
@@ -350,7 +362,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
     }
 
     const receiptJournalIds = new Set(
-      cashReceipts
+      scopedReceipts
         .filter((receipt) => receipt.partyId === currentParty.id && receipt.status !== 'cancelled')
         .map((receipt) => receipt.journalEntryId)
         .filter((journalId): journalId is string => Boolean(journalId))
@@ -364,7 +376,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
       .filter((identifier): identifier is string => Boolean(identifier));
 
     // 3. Journal Entries mentioning this party
-    journalEntries.forEach((entry) => {
+    scopedJournals.forEach((entry) => {
       if (entry.entryNumber?.startsWith('JV-MNT')) return;
       const isCollectionPosting = entry.sourceDocument?.startsWith('إيصالات التحصيل -') || false;
       if (receiptJournalIds.has(entry.id) || isCollectionPosting) return;
@@ -428,7 +440,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
       totalDebits: sumDebits,
       totalCredits: sumCredits,
     };
-  }, [currentParty, invoices, receptionShifts, cashReceipts, journalEntries, deviceMaintenanceRecords, filterStart, filterEnd]);
+  }, [currentParty, branchScoped, invoices, receptionShifts, cashReceipts, journalEntries, deviceMaintenanceRecords, filterStart, filterEnd]);
 
   // QUANTITY & SERVICE MOVEMENTS FROM COLLECTION RECEIPTS
   // (حركات الكميات والخدمة المقيدة من إيصالات التحصيل)
@@ -441,7 +453,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
     const pCode = currentParty.systemCode?.toLowerCase().trim();
     const pCustomerCode = (currentParty.customerCode || currentParty.code)?.toLowerCase().trim();
 
-    return cashReceipts
+    return scopedReceipts
       .filter((rcpt) => rcpt.status !== 'cancelled' && !rcpt.isArchived)
       .filter((rcpt) => {
         const matchRcpt = rcpt.partyId
@@ -463,7 +475,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
       }))
       .filter((movement) => movement.quantity > 0)
       .sort((a, b) => a.date.localeCompare(b.date));
-  }, [currentParty, cashReceipts, filterStart, filterEnd]);
+  }, [currentParty, branchScoped, cashReceipts, filterStart, filterEnd]);
 
   const totalReceiptQuantity = useMemo(
     () => receiptQuantityMovements.reduce((sum, movement) => sum + movement.quantity, 0),
@@ -543,7 +555,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
     const pPhone = currentParty.phone.trim();
     const pCode = currentParty.systemCode?.toLowerCase().trim();
 
-    receptionShifts.forEach((shift) => {
+    scopedShifts.forEach((shift) => {
       shift.runRows.forEach((row) => {
         const match =
           row.customerId === currentParty.id ||
@@ -569,7 +581,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
     });
 
     return rows.sort((a, b) => b.date.localeCompare(a.date));
-  }, [currentParty, receptionShifts]);
+  }, [currentParty, branchScoped, receptionShifts]);
 
   // Handle direct session consumption from statement
   const handleConsumeSession = (offerId: string, offerName: string) => {
@@ -653,6 +665,46 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
     window.open(`https://wa.me/${cleanPhone}?text=${text}`, '_blank');
   };
 
+  const handleExportExcel = () => {
+    if (!currentParty) return;
+    const safeCode = (currentParty.customerCode || currentParty.code || currentParty.name || 'customer').replace(/[\s/\\]+/g, '_');
+    if (statementMode === 'QUANTITY') {
+      exportRowsToExcel({
+        filename: `كشف_كميات_${safeCode}`,
+        sheetName: 'Quantities',
+        headers: ['التاريخ', 'البند / الخدمة', 'الكمية المحجوزة', 'المستهلك', 'المتبقي', 'نسبة الإنجاز %', 'قيمة الباقة'],
+        rows: clientOffers.map((offer) => [
+          offer.purchaseDate || '',
+          offer.offerNameAr,
+          Number(offer.totalQuantity || 0),
+          Number(offer.consumedQuantity || 0),
+          Number(offer.remainingQuantity || 0),
+          offer.totalQuantity > 0 ? Math.round(((offer.consumedQuantity || 0) / offer.totalQuantity) * 100) : 0,
+          Number(offer.totalPrice || 0),
+        ]),
+      });
+      return;
+    }
+    const rows: (string | number)[][] = [
+      [t('رصيد أول المدة', 'Opening Balance'), '', '', '', '', '', Number(openingBalance || 0)],
+      ...periodMovements.map((movement) => [
+        movement.date,
+        movement.docNumber,
+        movement.docTypeAr,
+        movement.description,
+        Number(movement.debit || 0),
+        Number(movement.credit || 0),
+        Number(movement.runningBalance || 0),
+      ]),
+      [t('الإجمالي والرصيد الختامي', 'Totals & Closing Balance'), '', '', '', Number(totalDebits || 0), Number(totalCredits || 0), Number(closingBalance || 0)],
+    ];
+    exportRowsToExcel({
+      filename: `كشف_حساب_${safeCode}`,
+      sheetName: 'Statement',
+      headers: ['التاريخ', 'رقم المستند', 'نوع الحركة', 'البيان', 'مدين', 'دائن', 'الرصيد التراكمي'],
+      rows,
+    });
+  };
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 md:p-6 bg-slate-950/75 backdrop-blur-xs">
       <div className="flex flex-col w-full max-w-5xl h-[94vh] bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden print:m-0 print:h-auto print:max-w-none print:border-none print:shadow-none">
@@ -701,6 +753,17 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
                 <span className="hidden sm:inline">{t('واتساب', 'WhatsApp')}</span>
               </button>
             )}
+
+            <button
+              id="btn-export-excel-statement"
+              onClick={handleExportExcel}
+              disabled={!currentParty}
+              title={t('تصدير الكشف إلى Excel', 'Export statement to Excel')}
+              className="flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 py-2 text-xs font-bold text-white shadow-md shadow-emerald-600/20 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all cursor-pointer"
+            >
+              <Download className="h-4 w-4" />
+              <span className="hidden sm:inline">{t('تصدير Excel', 'Export Excel')}</span>
+            </button>
 
             <button
               id="btn-print-statement"

@@ -2,6 +2,15 @@
 
 # 2026-10-11
 
+## Accounting — Excel export in every tab + active-branch default
+
+- Added real Excel (.xlsx) export to Chart of Accounts, General Ledger, General Journal, Trial Balance, and Customer/Supplier Statements. Exports include the full filtered dataset (not just the visible page) with Arabic headers and sensible column widths.
+- Accounting now defaults to the **active branch** instead of "All Branches"; the branch selector remains for manual switching to all branches / HQ.
+- Customer/Supplier Statements opened from Accounting are now branch-scoped (only the selected branch's documents); statements opened from Parties/Suppliers keep the existing all-branch behaviour.
+- New helper `src/utils/excelExport.ts` (`exportRowsToExcel`). Files: `src/views/AccountingView.tsx`, `src/components/PartyStatementModal.tsx`.
+
+# 2026-10-11
+
 ## Performance fix — fast bulk selection in General Journal
 
 - Fixed the UI freeze when using "Select all filtered entries" on very large filters (e.g. 40,000 entries). The freeze was caused by quadratic (O(n²)) membership checks and by resolving every selected entry's source on each render.
