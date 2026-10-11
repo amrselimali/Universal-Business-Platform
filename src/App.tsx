@@ -29,6 +29,7 @@ import { LaserDevicesView } from './views/LaserDevicesView';
 import { FiscalDocumentsView } from './views/FiscalDocumentsView';
 import { CashReceiptsView } from './views/CashReceiptsView';
 import { CollectionReceiptsView } from './views/CollectionReceiptsView';
+import { CustomerRefundsView } from './views/CustomerRefundsView';
 import { CashPaymentsView } from './views/CashPaymentsView';
 import { SpecializedTaxInvoicesView } from './views/SpecializedTaxInvoicesView';
 import { GoodsReceiptsView } from './views/GoodsReceiptsView';
@@ -115,6 +116,7 @@ const MainLayout: React.FC = () => {
         'products',
         'inventory_mgmt',
         'inventory',
+        'customer_refunds',
         'cash_receipts',
         'cash_payments',
         'tax_invoices',
@@ -243,6 +245,8 @@ const MainLayout: React.FC = () => {
         return <InvoicesView />;
       case 'collection_receipts':
         return <CollectionReceiptsView />;
+      case 'customer_refunds':
+        return <CustomerRefundsView />;
       case 'parties':
         return <PartiesView />;
       case 'suppliers':

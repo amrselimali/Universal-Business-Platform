@@ -31,6 +31,7 @@ import {
   ChevronDown,
   Info,
   Download,
+  Undo2,
 } from 'lucide-react';
 
 interface PartyStatementModalProps {
@@ -70,6 +71,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
     invoices,
     receptionShifts,
     cashReceipts,
+    customerRefunds,
     journalEntries,
     deviceMaintenanceRecords,
     consumeClientOfferSession,
@@ -104,6 +106,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
   const scopedInvoices = useMemo(() => (branchScoped ? invoices.filter((inv) => inv.branchId === branchScoped) : invoices), [invoices, branchScoped]);
   const scopedShifts = useMemo(() => (branchScoped ? receptionShifts.filter((shift) => shift.branchId === branchScoped) : receptionShifts), [receptionShifts, branchScoped]);
   const scopedReceipts = useMemo(() => (branchScoped ? cashReceipts.filter((rcpt) => rcpt.branchId === branchScoped) : cashReceipts), [cashReceipts, branchScoped]);
+  const scopedRefunds = useMemo(() => (branchScoped ? customerRefunds.filter((refund) => refund.branchId === branchScoped) : customerRefunds), [customerRefunds, branchScoped]);
   const scopedJournals = useMemo(() => (branchScoped ? journalEntries.filter((entry) => entry.branchId === branchScoped) : journalEntries), [journalEntries, branchScoped]);
 
   // Available filtered parties for dropdown (search by name, phone, customer code,
@@ -301,6 +304,25 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
           }
         }
       });
+
+      // Customer refunds (استردادات العملاء) — recorded as a DEBIT against the customer
+      scopedRefunds.forEach((refund) => {
+        if (refund.status === 'cancelled') return;
+        if (refund.partyId !== currentParty.id) return;
+        const refundAmount = Number(refund.amount) || 0;
+        if (refundAmount <= 0) return;
+        const unitsInfo = refund.units ? ` [وحدات مستردة: ${refund.units}]` : '';
+        rawMovements.push({
+          date: refund.date,
+          docNumber: refund.voucherNumber,
+          docType: 'ExpensePayment',
+          docTypeAr: 'استرداد للعميل (مدين)',
+          description: `${refund.serviceName || 'استرداد مستحقات'}${unitsInfo}${refund.notes ? ` - ${refund.notes}` : ''}`,
+          debit: refundAmount,
+          credit: 0,
+          paymentMethod: refund.paymentMethodLabel,
+        });
+      });
     }
 
     // 2. Gather Supplier Movements
@@ -440,7 +462,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
       totalDebits: sumDebits,
       totalCredits: sumCredits,
     };
-  }, [currentParty, branchScoped, invoices, receptionShifts, cashReceipts, journalEntries, deviceMaintenanceRecords, filterStart, filterEnd]);
+  }, [currentParty, branchScoped, invoices, receptionShifts, cashReceipts, customerRefunds, journalEntries, deviceMaintenanceRecords, filterStart, filterEnd]);
 
   // QUANTITY & SERVICE MOVEMENTS FROM COLLECTION RECEIPTS
   // (حركات الكميات والخدمة المقيدة من إيصالات التحصيل)
@@ -481,6 +503,25 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
     () => receiptQuantityMovements.reduce((sum, movement) => sum + movement.quantity, 0),
     [receiptQuantityMovements]
   );
+
+  // REFUND QUANTITY MOVEMENTS (حركات الكميات المستردة من سندات الاسترداد)
+  const refundQuantityMovements = useMemo(() => {
+    if (!currentParty) return [];
+    return scopedRefunds
+      .filter((refund) => refund.status !== 'cancelled' && refund.partyId === currentParty.id)
+      .filter((refund) => refund.date >= filterStart && refund.date <= filterEnd)
+      .map((refund) => ({
+        id: refund.id,
+        date: refund.date,
+        voucherNumber: refund.voucherNumber,
+        service: refund.serviceName || 'استرداد مستحقات',
+        units: Number(refund.units || 0),
+        amount: Number(refund.amount || 0),
+        paymentMethod: refund.paymentMethodLabel,
+      }))
+      .filter((movement) => movement.units > 0)
+      .sort((a, b) => a.date.localeCompare(b.date));
+  }, [currentParty, scopedRefunds, filterStart, filterEnd]);
 
   // QUANTITY & SESSIONS ANALYSIS (كشف حساب الكميات والباقات)
   // The quantity view keeps its existing mechanism (packages/offers). Collection
@@ -1328,6 +1369,67 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
                       </table>
                     </div>
                   </div>
+
+                  {/* REFUND QUANTITY MOVEMENTS (حركات الكميات المستردة) */}
+                  {refundQuantityMovements.length > 0 && (
+                    <div className="rounded-2xl border border-rose-200 dark:border-rose-900/50 bg-white dark:bg-slate-900 overflow-hidden shadow-xs">
+                      <div className="p-3.5 border-b border-rose-100 dark:border-rose-900/40 flex items-center justify-between bg-rose-50/60 dark:bg-rose-950/20">
+                        <div className="flex items-center gap-2">
+                          <Undo2 className="h-4 w-4 text-rose-600" />
+                          <h4 className="text-xs font-bold text-slate-800 dark:text-white">
+                            {t('حركات الكميات المستردة (بالسالب)', 'Refunded Quantity Movements (negative)')}
+                          </h4>
+                        </div>
+                        <span className="text-[10px] text-rose-500 font-mono">
+                          {refundQuantityMovements.length} {t('حركة', 'movements')}
+                        </span>
+                      </div>
+                      <div className="overflow-x-auto max-h-64">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="border-b border-slate-200 text-slate-400 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/50 sticky top-0">
+                              <th className="py-2 px-3 font-bold text-start">{t('التاريخ', 'Date')}</th>
+                              <th className="py-2 px-3 font-bold text-start">{t('رقم السند', 'Voucher')}</th>
+                              <th className="py-2 px-3 font-bold text-start">{t('الخدمة', 'Service')}</th>
+                              <th className="py-2 px-3 font-bold text-center">{t('الوحدات المستردة', 'Refunded Units')}</th>
+                              <th className="py-2 px-3 font-bold text-end">{t('القيمة', 'Value')}</th>
+                              <th className="py-2 px-3 font-bold text-center">{t('طريقة الصرف', 'Method')}</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                            {refundQuantityMovements.map((movement) => (
+                              <tr key={movement.id} className="hover:bg-rose-50/40 dark:hover:bg-rose-950/20">
+                                <td className="py-2 px-3 font-mono text-slate-500 whitespace-nowrap">{movement.date}</td>
+                                <td className="py-2 px-3 font-mono text-slate-600 dark:text-slate-300 whitespace-nowrap">{movement.voucherNumber}</td>
+                                <td className="py-2 px-3 font-bold text-slate-800 dark:text-slate-200">{movement.service}</td>
+                                <td className="py-2 px-3 text-center font-mono font-black text-rose-600">-{movement.units}</td>
+                                <td className="py-2 px-3 text-end font-mono font-bold text-rose-600">{formatMoney(movement.amount)}</td>
+                                <td className="py-2 px-3 text-center">
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                                    {movement.paymentMethod}
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                          <tfoot>
+                            <tr className="border-t-2 border-rose-200 dark:border-rose-900/50 font-bold bg-rose-50/60 dark:bg-rose-950/20">
+                              <td className="py-3 px-3 font-bold" colSpan={3}>
+                                {t('إجمالي الوحدات والقيمة المستردة:', 'Total refunded units & value:')}
+                              </td>
+                              <td className="py-3 px-3 text-center font-mono font-black text-rose-700 dark:text-rose-300 text-sm">
+                                -{refundQuantityMovements.reduce((sum, movement) => sum + movement.units, 0)} {t('وحدة', 'units')}
+                              </td>
+                              <td className="py-3 px-3 text-end font-mono font-black text-rose-700 dark:text-rose-300 text-sm">
+                                {formatMoney(refundQuantityMovements.reduce((sum, movement) => sum + movement.amount, 0))}
+                              </td>
+                              <td className="py-3 px-3 print:hidden"></td>
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </div>
+                    </div>
+                  )}
 
                   {/* SESSIONS CONSUMPTION HISTORY LOG (سجل الجلسات المنفذة وحضور العميل) */}
                   {clientShiftSessions.length > 0 && (

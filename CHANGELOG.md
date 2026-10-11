@@ -2,6 +2,17 @@
 
 # 2026-10-11
 
+## New screen — Customer Dues Settlement (تسوية مستحقات عميل)
+
+- Added a dedicated screen listing all customer refunds, defaulting to **today's refunds** and scoped to the **active branch**.
+- Record a refund with refunded units, unit price and refund value (auto-computed as units × price, editable); the customer is searched by name, customer code, system code, file code, paper code or phone; the selected customer's value and quantity balances are shown before saving.
+- Posting: **customer account debit / payment-method-linked account credit**, posted to the journal, chart of accounts and trial balance; the value and quantity are reflected in the customer statement.
+- The refunded units reduce the customer's remaining package balance and appear as a negative quantity movement in the statement's quantity view; the refund appears as a debit movement in the value view.
+- Refunds can be cancelled with a required reason (reverses the accounting effect and the customer balance) and exported to Excel.
+- Files: `src/views/CustomerRefundsView.tsx` (new), `src/types.ts`, `src/context/PlatformContext.tsx`, `src/App.tsx`, `src/components/Sidebar.tsx`, `src/components/PartyStatementModal.tsx`.
+
+# 2026-10-11
+
 ## Accounting — Excel export in every tab + active-branch default
 
 - Added real Excel (.xlsx) export to Chart of Accounts, General Ledger, General Journal, Trial Balance, and Customer/Supplier Statements. Exports include the full filtered dataset (not just the visible page) with Arabic headers and sensible column widths.

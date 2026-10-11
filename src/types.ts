@@ -892,7 +892,7 @@ export interface AuditRecord {
   id: string;
   tenantId: string;
   branchId?: string;
-  entityType: 'Party' | 'Appointment' | 'TreatmentPlan' | 'Staff' | 'PaymentMethod' | 'Product' | 'Invoice' | 'Shift' | 'Tenant' | 'Branch' | 'Warehouse' | 'User' | 'Account' | 'JournalEntry';
+  entityType: 'Party' | 'Appointment' | 'TreatmentPlan' | 'Staff' | 'PaymentMethod' | 'Product' | 'Invoice' | 'Shift' | 'Tenant' | 'Branch' | 'Warehouse' | 'User' | 'Account' | 'JournalEntry' | 'CustomerRefund';
   entityId: string;
   entityName: string;
   actionType: 'CREATE' | 'UPDATE' | 'DELETE' | 'ARCHIVE' | 'RESTORE' | 'CANCEL';
@@ -982,6 +982,31 @@ export interface AppUser {
 // ==========================================
 // سندات ومستندات محاسبية ومخزنية متخصصة
 // ==========================================
+
+export interface CustomerRefundVoucher {
+  id: string;
+  voucherNumber: string;
+  date: string;
+  tenantId: string;
+  branchId: string;
+  partyId: string;
+  customerCode?: string;
+  systemCode?: string;
+  customerName: string;
+  units: number; // عدد الوحدات المستردة
+  unitPrice: number; // سعر الوحدة
+  amount: number; // القيمة المستردة
+  paymentMethodId?: string;
+  paymentMethodLabel: string;
+  paymentAccountId?: string;
+  serviceName?: string;
+  notes?: string;
+  status: 'active' | 'cancelled';
+  journalEntryId?: string;
+  createdAt: string;
+  createdBy?: string;
+}
+
 
 export interface CashReceiptVoucher {
   id: string;
