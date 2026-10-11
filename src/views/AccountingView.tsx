@@ -262,6 +262,11 @@ export const AccountingView: React.FC = () => {
   const selectableJournalPageEntryIds = paginatedJournalEntries.map((entry) => entry.id);
   const allSelectableJournalPageEntriesSelected = selectableJournalPageEntryIds.length > 0 &&
     selectableJournalPageEntryIds.every((entryId) => selectedJournalEntryIds.includes(entryId));
+
+  // All IDs across every page of the current filter result
+  const allFilteredJournalEntryIds = filteredJournalTabEntries.map((entry) => entry.id);
+  const allFilteredJournalEntriesSelected = allFilteredJournalEntryIds.length > 0 &&
+    allFilteredJournalEntryIds.every((entryId) => selectedJournalEntryIds.includes(entryId));
   const selectedReversibleJournalEntryIds = selectedJournalEntryIds.filter((entryId) => {
     const entry = journalEntries.find((candidate) => candidate.id === entryId);
     return !!entry && !journalReversalBlockReason(entry);
@@ -1724,19 +1729,37 @@ export const AccountingView: React.FC = () => {
               </button>
             </div>
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-3 dark:border-slate-800">
-              <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-200">
-                <input
-                  type="checkbox"
-                  checked={allSelectableJournalPageEntriesSelected}
-                  disabled={selectableJournalPageEntryIds.length === 0}
-                  onChange={(event) => setSelectedJournalEntryIds((previous) => event.target.checked
-                    ? Array.from(new Set([...previous, ...selectableJournalPageEntryIds]))
-                    : previous.filter((id) => !selectableJournalPageEntryIds.includes(id)))}
-                  className="h-4 w-4 rounded border-slate-300 text-indigo-600"
-                />
-                {t('تحديد كل قيود الصفحة', 'Select all entries on this page')}
-                <span className="font-mono text-slate-500">({selectedJournalEntryIds.length})</span>
-              </label>
+              <div className="flex flex-wrap items-center gap-4">
+                <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-200">
+                  <input
+                    type="checkbox"
+                    checked={allSelectableJournalPageEntriesSelected}
+                    disabled={selectableJournalPageEntryIds.length === 0}
+                    onChange={(event) => setSelectedJournalEntryIds((previous) => event.target.checked
+                      ? Array.from(new Set([...previous, ...selectableJournalPageEntryIds]))
+                      : previous.filter((id) => !selectableJournalPageEntryIds.includes(id)))}
+                    className="h-4 w-4 rounded border-slate-300 text-indigo-600"
+                  />
+                  {t('تحديد كل قيود الصفحة', 'Select all entries on this page')}
+                  <span className="font-mono text-slate-400">({selectableJournalPageEntryIds.length})</span>
+                </label>
+                <label className="inline-flex items-center gap-2 text-xs font-semibold text-indigo-700 dark:text-indigo-300">
+                  <input
+                    type="checkbox"
+                    checked={allFilteredJournalEntriesSelected}
+                    disabled={allFilteredJournalEntryIds.length === 0}
+                    onChange={(event) => setSelectedJournalEntryIds(event.target.checked
+                      ? allFilteredJournalEntryIds
+                      : [])}
+                    className="h-4 w-4 rounded border-indigo-300 text-indigo-600"
+                  />
+                  {t('تحديد كل قيود الفلتر', 'Select all filtered entries')}
+                  <span className="font-mono text-indigo-400">({allFilteredJournalEntryIds.length})</span>
+                </label>
+                <span className="text-xs text-slate-500 dark:text-slate-400">
+                  {t('المحدد:', 'Selected:')} <span className="font-mono font-bold text-slate-700 dark:text-slate-200">{selectedJournalEntryIds.length}</span>
+                </span>
+              </div>
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
