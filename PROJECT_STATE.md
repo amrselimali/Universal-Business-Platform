@@ -1,5 +1,11 @@
 # PROJECT STATE
 
+## Performance fix — fast bulk selection in General Journal — 2026-10-11
+
+- "Select all filtered entries" no longer freezes the app on large filters. Root cause: O(n²) `includes` checks over up to 40k selected ids, plus resolving each selected entry's source on every render.
+- Fixes: memoized selection `Set` (O(1) membership), lazy reversible-subset resolution on action, memoized id lists, and O(n²)→O(n) maps in `forceDeleteJournalEntries`/`reverseJournalEntries`.
+- Behaviour/eligibility rules unchanged. Files: `src/views/AccountingView.tsx`, `src/context/PlatformContext.tsx`. Validation: tsc error count unchanged (126 pre-existing), vite build ok.
+
 ## Detailed Customer Account — Receipt-linked quantity view & improved selector — 2026-10-11
 
 - Quantity view (QUANTITY mode) now links collection-receipt data (product/service name + booked quantity) into its existing offers/packages mechanism; the earlier standalone table was removed. Receipts already represented as offers are de-duplicated by voucher number.
