@@ -430,6 +430,46 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
     return currentParty?.offers || [];
   }, [currentParty]);
 
+
+  // QUANTITY & SERVICE MOVEMENTS FROM COLLECTION RECEIPTS
+  // (حركات الكميات والخدمة المقيدة من إيصالات التحصيل)
+  // Reads directly from the receipt records so every receipt shows here regardless
+  // of its source (direct entry, Excel import, migration posting, ...).
+  // This belongs to the detailed customer account only; the chart of accounts is untouched.
+  const receiptQuantityMovements = useMemo(() => {
+    if (!currentParty) return [];
+    const pName = currentParty.name.toLowerCase().trim();
+    const pCode = currentParty.systemCode?.toLowerCase().trim();
+    const pCustomerCode = (currentParty.customerCode || currentParty.code)?.toLowerCase().trim();
+
+    return cashReceipts
+      .filter((rcpt) => rcpt.status !== 'cancelled' && !rcpt.isArchived)
+      .filter((rcpt) => {
+        const matchRcpt = rcpt.partyId
+          ? rcpt.partyId === currentParty.id
+          : (Boolean(pCode && rcpt.systemCode?.toLowerCase().trim() === pCode) ||
+            Boolean(pCustomerCode && rcpt.customerCode?.toLowerCase().trim() === pCustomerCode) ||
+            Boolean(rcpt.receivedFrom && rcpt.receivedFrom.toLowerCase().trim() === pName));
+        return matchRcpt;
+      })
+      .filter((rcpt) => rcpt.date >= filterStart && rcpt.date <= filterEnd)
+      .map((rcpt) => ({
+        id: rcpt.id,
+        date: rcpt.date,
+        voucherNumber: rcpt.voucherNumber || rcpt.referenceInvoiceNo || `CR-${rcpt.id.slice(-5)}`,
+        service: rcpt.serviceName || rcpt.productName || rcpt.description || 'خدمة / جلسة',
+        quantity: Number(rcpt.bookedQuantity || rcpt.quantity || 0),
+        amount: Number(rcpt.amount) || 0,
+        paymentMethod: rcpt.paymentMethodLabel || (rcpt.paymentMethod === 'Cash' ? 'نقداً (كاش)' : rcpt.paymentMethod === 'Card' ? 'بطاقة' : 'تحويل'),
+      }))
+      .filter((movement) => movement.quantity > 0)
+      .sort((a, b) => a.date.localeCompare(b.date));
+  }, [currentParty, cashReceipts, filterStart, filterEnd]);
+
+  const totalReceiptQuantity = useMemo(
+    () => receiptQuantityMovements.reduce((sum, movement) => sum + movement.quantity, 0),
+    [receiptQuantityMovements]
+  );
   const {
     totalBookedSessions,
     totalConsumedSessions,
@@ -1170,6 +1210,72 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
                       </table>
                     </div>
                   </div>
+
+                  {/* COLLECTION RECEIPT QUANTITY & SERVICE MOVEMENTS (حركات الكميات والخدمة من إيصالات التحصيل) */}
+                  {receiptQuantityMovements.length > 0 && (
+                    <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden shadow-xs">
+                      <div className="p-3.5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-800/30">
+                        <div className="flex items-center gap-2">
+                          <Package className="h-4 w-4 text-blue-600" />
+                          <h4 className="text-xs font-bold text-slate-800 dark:text-white">
+                            {t('حركات الكميات والخدمة المقيدة من إيصالات التحصيل', 'Quantity & Service Movements from Collection Receipts')}
+                          </h4>
+                        </div>
+                        <span className="text-[10px] text-slate-400 font-mono">
+                          {receiptQuantityMovements.length} {t('حركة', 'movements')} · {totalReceiptQuantity} {t('إجمالي الكمية', 'total qty')}
+                        </span>
+                      </div>
+
+                      <div className="overflow-x-auto max-h-72">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="border-b border-slate-200 text-slate-400 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/50 sticky top-0">
+                              <th className="py-2 px-3 font-bold text-start">{t('التاريخ', 'Date')}</th>
+                              <th className="py-2 px-3 font-bold text-start">{t('رقم السند', 'Voucher No.')}</th>
+                              <th className="py-2 px-3 font-bold text-start">{t('الخدمة / الجلسة', 'Service')}</th>
+                              <th className="py-2 px-3 font-bold text-center">{t('الكمية المحجوزة', 'Booked Qty')}</th>
+                              <th className="py-2 px-3 font-bold text-end">{t('القيمة', 'Value')}</th>
+                              <th className="py-2 px-3 font-bold text-center">{t('طريقة التحصيل', 'Collection Method')}</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                            {receiptQuantityMovements.map((movement) => (
+                              <tr key={movement.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/30">
+                                <td className="py-2 px-3 font-mono text-slate-500 whitespace-nowrap">{movement.date}</td>
+                                <td className="py-2 px-3 font-mono text-slate-600 dark:text-slate-300 whitespace-nowrap">{movement.voucherNumber}</td>
+                                <td className="py-2 px-3 font-bold text-slate-800 dark:text-slate-200">{movement.service}</td>
+                                <td className="py-2 px-3 text-center font-mono font-bold text-blue-600">
+                                  {movement.quantity}
+                                </td>
+                                <td className="py-2 px-3 text-end font-mono font-bold text-slate-700 dark:text-slate-200">
+                                  {formatMoney(movement.amount)}
+                                </td>
+                                <td className="py-2 px-3 text-center">
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                                    {movement.paymentMethod}
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                          <tfoot>
+                            <tr className="border-t-2 border-slate-300 dark:border-slate-700 font-bold bg-slate-50 dark:bg-slate-850">
+                              <td className="py-3 px-3 font-bold" colSpan={3}>
+                                {t('إجمالي الكميات المحجوزة والقيمة:', 'Total Booked Quantity & Value:')}
+                              </td>
+                              <td className="py-3 px-3 text-center font-mono font-black text-blue-700 dark:text-blue-300 text-sm">
+                                {totalReceiptQuantity} {t('وحدة', 'units')}
+                              </td>
+                              <td className="py-3 px-3 text-end font-mono font-black text-slate-900 dark:text-white text-sm">
+                                {formatMoney(receiptQuantityMovements.reduce((sum, movement) => sum + movement.amount, 0))}
+                              </td>
+                              <td className="py-3 px-3 print:hidden"></td>
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </div>
+                    </div>
+                  )}
 
                   {/* SESSIONS CONSUMPTION HISTORY LOG (سجل الجلسات المنفذة وحضور العميل) */}
                   {clientShiftSessions.length > 0 && (
