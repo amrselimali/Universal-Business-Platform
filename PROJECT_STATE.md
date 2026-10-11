@@ -1,5 +1,26 @@
 # PROJECT STATE
 
+## Fix Customer Control Account Resolution & Migration Errors (1120 vs 2000) — 2026-10-11
+
+- Resolved errors during hydration and customer reconciliation:
+  - Error 0 & 1 (`Customer account linking skipped: لا يوجد حساب عملاء مسجل بالكود 2000 لهذا الكيان. Tenant: tenant-2718 / tenant-eg-004`).
+  - Error 2 (`Collection receipt migration skipped: الحساب 2000 ليس أصلًا ذا طبيعة مدينة، لذلك لا يمكن استخدامه كحساب تحكم للعملاء. Tenant: tenant-eg-001`).
+- Root cause: `resolveCustomerControlAccount` and `resolveCustomerPartyAccount` in `accountingEngine.ts` strictly looked for account code `2000` and required it to be an Asset with normal debit balance. In the chart of accounts (`INITIAL_ACCOUNTS` and `baseAccountDefs`), account `2000` is Liabilities (`الخصوم والالتزامات`, type `Liability`, `isDebitNormal: false`), while the true customer receivable control account is code `1120` (`العملاء والمدينون التجاريون`, type `Asset`, `isDebitNormal: true`). This caused `tenant-eg-001` to be rejected as non-asset, and tenants without custom code `2000` to be skipped completely.
+- Fix:
+  - Updated `resolveCustomerControlAccount` in `src/services/accountingEngine.ts` to prioritize standard account `1120` (Asset, debit normal), custom `2000` only if configured as debit-normal Asset, any Asset customer receivable account, and synthesize a tenant-scoped `1120` account fallback.
+  - Unified `resolveCustomerPartyAccount` with `resolveCustomerControlAccount`.
+  - Added auto-provisioning of missing `1120` control accounts for any tenant with customers in `PlatformContext.tsx`.
+  - Updated `PartyStatementModal.tsx` to recognize both `1120` and `2000` as shared customer control accounts.
+- Files: `src/services/accountingEngine.ts`, `src/context/PlatformContext.tsx`, `src/components/PartyStatementModal.tsx`. Validation: `compile_applet` passed.
+
+## Settlement View Default Today & Customer Statement Date Presentation — 2026-10-11
+
+- Customer Dues Settlement (`CustomerRefundsView`): Defaulted date filter strictly to today (`dateFrom = today`, `dateTo = today`) as requested by the user, while keeping manual date range and "All" buttons available.
+- Detailed Customer Statement (`PartyStatementModal`):
+  - Removed the branch switching toggle and the extra "show receipts outside date" banner per user request.
+  - All collection receipts are recorded using the upload date as the transaction date, while any original receipt date (from Excel import or input) is embedded directly into the explanation/description (`[تاريخ الإيصال: ...]`) alongside any previous notes.
+- Files: `src/views/CustomerRefundsView.tsx`, `src/components/PartyStatementModal.tsx`, `src/views/CollectionReceiptsView.tsx`. Validation: `compile_applet` passed.
+
 ## Customer Refunds Persistence & Comprehensive Statement Receipts Linking — 2026-10-11
 
 - Fixed Customer Dues Settlement (`CustomerRefundsView` / `allCustomerRefunds`) persistence: `erp_customer_refunds` was not loaded in `hydrateDatasets` and was mirrored only to IndexedDB without localStorage, causing imported movements to disappear upon refresh. Now fully hydrated from IndexedDB, mirrored safely to both localStorage and IndexedDB, with an automatic self-healing recovery from journal entries.

@@ -49,8 +49,8 @@ export const CustomerRefundsView: React.FC = () => {
   } = usePlatform();
 
   const today = new Date().toISOString().slice(0, 10);
-  const [dateFrom, setDateFrom] = useState<string>('');
-  const [dateTo, setDateTo] = useState<string>('');
+  const [dateFrom, setDateFrom] = useState<string>(today);
+  const [dateTo, setDateTo] = useState<string>(today);
   const [showAllBranches, setShowAllBranches] = useState<boolean>(true);
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'cancelled'>('all');
   const [search, setSearch] = useState<string>('');

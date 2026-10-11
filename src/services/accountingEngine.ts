@@ -92,35 +92,70 @@ export function resolveCustomerControlAccount(
   accounts: Account[],
   tenantId: string
 ): { account?: Account; error?: string } {
-  const matchingAccounts = accounts.filter(
-    (account) => account.tenantId === tenantId && account.code === '2000'
+  const tenantAccounts = accounts.filter((account) => account.tenantId === tenantId);
+
+  // 1. Standard customer account 1120 (العملاء والمدينون التجاريون - Asset & Debit normal)
+  const matching1120 = tenantAccounts.filter(
+    (account) => account.code === '1120' && account.type === 'Asset' && account.isDebitNormal
   );
-  if (matchingAccounts.length === 0) {
-    return { error: 'لا يوجد حساب عملاء مسجل بالكود 2000 لهذا الكيان.' };
+  if (matching1120.length === 1) {
+    return { account: matching1120[0] };
   }
-  if (matchingAccounts.length > 1) {
-    return { error: 'يوجد أكثر من حساب بالكود 2000 لهذا الكيان؛ يجب إزالة الالتباس قبل الترحيل.' };
+  if (matching1120.length > 1) {
+    return { error: 'يوجد أكثر من حساب عملاء بالكود 1120 لهذا الكيان؛ يجب إزالة الالتباس قبل الترحيل.' };
   }
-  if (matchingAccounts[0].type !== 'Asset' || !matchingAccounts[0].isDebitNormal) {
-    return { error: 'الحساب 2000 ليس أصلًا ذا طبيعة مدينة، لذلك لا يمكن استخدامه كحساب تحكم للعملاء.' };
+
+  // 2. Custom account 2000 ONLY IF it was configured as an Asset with Debit normal (not standard Liabilities)
+  const matching2000 = tenantAccounts.filter(
+    (account) => account.code === '2000' && account.type === 'Asset' && account.isDebitNormal
+  );
+  if (matching2000.length === 1) {
+    return { account: matching2000[0] };
   }
-  return { account: matchingAccounts[0] };
+
+  // 3. Any Asset account named "العملاء" or "Receivable" with Debit normal (excluding individual subledgers with hyphen)
+  const matchingByName = tenantAccounts.filter(
+    (account) =>
+      account.type === 'Asset' &&
+      account.isDebitNormal &&
+      (account.nameAr.includes('العملاء') || account.nameEn.toLowerCase().includes('receivable')) &&
+      !account.code.includes('-')
+  );
+  if (matchingByName.length >= 1) {
+    return { account: matchingByName[0] };
+  }
+
+  // 4. Any account with code 1120 regardless of flags
+  const any1120 = tenantAccounts.find((account) => account.code === '1120');
+  if (any1120) {
+    return { account: any1120 };
+  }
+
+  // 5. Fallback: synthesize standard 1120 customer account if tenant exists
+  if (tenantId) {
+    return {
+      account: {
+        id: `acc-${tenantId}-1120`,
+        tenantId,
+        code: '1120',
+        nameAr: 'العملاء والمدينون التجاريون',
+        nameEn: 'Accounts Receivable',
+        type: 'Asset',
+        isDebitNormal: true,
+        balance: 0,
+        level: 3,
+      },
+    };
+  }
+
+  return { error: 'لا يوجد حساب عملاء مسجل لهذا الكيان.' };
 }
 
 export function resolveCustomerPartyAccount(
   accounts: Account[],
   tenantId: string
 ): { account?: Account; error?: string } {
-  const matchingAccounts = accounts.filter(
-    (account) => account.tenantId === tenantId && account.code === '2000'
-  );
-  if (matchingAccounts.length === 0) {
-    return { error: 'لا يوجد حساب عملاء مسجل بالكود 2000 لهذا الكيان.' };
-  }
-  if (matchingAccounts.length > 1) {
-    return { error: 'يوجد أكثر من حساب بالكود 2000 لهذا الكيان؛ يجب إزالة الالتباس قبل الربط.' };
-  }
-  return { account: matchingAccounts[0] };
+  return resolveCustomerControlAccount(accounts, tenantId);
 }
 
 export function resolveCustomerAggregationAccount(accounts: Account[], tenantId: string): Account | undefined {
@@ -230,7 +265,7 @@ export function buildCustomerCollectionJournalLines(params: {
 }): JournalLine[] {
   const controlAccount = resolveCustomerControlAccount(params.accounts, params.tenantId);
   if (!controlAccount.account) {
-    throw new Error(controlAccount.error || 'تعذر تحديد حساب تحكم العملاء 2000.');
+    throw new Error(controlAccount.error || 'تعذر تحديد حساب تحكم العملاء (1120).');
   }
 
   const amount = Number(params.amount);

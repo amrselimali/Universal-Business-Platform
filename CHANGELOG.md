@@ -2,6 +2,23 @@
 
 # 2026-10-11
 
+## Customer Control Account Resolution & Migration Errors Fix (1120 vs 2000)
+
+- Fixed hydration and reconciliation errors for customer account linking and collection receipt migration (`tenant-2718`, `tenant-eg-004`, `tenant-eg-001`).
+- Resolved account code confusion: updated `resolveCustomerControlAccount` and `resolveCustomerPartyAccount` in `accountingEngine.ts` to identify the true customer receivable account (`1120` / Accounts Receivable, Asset, debit-normal) rather than mistakenly enforcing account `2000` (which is standard Liabilities in the chart of accounts).
+- Added auto-provisioning of `1120` control accounts for any tenant with customers in `PlatformContext.tsx`.
+- Updated `PartyStatementModal.tsx` to handle shared control accounts (`1120` and `2000`) cleanly without individual memo leaks.
+- Files: `src/services/accountingEngine.ts`, `src/context/PlatformContext.tsx`, `src/components/PartyStatementModal.tsx`.
+ 
++## Settlement View Default Today & Customer Statement Date Presentation
++
++- Updated Customer Dues Settlement (`CustomerRefundsView`): Now defaults to showing **today's settlements only** (`today`), with quick buttons for "All" or custom date ranges.
++- Refactored Detailed Customer Statement (`PartyStatementModal`):
++  - Removed the branch switching toggle and the extra "show receipts outside date" warning button.
++  - Receipts uploaded/migrated display the transaction date as the upload date, while any irregular or original file date is cleanly preserved in the receipt notes and description (`[تاريخ الإيصال: ...]`) along with previous notes.
++- Files: `src/views/CustomerRefundsView.tsx`, `src/components/PartyStatementModal.tsx`, `src/views/CollectionReceiptsView.tsx`.
++
+
 ## Customer Refunds Persistence & Detailed Statement Linking
 
 - Fixed Customer Dues Settlement (`CustomerRefundsView`) movements disappearing after page refresh: added `erp_customer_refunds` hydration from IndexedDB, mirrored persistence across both IndexedDB and localStorage, and introduced automatic journal recovery for any existing refund transactions.

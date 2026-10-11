@@ -8693,6 +8693,44 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (!isStorageHydrated) return;
 
     const accountsForReconciliation = [...allAccounts];
+    const missingControlAccounts: Account[] = [];
+
+    const tenantIdsWithCustomers = new Set(
+      allParties
+        .filter((p) => p.type === 'Customer' || p.type === 'Both')
+        .map((p) => p.tenantId)
+        .filter(Boolean)
+    );
+
+    tenantIdsWithCustomers.forEach((tId) => {
+      const existing = accountsForReconciliation.find(
+        (a) =>
+          a.tenantId === tId &&
+          (a.code === '1120' ||
+            (a.code === '2000' && a.type === 'Asset' && a.isDebitNormal) ||
+            (a.type === 'Asset' && a.isDebitNormal && (a.nameAr.includes('العملاء') || a.nameEn?.toLowerCase().includes('receivable')) && !a.code.includes('-')))
+      );
+      if (!existing) {
+        const newAcc: Account = {
+          id: `acc-${tId}-1120`,
+          tenantId: tId,
+          code: '1120',
+          nameAr: 'العملاء والمدينون التجاريون',
+          nameEn: 'Accounts Receivable',
+          type: 'Asset',
+          isDebitNormal: true,
+          balance: 0,
+          level: 3,
+        };
+        accountsForReconciliation.push(newAcc);
+        missingControlAccounts.push(newAcc);
+      }
+    });
+
+    if (missingControlAccounts.length > 0) {
+      setAllAccounts((prev) => [...prev, ...missingControlAccounts]);
+    }
+
     const accountBalanceDeltas = new Map<string, number>();
     const consolidatedBalances = new Map<string, number>();
     const consolidatedAccountIds = new Map<string, string>();
@@ -9277,6 +9315,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         bankOrSafeAccountId: item.paymentAccountId,
         referenceInvoiceNo: item.receiptNumber || undefined,
         description: `${displayDesc}${item.notes ? ` - ${item.notes}` : ''}`,
+        notes: item.notes,
         serviceId: item.serviceId,
         serviceName: item.serviceName,
         productId: item.productId,

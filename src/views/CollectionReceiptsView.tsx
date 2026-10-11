@@ -922,7 +922,10 @@ export const CollectionReceiptsView: React.FC = () => {
         bookedQuantity: Number(row.bookedQuantity) || 1,
         quantity: Number(row.bookedQuantity) || 1,
         receiptNumber: row.receiptNumber,
-        notes: [row.notes, (row.fileDate || row.date) ? `تاريخ الإيصال: ${row.fileDate || row.date}` : ''].filter(Boolean).join(' - ') || undefined,
+        notes: [
+          row.notes,
+          (row.fileDate || row.date) ? `تاريخ الإيصال: ${row.fileDate || row.date}` : '',
+        ].filter(Boolean).join(' - ') || undefined,
         patientPhone: row.patientPhone,
         customerCode: row.customerCode,
         systemCode: parties.find((party) => party.id === row.customerId)?.systemCode,

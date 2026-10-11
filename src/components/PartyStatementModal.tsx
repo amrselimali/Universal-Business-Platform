@@ -343,13 +343,14 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
         const amt = Number(rcpt.amount) || 0;
         if (amt > 0) {
           let originalDateStr = '';
-          if (rcpt.notes) {
-            const m = rcpt.notes.match(/(?:تاريخ الإيصال|التاريخ المسجل في الملف|تاريخ التحصيل)[\s:]*([0-9\-/T]+)/);
-            if (m) originalDateStr = m[1];
-          }
-          const dateNote = originalDateStr ? ` [تاريخ الإيصال: ${originalDateStr}]` : '';
+          const sourceText = [rcpt.notes, rcpt.description].filter(Boolean).join(' ');
+          const m = sourceText.match(/(?:تاريخ الإيصال|التاريخ المسجل في الملف|تاريخ التحصيل)[\s:]*([0-9\-/T]+)/);
+          if (m) originalDateStr = m[1];
+
+          let serviceDesc = rcpt.serviceName || rcpt.productName || rcpt.description || 'إيصال تحصيل نقدية';
+          const hasDateInDesc = originalDateStr && serviceDesc.includes(originalDateStr);
+          const dateNote = originalDateStr && !hasDateInDesc ? ` [تاريخ الإيصال: ${originalDateStr}]` : '';
           const bookedInfo = (rcpt.bookedQuantity || rcpt.quantity) ? ` [كمية محجوزة: ${rcpt.bookedQuantity || rcpt.quantity}]` : '';
-          const serviceDesc = rcpt.serviceName || rcpt.productName || rcpt.description || 'إيصال تحصيل نقدية';
           const cleanNotes = rcpt.notes && originalDateStr && rcpt.notes.includes(originalDateStr)
             ? rcpt.notes.replace(new RegExp(`(?:تاريخ الإيصال|التاريخ المسجل في الملف|تاريخ التحصيل)[\\s:]*${originalDateStr}`, 'g'), '').replace(/^[\s\-|]+|[\s\-|]+$/g, '').trim()
             : rcpt.notes;
@@ -453,7 +454,10 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
         .filter((journalId): journalId is string => Boolean(journalId))
     );
     const linkedPartyAccount = accounts.find((account) => account.id === currentParty.accountId);
-    const hasSharedCustomerControlAccount = linkedPartyAccount?.code === '2000';
+    const hasSharedCustomerControlAccount =
+      linkedPartyAccount?.code === '1120' ||
+      linkedPartyAccount?.code === '2000' ||
+      (linkedPartyAccount?.type === 'Asset' && !linkedPartyAccount?.code.includes('-'));
     const supplierAccountId = currentParty.type === 'Both'
       ? currentParty.supplierAccountId
       : currentParty.type === 'Supplier' ? currentParty.accountId : undefined;
@@ -541,12 +545,13 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
       .filter((rcpt) => rcpt.date >= filterStart && rcpt.date <= filterEnd)
       .map((rcpt) => {
         let originalDateStr = '';
-        if (rcpt.notes) {
-          const m = rcpt.notes.match(/(?:تاريخ الإيصال|التاريخ المسجل في الملف|تاريخ التحصيل)[\s:]*([0-9\-/T]+)/);
-          if (m) originalDateStr = m[1];
-        }
+        const sourceText = [rcpt.notes, rcpt.description].filter(Boolean).join(' ');
+        const m = sourceText.match(/(?:تاريخ الإيصال|التاريخ المسجل في الملف|تاريخ التحصيل)[\s:]*([0-9\-/T]+)/);
+        if (m) originalDateStr = m[1];
         const baseService = rcpt.serviceName || rcpt.productName || rcpt.description || 'خدمة / جلسة';
-        const displayService = originalDateStr ? `${baseService} [تاريخ الإيصال: ${originalDateStr}]` : baseService;
+        const displayService = originalDateStr && !baseService.includes(originalDateStr)
+          ? `${baseService} [تاريخ الإيصال: ${originalDateStr}]`
+          : baseService;
         return {
           id: rcpt.id,
           date: rcpt.date,
@@ -1056,61 +1061,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
             </div>
           )}
 
-          {/* Branch scope toggle if branchId was provided */}
-          {branchId && (
-            <div className="md:col-span-12 flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100 dark:border-slate-800 text-xs">
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] font-bold text-slate-500">{t('نطاق الفروع:', 'Branch scope:')}</span>
-                <button
-                  type="button"
-                  onClick={() => setIncludeAllBranches(true)}
-                  className={`px-2.5 py-1 text-xs font-bold rounded-lg cursor-pointer transition-colors ${
-                    includeAllBranches
-                      ? 'bg-indigo-600 text-white shadow-xs'
-                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
-                  }`}
-                >
-                  {t('كافة فروع الشركة (شامل)', 'All Branches (Comprehensive)')}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIncludeAllBranches(false)}
-                  className={`px-2.5 py-1 text-xs font-bold rounded-lg cursor-pointer transition-colors ${
-                    !includeAllBranches
-                      ? 'bg-indigo-600 text-white shadow-xs'
-                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
-                  }`}
-                >
-                  {t('الفرع المالي الحالي فقط', 'Active Branch Only')}
-                </button>
-              </div>
-            </div>
-          )}
 
-          {/* Warning banner if collection receipts are hidden outside current filters */}
-          {hiddenReceiptsCount > 0 && (
-            <div className="md:col-span-12 flex flex-wrap items-center justify-between gap-2 p-3 rounded-xl border border-amber-200 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/20 text-amber-900 dark:text-amber-200 text-xs font-bold shadow-xs">
-              <div className="flex items-center gap-2">
-                <AlertCircle className="h-4 w-4 text-amber-600 shrink-0" />
-                <span>
-                  {t(
-                    `يوجد ${hiddenReceiptsCount} إيصال تحصيل مسجل للعميل خارج نطاق التاريخ المحدد أو في فرع آخر.`,
-                    `There are ${hiddenReceiptsCount} recorded collection receipts for this client outside the current date filter or in another branch.`
-                  )}
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setDateFilter('ALL');
-                  setIncludeAllBranches(true);
-                }}
-                className="px-3 py-1 bg-amber-600 text-white rounded-lg hover:bg-amber-700 cursor-pointer text-xs font-bold shadow-xs"
-              >
-                {t('عرض كافة الإيصالات والتواريخ والفروع الآن', 'Show All Receipts & Dates Now')}
-              </button>
-            </div>
-          )}
         </div>
 
         {/* Scrollable Statement Body */}
