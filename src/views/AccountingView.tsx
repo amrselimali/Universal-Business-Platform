@@ -36,6 +36,9 @@ export const AccountingView: React.FC = () => {
     updateAccount,
     deleteAccount,
     createManualJournalEntry,
+    getJournalEntrySourceInfo,
+    repairJournalEntryLines,
+    voidUnlinkedJournalEntry,
     language,
     tenant,
     branches,
@@ -102,6 +105,15 @@ export const AccountingView: React.FC = () => {
     { accountId: accounts[1]?.id || '', debit: 0, credit: 1000, memo: '' },
   ]);
   const [modalError, setModalError] = useState<string | null>(null);
+  const [showUnbalancedJournalModal, setShowUnbalancedJournalModal] = useState(false);
+  const [unbalancedPage, setUnbalancedPage] = useState(1);
+  const [editingUnbalancedEntryId, setEditingUnbalancedEntryId] = useState<string | null>(null);
+  const [repairLines, setRepairLines] = useState<{ accountId: string; debit: number; credit: number; memo: string }[]>([]);
+  const [repairReason, setRepairReason] = useState('');
+  const [repairError, setRepairError] = useState<string | null>(null);
+  const [voidingUnbalancedEntryId, setVoidingUnbalancedEntryId] = useState<string | null>(null);
+  const [voidReason, setVoidReason] = useState('');
+  const [voidError, setVoidError] = useState<string | null>(null);
 
   // Filtered accounts based on Selected Branch
   const activeBranchAccounts = useMemo(() => {
@@ -219,6 +231,11 @@ export const AccountingView: React.FC = () => {
       resolvedByLegacyCodeCount,
     };
   }, [accounts, filteredJournalEntries]);
+  const paginatedUnbalancedEntries = useMemo(
+    () => trialBalanceDiagnostics.unbalancedEntries.slice((unbalancedPage - 1) * rowsPerPage, unbalancedPage * rowsPerPage),
+    [trialBalanceDiagnostics.unbalancedEntries, unbalancedPage]
+  );
+  useEffect(() => setUnbalancedPage(1), [selectedBranchId]);
 
   const totalDebits = trialBalanceAccounts.reduce((sum, account) => sum + Math.max(0, account.balance), 0);
   const totalCredits = trialBalanceAccounts.reduce((sum, account) => sum + Math.max(0, -account.balance), 0);
@@ -585,6 +602,48 @@ export const AccountingView: React.FC = () => {
     }
   };
 
+  const startRepairJournal = (entryId: string) => {
+    const entry = journalEntries.find((candidate) => candidate.id === entryId);
+    if (!entry) return;
+    setRepairLines(entry.lines.map((line) => ({
+      accountId: line.accountId,
+      debit: Number(line.debit) || 0,
+      credit: Number(line.credit) || 0,
+      memo: line.memo || '',
+    })));
+    setRepairReason('');
+    setRepairError(null);
+    setEditingUnbalancedEntryId(entryId);
+    setVoidingUnbalancedEntryId(null);
+  };
+
+  const handleRepairJournal = () => {
+    if (!editingUnbalancedEntryId) return;
+    const result = repairJournalEntryLines(editingUnbalancedEntryId, repairLines, repairReason);
+    if (!result.success) {
+      setRepairError(result.error || t('تعذر حفظ تصحيح القيد.', 'Could not save journal correction.'));
+      return;
+    }
+    setEditingUnbalancedEntryId(null);
+    setRepairLines([]);
+    setRepairReason('');
+    setRepairError(null);
+    setUnbalancedPage(1);
+  };
+
+  const handleVoidJournal = () => {
+    if (!voidingUnbalancedEntryId) return;
+    const result = voidUnlinkedJournalEntry(voidingUnbalancedEntryId, voidReason);
+    if (!result.success) {
+      setVoidError(result.error || t('تعذر إلغاء القيد.', 'Could not void journal entry.'));
+      return;
+    }
+    setVoidingUnbalancedEntryId(null);
+    setVoidReason('');
+    setVoidError(null);
+    setUnbalancedPage(1);
+  };
+
   return (
     <div className="space-y-6">
       {/* Top Header & Actions */}
@@ -633,6 +692,23 @@ export const AccountingView: React.FC = () => {
           >
             <Plus className="h-4 w-4" />
             <span>{t('إضافة حساب بالشجرة', 'Add Account')}</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setEditingUnbalancedEntryId(null);
+              setVoidingUnbalancedEntryId(null);
+              setShowUnbalancedJournalModal(true);
+            }}
+            className={`flex items-center justify-center gap-1.5 rounded-xl px-3.5 py-2.5 text-xs font-bold shadow-sm transition-all active:scale-95 cursor-pointer ${
+              hasUnbalancedJournalEntries
+                ? 'bg-rose-600 text-white hover:bg-rose-700'
+                : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300'
+            }`}
+          >
+            <AlertCircle className="h-4 w-4" />
+            <span>{t('القيود غير المتوازنة', 'Unbalanced journals')}</span>
+            <span className="rounded-full bg-white/20 px-1.5 py-0.5 font-mono">{trialBalanceDiagnostics.unbalancedEntries.length}</span>
           </button>
 
           <button
@@ -1245,6 +1321,11 @@ export const AccountingView: React.FC = () => {
                     <span className="rounded-lg bg-indigo-600 px-2 py-0.5 font-mono text-xs font-bold text-white">
                       {entry.entryNumber}
                     </span>
+                    {!entry.isPosted && (
+                      <span className="rounded-lg bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-700 dark:bg-slate-700 dark:text-slate-200">
+                        {entry.voidReason ? t('ملغي الترحيل', 'Voided') : t('غير مرحل', 'Unposted')}
+                      </span>
+                    )}
                     <span className="font-bold text-slate-900 dark:text-white">{entry.description}</span>
                   </div>
                   <div className="flex items-center gap-2 text-xs text-slate-500 flex-wrap">
@@ -1266,6 +1347,11 @@ export const AccountingView: React.FC = () => {
                     )}
                   </div>
                 </div>
+                {entry.voidReason && (
+                  <p className="text-[11px] text-rose-700 dark:text-rose-300">
+                    {t('سبب إلغاء الترحيل:', 'Void reason:')} {entry.voidReason} · {entry.voidedBy} · {entry.voidedAt}
+                  </p>
+                )}
 
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs">
@@ -1525,6 +1611,268 @@ export const AccountingView: React.FC = () => {
       )}
 
       {/* ADD / EDIT ACCOUNT MODAL */}
+      {showUnbalancedJournalModal && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-3 backdrop-blur-sm">
+          <div className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900">
+            <div className="flex items-center justify-between border-b border-slate-200 p-4 dark:border-slate-800">
+              <div>
+                <h2 className="text-base font-black text-slate-900 dark:text-white">
+                  {t('مراجعة القيود غير المتوازنة ومصادرها', 'Unbalanced Journals & Sources')}
+                </h2>
+                <p className="text-xs text-slate-500">
+                  {t('يُسمح بتصحيح القيد المتوازن مع الحفاظ على إجمالي المصدر. القيود المرتبطة بمصدر آخر تُعدّل من شاشته.', 'Corrections preserve linked source totals. Other source-linked entries must be changed from their source screen.')}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowUnbalancedJournalModal(false)}
+                className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+                aria-label={t('إغلاق', 'Close')}
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="overflow-y-auto p-4">
+              {editingUnbalancedEntryId ? (() => {
+                const entry = journalEntries.find((candidate) => candidate.id === editingUnbalancedEntryId);
+                if (!entry) return <p className="text-sm text-rose-600">{t('القيد لم يعد موجودًا.', 'The journal entry no longer exists.')}</p>;
+                const sourceInfo = getJournalEntrySourceInfo(entry.id);
+                const repairAccounts = accounts.filter((account) =>
+                  account.tenantId === entry.tenantId &&
+                  (!account.branchId || account.branchId === 'all' || account.branchId === entry.branchId)
+                );
+                const debitTotal = repairLines.reduce((sum, line) => sum + (Number(line.debit) || 0), 0);
+                const creditTotal = repairLines.reduce((sum, line) => sum + (Number(line.credit) || 0), 0);
+                return (
+                  <div className="space-y-4">
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
+                      <p className="font-bold">{entry.entryNumber} · {entry.date} · {entry.description}</p>
+                      <p className="mt-1">{t('المصدر:', 'Source:')} {sourceInfo.description}</p>
+                      {sourceInfo.expectedAmount !== undefined && (
+                        <p className="mt-1 font-semibold">
+                          {t('إجمالي المستندات المرتبطة (يجب الحفاظ عليه):', 'Linked source total (must be preserved):')} {formatMoney(sourceInfo.expectedAmount)}
+                        </p>
+                      )}
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full min-w-[700px] text-xs">
+                        <thead>
+                          <tr className="border-b border-slate-200 text-start text-slate-500 dark:border-slate-700">
+                            <th className="p-2 text-start">{t('الحساب', 'Account')}</th>
+                            <th className="p-2 text-start">{t('البيان', 'Memo')}</th>
+                            <th className="p-2 text-end">{t('مدين', 'Debit')}</th>
+                            <th className="p-2 text-end">{t('دائن', 'Credit')}</th>
+                            <th className="p-2"></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {repairLines.map((line, index) => (
+                            <tr key={`${editingUnbalancedEntryId}-${index}`} className="border-b border-slate-100 dark:border-slate-800">
+                              <td className="p-2">
+                                <select
+                                  value={line.accountId}
+                                  onChange={(event) => setRepairLines((previous) => previous.map((item, itemIndex) =>
+                                    itemIndex === index ? { ...item, accountId: event.target.value } : item
+                                  ))}
+                                  className="w-full min-w-[220px] rounded-lg border border-slate-200 bg-white p-2 dark:border-slate-700 dark:bg-slate-800"
+                                >
+                                  <option value="">{t('اختر حسابًا', 'Select account')}</option>
+                                  {repairAccounts.map((account) => (
+                                    <option key={account.id} value={account.id}>
+                                      {account.code} - {language === 'ar' ? account.nameAr : account.nameEn}
+                                    </option>
+                                  ))}
+                                </select>
+                              </td>
+                              <td className="p-2">
+                                <input
+                                  value={line.memo}
+                                  onChange={(event) => setRepairLines((previous) => previous.map((item, itemIndex) =>
+                                    itemIndex === index ? { ...item, memo: event.target.value } : item
+                                  ))}
+                                  className="w-full min-w-[140px] rounded-lg border border-slate-200 bg-white p-2 dark:border-slate-700 dark:bg-slate-800"
+                                />
+                              </td>
+                              <td className="p-2">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  value={line.debit}
+                                  onChange={(event) => setRepairLines((previous) => previous.map((item, itemIndex) =>
+                                    itemIndex === index ? { ...item, debit: Number(event.target.value) || 0 } : item
+                                  ))}
+                                  className="w-28 rounded-lg border border-slate-200 bg-white p-2 text-end font-mono dark:border-slate-700 dark:bg-slate-800"
+                                />
+                              </td>
+                              <td className="p-2">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  value={line.credit}
+                                  onChange={(event) => setRepairLines((previous) => previous.map((item, itemIndex) =>
+                                    itemIndex === index ? { ...item, credit: Number(event.target.value) || 0 } : item
+                                  ))}
+                                  className="w-28 rounded-lg border border-slate-200 bg-white p-2 text-end font-mono dark:border-slate-700 dark:bg-slate-800"
+                                />
+                              </td>
+                              <td className="p-2 text-center">
+                                <button
+                                  type="button"
+                                  onClick={() => setRepairLines((previous) => previous.filter((_, itemIndex) => itemIndex !== index))}
+                                  className="rounded-lg p-2 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30"
+                                  aria-label={t('حذف السطر', 'Remove line')}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot>
+                          <tr className="font-bold">
+                            <td className="p-2" colSpan={2}>{t('الإجمالي', 'Totals')}</td>
+                            <td className={`p-2 text-end font-mono ${Math.abs(debitTotal - creditTotal) < 0.01 ? 'text-emerald-600' : 'text-rose-600'}`}>{formatMoney(debitTotal)}</td>
+                            <td className="p-2 text-end font-mono">{formatMoney(creditTotal)}</td>
+                            <td></td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setRepairLines((previous) => [...previous, {
+                          accountId: repairAccounts[0]?.id || '',
+                          debit: 0,
+                          credit: 0,
+                          memo: '',
+                        }])}
+                        className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                      >
+                        <span className="inline-flex items-center gap-1"><Plus className="h-4 w-4" />{t('إضافة سطر', 'Add line')}</span>
+                      </button>
+                      <input
+                        value={repairReason}
+                        onChange={(event) => setRepairReason(event.target.value)}
+                        placeholder={t('سبب التصحيح (إلزامي)', 'Correction reason (required)')}
+                        className="min-w-[260px] flex-1 rounded-lg border border-slate-200 bg-white p-2 text-xs dark:border-slate-700 dark:bg-slate-800"
+                      />
+                    </div>
+                    {repairError && <p className="rounded-lg bg-rose-50 p-2 text-xs text-rose-700 dark:bg-rose-950/30 dark:text-rose-300">{repairError}</p>}
+                    <div className="flex justify-end gap-2 border-t border-slate-200 pt-3 dark:border-slate-800">
+                      <button type="button" onClick={() => setEditingUnbalancedEntryId(null)} className="rounded-lg px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800">
+                        {t('رجوع للقائمة', 'Back to list')}
+                      </button>
+                      <button type="button" onClick={handleRepairJournal} className="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-bold text-white hover:bg-indigo-700">
+                        {t('حفظ التصحيح', 'Save correction')}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })() : (
+                <div className="space-y-4">
+                  {voidingUnbalancedEntryId && (
+                    <div className="space-y-2 rounded-xl border border-rose-200 bg-rose-50 p-3 dark:border-rose-900/50 dark:bg-rose-950/20">
+                      <p className="text-xs font-bold text-rose-800 dark:text-rose-200">
+                        {t('سيتم إلغاء ترحيل القيد اليدوي مع الاحتفاظ بسجله وسجل التدقيق.', 'The manual journal will be unposted while retaining its history and audit trail.')}
+                      </p>
+                      <input
+                        value={voidReason}
+                        onChange={(event) => setVoidReason(event.target.value)}
+                        placeholder={t('سبب الإلغاء (إلزامي)', 'Void reason (required)')}
+                        className="w-full rounded-lg border border-rose-200 bg-white p-2 text-xs dark:border-rose-800 dark:bg-slate-900"
+                      />
+                      {voidError && <p className="text-xs text-rose-700 dark:text-rose-300">{voidError}</p>}
+                      <div className="flex justify-end gap-2">
+                        <button type="button" onClick={() => setVoidingUnbalancedEntryId(null)} className="rounded-lg px-3 py-1.5 text-xs font-bold text-slate-600">{t('إلغاء', 'Back')}</button>
+                        <button type="button" onClick={handleVoidJournal} className="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-bold text-white">{t('تأكيد إلغاء الترحيل', 'Confirm void')}</button>
+                      </div>
+                    </div>
+                  )}
+                  {trialBalanceDiagnostics.unbalancedEntries.length === 0 ? (
+                    <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-6 text-center text-sm font-semibold text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/20 dark:text-emerald-300">
+                      {t('لا توجد قيود يومية مرحلة غير متوازنة في النطاق الحالي.', 'There are no unbalanced posted journal entries in the current scope.')}
+                    </div>
+                  ) : (
+                    <>
+                      <PaginationControls
+                        currentPage={unbalancedPage}
+                        totalItems={trialBalanceDiagnostics.unbalancedEntries.length}
+                        pageSize={rowsPerPage}
+                        onPageChange={setUnbalancedPage}
+                        language={language}
+                      />
+                      {paginatedUnbalancedEntries.map((diagnostic) => {
+                        const entry = journalEntries.find((candidate) => candidate.id === diagnostic.id);
+                        if (!entry) return null;
+                        const sourceInfo = getJournalEntrySourceInfo(entry.id);
+                        return (
+                          <div key={entry.id} className="space-y-3 rounded-xl border border-rose-200 bg-rose-50/50 p-3 dark:border-rose-900/50 dark:bg-rose-950/10">
+                            <div className="flex flex-wrap items-start justify-between gap-2">
+                              <div>
+                                <p className="font-mono text-sm font-black text-slate-900 dark:text-white">{entry.entryNumber} · {entry.date}</p>
+                                <p className="text-xs text-slate-600 dark:text-slate-300">{entry.description}</p>
+                                <p className="mt-1 text-xs text-indigo-700 dark:text-indigo-300">{t('المصدر:', 'Source:')} {sourceInfo.description}</p>
+                              </div>
+                              <div className="text-end text-xs">
+                                <p>{t('مدين', 'Debit')}: <b className="font-mono">{formatMoney(diagnostic.debit)}</b></p>
+                                <p>{t('دائن', 'Credit')}: <b className="font-mono">{formatMoney(diagnostic.credit)}</b></p>
+                                <p className="font-bold text-rose-700 dark:text-rose-300">{t('الفرق', 'Difference')}: {formatMoney(Math.abs(diagnostic.difference))}</p>
+                              </div>
+                            </div>
+                            <div className="overflow-x-auto">
+                              <table className="w-full min-w-[520px] text-[11px]">
+                                <thead><tr className="text-slate-400"><th className="p-1 text-start">{t('الحساب', 'Account')}</th><th className="p-1 text-start">{t('البيان', 'Memo')}</th><th className="p-1 text-end">{t('مدين', 'Debit')}</th><th className="p-1 text-end">{t('دائن', 'Credit')}</th></tr></thead>
+                                <tbody>
+                                  {entry.lines.map((line) => (
+                                    <tr key={line.id} className="border-t border-rose-100 dark:border-rose-900/40">
+                                      <td className="p-1">{line.accountCode} · {language === 'ar' ? line.accountNameAr : line.accountNameEn}</td>
+                                      <td className="p-1">{line.memo || '-'}</td>
+                                      <td className="p-1 text-end font-mono">{formatMoney(Number(line.debit) || 0)}</td>
+                                      <td className="p-1 text-end font-mono">{formatMoney(Number(line.credit) || 0)}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                            {sourceInfo.reason && <p className="text-xs text-amber-700 dark:text-amber-300">{sourceInfo.reason}</p>}
+                            <div className="flex justify-end gap-2">
+                              <button
+                                type="button"
+                                disabled={!sourceInfo.canEdit}
+                                onClick={() => startRepairJournal(entry.id)}
+                                className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
+                              >
+                                <span className="inline-flex items-center gap-1"><Edit3 className="h-3.5 w-3.5" />{t('تعديل القيد', 'Edit journal')}</span>
+                              </button>
+                              <button
+                                type="button"
+                                disabled={!sourceInfo.canVoid}
+                                onClick={() => {
+                                  setVoidingUnbalancedEntryId(entry.id);
+                                  setVoidReason('');
+                                  setVoidError(null);
+                                }}
+                                className="rounded-lg border border-rose-300 px-3 py-1.5 text-xs font-bold text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-rose-800 dark:text-rose-300 dark:hover:bg-rose-950/30"
+                              >
+                                <span className="inline-flex items-center gap-1"><Trash2 className="h-3.5 w-3.5" />{t('إلغاء القيد اليدوي', 'Void manual journal')}</span>
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {showAccountModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
           <div className="w-full max-w-lg bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl p-6 space-y-4">

@@ -2,6 +2,16 @@
 
 # 2026-10-11
 
+## Source-Aware Unbalanced Journal Review
+
+- Added an Accounting header action and paginated review dialog for posted unbalanced journals, showing entry totals, difference, source references, and journal lines.
+- Journal edits validate line amounts and balance, verify account tenant/branch ownership, and require a reason recorded in the audit trail. Linked cash receipt/payment journals can only be redistributed across accounts while preserving the aggregate amount on their linked vouchers; other source-linked journals are directed back to their source workflow.
+- Manual journals can be corrected or logically voided. Voiding marks the entry unposted instead of deleting history, reverses its account snapshot effect, stores who/when/why, and records an audit/activity event. Closed accounting periods block both operations.
+- No production/runtime journal records were available or changed. Existing unbalanced entry data must still be reviewed in the user's runtime before any source-specific correction.
+- Validation: `npm run build` and `git diff --check` passed. `npm run lint` remains blocked by pre-existing TypeScript errors in PartyStatementModal, branch/tenant name fields, and unrelated staff/payroll shapes; no errors were reported on the new repair methods or dialog.
+
+# 2026-10-11
+
 ## Chart of Accounts and General Ledger Balances from Posted Journals
 
 - Added 50-row pagination to Chart of Accounts, journal entries, General Ledger movements, and Trial Balance to limit rendered rows until the user navigates pages.
