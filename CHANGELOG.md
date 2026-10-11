@@ -2,6 +2,16 @@
 
 # 2026-10-11
 
+## Detailed Customer Account — Receipt-linked quantity view & improved selector
+
+- Reworked the previous standalone quantity table: the collection-receipt quantity/service data is now **linked into the existing quantity view mechanism** instead of a separate section. Receipts not already represented as an offer are merged into the offers list (product/service name + booked quantity), so they appear in the existing packages table and totals whatever the receipt source.
+- Value view already records collection receipts on the credit side with description, date and cumulative running balance; verified and left intact.
+- Customer selector: default is now **no customer selected**; added a search box and the dropdown is filtered by name, phone, customer code, system code, paper code, file code, and file number.
+- Receipt-derived quantity rows are read-only (no session-consumption action).
+- No change to the chart of accounts. Files: `src/components/PartyStatementModal.tsx`.
+
+# 2026-10-11
+
 ## Detailed Customer Account — Collection Receipt Quantity & Service Movements
 
 - Added a per-customer "Quantity & Service Movements from Collection Receipts" table inside the QUANTITY mode of the detailed customer account (`PartyStatementModal`).
