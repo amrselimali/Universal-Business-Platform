@@ -2,6 +2,18 @@
 
 # 2026-10-11
 
+## Customer Refunds Persistence & Detailed Statement Linking
+
+- Fixed Customer Dues Settlement (`CustomerRefundsView`) movements disappearing after page refresh: added `erp_customer_refunds` hydration from IndexedDB, mirrored persistence across both IndexedDB and localStorage, and introduced automatic journal recovery for any existing refund transactions.
+- Filter improvements in `CustomerRefundsView`: defaulted date range to show all dates, added a branch toggle between active branch and all branches, and an interactive recovery button if records are hidden by active filters.
+- Detailed Customer Statement (`PartyStatementModal`):
+  - Robust auto-serial customer code matching (supports numerical match, leading zero variations, system code, phone, and normalized Arabic name).
+  - Receipts posted with the upload date now prominently display `[تاريخ الإيصال: ...]` inside the description/notes column.
+  - Linked quantity movements and package balances reflect all customer collection receipts.
+  - Added branch scope toggle and notification banner when receipts exist outside the active date/branch filter.
+
+# 2026-10-11
+
 ## Import — file date no longer rejects rows (upload date is posted)
 
 - Fixed imported collection receipts / customer refunds not appearing in the detailed customer statements. Root cause: the Excel importer rejected any row whose date was not strictly `YYYY-MM-DD`, so those rows were never recorded (and never appeared in the statement).

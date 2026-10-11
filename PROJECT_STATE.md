@@ -1,5 +1,16 @@
 # PROJECT STATE
 
+## Customer Refunds Persistence & Comprehensive Statement Receipts Linking — 2026-10-11
+
+- Fixed Customer Dues Settlement (`CustomerRefundsView` / `allCustomerRefunds`) persistence: `erp_customer_refunds` was not loaded in `hydrateDatasets` and was mirrored only to IndexedDB without localStorage, causing imported movements to disappear upon refresh. Now fully hydrated from IndexedDB, mirrored safely to both localStorage and IndexedDB, with an automatic self-healing recovery from journal entries.
+- Fixed `CustomerRefundsView` filtering: previously defaulted strictly to `today` and active branch, hiding movements from earlier dates or other branches. Added branch toggle (All Branches vs Active Branch), default all-dates view, and a reactive recovery banner if transactions exist outside current filters.
+- Detailed Customer Statement (`PartyStatementModal`):
+  - Made collection receipts and refunds matching robust against auto-serial customer code (with or without leading zeros), system code, phone, and normalized Arabic name.
+  - Receipt line displays: posted date shows upload date, and receipt explanation/description prominently preserves `[تاريخ الإيصال: ...]` along with service description and notes.
+  - Linked quantity movements and package balances now match all receipts by customer code seamlessly.
+  - Added branch scope toggle (All Branches vs Active Branch) and proactive banner for any hidden receipts outside date/branch filters.
+- Files: `src/context/PlatformContext.tsx`, `src/views/CustomerRefundsView.tsx`, `src/views/CollectionReceiptsView.tsx`, `src/components/PartyStatementModal.tsx`. Validation: `compile_applet` passed.
+
 ## Import date handling fix — 2026-10-11
 
 - Imported collection receipts and refunds were being dropped when the file date was not `YYYY-MM-DD`, so they never showed in the detailed customer statements.

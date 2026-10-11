@@ -773,8 +773,24 @@ export const CollectionReceiptsView: React.FC = () => {
       const rowNum = index + 2;
 
       const customerCode = String(row['كود العميل'] || row['Customer Code'] || '').trim();
-      const matchedCustomer = parties.find((p) => (p.type === 'Customer' || p.type === 'Both' || !p.type) && [p.customerCode, p.code].some((code) => String(code || '').trim() === customerCode));
+      const normCustomerCode = customerCode.replace(/^0+/, '');
       const customerName = String(row['اسم العميل / المسدد'] || row['العميل'] || row['اسم العميل'] || row['Customer Name'] || '').trim();
+      const matchedCustomer = parties.find((p) => {
+        if (p.type !== 'Customer' && p.type !== 'Both' && p.type) return false;
+        const pCustCode = String(p.customerCode || '').trim();
+        const pCode = String(p.code || '').trim();
+        const pSysCode = String(p.systemCode || '').trim();
+        return (
+          (customerCode && (
+            pCustCode === customerCode ||
+            pCustCode.replace(/^0+/, '') === normCustomerCode ||
+            pCode === customerCode ||
+            pCode.replace(/^0+/, '') === normCustomerCode ||
+            pSysCode.toLowerCase() === customerCode.toLowerCase()
+          )) ||
+          (customerName && p.name.trim().toLowerCase() === customerName.toLowerCase())
+        );
+      });
       const patientPhone = String(row['رقم الهاتف'] || row['الموبايل'] || row['الهاتف'] || row['Phone Number'] || '').trim();
       const rawDate = String(row['تاريخ التحصيل'] || row['التاريخ'] || row['Collection Date'] || row['Date'] || '').trim();
       const rawAmount = row['المبلغ المحصل'] !== undefined && row['المبلغ المحصل'] !== '' ? row['المبلغ المحصل'] : (row['Collected Amount'] || row['المبلغ'] || 0);
@@ -906,7 +922,7 @@ export const CollectionReceiptsView: React.FC = () => {
         bookedQuantity: Number(row.bookedQuantity) || 1,
         quantity: Number(row.bookedQuantity) || 1,
         receiptNumber: row.receiptNumber,
-        notes: [row.notes, row.fileDate ? `التاريخ المسجل في الملف: ${row.fileDate}` : ''].filter(Boolean).join(' - ') || undefined,
+        notes: [row.notes, (row.fileDate || row.date) ? `تاريخ الإيصال: ${row.fileDate || row.date}` : ''].filter(Boolean).join(' - ') || undefined,
         patientPhone: row.patientPhone,
         customerCode: row.customerCode,
         systemCode: parties.find((party) => party.id === row.customerId)?.systemCode,

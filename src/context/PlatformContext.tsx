@@ -2719,7 +2719,16 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     let isMounted = true;
     const hydrateDatasets = async () => {
       try {
-        const [idbApts, idbFups, idbPlans, idbParties, idbJournals, idbReceptionShifts, idbCashReceipts] = await Promise.all([
+        const [
+          idbApts,
+          idbFups,
+          idbPlans,
+          idbParties,
+          idbJournals,
+          idbReceptionShifts,
+          idbCashReceipts,
+          idbCustomerRefunds,
+        ] = await Promise.all([
           idbGet<Appointment[]>('erp_appointments'),
           idbGet<PatientFollowUp[]>('erp_patient_follow_ups'),
           idbGet<TreatmentPlan[]>('erp_treatment_plans'),
@@ -2727,6 +2736,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           idbGet<JournalEntry[]>('erp_journals'),
           idbGet<ReceptionShift[]>('erp_reception_shifts'),
           idbGet<CashReceiptVoucher[]>('erp_cash_receipts'),
+          idbGet<CustomerRefundVoucher[]>('erp_customer_refunds'),
         ]);
 
         if (!isMounted) return;
@@ -2762,6 +2772,13 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             const receiptsById = new Map(curr.map((receipt) => [receipt.id, receipt]));
             idbCashReceipts.forEach((receipt) => receiptsById.set(receipt.id, receipt));
             return Array.from(receiptsById.values());
+          });
+        }
+        if (Array.isArray(idbCustomerRefunds) && idbCustomerRefunds.length > 0) {
+          setAllCustomerRefunds((curr) => {
+            const refundsById = new Map(curr.map((refund) => [refund.id, refund]));
+            idbCustomerRefunds.forEach((refund) => refundsById.set(refund.id, refund));
+            return Array.from(refundsById.values());
           });
         }
       } catch (err) {
@@ -8586,7 +8603,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // Customer Refunds / Dues Settlement (تسوية مستحقات عميل واستردادات العملاء)
   const [allCustomerRefunds, setAllCustomerRefunds] = useState<CustomerRefundVoucher[]>(() => {
     try {
-      const saved = localStorage.getItem('erp_customer_refunds');
+      const saved = safeLocalStorageGet('erp_customer_refunds');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) return parsed as CustomerRefundVoucher[];
@@ -8596,10 +8613,81 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
     return [];
   });
+
   useEffect(() => {
     if (!isStorageHydrated) return;
-    void idbSet('erp_customer_refunds', allCustomerRefunds);
+    try {
+      safeLocalStorageSet('erp_customer_refunds', JSON.stringify(allCustomerRefunds));
+    } catch (e) {
+      console.warn(e);
+    }
+    void idbSet('erp_customer_refunds', allCustomerRefunds).then((saved) => {
+      if (!saved) console.error('Failed to persist customer refunds to IndexedDB.');
+    });
   }, [allCustomerRefunds, isStorageHydrated]);
+
+  // Auto-recover customer refund vouchers from journals if missing from the refund store
+  useEffect(() => {
+    if (!isStorageHydrated || allJournals.length === 0) return;
+    const existingJournalIds = new Set(allCustomerRefunds.map((r) => r.journalEntryId).filter(Boolean));
+    const existingVoucherNumbers = new Set(allCustomerRefunds.map((r) => r.voucherNumber.toLowerCase().trim()));
+    const recovered: CustomerRefundVoucher[] = [];
+
+    allJournals.forEach((journal) => {
+      const isRefundJournal =
+        (journal.entryNumber?.startsWith('JV-CRF-') || journal.sourceDocument?.includes('تسوية مستحقات عميل')) &&
+        !existingJournalIds.has(journal.id);
+      if (!isRefundJournal) return;
+
+      const matchVoucher = journal.sourceDocument?.match(/(CRF-[A-Za-z0-9-]+)/);
+      const voucherNumber = matchVoucher ? matchVoucher[1] : `CRF-${journal.date.slice(0, 4)}-${journal.id.slice(-4)}`;
+      if (existingVoucherNumbers.has(voucherNumber.toLowerCase().trim())) return;
+
+      const customerLine = journal.lines.find((line) => line.debit > 0);
+      const paymentLine = journal.lines.find((line) => line.credit > 0);
+      const amount = customerLine?.debit || paymentLine?.credit || 0;
+      if (amount <= 0) return;
+
+      let matchedParty = allParties.find((p) => p.accountId === customerLine?.accountId);
+      if (!matchedParty && customerLine?.memo) {
+        matchedParty = allParties.find((p) => customerLine.memo?.includes(p.name));
+      }
+
+      const unitsMatch = customerLine?.memo?.match(/(\d+(?:\.\d+)?)\s*وحدة/);
+      const units = unitsMatch ? Number(unitsMatch[1]) : 1;
+      const unitPrice = units > 0 ? Number((amount / units).toFixed(2)) : amount;
+
+      const recoveredRefund: CustomerRefundVoucher = {
+        id: `crf-rec-${journal.id}`,
+        voucherNumber,
+        date: journal.date,
+        tenantId: journal.tenantId,
+        branchId: journal.branchId,
+        partyId: matchedParty?.id || '',
+        customerCode: matchedParty?.customerCode || matchedParty?.code,
+        systemCode: matchedParty?.systemCode,
+        customerName: matchedParty?.name || 'عميل',
+        units,
+        unitPrice,
+        amount,
+        paymentMethodId: '',
+        paymentMethodLabel: paymentLine?.accountNameAr || 'نقدية',
+        paymentAccountId: paymentLine?.accountId,
+        serviceName: 'استرداد مستحقات عميل',
+        notes: `مستعاد تلقائياً من قيد اليومية ${journal.entryNumber}`,
+        status: journal.isPosted ? 'active' : 'cancelled',
+        journalEntryId: journal.id,
+        createdAt: journal.createdAt || new Date().toISOString(),
+        createdBy: journal.createdBy,
+      };
+      recovered.push(recoveredRefund);
+      existingVoucherNumbers.add(voucherNumber.toLowerCase().trim());
+    });
+
+    if (recovered.length > 0) {
+      setAllCustomerRefunds((prev) => [...recovered, ...prev]);
+    }
+  }, [allJournals, isStorageHydrated]);
 
   useEffect(() => {
     if (!isStorageHydrated) return;

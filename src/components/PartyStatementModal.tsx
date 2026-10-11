@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { usePlatform } from '../context/PlatformContext';
 import { exportRowsToExcel } from '../utils/excelExport';
-import { Party, ClientOffer } from '../types';
+import { Party, ClientOffer, CashReceiptVoucher, CustomerRefundVoucher } from '../types';
 import {
   FileText,
   Printer,
@@ -33,6 +33,64 @@ import {
   Download,
   Undo2,
 } from 'lucide-react';
+
+const normalizeCode = (val?: string | number | null): string => {
+  if (val === undefined || val === null) return '';
+  const s = String(val).trim().toLowerCase();
+  const digits = s.replace(/^0+/, '');
+  return digits || '0';
+};
+
+const normalizeArabic = (text?: string): string => {
+  if (!text) return '';
+  return text
+    .trim()
+    .toLowerCase()
+    .replace(/[أإآ]/g, 'ا')
+    .replace(/ة/g, 'ه')
+    .replace(/ى/g, 'ي')
+    .replace(/\s+/g, ' ');
+};
+
+const isPartyReceiptMatch = (rcpt: CashReceiptVoucher, party: Party): boolean => {
+  if (!party || !rcpt) return false;
+  if (rcpt.partyId && rcpt.partyId === party.id) return true;
+
+  const partyCode = normalizeCode(party.customerCode || party.code);
+  const rcptCode = normalizeCode(rcpt.customerCode);
+  if (partyCode && rcptCode && partyCode === rcptCode) return true;
+
+  if (party.systemCode && rcpt.systemCode && party.systemCode.trim().toLowerCase() === rcpt.systemCode.trim().toLowerCase()) return true;
+
+  const partyPhone = party.phone?.replace(/\D/g, '');
+  const rcptPhone = rcpt.patientPhone?.replace(/\D/g, '');
+  if (partyPhone && rcptPhone && partyPhone.length >= 7 && rcptPhone.length >= 7) {
+    if (partyPhone === rcptPhone || partyPhone.endsWith(rcptPhone) || rcptPhone.endsWith(partyPhone)) return true;
+  }
+
+  const partyNameNorm = normalizeArabic(party.name);
+  const rcptNameNorm = normalizeArabic(rcpt.receivedFrom);
+  if (partyNameNorm && rcptNameNorm && (partyNameNorm === rcptNameNorm || partyNameNorm.includes(rcptNameNorm) || rcptNameNorm.includes(partyNameNorm))) return true;
+
+  return false;
+};
+
+const isPartyRefundMatch = (refund: CustomerRefundVoucher, party: Party): boolean => {
+  if (!party || !refund) return false;
+  if (refund.partyId && refund.partyId === party.id) return true;
+
+  const partyCode = normalizeCode(party.customerCode || party.code);
+  const refundCode = normalizeCode(refund.customerCode);
+  if (partyCode && refundCode && partyCode === refundCode) return true;
+
+  if (party.systemCode && refund.systemCode && party.systemCode.trim().toLowerCase() === refund.systemCode.trim().toLowerCase()) return true;
+
+  const partyNameNorm = normalizeArabic(party.name);
+  const refundNameNorm = normalizeArabic(refund.customerName);
+  if (partyNameNorm && refundNameNorm && (partyNameNorm === refundNameNorm || partyNameNorm.includes(refundNameNorm) || refundNameNorm.includes(partyNameNorm))) return true;
+
+  return false;
+};
 
 interface PartyStatementModalProps {
   initialPartyId?: string | null;
@@ -100,14 +158,15 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
 
   const currentParty = parties.find((p) => p.id === selectedPartyId);
 
-  // Branch isolation (الفلترة حسب الفرع): when a specific branch is provided (e.g. the
-  // active branch when opened from Accounting), only that branch's documents are included.
+  // Branch isolation: supports showing all branches or restricting to selected branch
+  const [includeAllBranches, setIncludeAllBranches] = useState<boolean>(true);
   const branchScoped = branchId && branchId !== 'all' && branchId !== 'general' ? branchId : null;
-  const scopedInvoices = useMemo(() => (branchScoped ? invoices.filter((inv) => inv.branchId === branchScoped) : invoices), [invoices, branchScoped]);
-  const scopedShifts = useMemo(() => (branchScoped ? receptionShifts.filter((shift) => shift.branchId === branchScoped) : receptionShifts), [receptionShifts, branchScoped]);
-  const scopedReceipts = useMemo(() => (branchScoped ? cashReceipts.filter((rcpt) => rcpt.branchId === branchScoped) : cashReceipts), [cashReceipts, branchScoped]);
-  const scopedRefunds = useMemo(() => (branchScoped ? customerRefunds.filter((refund) => refund.branchId === branchScoped) : customerRefunds), [customerRefunds, branchScoped]);
-  const scopedJournals = useMemo(() => (branchScoped ? journalEntries.filter((entry) => entry.branchId === branchScoped) : journalEntries), [journalEntries, branchScoped]);
+  const effectiveBranchScoped = includeAllBranches ? null : branchScoped;
+  const scopedInvoices = useMemo(() => (effectiveBranchScoped ? invoices.filter((inv) => inv.branchId === effectiveBranchScoped) : invoices), [invoices, effectiveBranchScoped]);
+  const scopedShifts = useMemo(() => (effectiveBranchScoped ? receptionShifts.filter((shift) => shift.branchId === effectiveBranchScoped) : receptionShifts), [receptionShifts, effectiveBranchScoped]);
+  const scopedReceipts = useMemo(() => (effectiveBranchScoped ? cashReceipts.filter((rcpt) => rcpt.branchId === effectiveBranchScoped) : cashReceipts), [cashReceipts, effectiveBranchScoped]);
+  const scopedRefunds = useMemo(() => (effectiveBranchScoped ? customerRefunds.filter((refund) => refund.branchId === effectiveBranchScoped) : customerRefunds), [customerRefunds, effectiveBranchScoped]);
+  const scopedJournals = useMemo(() => (effectiveBranchScoped ? journalEntries.filter((entry) => entry.branchId === effectiveBranchScoped) : journalEntries), [journalEntries, effectiveBranchScoped]);
 
   // Available filtered parties for dropdown (search by name, phone, customer code,
   // system code, paper code, file code, or file number)
@@ -239,7 +298,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
             const rowDate = row.date || shift.shiftDate || shift.openedAt.slice(0, 10);
             const revenue = row.totalRevenue || 0;
             const linkedReceipt = scopedReceipts.find((receipt) =>
-              receipt.status !== 'cancelled' && receipt.partyId === currentParty.id &&
+              receipt.status !== 'cancelled' && isPartyReceiptMatch(receipt, currentParty) &&
               (receipt.id === row.receiptVoucherId ||
                 (Boolean(receipt.journalEntryId) && receipt.journalEntryId === row.journalEntryId &&
                   receipt.date === rowDate &&
@@ -279,36 +338,40 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
       // Direct Collection Receipts / Cash Receipt Vouchers (سندات وإيصالات التحصيل المسجلة للعميل)
       scopedReceipts.forEach((rcpt) => {
         if (rcpt.status === 'cancelled') return;
-        const matchRcpt =
-          rcpt.partyId
-            ? rcpt.partyId === currentParty.id
-            : (Boolean(pCode && rcpt.systemCode?.toLowerCase().trim() === pCode) ||
-              Boolean(pCustomerCode && rcpt.customerCode?.toLowerCase().trim() === pCustomerCode) ||
-              Boolean(rcpt.receivedFrom && rcpt.receivedFrom.toLowerCase().trim() === pName));
+        if (!isPartyReceiptMatch(rcpt, currentParty)) return;
 
-        if (matchRcpt) {
-          const amt = Number(rcpt.amount) || 0;
-          if (amt > 0) {
-            const bookedInfo = (rcpt.bookedQuantity || rcpt.quantity) ? ` [كمية محجوزة: ${rcpt.bookedQuantity || rcpt.quantity}]` : '';
-            const serviceDesc = rcpt.serviceName || rcpt.description || 'إيصال تحصيل نقدية';
-            rawMovements.push({
-              date: rcpt.date,
-              docNumber: rcpt.voucherNumber || rcpt.referenceInvoiceNo || `CR-${rcpt.id.slice(-5)}`,
-              docType: 'Invoice',
-              docTypeAr: 'إيصال تحصيل نقدية (دائن)',
-              description: `${serviceDesc}${bookedInfo}`,
-              debit: 0,
-              credit: amt,
-              paymentMethod: rcpt.paymentMethodLabel || (rcpt.paymentMethod === 'Cash' ? 'نقداً (كاش)' : rcpt.paymentMethod === 'Card' ? 'بطاقة' : 'تحويل'),
-            });
+        const amt = Number(rcpt.amount) || 0;
+        if (amt > 0) {
+          let originalDateStr = '';
+          if (rcpt.notes) {
+            const m = rcpt.notes.match(/(?:تاريخ الإيصال|التاريخ المسجل في الملف|تاريخ التحصيل)[\s:]*([0-9\-/T]+)/);
+            if (m) originalDateStr = m[1];
           }
+          const dateNote = originalDateStr ? ` [تاريخ الإيصال: ${originalDateStr}]` : '';
+          const bookedInfo = (rcpt.bookedQuantity || rcpt.quantity) ? ` [كمية محجوزة: ${rcpt.bookedQuantity || rcpt.quantity}]` : '';
+          const serviceDesc = rcpt.serviceName || rcpt.productName || rcpt.description || 'إيصال تحصيل نقدية';
+          const cleanNotes = rcpt.notes && originalDateStr && rcpt.notes.includes(originalDateStr)
+            ? rcpt.notes.replace(new RegExp(`(?:تاريخ الإيصال|التاريخ المسجل في الملف|تاريخ التحصيل)[\\s:]*${originalDateStr}`, 'g'), '').replace(/^[\s\-|]+|[\s\-|]+$/g, '').trim()
+            : rcpt.notes;
+          const notesText = cleanNotes ? ` - ${cleanNotes}` : '';
+
+          rawMovements.push({
+            date: rcpt.date,
+            docNumber: rcpt.voucherNumber || rcpt.referenceInvoiceNo || `CR-${rcpt.id.slice(-5)}`,
+            docType: 'Invoice',
+            docTypeAr: 'إيصال تحصيل نقدية (دائن)',
+            description: `${serviceDesc}${bookedInfo}${dateNote}${notesText}`,
+            debit: 0,
+            credit: amt,
+            paymentMethod: rcpt.paymentMethodLabel || (rcpt.paymentMethod === 'Cash' ? 'نقداً (كاش)' : rcpt.paymentMethod === 'Card' ? 'بطاقة' : 'تحويل'),
+          });
         }
       });
 
       // Customer refunds (استردادات العملاء) — recorded as a DEBIT against the customer
       scopedRefunds.forEach((refund) => {
         if (refund.status === 'cancelled') return;
-        if (refund.partyId !== currentParty.id) return;
+        if (!isPartyRefundMatch(refund, currentParty)) return;
         const refundAmount = Number(refund.amount) || 0;
         if (refundAmount <= 0) return;
         const unitsInfo = refund.units ? ` [وحدات مستردة: ${refund.units}]` : '';
@@ -385,7 +448,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
 
     const receiptJournalIds = new Set(
       scopedReceipts
-        .filter((receipt) => receipt.partyId === currentParty.id && receipt.status !== 'cancelled')
+        .filter((receipt) => isPartyReceiptMatch(receipt, currentParty) && receipt.status !== 'cancelled')
         .map((receipt) => receipt.journalEntryId)
         .filter((journalId): journalId is string => Boolean(journalId))
     );
@@ -471,33 +534,32 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
   // This belongs to the detailed customer account only; the chart of accounts is untouched.
   const receiptQuantityMovements = useMemo(() => {
     if (!currentParty) return [];
-    const pName = currentParty.name.toLowerCase().trim();
-    const pCode = currentParty.systemCode?.toLowerCase().trim();
-    const pCustomerCode = (currentParty.customerCode || currentParty.code)?.toLowerCase().trim();
 
     return scopedReceipts
       .filter((rcpt) => rcpt.status !== 'cancelled' && !rcpt.isArchived)
-      .filter((rcpt) => {
-        const matchRcpt = rcpt.partyId
-          ? rcpt.partyId === currentParty.id
-          : (Boolean(pCode && rcpt.systemCode?.toLowerCase().trim() === pCode) ||
-            Boolean(pCustomerCode && rcpt.customerCode?.toLowerCase().trim() === pCustomerCode) ||
-            Boolean(rcpt.receivedFrom && rcpt.receivedFrom.toLowerCase().trim() === pName));
-        return matchRcpt;
-      })
+      .filter((rcpt) => isPartyReceiptMatch(rcpt, currentParty))
       .filter((rcpt) => rcpt.date >= filterStart && rcpt.date <= filterEnd)
-      .map((rcpt) => ({
-        id: rcpt.id,
-        date: rcpt.date,
-        voucherNumber: rcpt.voucherNumber || rcpt.referenceInvoiceNo || `CR-${rcpt.id.slice(-5)}`,
-        service: rcpt.serviceName || rcpt.productName || rcpt.description || 'خدمة / جلسة',
-        quantity: Number(rcpt.bookedQuantity || rcpt.quantity || 0),
-        amount: Number(rcpt.amount) || 0,
-        paymentMethod: rcpt.paymentMethodLabel || (rcpt.paymentMethod === 'Cash' ? 'نقداً (كاش)' : rcpt.paymentMethod === 'Card' ? 'بطاقة' : 'تحويل'),
-      }))
+      .map((rcpt) => {
+        let originalDateStr = '';
+        if (rcpt.notes) {
+          const m = rcpt.notes.match(/(?:تاريخ الإيصال|التاريخ المسجل في الملف|تاريخ التحصيل)[\s:]*([0-9\-/T]+)/);
+          if (m) originalDateStr = m[1];
+        }
+        const baseService = rcpt.serviceName || rcpt.productName || rcpt.description || 'خدمة / جلسة';
+        const displayService = originalDateStr ? `${baseService} [تاريخ الإيصال: ${originalDateStr}]` : baseService;
+        return {
+          id: rcpt.id,
+          date: rcpt.date,
+          voucherNumber: rcpt.voucherNumber || rcpt.referenceInvoiceNo || `CR-${rcpt.id.slice(-5)}`,
+          service: displayService,
+          quantity: Number(rcpt.bookedQuantity || rcpt.quantity || 0),
+          amount: Number(rcpt.amount) || 0,
+          paymentMethod: rcpt.paymentMethodLabel || (rcpt.paymentMethod === 'Cash' ? 'نقداً (كاش)' : rcpt.paymentMethod === 'Card' ? 'بطاقة' : 'تحويل'),
+        };
+      })
       .filter((movement) => movement.quantity > 0)
       .sort((a, b) => a.date.localeCompare(b.date));
-  }, [currentParty, branchScoped, cashReceipts, filterStart, filterEnd]);
+  }, [currentParty, scopedReceipts, filterStart, filterEnd]);
 
   const totalReceiptQuantity = useMemo(
     () => receiptQuantityMovements.reduce((sum, movement) => sum + movement.quantity, 0),
@@ -508,7 +570,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
   const refundQuantityMovements = useMemo(() => {
     if (!currentParty) return [];
     return scopedRefunds
-      .filter((refund) => refund.status !== 'cancelled' && refund.partyId === currentParty.id)
+      .filter((refund) => refund.status !== 'cancelled' && isPartyRefundMatch(refund, currentParty))
       .filter((refund) => refund.date >= filterStart && refund.date <= filterEnd)
       .map((refund) => ({
         id: refund.id,
@@ -522,6 +584,19 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
       .filter((movement) => movement.units > 0)
       .sort((a, b) => a.date.localeCompare(b.date));
   }, [currentParty, scopedRefunds, filterStart, filterEnd]);
+
+  // Count receipts matching this party that are hidden by date filter or branch scoping
+  const hiddenReceiptsCount = useMemo(() => {
+    if (!currentParty) return 0;
+    if (dateFilter === 'ALL' && includeAllBranches) return 0;
+    const allMatching = cashReceipts.filter((rcpt) => rcpt.status !== 'cancelled' && isPartyReceiptMatch(rcpt, currentParty));
+    const currentlyShowingIds = new Set(
+      scopedReceipts
+        .filter((rcpt) => rcpt.status !== 'cancelled' && isPartyReceiptMatch(rcpt, currentParty) && rcpt.date >= filterStart && rcpt.date <= filterEnd)
+        .map((r) => r.id)
+    );
+    return allMatching.filter((r) => !currentlyShowingIds.has(r.id)).length;
+  }, [currentParty, dateFilter, includeAllBranches, cashReceipts, scopedReceipts, filterStart, filterEnd]);
 
   // QUANTITY & SESSIONS ANALYSIS (كشف حساب الكميات والباقات)
   // The quantity view keeps its existing mechanism (packages/offers). Collection
@@ -978,6 +1053,62 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
                   className="text-xs px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
                 />
               </div>
+            </div>
+          )}
+
+          {/* Branch scope toggle if branchId was provided */}
+          {branchId && (
+            <div className="md:col-span-12 flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100 dark:border-slate-800 text-xs">
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-bold text-slate-500">{t('نطاق الفروع:', 'Branch scope:')}</span>
+                <button
+                  type="button"
+                  onClick={() => setIncludeAllBranches(true)}
+                  className={`px-2.5 py-1 text-xs font-bold rounded-lg cursor-pointer transition-colors ${
+                    includeAllBranches
+                      ? 'bg-indigo-600 text-white shadow-xs'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+                  }`}
+                >
+                  {t('كافة فروع الشركة (شامل)', 'All Branches (Comprehensive)')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIncludeAllBranches(false)}
+                  className={`px-2.5 py-1 text-xs font-bold rounded-lg cursor-pointer transition-colors ${
+                    !includeAllBranches
+                      ? 'bg-indigo-600 text-white shadow-xs'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+                  }`}
+                >
+                  {t('الفرع المالي الحالي فقط', 'Active Branch Only')}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Warning banner if collection receipts are hidden outside current filters */}
+          {hiddenReceiptsCount > 0 && (
+            <div className="md:col-span-12 flex flex-wrap items-center justify-between gap-2 p-3 rounded-xl border border-amber-200 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/20 text-amber-900 dark:text-amber-200 text-xs font-bold shadow-xs">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="h-4 w-4 text-amber-600 shrink-0" />
+                <span>
+                  {t(
+                    `يوجد ${hiddenReceiptsCount} إيصال تحصيل مسجل للعميل خارج نطاق التاريخ المحدد أو في فرع آخر.`,
+                    `There are ${hiddenReceiptsCount} recorded collection receipts for this client outside the current date filter or in another branch.`
+                  )}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setDateFilter('ALL');
+                  setIncludeAllBranches(true);
+                }}
+                className="px-3 py-1 bg-amber-600 text-white rounded-lg hover:bg-amber-700 cursor-pointer text-xs font-bold shadow-xs"
+              >
+                {t('عرض كافة الإيصالات والتواريخ والفروع الآن', 'Show All Receipts & Dates Now')}
+              </button>
             </div>
           )}
         </div>
