@@ -2,6 +2,14 @@
 
 # 2026-10-11
 
+## Forced Permanent Journal Deletion
+
+- Added per-entry and bulk forced deletion from the General Journal. It intentionally bypasses accounting eligibility checks such as source linkage, period lock, posting state, and journal balance, while retaining a final confirmation and optional audit reason.
+- Deleting a posted entry reverses its account balance snapshot effect before removing it from journal storage; every deleted record is retained in the audit log. Linked collection receipts are flagged to prevent automatic journal recreation.
+- Forced deletion removes only accounting journal records. Source vouchers, inventory, customer/supplier statements, and other operational effects are not generally reversed; the confirmation warns about this explicitly.
+
+# 2026-10-11
+
 ## Journal Source Details and Navigation
 
 - Added a source action beside each General Journal entry and in unbalanced-journal review. The popup resolves exact linked receipts, payments, invoices, operation rows/expenses, maintenance, inventory audits, payroll items, and goods vouchers where source IDs exist.
