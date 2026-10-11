@@ -573,6 +573,10 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
     const price = Number(unitPrice) || 0;
     const rev = qty * price;
     const coll = collectedAmount !== undefined && collectedAmount !== null ? Number(collectedAmount) : rev;
+    if (!Number.isFinite(coll) || coll < 0 || coll > Number(rev.toFixed(2))) {
+      alert(t('مبلغ التحصيل يجب أن يكون رقمًا من صفر إلى إجمالي الإيراد؛ لم يتم حفظ الحركة.', 'Collected amount must be between zero and total revenue; the transaction was not saved.'));
+      return;
+    }
 
     addShiftRunRow(activeShift.id, {
       customerId: selectedParty?.id || patientId,
@@ -675,7 +679,7 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
       const defaultReason = `سداد دفعة للمورد: ${supplierName}`;
       const finalDesc = expenseReason.trim() || defaultReason;
 
-      addShiftExpense(activeShift.id, {
+      const result = addShiftExpense(activeShift.id, {
         category: finalCategory,
         expenseType: 'balance_payment',
         amount: expenseAmount,
@@ -690,11 +694,19 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
         supplierId: supplierId || undefined,
         supplierName: supplierName || undefined,
       });
+      if (!result.success) {
+        alert(result.error || t('تعذر حفظ الحركة', 'Unable to save transaction'));
+        return;
+      }
     } else {
       // Multi-item rows submission: save each item line as a separate expense
       const validRows = expenseItemRows.filter((r) => r.itemId && (r.amount > 0 || r.quantity > 0));
       if (validRows.length === 0) {
         alert(t('يرجى اختيار صنف واحد على الأقل وتحديد كمية وسعر صحيحين', 'Please select at least one item with valid quantity and price'));
+        return;
+      }
+      if (validRows.some((row) => !Number.isFinite(Number(row.amount)) || Number(row.amount) < 0)) {
+        alert(t('توجد قيمة غير صالحة ضمن بنود الحركة؛ لم يتم حفظ أي بند.', 'A transaction line has an invalid amount; no lines were saved.'));
         return;
       }
 
@@ -705,7 +717,7 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
           ? `استلام أصناف آجل: ${row.itemName} (${supplierName})`
           : `استلام وسداد: ${row.itemName} (${supplierName})`;
 
-        addShiftExpense(activeShift.id, {
+        const result = addShiftExpense(activeShift.id, {
           category: row.itemName || 'مستلزمات وبنود مخزنية',
           itemId: row.itemId,
           itemName: row.itemName,
@@ -724,6 +736,10 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
           supplierId: supplierId || undefined,
           supplierName: supplierName || undefined,
         });
+        if (!result.success) {
+          alert(result.error || t('تعذر حفظ الحركة', 'Unable to save transaction'));
+          return;
+        }
       });
     }
 
@@ -855,13 +871,23 @@ export const ReceptionOpsView: React.FC<ReceptionOpsViewProps> = ({ onNavigateTo
       }
 
       // 4. Validation for Total Revenue
-      if (isNaN(totalRevenueNum) || totalRevenueNum <= 0) {
+      if (!Number.isFinite(totalRevenueNum) || totalRevenueNum <= 0) {
         errors.push({
           rowNumber: rowNum,
           columnKey: 'totalRevenue',
           columnLabelAr: 'المبلغ المطلوب / الإيراد',
           enteredValue: totalRevenueRaw,
           reasonAr: 'قيمة الإيراد يجب أن تكون رقماً موجباً أكبر من الصفر (بالجنيه)',
+        });
+      }
+
+      if (!Number.isFinite(collectedNum) || collectedNum < 0 || collectedNum > Number(totalRevenueNum.toFixed(2))) {
+        errors.push({
+          rowNumber: rowNum,
+          columnKey: 'collectedAmount',
+          columnLabelAr: 'المبلغ المحصل نقداً / إلكترونياً',
+          enteredValue: collectedRaw,
+          reasonAr: 'المبلغ المحصل يجب أن يكون رقماً من صفر إلى إجمالي الإيراد؛ لا يمكن ترحيل زيادة كتحصيل خدمة دون حساب دفعة مقدمة معتمد',
         });
       }
 

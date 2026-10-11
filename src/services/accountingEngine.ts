@@ -192,6 +192,35 @@ export function findCustomerReceiptJournalIndex(
   );
 }
 
+export function assertBalancedJournalLines(
+  lines: Pick<JournalLine, 'debit' | 'credit'>[],
+  entryNumber: string
+): void {
+  let totalDebit = 0;
+  let totalCredit = 0;
+  for (const [index, line] of lines.entries()) {
+    const debit = Number(line.debit);
+    const credit = Number(line.credit);
+    if (!Number.isFinite(debit) || !Number.isFinite(credit) || debit < 0 || credit < 0) {
+      throw new Error(`القيد ${entryNumber}: قيمة مدين/دائن غير صالحة في السطر ${index + 1}.`);
+    }
+    if (debit > 0 && credit > 0) {
+      throw new Error(`القيد ${entryNumber}: لا يجوز تسجيل مدين ودائن معًا في السطر ${index + 1}.`);
+    }
+    totalDebit += debit;
+    totalCredit += credit;
+  }
+
+  if (
+    lines.length === 0 ||
+    Math.round(totalDebit * 100) !== Math.round(totalCredit * 100)
+  ) {
+    throw new Error(
+      `القيد ${entryNumber} غير متوازن: المدين ${totalDebit.toFixed(2)} والدائن ${totalCredit.toFixed(2)}. لم يتم ترحيله.`
+    );
+  }
+}
+
 export function buildCustomerCollectionJournalLines(params: {
   accounts: Account[];
   tenantId: string;
@@ -236,6 +265,7 @@ export function buildJournalEntry(params: {
   lines: JournalLine[];
 }): JournalEntry {
   const entryNumber = `${params.prefix}-${Date.now().toString().slice(-6)}`;
+  assertBalancedJournalLines(params.lines, entryNumber);
   return {
     id: `je-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
     tenantId: params.tenantId,
@@ -325,8 +355,14 @@ export function buildRevenueJournalLines(params: {
   // Values may originate from Excel/JSON storage, where numeric fields can be strings.
   const totalRevenue = Number(params.totalRevenue);
   const collectedAmount = Number(params.collectedAmount);
-  const total = Number((Number.isFinite(totalRevenue) ? totalRevenue : 0).toFixed(2));
-  const collected = Number((Number.isFinite(collectedAmount) ? collectedAmount : 0).toFixed(2));
+  if (!Number.isFinite(totalRevenue) || !Number.isFinite(collectedAmount) || totalRevenue < 0 || collectedAmount < 0) {
+    throw new Error('قيمة الإيراد أو التحصيل غير صالحة؛ لم يتم إنشاء القيد.');
+  }
+  const total = Number(totalRevenue.toFixed(2));
+  const collected = Number(collectedAmount.toFixed(2));
+  if (collected > total) {
+    throw new Error('مبلغ التحصيل أكبر من إجمالي الإيراد؛ راجع المبلغ قبل الترحيل.');
+  }
   const receivable = Number(Math.max(0, total - collected).toFixed(2));
 
   let lineIdx = 1;

@@ -73,6 +73,7 @@ import {
   resolveCustomerPartyAccount,
   resolveCustomerControlAccount,
   findCustomerReceiptJournalIndex,
+  assertBalancedJournalLines,
   resolveAccount,
   createJournalLine,
 } from '../services/accountingEngine';
@@ -311,8 +312,8 @@ interface PlatformContextType {
   allPayrollRuns: PayrollRun[];
   generatePayrollRun: (month: string, branchId?: string) => PayrollRun;
   updatePayrollItem: (runId: string, itemId: string, data: Partial<StaffPayrollItem>) => void;
-  payPayrollItem: (runId: string, itemId: string, paymentMethod: string, notes?: string) => void;
-  payEntirePayrollRun: (runId: string, paymentMethod: string) => void;
+  payPayrollItem: (runId: string, itemId: string, paymentMethod: string, notes?: string) => { success: boolean; error?: string };
+  payEntirePayrollRun: (runId: string, paymentMethod: string) => { success: boolean; error?: string };
 
   // Customers, Patients & Suppliers (العملاء والمرضى والموردين)
   parties: Party[];
@@ -404,7 +405,7 @@ interface PlatformContextType {
   }) => { success: boolean; error?: string };
   archiveCollectionReceipts: (receiptIds: string[]) => void;
   postUnpostedCollectionReceipts: (branchId?: string) => { posted: number; skipped: number; errors: string[] };
-  addShiftExpense: (shiftId: string, expense: Omit<ShiftExpense, 'id'>) => void;
+  addShiftExpense: (shiftId: string, expense: Omit<ShiftExpense, 'id'>) => { success: boolean; error?: string };
   removeShiftExpense: (shiftId: string, expenseId: string) => void;
   updateShiftBalancing: (
     shiftId: string,
@@ -1167,6 +1168,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const postJournalEntryWithSync = (entry: Omit<JournalEntry, 'id' | 'createdAt'>): JournalEntry => {
+    assertBalancedJournalLines(entry.lines, entry.entryNumber);
     const newEntry: JournalEntry = {
       ...entry,
       id: `jv-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
@@ -2757,6 +2759,10 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     data: Omit<DeviceMaintenanceRecord, 'id' | 'createdAt'>
   ): { success: boolean; maintenanceId?: string; journalEntryNumber?: string; error?: string } => {
     try {
+      const maintenanceCost = Number(data.cost);
+      if (!Number.isFinite(maintenanceCost) || maintenanceCost < 0) {
+        return { success: false, error: 'قيمة تكلفة الصيانة غير صالحة؛ لم يتم حفظ الصيانة أو القيد.' };
+      }
       const maintenanceId = `maint-${Date.now()}`;
       const journalEntryNumber = `JV-MNT-${Date.now().toString().slice(-5)}`;
       const nowIso = new Date().toISOString();
@@ -2803,7 +2809,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           creditAcc;
       }
 
-      const costNum = Number(data.cost) || 0;
+      const costNum = maintenanceCost;
 
       const jvLines = [
         {
@@ -2845,6 +2851,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         createdAt: nowIso,
       };
 
+      assertBalancedJournalLines(newJournal.lines, newJournal.entryNumber);
       setAllJournals((prev) => [newJournal, ...prev]);
 
       // تحديث أرصدة شجرة الحسابات
@@ -4373,9 +4380,17 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return { success: true };
   };
 
-  const addShiftExpense = (shiftId: string, expense: Omit<ShiftExpense, 'id'>) => {
+  const addShiftExpense = (
+    shiftId: string,
+    expense: Omit<ShiftExpense, 'id'>
+  ): { success: boolean; error?: string } => {
+    const amount = Number(expense.amount);
+    if (!Number.isFinite(amount) || amount < 0) {
+      return { success: false, error: 'قيمة الحركة غير صالحة؛ لم يتم حفظ الحركة أو القيد.' };
+    }
     const newExp: ShiftExpense = {
       ...expense,
+      amount,
       id: `exp-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
     };
 
@@ -4480,12 +4495,13 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           },
         ],
       };
+      assertBalancedJournalLines(autoJv.lines, autoJv.entryNumber);
       setAllJournals((prev) => [autoJv, ...prev]);
     }
 
     // وفى حالة استلام فقط: القيمة تضاف لحساب المورد ولا تضاف لمصروفات الشيفت
     if (isCreditReceipt) {
-      return;
+      return { success: true };
     }
 
     setAllReceptionShifts((prev) =>
@@ -4518,6 +4534,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         return shift;
       })
     );
+    return { success: true };
   };
 
   const removeShiftExpense = (shiftId: string, expenseId: string) => {
@@ -5142,6 +5159,12 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       return { success: false, error: 'تمت تسوية هذا الجرد من قبل بالفعل' };
     }
 
+    const shortageVal = Math.abs(Number(targetAudit.totalShortageValue ?? 0));
+    const surplusVal = Math.abs(Number(targetAudit.totalSurplusValue ?? 0));
+    if (!Number.isFinite(shortageVal) || !Number.isFinite(surplusVal)) {
+      return { success: false, error: 'قيم تسوية الجرد غير صالحة؛ لم يتم تحديث المخزون أو إنشاء قيد.' };
+    }
+
     // 1. تحديث أرصدة المخزن تلقائياً لتطابق الكمية الفعلية
     targetAudit.items.forEach((item) => {
       if (item.differenceQty !== 0) {
@@ -5156,8 +5179,6 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     // 2. إنشاء قيد محاسبي للتسوية إذا وُجد فرق مالي
     let journalNumber = '';
-    const shortageVal = Math.abs(targetAudit.totalShortageValue || 0);
-    const surplusVal = Math.abs(targetAudit.totalSurplusValue || 0);
 
     if (shortageVal > 0 || surplusVal > 0) {
       const entryId = `jv-inv-${Date.now().toString().slice(-6)}`;
@@ -5243,6 +5264,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         createdAt: new Date().toISOString(),
       };
 
+      assertBalancedJournalLines(newJournal.lines, newJournal.entryNumber);
       setAllJournals((prev) => [newJournal, ...prev]);
     }
 
@@ -5492,7 +5514,18 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     );
   };
 
-  const payPayrollItem = (runId: string, itemId: string, paymentMethod: string, notes?: string) => {
+  const payPayrollItem = (
+    runId: string,
+    itemId: string,
+    paymentMethod: string,
+    notes?: string
+  ): { success: boolean; error?: string } => {
+    const itemToPay = allPayrollRuns.find((run) => run.id === runId)?.items.find((item) => item.id === itemId);
+    if (!itemToPay) return { success: false, error: 'تعذر العثور على بند الراتب المطلوب.' };
+    if (!Number.isFinite(Number(itemToPay.netSalary)) || Number(itemToPay.netSalary) < 0) {
+      return { success: false, error: 'صافي الراتب غير صالح؛ لم يتم اعتماد الصرف أو إنشاء قيد.' };
+    }
+
     let paidItem: StaffPayrollItem | null = null;
     let targetMonth = '';
 
@@ -5572,6 +5605,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             },
           ],
         };
+        assertBalancedJournalLines(autoJv.lines, autoJv.entryNumber);
         setAllJournals((prev) => [autoJv, ...prev]);
       }
 
@@ -5584,11 +5618,15 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         details: `صرف راتب شهر ${targetMonth} لـ (${(paidItem as StaffPayrollItem).staffNameAr}) بصافي ${(paidItem as StaffPayrollItem).netSalary} ج.م طريقة: ${paymentMethod}`,
       });
     }
+    return { success: true };
   };
 
-  const payEntirePayrollRun = (runId: string, paymentMethod: string) => {
+  const payEntirePayrollRun = (runId: string, paymentMethod: string): { success: boolean; error?: string } => {
     const targetRun = allPayrollRuns.find((r) => r.id === runId);
-    if (!targetRun) return;
+    if (!targetRun) return { success: false, error: 'مسير الرواتب المطلوب غير موجود.' };
+    if (!Number.isFinite(Number(targetRun.totalNet)) || Number(targetRun.totalNet) < 0) {
+      return { success: false, error: 'إجمالي صافي الرواتب غير صالح؛ لم يتم اعتماد الصرف أو إنشاء قيد.' };
+    }
 
     const nowIso = new Date().toISOString();
     const currentUserName = currentUser?.name || 'المحاسب المالي';
@@ -5658,6 +5696,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           },
         ],
       };
+      assertBalancedJournalLines(autoJv.lines, autoJv.entryNumber);
       setAllJournals((prev) => [autoJv, ...prev]);
     }
 
@@ -5669,6 +5708,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       actionType: 'UPDATE',
       details: `صرف مسير رواتب شهر ${targetRun.month} بالكامل بإجمالي ${targetRun.totalNet} ج.م عبر ${paymentMethod}`,
     });
+    return { success: true };
   };
 
   // 14. POS & Invoices with Multi-Branch Shift Isolation
@@ -6871,6 +6911,14 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       createdAt: new Date().toISOString(),
     };
 
+    try {
+      assertBalancedJournalLines(newEntry.lines, newEntry.entryNumber);
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'تعذر التحقق من توازن القيد.',
+      };
+    }
     setAllJournals((prev) => [newEntry, ...prev]);
     return { success: true };
   };

@@ -2,6 +2,12 @@
 
 ## Legacy Account Matching and Customer Account Display
 
+- Accounting's Chart of Accounts, general journal entries, General Ledger movements, and Trial Balance tables now render at most 50 rows/entries per page with explicit navigation. Filtering/branch changes reset the relevant page. This is client-side render pagination: the current Context/local storage data source still hydrates the underlying arrays in memory; it does not yet fetch pages from Neon.
+- Chart of Accounts displayed balances, revenue/expense summary values, Trial Balance, and General Ledger are now based exclusively on posted journal lines. The chart-account master still supplies account names/codes/types, but stored `account.balance` snapshots are not used as report balances or implicit opening balances.
+- General Ledger applies the same tenant/branch-aware account ID/code resolver as Trial Balance and excludes unposted journals; this keeps the customer-control account's chart balance, trial-balance amount, and ledger movements consistent. Existing account snapshots/journals are unchanged.
+- Trial Balance status distinguishes genuinely unbalanced posted entries from a numerically incomplete report caused by unmapped lines. The latter explicitly says that zero unbalanced entries does not mean all account activity is included.
+- New journal posting paths validate finite, non-negative debit/credit amounts, prohibit both sides on one line, and require a non-empty entry with equal debit/credit totals before it can be built or posted. This does not rewrite existing journals.
+- Revenue-session posting now rejects non-finite/negative amounts and collections greater than the session's revenue. Such over-collections require an approved customer-advance account/rule that is not defined in the current chart; collection forms and Excel import report the issue before saving.
 - Trial Balance resolves journal lines by exact account ID first, then by a unique tenant-scoped account code, preferring the journal's branch account and falling back only to a unique general account.
 - Legacy customer receivable lines using `1120` or `1120-*` are included under account `2000` only when the tenant has exactly one valid debit-normal Asset control account. No journal records or account balances are rewritten by this report-time mapping.
 - Unresolved lines remain excluded and diagnosed; only the first 50 details are rendered while the total unresolved count remains visible, preventing a large legacy dataset from overwhelming the screen.
