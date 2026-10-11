@@ -1,5 +1,12 @@
 # PROJECT STATE
 
+## Journal Quick Filters and Safe Bulk Reversal — 2026-10-11
+
+- General Journal now filters entries by number, date range, account code/name, and debit/credit total ranges. Results retain 50-entry pagination.
+- Users can select reversible entries on the current page or reverse one entry directly. Confirming posts an equal-and-opposite journal dated in the current open period, retains the original, and writes an audit/activity record with the required reason. The full batch is validated before any selected entry is applied, and an entry already reversed is blocked.
+- To preserve source consistency, reversal is enabled only for balanced, posted, source-free manual journals. Source-linked receipts, inventory, payroll, shift, and other operational entries must be corrected from their source workflow; unbalanced journals remain in the existing dedicated correction flow.
+- This is a client-side filter over the journal data already hydrated into Context/local storage, not a server-side database query. No live/runtime journal records were modified.
+
 ## Historical Unmapped Account Consolidation — 2026-10-11
 
 - In Trial Balance, users can explicitly consolidate all unresolved lines in the selected branch scope into the tenant-wide temporary account `9999999` (`أرصدة تاريخية مجمعة - تحت المراجعة`).
