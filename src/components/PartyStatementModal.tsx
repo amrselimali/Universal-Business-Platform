@@ -75,9 +75,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
   // Mode Selection: By Monetary Value (بالقيمة) or By Quantities / Sessions (بالكمية)
   const [statementMode, setStatementMode] = useState<'VALUE' | 'QUANTITY'>(initialMode);
 
-  const [selectedPartyId, setSelectedPartyId] = useState<string>(
-    initialPartyId || (parties.length > 0 ? parties[0].id : '')
-  );
+  const [selectedPartyId, setSelectedPartyId] = useState<string>(initialPartyId || '');
   const [partyTypeFilter, setPartyTypeFilter] = useState<'ALL' | 'Customer' | 'Supplier'>('ALL');
   const [partySearch, setPartySearch] = useState<string>('');
 
@@ -96,7 +94,8 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
 
   const currentParty = parties.find((p) => p.id === selectedPartyId);
 
-  // Available filtered parties for dropdown
+  // Available filtered parties for dropdown (search by name, phone, customer code,
+  // system code, paper code, file code, or file number)
   const availableParties = useMemo(() => {
     return parties.filter((p) => {
       const matchesType = partyTypeFilter === 'ALL' || p.type === partyTypeFilter || p.type === 'Both';
@@ -105,8 +104,14 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
         !q ||
         p.name.toLowerCase().includes(q) ||
         (p.nameEn && p.nameEn.toLowerCase().includes(q)) ||
-        p.phone.includes(q) ||
-        (p.systemCode && p.systemCode.toLowerCase().includes(q));
+        (p.phone && p.phone.toLowerCase().includes(q)) ||
+        (p.altPhone && p.altPhone.toLowerCase().includes(q)) ||
+        (p.customerCode && p.customerCode.toLowerCase().includes(q)) ||
+        (p.code && p.code.toLowerCase().includes(q)) ||
+        (p.systemCode && p.systemCode.toLowerCase().includes(q)) ||
+        (p.paperCode && p.paperCode.toLowerCase().includes(q)) ||
+        (p.fileCode && p.fileCode.toLowerCase().includes(q)) ||
+        (p.fileNumber && p.fileNumber.toLowerCase().includes(q));
       return matchesType && matchesSearch;
     });
   }, [parties, partyTypeFilter, partySearch]);
@@ -425,16 +430,10 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
     };
   }, [currentParty, invoices, receptionShifts, cashReceipts, journalEntries, deviceMaintenanceRecords, filterStart, filterEnd]);
 
-  // QUANTITY & SESSIONS ANALYSIS (كشف حساب الكميات والباقات)
-  const clientOffers = useMemo(() => {
-    return currentParty?.offers || [];
-  }, [currentParty]);
-
-
   // QUANTITY & SERVICE MOVEMENTS FROM COLLECTION RECEIPTS
   // (حركات الكميات والخدمة المقيدة من إيصالات التحصيل)
-  // Reads directly from the receipt records so every receipt shows here regardless
-  // of its source (direct entry, Excel import, migration posting, ...).
+  // Reads directly from the receipt records so every receipt is reflected here
+  // regardless of its source (direct entry, Excel import, migration posting, ...).
   // This belongs to the detailed customer account only; the chart of accounts is untouched.
   const receiptQuantityMovements = useMemo(() => {
     if (!currentParty) return [];
@@ -470,6 +469,37 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
     () => receiptQuantityMovements.reduce((sum, movement) => sum + movement.quantity, 0),
     [receiptQuantityMovements]
   );
+
+  // QUANTITY & SESSIONS ANALYSIS (كشف حساب الكميات والباقات)
+  // The quantity view keeps its existing mechanism (packages/offers). Collection
+  // receipts that are not already reflected as an offer are linked in here, so the
+  // product/service name and booked quantity always appear whatever the receipt source.
+  const clientOffers = useMemo(() => {
+    const base = currentParty?.offers || [];
+    const representedVouchers = new Set<string>();
+    base.forEach((offer) => {
+      const match = offer.notes?.match(/إيصال تحصيل رقم\s*([^\s(]+)/);
+      if (match) representedVouchers.add(match[1]);
+    });
+    const receiptOffers: ClientOffer[] = receiptQuantityMovements
+      .filter((movement) => !representedVouchers.has(movement.voucherNumber))
+      .map((movement) => ({
+        id: `off-rcpt-view-${movement.id}`,
+        offerNameAr: movement.service,
+        offerNameEn: movement.service,
+        totalQuantity: movement.quantity,
+        consumedQuantity: 0,
+        remainingQuantity: movement.quantity,
+        unitPrice: movement.quantity > 0 ? Number((movement.amount / movement.quantity).toFixed(2)) : movement.amount,
+        totalPrice: movement.amount,
+        purchaseDate: movement.date,
+        status: 'Active' as const,
+        serviceType: movement.service,
+        notes: `مرتبط بإيصال تحصيل رقم ${movement.voucherNumber}`,
+      }));
+    return [...base, ...receiptOffers];
+  }, [currentParty, receiptQuantityMovements]);
+
   const {
     totalBookedSessions,
     totalConsumedSessions,
@@ -760,22 +790,40 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
             <label className="text-[11px] font-bold text-slate-500 block">
               {t('اختر العميل / المريض المطلوب:', 'Select Customer / Patient:')}
             </label>
-            <div className="flex gap-2">
+            <div className="flex flex-col sm:flex-row gap-2">
+              <div className="relative sm:w-56 shrink-0">
+                <Search className="h-3.5 w-3.5 text-slate-400 absolute top-1/2 -translate-y-1/2 start-2.5" />
+                <input
+                  type="text"
+                  value={partySearch}
+                  onChange={(e) => setPartySearch(e.target.value)}
+                  placeholder={t('ابحث بالكود أو الاسم أو الهاتف...', 'Search by code, name or phone...')}
+                  className="w-full ps-8 pe-3 py-2 text-xs font-bold rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white outline-none focus:border-indigo-600"
+                />
+              </div>
               <select
                 id="select-statement-party"
                 value={selectedPartyId}
                 onChange={(e) => setSelectedPartyId(e.target.value)}
                 className="w-full px-3 py-2 text-xs font-bold rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white outline-none focus:border-indigo-600"
               >
-                {parties.map((p) => (
+                <option value="">
+                  {t('— اختر العميل (لم يتم تحديد عميل) —', '— Select a customer (none selected) —')}
+                </option>
+                {availableParties.map((p) => (
                   <option key={p.id} value={p.id}>
                     [{p.type === 'Customer' ? 'عميل' : p.type === 'Supplier' ? 'مورد' : 'عميل/مورد'}]{' '}
-                    {p.name} {p.systemCode ? `(${p.systemCode})` : ''} - رصيد: {formatMoney(p.balance)}
+                    {p.name}
+                    {p.customerCode || p.code ? ` (كود: ${p.customerCode || p.code})` : ''}
+                    {p.systemCode ? ` (سيستم: ${p.systemCode})` : ''}
+                    {p.paperCode ? ` (ورقي: ${p.paperCode})` : ''}
+                    {p.phone ? ` - ${p.phone}` : ''} - رصيد: {formatMoney(p.balance)}
                   </option>
                 ))}
               </select>
             </div>
           </div>
+
 
           {/* Quick Period Buttons (Only relevant in Value mode or for date filtering) */}
           <div className="md:col-span-6 space-y-1">
@@ -1149,7 +1197,14 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
 
                                 {/* Action: Quick Session Consume */}
                                 <td className="py-3 px-3 text-center print:hidden">
-                                  {!isFinished ? (
+                                  {offer.id.startsWith('off-rcpt-view-') ? (
+                                    <span
+                                      className="text-[10px] text-blue-500 dark:text-blue-400 font-bold"
+                                      title={t('هذه الكمية مقيدة من إيصال تحصيل', 'This quantity is linked from a collection receipt')}
+                                    >
+                                      {t('من إيصال تحصيل', 'From receipt')}
+                                    </span>
+                                  ) : !isFinished ? (
                                     <button
                                       onClick={() => handleConsumeSession(offer.id, offer.offerNameAr)}
                                       className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800 hover:bg-purple-100 dark:hover:bg-purple-900/60 text-[11px] font-bold cursor-pointer transition-colors"
@@ -1210,72 +1265,6 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
                       </table>
                     </div>
                   </div>
-
-                  {/* COLLECTION RECEIPT QUANTITY & SERVICE MOVEMENTS (حركات الكميات والخدمة من إيصالات التحصيل) */}
-                  {receiptQuantityMovements.length > 0 && (
-                    <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden shadow-xs">
-                      <div className="p-3.5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-800/30">
-                        <div className="flex items-center gap-2">
-                          <Package className="h-4 w-4 text-blue-600" />
-                          <h4 className="text-xs font-bold text-slate-800 dark:text-white">
-                            {t('حركات الكميات والخدمة المقيدة من إيصالات التحصيل', 'Quantity & Service Movements from Collection Receipts')}
-                          </h4>
-                        </div>
-                        <span className="text-[10px] text-slate-400 font-mono">
-                          {receiptQuantityMovements.length} {t('حركة', 'movements')} · {totalReceiptQuantity} {t('إجمالي الكمية', 'total qty')}
-                        </span>
-                      </div>
-
-                      <div className="overflow-x-auto max-h-72">
-                        <table className="w-full text-xs">
-                          <thead>
-                            <tr className="border-b border-slate-200 text-slate-400 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/50 sticky top-0">
-                              <th className="py-2 px-3 font-bold text-start">{t('التاريخ', 'Date')}</th>
-                              <th className="py-2 px-3 font-bold text-start">{t('رقم السند', 'Voucher No.')}</th>
-                              <th className="py-2 px-3 font-bold text-start">{t('الخدمة / الجلسة', 'Service')}</th>
-                              <th className="py-2 px-3 font-bold text-center">{t('الكمية المحجوزة', 'Booked Qty')}</th>
-                              <th className="py-2 px-3 font-bold text-end">{t('القيمة', 'Value')}</th>
-                              <th className="py-2 px-3 font-bold text-center">{t('طريقة التحصيل', 'Collection Method')}</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                            {receiptQuantityMovements.map((movement) => (
-                              <tr key={movement.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/30">
-                                <td className="py-2 px-3 font-mono text-slate-500 whitespace-nowrap">{movement.date}</td>
-                                <td className="py-2 px-3 font-mono text-slate-600 dark:text-slate-300 whitespace-nowrap">{movement.voucherNumber}</td>
-                                <td className="py-2 px-3 font-bold text-slate-800 dark:text-slate-200">{movement.service}</td>
-                                <td className="py-2 px-3 text-center font-mono font-bold text-blue-600">
-                                  {movement.quantity}
-                                </td>
-                                <td className="py-2 px-3 text-end font-mono font-bold text-slate-700 dark:text-slate-200">
-                                  {formatMoney(movement.amount)}
-                                </td>
-                                <td className="py-2 px-3 text-center">
-                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
-                                    {movement.paymentMethod}
-                                  </span>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                          <tfoot>
-                            <tr className="border-t-2 border-slate-300 dark:border-slate-700 font-bold bg-slate-50 dark:bg-slate-850">
-                              <td className="py-3 px-3 font-bold" colSpan={3}>
-                                {t('إجمالي الكميات المحجوزة والقيمة:', 'Total Booked Quantity & Value:')}
-                              </td>
-                              <td className="py-3 px-3 text-center font-mono font-black text-blue-700 dark:text-blue-300 text-sm">
-                                {totalReceiptQuantity} {t('وحدة', 'units')}
-                              </td>
-                              <td className="py-3 px-3 text-end font-mono font-black text-slate-900 dark:text-white text-sm">
-                                {formatMoney(receiptQuantityMovements.reduce((sum, movement) => sum + movement.amount, 0))}
-                              </td>
-                              <td className="py-3 px-3 print:hidden"></td>
-                            </tr>
-                          </tfoot>
-                        </table>
-                      </div>
-                    </div>
-                  )}
 
                   {/* SESSIONS CONSUMPTION HISTORY LOG (سجل الجلسات المنفذة وحضور العميل) */}
                   {clientShiftSessions.length > 0 && (

@@ -1,5 +1,12 @@
 # PROJECT STATE
 
+## Detailed Customer Account — Receipt-linked quantity view & improved selector — 2026-10-11
+
+- Quantity view (QUANTITY mode) now links collection-receipt data (product/service name + booked quantity) into its existing offers/packages mechanism; the earlier standalone table was removed. Receipts already represented as offers are de-duplicated by voucher number.
+- Value view records collection receipts as credit movements with service description, date and cumulative running balance (already present; verified).
+- Customer selector defaults to no selection and supports search by name, phone, customer code, system code, paper code, file code and file number.
+- Chart of accounts untouched. Files: `src/components/PartyStatementModal.tsx`. Validation: tsc error count unchanged (126 pre-existing), vite build succeeded.
+
 ## Detailed Customer Account — Collection Receipt Quantity & Service Movements — 2026-10-11
 
 - Collection receipts now appear line by line in the detailed customer account (`PartyStatementModal`, QUANTITY mode) as a dedicated "Quantity & Service Movements" table: date, voucher number, service, booked quantity, value, and collection method, plus totals.
