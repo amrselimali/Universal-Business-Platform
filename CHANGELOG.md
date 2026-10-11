@@ -2,6 +2,15 @@
 
 # 2026-10-11
 
+## Journal Quick Filters and Safe Bulk Reversal
+
+- Added General Journal filters for entry number, date range, account code/name, and debit/credit amount ranges, while keeping the existing 50-entry pagination.
+- Added page-level multi-selection and per-entry reversal actions. Reversal creates a balanced posted journal in the current open period, preserves the original entry, and records a required reason in the audit/activity logs. Duplicate reversals are blocked.
+- Reversal is limited to balanced, posted, unlinked manual journals. Entries tied to receipts, inventory, payroll, shifts, or other operational sources remain disabled here and must be corrected through their source workflow to avoid inconsistent downstream records. Unbalanced entries remain in the dedicated repair flow.
+- No runtime ledger entries were changed by this feature; reversal occurs only after user confirmation in the application.
+
+# 2026-10-11
+
 ## Historical Unmapped Journal Account Consolidation
 
 - Added an explicit Trial Balance action to consolidate currently unmapped posted journal lines for the selected branch scope under tenant-level account `9999999`, named `أرصدة تاريخية مجمعة - تحت المراجعة`.

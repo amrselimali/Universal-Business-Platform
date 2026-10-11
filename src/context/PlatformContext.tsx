@@ -511,6 +511,7 @@ interface PlatformContextType {
     reason: string
   ) => { success: boolean; error?: string };
   voidUnlinkedJournalEntry: (entryId: string, reason: string) => { success: boolean; error?: string };
+  reverseJournalEntries: (entryIds: string[], reason: string) => { success: boolean; reversed?: number; error?: string };
   consolidateUnmappedJournalLines: (
     entryIds: string[],
     accountType: AccountType,
@@ -1397,6 +1398,120 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       `${entry.entryNumber}: ${reason.trim()}`
     );
     return { success: true };
+  };
+
+  const reverseJournalEntries = (
+    entryIds: string[],
+    reason: string
+  ): { success: boolean; reversed?: number; error?: string } => {
+    const uniqueEntryIds = Array.from(new Set(entryIds));
+    if (uniqueEntryIds.length === 0) {
+      return { success: false, error: t('حدد قيدًا واحدًا على الأقل.', 'Select at least one journal entry.') };
+    }
+    if (!reason.trim()) {
+      return { success: false, error: t('يرجى إدخال سبب العكس لأغراض المراجعة.', 'Enter a reversal reason for the audit trail.') };
+    }
+
+    const now = new Date();
+    const reversalDate = [
+      now.getFullYear(),
+      String(now.getMonth() + 1).padStart(2, '0'),
+      String(now.getDate()).padStart(2, '0'),
+    ].join('-');
+    const reversals: JournalEntry[] = [];
+    const reversalLines: JournalLine[] = [];
+    const usedEntryNumbers = new Set(allJournals.map((journal) => journal.entryNumber));
+
+    try {
+      uniqueEntryIds.forEach((entryId, index) => {
+        const entry = allJournals.find((journal) => journal.id === entryId);
+        if (!entry) throw new Error(t(`القيد ${entryId} غير موجود.`, `Journal entry ${entryId} was not found.`));
+        if (entry.tenantId !== (tenant?.id || INITIAL_TENANT.id)) {
+          throw new Error(t('لا يمكن عكس قيد تابع لكيان آخر.', 'Cannot reverse an entry belonging to another tenant.'));
+        }
+        if (!entry.isPosted) {
+          throw new Error(t(`القيد ${entry.entryNumber} غير مرحل بالفعل.`, `${entry.entryNumber} is not posted.`));
+        }
+        const sourceInfo = getJournalEntrySourceInfo(entryId);
+        if (!sourceInfo.canVoid) {
+          throw new Error(sourceInfo.reason || t(
+            `لا يمكن عكس ${entry.entryNumber} من اليومية؛ عدّله أو ألغِه من شاشة مصدره.`,
+            `${entry.entryNumber} cannot be reversed from the journal; edit or cancel it from its source screen.`
+          ));
+        }
+        const reversalSource = `REVERSAL_OF:${entry.id}`;
+        if (allJournals.some((journal) => journal.tenantId === entry.tenantId && journal.sourceDocument === reversalSource)) {
+          throw new Error(t(`تم عكس القيد ${entry.entryNumber} من قبل.`, `${entry.entryNumber} has already been reversed.`));
+        }
+        const periodCheck = validatePeriodDate(reversalDate, entry.branchId);
+        if (!periodCheck.allowed) {
+          throw new Error(periodCheck.message || t('الفترة المحاسبية الحالية مقفلة.', 'The current accounting period is locked.'));
+        }
+        assertBalancedJournalLines(entry.lines, entry.entryNumber);
+
+        let reversalEntryNumber = `JV-RV-${Date.now()}-${index + 1}-${Math.random().toString(36).slice(2, 6)}`;
+        while (usedEntryNumbers.has(reversalEntryNumber)) {
+          reversalEntryNumber = `JV-RV-${Date.now()}-${index + 1}-${Math.random().toString(36).slice(2, 6)}`;
+        }
+        usedEntryNumbers.add(reversalEntryNumber);
+        const lines = entry.lines.map((line, lineIndex) => ({
+          ...line,
+          id: `line-reversal-${Date.now()}-${index}-${lineIndex}-${Math.random().toString(36).slice(2, 7)}`,
+          debit: Number(line.credit),
+          credit: Number(line.debit),
+          memo: line.memo
+            ? `${t('عكس:', 'Reversal:')} ${line.memo}`
+            : t(`عكس القيد ${entry.entryNumber}`, `Reversal of ${entry.entryNumber}`),
+        }));
+        assertBalancedJournalLines(lines, reversalEntryNumber);
+
+        reversals.push({
+          id: `jv-reversal-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`,
+          tenantId: entry.tenantId,
+          branchId: entry.branchId,
+          entryNumber: reversalEntryNumber,
+          date: reversalDate,
+          description: t(
+            `عكس القيد ${entry.entryNumber}: ${entry.description}`,
+            `Reversal of ${entry.entryNumber}: ${entry.description}`
+          ),
+          isPosted: true,
+          sourceDocument: reversalSource,
+          lines,
+          createdAt: new Date().toISOString(),
+        });
+        reversalLines.push(...lines);
+      });
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : t('تعذر التحقق من القيود المطلوب عكسها.', 'Could not validate the selected journals for reversal.'),
+      };
+    }
+
+    applyJournalLinesToAccounts(reversalLines);
+    setAllJournals((previous) => [...reversals, ...previous]);
+    reversals.forEach((reversal, index) => {
+      const originalEntry = allJournals.find((journal) => journal.id === uniqueEntryIds[index]);
+      if (!originalEntry) return;
+      recordAudit({
+        branchId: originalEntry.branchId,
+        entityType: 'JournalEntry',
+        entityId: originalEntry.id,
+        entityName: `${originalEntry.entryNumber} - ${originalEntry.description}`,
+        actionType: 'CANCEL',
+        reason: reason.trim(),
+        diffSummary: `تم إنشاء القيد العكسي ${reversal.entryNumber} دون حذف القيد الأصلي. السبب: ${reason.trim()}`,
+        previousState: originalEntry,
+        newState: { originalEntry, reversalEntryId: reversal.id, reversalEntryNumber: reversal.entryNumber },
+      });
+      logUserActivity(
+        'accounting', 'المحاسبة', 'Accounting',
+        'عكس قيد يومية', 'Reverse journal entry',
+        `${originalEntry.entryNumber} -> ${reversal.entryNumber}: ${reason.trim()}`
+      );
+    });
+    return { success: true, reversed: reversals.length };
   };
 
   const consolidateUnmappedJournalLines = (
@@ -10095,6 +10210,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         getJournalEntrySourceInfo,
         repairJournalEntryLines,
         voidUnlinkedJournalEntry,
+        reverseJournalEntries,
         consolidateUnmappedJournalLines,
         auditRecords,
         allAuditRecords,

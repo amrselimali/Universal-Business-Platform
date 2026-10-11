@@ -22,6 +22,7 @@ import {
   X,
   ExternalLink,
   Building2,
+  RotateCcw,
 } from 'lucide-react';
 import { PartyStatementModal } from '../components/PartyStatementModal';
 import { PaginationControls } from '../components/PaginationControls';
@@ -39,6 +40,7 @@ export const AccountingView: React.FC = () => {
     getJournalEntrySourceInfo,
     repairJournalEntryLines,
     voidUnlinkedJournalEntry,
+    reverseJournalEntries,
     consolidateUnmappedJournalLines,
     language,
     tenant,
@@ -57,6 +59,20 @@ export const AccountingView: React.FC = () => {
   const [generalLedgerPage, setGeneralLedgerPage] = useState(1);
   const [trialBalancePage, setTrialBalancePage] = useState(1);
   const [journalPage, setJournalPage] = useState(1);
+  const [journalNumberFilter, setJournalNumberFilter] = useState('');
+  const [journalDateFromFilter, setJournalDateFromFilter] = useState('');
+  const [journalDateToFilter, setJournalDateToFilter] = useState('');
+  const [journalAccountFilter, setJournalAccountFilter] = useState('');
+  const [journalDebitMinFilter, setJournalDebitMinFilter] = useState('');
+  const [journalDebitMaxFilter, setJournalDebitMaxFilter] = useState('');
+  const [journalCreditMinFilter, setJournalCreditMinFilter] = useState('');
+  const [journalCreditMaxFilter, setJournalCreditMaxFilter] = useState('');
+  const [selectedJournalEntryIds, setSelectedJournalEntryIds] = useState<string[]>([]);
+  const [showJournalReversalDialog, setShowJournalReversalDialog] = useState(false);
+  const [journalReversalEntryIds, setJournalReversalEntryIds] = useState<string[]>([]);
+  const [journalReversalReason, setJournalReversalReason] = useState('');
+  const [journalReversalError, setJournalReversalError] = useState<string | null>(null);
+  const [journalReversalResult, setJournalReversalResult] = useState<string | null>(null);
   const rowsPerPage = 50;
 
   // Account Modal State (Add / Edit)
@@ -141,11 +157,93 @@ export const AccountingView: React.FC = () => {
       return entry.branchId === selectedBranchId;
     });
   }, [journalEntries, selectedBranchId]);
+  const filteredJournalTabEntries = useMemo(() => {
+    const numberQuery = journalNumberFilter.trim().toLowerCase();
+    const accountQuery = journalAccountFilter.trim().toLowerCase();
+    const debitMin = journalDebitMinFilter === '' ? undefined : Number(journalDebitMinFilter);
+    const debitMax = journalDebitMaxFilter === '' ? undefined : Number(journalDebitMaxFilter);
+    const creditMin = journalCreditMinFilter === '' ? undefined : Number(journalCreditMinFilter);
+    const creditMax = journalCreditMaxFilter === '' ? undefined : Number(journalCreditMaxFilter);
+
+    return filteredJournalEntries.filter((entry) => {
+      const debitTotal = entry.lines.reduce((sum, line) => sum + (Number(line.debit) || 0), 0);
+      const creditTotal = entry.lines.reduce((sum, line) => sum + (Number(line.credit) || 0), 0);
+      const matchesNumber = !numberQuery || entry.entryNumber.toLowerCase().includes(numberQuery);
+      const matchesDate = (!journalDateFromFilter || entry.date >= journalDateFromFilter) &&
+        (!journalDateToFilter || entry.date <= journalDateToFilter);
+      const matchesAccount = !accountQuery || entry.lines.some((line) =>
+        line.accountCode.toLowerCase().includes(accountQuery) ||
+        line.accountNameAr.toLowerCase().includes(accountQuery) ||
+        line.accountNameEn.toLowerCase().includes(accountQuery)
+      );
+      const matchesDebit = (debitMin === undefined || debitTotal >= debitMin) &&
+        (debitMax === undefined || debitTotal <= debitMax);
+      const matchesCredit = (creditMin === undefined || creditTotal >= creditMin) &&
+        (creditMax === undefined || creditTotal <= creditMax);
+      return matchesNumber && matchesDate && matchesAccount && matchesDebit && matchesCredit;
+    });
+  }, [
+    filteredJournalEntries,
+    journalNumberFilter,
+    journalDateFromFilter,
+    journalDateToFilter,
+    journalAccountFilter,
+    journalDebitMinFilter,
+    journalDebitMaxFilter,
+    journalCreditMinFilter,
+    journalCreditMaxFilter,
+  ]);
   const paginatedJournalEntries = useMemo(
-    () => filteredJournalEntries.slice((journalPage - 1) * rowsPerPage, journalPage * rowsPerPage),
-    [filteredJournalEntries, journalPage]
+    () => filteredJournalTabEntries.slice((journalPage - 1) * rowsPerPage, journalPage * rowsPerPage),
+    [filteredJournalTabEntries, journalPage]
   );
-  useEffect(() => setJournalPage(1), [selectedBranchId]);
+  useEffect(() => {
+    setJournalPage(1);
+    setSelectedJournalEntryIds([]);
+  }, [
+    selectedBranchId,
+    journalNumberFilter,
+    journalDateFromFilter,
+    journalDateToFilter,
+    journalAccountFilter,
+    journalDebitMinFilter,
+    journalDebitMaxFilter,
+    journalCreditMinFilter,
+    journalCreditMaxFilter,
+  ]);
+
+  const journalReversalBlockReason = (entry: typeof journalEntries[number]): string | null => {
+    if (!entry.isPosted) return t('القيد غير مرحل.', 'The journal is not posted.');
+    const hasInvalidLine = entry.lines.length === 0 || entry.lines.some((line) => {
+      const debit = Number(line.debit);
+      const credit = Number(line.credit);
+      return !Number.isFinite(debit) || !Number.isFinite(credit) || debit < 0 || credit < 0 ||
+        (debit > 0 && credit > 0);
+    });
+    if (hasInvalidLine) {
+      return t('يحتوي القيد على سطور غير صالحة؛ راجعه قبل العكس.', 'The journal contains invalid lines; review it before reversal.');
+    }
+    const debit = entry.lines.reduce((sum, line) => sum + (Number(line.debit) || 0), 0);
+    const credit = entry.lines.reduce((sum, line) => sum + (Number(line.credit) || 0), 0);
+    if (Math.abs(debit - credit) >= 0.01) {
+      return t('القيد غير متوازن؛ صححه من شاشة مراجعة القيود أولًا.', 'The journal is unbalanced; repair it in the unbalanced-journal review first.');
+    }
+    if (journalEntries.some((candidate) =>
+      candidate.tenantId === entry.tenantId && candidate.sourceDocument === `REVERSAL_OF:${entry.id}`
+    )) {
+      return t('تم عكس القيد بالفعل.', 'This journal has already been reversed.');
+    }
+    const sourceInfo = getJournalEntrySourceInfo(entry.id);
+    return sourceInfo.canVoid
+      ? null
+      : sourceInfo.reason || t('يجب معالجة هذا القيد من شاشة مصدره.', 'This journal must be handled from its source screen.');
+  };
+
+  const selectableJournalPageEntryIds = paginatedJournalEntries
+    .filter((entry) => !journalReversalBlockReason(entry))
+    .map((entry) => entry.id);
+  const allSelectableJournalPageEntriesSelected = selectableJournalPageEntryIds.length > 0 &&
+    selectableJournalPageEntryIds.every((entryId) => selectedJournalEntryIds.includes(entryId));
 
   const trialBalanceAccounts = useMemo(() => {
     const balances = new Map<string, number>();
@@ -665,6 +763,33 @@ export const AccountingView: React.FC = () => {
     setVoidReason('');
     setVoidError(null);
     setUnbalancedPage(1);
+  };
+
+  const startJournalReversal = (entryIds: string[]) => {
+    const uniqueIds = Array.from(new Set(entryIds));
+    if (uniqueIds.length === 0) return;
+    setJournalReversalResult(null);
+    setJournalReversalEntryIds(uniqueIds);
+    setJournalReversalReason('');
+    setJournalReversalError(null);
+    setShowJournalReversalDialog(true);
+  };
+
+  const handleReverseJournalEntries = () => {
+    const result = reverseJournalEntries(journalReversalEntryIds, journalReversalReason);
+    if (!result.success) {
+      setJournalReversalError(result.error || t('تعذر عكس القيود المحددة.', 'Could not reverse the selected journals.'));
+      return;
+    }
+    setSelectedJournalEntryIds((previous) => previous.filter((id) => !journalReversalEntryIds.includes(id)));
+    setJournalReversalEntryIds([]);
+    setJournalReversalReason('');
+    setJournalReversalError(null);
+    setJournalReversalResult(t(
+      `تم إنشاء ${result.reversed || 0} قيد عكسي مع الاحتفاظ بالقيود الأصلية.`,
+      `Created ${result.reversed || 0} reversing journal(s); original entries were retained.`
+    ));
+    setShowJournalReversalDialog(false);
   };
 
   const handleConsolidateUnmappedLines = () => {
@@ -1352,24 +1477,169 @@ export const AccountingView: React.FC = () => {
                   : t('عرض جميع قيود اليومية لجميع الفروع والمراكز.', 'Displaying all journal entries across all branches.')}
               </p>
             </div>
-            <span className="text-xs text-slate-400">{filteredJournalEntries.length} {t('قيد مقيد', 'entries')}</span>
+            <span className="text-xs text-slate-400">{filteredJournalTabEntries.length} {t('قيد مطابق', 'matching entries')}</span>
           </div>
+
+          <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950/40">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <label className="space-y-1 text-[11px] font-semibold text-slate-500">
+                <span>{t('رقم القيد', 'Journal number')}</span>
+                <input
+                  value={journalNumberFilter}
+                  onChange={(event) => setJournalNumberFilter(event.target.value)}
+                  placeholder={t('ابحث برقم القيد', 'Search entry number')}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                />
+              </label>
+              <label className="space-y-1 text-[11px] font-semibold text-slate-500">
+                <span>{t('الحساب (كود أو اسم)', 'Account (code or name)')}</span>
+                <input
+                  value={journalAccountFilter}
+                  onChange={(event) => setJournalAccountFilter(event.target.value)}
+                  placeholder={t('ابحث داخل سطور القيد', 'Search journal lines')}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                />
+              </label>
+              <div className="space-y-1 text-[11px] font-semibold text-slate-500">
+                <span>{t('من تاريخ / إلى تاريخ', 'Date from / to')}</span>
+                <div className="flex gap-2">
+                  <input
+                    type="date"
+                    value={journalDateFromFilter}
+                    onChange={(event) => setJournalDateFromFilter(event.target.value)}
+                    className="min-w-0 w-full rounded-lg border border-slate-200 bg-white px-2 py-2 text-xs text-slate-800 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                  />
+                  <input
+                    type="date"
+                    value={journalDateToFilter}
+                    onChange={(event) => setJournalDateToFilter(event.target.value)}
+                    className="min-w-0 w-full rounded-lg border border-slate-200 bg-white px-2 py-2 text-xs text-slate-800 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                  />
+                </div>
+              </div>
+              <div className="space-y-1 text-[11px] font-semibold text-slate-500">
+                <span>{t('المدين من / إلى', 'Debit from / to')}</span>
+                <div className="flex gap-2">
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={journalDebitMinFilter}
+                    onChange={(event) => setJournalDebitMinFilter(event.target.value)}
+                    placeholder={t('من', 'Min')}
+                    className="min-w-0 w-full rounded-lg border border-slate-200 bg-white px-2 py-2 text-xs text-slate-800 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                  />
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={journalDebitMaxFilter}
+                    onChange={(event) => setJournalDebitMaxFilter(event.target.value)}
+                    placeholder={t('إلى', 'Max')}
+                    className="min-w-0 w-full rounded-lg border border-slate-200 bg-white px-2 py-2 text-xs text-slate-800 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                  />
+                </div>
+              </div>
+              <div className="space-y-1 text-[11px] font-semibold text-slate-500">
+                <span>{t('الدائن من / إلى', 'Credit from / to')}</span>
+                <div className="flex gap-2">
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={journalCreditMinFilter}
+                    onChange={(event) => setJournalCreditMinFilter(event.target.value)}
+                    placeholder={t('من', 'Min')}
+                    className="min-w-0 w-full rounded-lg border border-slate-200 bg-white px-2 py-2 text-xs text-slate-800 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                  />
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={journalCreditMaxFilter}
+                    onChange={(event) => setJournalCreditMaxFilter(event.target.value)}
+                    placeholder={t('إلى', 'Max')}
+                    className="min-w-0 w-full rounded-lg border border-slate-200 bg-white px-2 py-2 text-xs text-slate-800 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                  />
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setJournalNumberFilter('');
+                  setJournalDateFromFilter('');
+                  setJournalDateToFilter('');
+                  setJournalAccountFilter('');
+                  setJournalDebitMinFilter('');
+                  setJournalDebitMaxFilter('');
+                  setJournalCreditMinFilter('');
+                  setJournalCreditMaxFilter('');
+                }}
+                className="self-end rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold text-slate-600 hover:bg-white dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-900"
+              >
+                {t('مسح الفلاتر', 'Clear filters')}
+              </button>
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-3 dark:border-slate-800">
+              <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-200">
+                <input
+                  type="checkbox"
+                  checked={allSelectableJournalPageEntriesSelected}
+                  disabled={selectableJournalPageEntryIds.length === 0}
+                  onChange={(event) => setSelectedJournalEntryIds((previous) => event.target.checked
+                    ? Array.from(new Set([...previous, ...selectableJournalPageEntryIds]))
+                    : previous.filter((id) => !selectableJournalPageEntryIds.includes(id)))}
+                  className="h-4 w-4 rounded border-slate-300 text-indigo-600"
+                />
+                {t('تحديد القيود القابلة للعكس في الصفحة الحالية', 'Select reversible entries on this page')}
+                <span className="font-mono text-slate-500">({selectedJournalEntryIds.length})</span>
+              </label>
+              <button
+                type="button"
+                disabled={selectedJournalEntryIds.length === 0}
+                onClick={() => startJournalReversal(selectedJournalEntryIds)}
+                className="inline-flex items-center gap-1 rounded-lg bg-rose-600 px-3 py-2 text-xs font-bold text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                {t('عكس المحدد', 'Reverse selected')} ({selectedJournalEntryIds.length})
+              </button>
+            </div>
+          </div>
+
+          {journalReversalResult && (
+            <p role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs font-semibold text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/20 dark:text-emerald-300">
+              {journalReversalResult}
+            </p>
+          )}
 
           <div className="space-y-4">
             <PaginationControls
               currentPage={journalPage}
-              totalItems={filteredJournalEntries.length}
+              totalItems={filteredJournalTabEntries.length}
               pageSize={rowsPerPage}
               onPageChange={setJournalPage}
               language={language}
             />
-            {paginatedJournalEntries.map((entry) => (
+            {paginatedJournalEntries.map((entry) => {
+              const reversalBlockReason = journalReversalBlockReason(entry);
+              const isSelectedForReversal = selectedJournalEntryIds.includes(entry.id);
+              return (
               <div
                 key={entry.id}
                 className="rounded-xl border border-slate-200 bg-slate-50/50 p-4 dark:border-slate-800 dark:bg-slate-800/40 space-y-3"
               >
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-slate-200 pb-3 dark:border-slate-700">
-                  <div className="flex items-center gap-2">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={isSelectedForReversal}
+                      disabled={!!reversalBlockReason}
+                      title={reversalBlockReason || t('حدد القيد لعكسه', 'Select this journal for reversal')}
+                      onChange={(event) => setSelectedJournalEntryIds((previous) => event.target.checked
+                        ? [...previous, entry.id]
+                        : previous.filter((id) => id !== entry.id))}
+                      className="h-4 w-4 shrink-0 rounded border-slate-300 text-indigo-600 disabled:cursor-not-allowed"
+                    />
                     <span className="rounded-lg bg-indigo-600 px-2 py-0.5 font-mono text-xs font-bold text-white">
                       {entry.entryNumber}
                     </span>
@@ -1397,6 +1667,16 @@ export const AccountingView: React.FC = () => {
                         {entry.sourceDocument}
                       </span>
                     )}
+                    <button
+                      type="button"
+                      disabled={!!reversalBlockReason}
+                      title={reversalBlockReason || t('إنشاء قيد عكسي في الفترة الحالية', 'Create a reversing entry in the current period')}
+                      onClick={() => startJournalReversal([entry.id])}
+                      className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-rose-300 px-2 py-1 text-[10px] font-bold text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-rose-800 dark:text-rose-300 dark:hover:bg-rose-950/30"
+                    >
+                      <RotateCcw className="h-3 w-3" />
+                      {t('عكس', 'Reverse')}
+                    </button>
                   </div>
                 </div>
                 {entry.voidReason && (
@@ -1443,7 +1723,8 @@ export const AccountingView: React.FC = () => {
                   </table>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
@@ -1771,6 +2052,71 @@ export const AccountingView: React.FC = () => {
                 className="rounded-lg bg-amber-700 px-4 py-2 text-xs font-bold text-white hover:bg-amber-800 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {t('تجميع الآن في 9999999', 'Consolidate now into 9999999')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showJournalReversalDialog && (
+        <div className="fixed inset-0 z-[78] flex items-center justify-center bg-black/60 p-3 backdrop-blur-sm">
+          <div className="w-full max-w-xl space-y-4 rounded-2xl border border-rose-200 bg-white p-5 shadow-2xl dark:border-rose-900/60 dark:bg-slate-900">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-base font-black text-slate-900 dark:text-white">
+                  {t('تأكيد عكس القيود المحددة', 'Confirm Journal Reversal')}
+                </h2>
+                <p className="mt-1 text-xs text-slate-500">
+                  {t('عدد القيود:', 'Selected entries:')} {journalReversalEntryIds.length}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowJournalReversalDialog(false)}
+                className="rounded-lg p-1 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+                aria-label={t('إغلاق', 'Close')}
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
+              <p className="font-bold">
+                {t(
+                  'سيُنشأ قيد عكسي مرحل بتاريخ اليوم لكل قيد محدد، مع الإبقاء على القيود الأصلية وسجل التدقيق. هذا الإجراء متاح فقط للقيود اليدوية المتوازنة غير المرتبطة بمصدر تشغيلي، ويُمنع تكراره أو تنفيذه إذا كانت الفترة الحالية مقفلة.',
+                  'A posted reversing journal dated today will be created for each selected entry; originals and audit history are retained. This is limited to balanced, unlinked manual journals and is blocked if the current period is locked or a reversal already exists.'
+                )}
+              </p>
+            </div>
+            <label className="block space-y-1 text-xs font-bold text-slate-700 dark:text-slate-200">
+              <span>{t('سبب العكس (إلزامي للتدقيق)', 'Reason for reversal (required for audit)')}</span>
+              <input
+                value={journalReversalReason}
+                onChange={(event) => setJournalReversalReason(event.target.value)}
+                className="w-full rounded-lg border border-slate-200 bg-white p-2 dark:border-slate-700 dark:bg-slate-800"
+                placeholder={t('اكتب سبب إلغاء أثر القيد', 'Explain why the journal is being reversed')}
+              />
+            </label>
+            {journalReversalError && (
+              <p role="alert" className="rounded-lg bg-rose-50 p-2 text-xs text-rose-700 dark:bg-rose-950/30 dark:text-rose-300">
+                {journalReversalError}
+              </p>
+            )}
+            <div className="flex justify-end gap-2 border-t border-slate-200 pt-3 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setShowJournalReversalDialog(false)}
+                className="rounded-lg px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+              >
+                {t('رجوع دون تغيير', 'Cancel')}
+              </button>
+              <button
+                type="button"
+                disabled={!journalReversalReason.trim() || journalReversalEntryIds.length === 0}
+                onClick={handleReverseJournalEntries}
+                className="inline-flex items-center gap-1 rounded-lg bg-rose-600 px-4 py-2 text-xs font-bold text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                {t('تأكيد إنشاء القيود العكسية', 'Confirm Reversal')}
               </button>
             </div>
           </div>
