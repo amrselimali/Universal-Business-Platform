@@ -1198,7 +1198,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (uniqueIds.length === 0) {
       return { success: false, error: t('لم يتم تحديد أي قيود للحذف.', 'No journal entries were selected for deletion.') };
     }
-    const entries = uniqueIds.map((entryId) => allJournals.find((entry) => entry.id === entryId));
+    const journalById = new Map(allJournals.map((entry) => [entry.id, entry]));
+    const entries = uniqueIds.map((entryId) => journalById.get(entryId));
     const missingIndex = entries.findIndex((entry) => !entry);
     if (missingIndex >= 0) {
       return { success: false, error: t(`القيد المحدد (${uniqueIds[missingIndex]}) غير موجود.`, `Selected journal (${uniqueIds[missingIndex]}) was not found.`) };
@@ -1480,10 +1481,14 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const reversals: JournalEntry[] = [];
     const reversalLines: JournalLine[] = [];
     const usedEntryNumbers = new Set(allJournals.map((journal) => journal.entryNumber));
+    const journalById = new Map(allJournals.map((journal) => [journal.id, journal]));
+    const reversedSources = new Set(allJournals
+      .map((journal) => journal.sourceDocument)
+      .filter((source): source is string => Boolean(source && source.startsWith('REVERSAL_OF:'))));
 
     try {
       uniqueEntryIds.forEach((entryId, index) => {
-        const entry = allJournals.find((journal) => journal.id === entryId);
+        const entry = journalById.get(entryId);
         if (!entry) throw new Error(t(`القيد ${entryId} غير موجود.`, `Journal entry ${entryId} was not found.`));
         if (entry.tenantId !== (tenant?.id || INITIAL_TENANT.id)) {
           throw new Error(t('لا يمكن عكس قيد تابع لكيان آخر.', 'Cannot reverse an entry belonging to another tenant.'));
@@ -1499,7 +1504,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           ));
         }
         const reversalSource = `REVERSAL_OF:${entry.id}`;
-        if (allJournals.some((journal) => journal.tenantId === entry.tenantId && journal.sourceDocument === reversalSource)) {
+        if (reversedSources.has(reversalSource)) {
           throw new Error(t(`تم عكس القيد ${entry.entryNumber} من قبل.`, `${entry.entryNumber} has already been reversed.`));
         }
         const periodCheck = validatePeriodDate(reversalDate, entry.branchId);
@@ -1551,7 +1556,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     applyJournalLinesToAccounts(reversalLines);
     setAllJournals((previous) => [...reversals, ...previous]);
     reversals.forEach((reversal, index) => {
-      const originalEntry = allJournals.find((journal) => journal.id === uniqueEntryIds[index]);
+      const originalEntry = journalById.get(uniqueEntryIds[index]);
       if (!originalEntry) return;
       recordAudit({
         branchId: originalEntry.branchId,

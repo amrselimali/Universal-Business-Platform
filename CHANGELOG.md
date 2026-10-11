@@ -2,6 +2,16 @@
 
 # 2026-10-11
 
+## Performance fix — fast bulk selection in General Journal
+
+- Fixed the UI freeze when using "Select all filtered entries" on very large filters (e.g. 40,000 entries). The freeze was caused by quadratic (O(n²)) membership checks and by resolving every selected entry's source on each render.
+- Selection membership is now O(1) via a memoized `Set`; the reversible subset is resolved lazily only when the user presses "Reverse selected"; per-entry ID lists are memoized.
+- Removed O(n²) lookups in `forceDeleteJournalEntries` and `reverseJournalEntries` (now use id/source maps).
+- No business rule changed: reversal eligibility and source-linked protections are unchanged.
+- Files: `src/views/AccountingView.tsx`, `src/context/PlatformContext.tsx`.
+
+# 2026-10-11
+
 ## Detailed Customer Account — Receipt-linked quantity view & improved selector
 
 - Reworked the previous standalone quantity table: the collection-receipt quantity/service data is now **linked into the existing quantity view mechanism** instead of a separate section. Receipts not already represented as an offer are merged into the offers list (product/service name + booked quantity), so they appear in the existing packages table and totals whatever the receipt source.

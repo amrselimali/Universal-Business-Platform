@@ -232,6 +232,24 @@ export const AccountingView: React.FC = () => {
     journalCreditMaxFilter,
   ]);
 
+  // Precomputed lookups to keep selection/reversal checks fast with very large data.
+  const journalEntriesById = useMemo(() => {
+    const map = new Map<string, typeof journalEntries[number]>();
+    journalEntries.forEach((entry) => map.set(entry.id, entry));
+    return map;
+  }, [journalEntries]);
+
+  const reversedJournalSourceIds = useMemo(() => {
+    const prefix = 'REVERSAL_OF:';
+    const set = new Set<string>();
+    journalEntries.forEach((entry) => {
+      if (entry.sourceDocument?.startsWith(prefix)) {
+        set.add(entry.sourceDocument.slice(prefix.length));
+      }
+    });
+    return set;
+  }, [journalEntries]);
+
   const journalReversalBlockReason = (entry: typeof journalEntries[number]): string | null => {
     if (!entry.isPosted) return t('القيد غير مرحل.', 'The journal is not posted.');
     const hasInvalidLine = entry.lines.length === 0 || entry.lines.some((line) => {
@@ -248,9 +266,7 @@ export const AccountingView: React.FC = () => {
     if (Math.abs(debit - credit) >= 0.01) {
       return t('القيد غير متوازن؛ صححه من شاشة مراجعة القيود أولًا.', 'The journal is unbalanced; repair it in the unbalanced-journal review first.');
     }
-    if (journalEntries.some((candidate) =>
-      candidate.tenantId === entry.tenantId && candidate.sourceDocument === `REVERSAL_OF:${entry.id}`
-    )) {
+    if (reversedJournalSourceIds.has(entry.id)) {
       return t('تم عكس القيد بالفعل.', 'This journal has already been reversed.');
     }
     const sourceInfo = getJournalEntrySourceInfo(entry.id);
@@ -259,16 +275,21 @@ export const AccountingView: React.FC = () => {
       : sourceInfo.reason || t('يجب معالجة هذا القيد من شاشة مصدره.', 'This journal must be handled from its source screen.');
   };
 
-  const selectableJournalPageEntryIds = paginatedJournalEntries.map((entry) => entry.id);
+  const selectableJournalPageEntryIds = useMemo(() => paginatedJournalEntries.map((entry) => entry.id), [paginatedJournalEntries]);
+  const selectedJournalEntryIdSet = useMemo(() => new Set(selectedJournalEntryIds), [selectedJournalEntryIds]);
   const allSelectableJournalPageEntriesSelected = selectableJournalPageEntryIds.length > 0 &&
-    selectableJournalPageEntryIds.every((entryId) => selectedJournalEntryIds.includes(entryId));
+    selectableJournalPageEntryIds.every((entryId) => selectedJournalEntryIdSet.has(entryId));
 
   // All IDs across every page of the current filter result
-  const allFilteredJournalEntryIds = filteredJournalTabEntries.map((entry) => entry.id);
+  const allFilteredJournalEntryIds = useMemo(() => filteredJournalTabEntries.map((entry) => entry.id), [filteredJournalTabEntries]);
   const allFilteredJournalEntriesSelected = allFilteredJournalEntryIds.length > 0 &&
-    allFilteredJournalEntryIds.every((entryId) => selectedJournalEntryIds.includes(entryId));
-  const selectedReversibleJournalEntryIds = selectedJournalEntryIds.filter((entryId) => {
-    const entry = journalEntries.find((candidate) => candidate.id === entryId);
+    allFilteredJournalEntryIds.every((entryId) => selectedJournalEntryIdSet.has(entryId));
+
+  // The reversible subset is intentionally resolved lazily (only when the user acts).
+  // Resolving each entry's source is expensive; doing it for tens of thousands of selected
+  // rows on every render is what previously froze the UI.
+  const computeReversibleSelectedIds = (): string[] => selectedJournalEntryIds.filter((entryId) => {
+    const entry = journalEntriesById.get(entryId);
     return !!entry && !journalReversalBlockReason(entry);
   });
 
@@ -902,7 +923,8 @@ export const AccountingView: React.FC = () => {
       setJournalReversalError(result.error || t('تعذر عكس القيود المحددة.', 'Could not reverse the selected journals.'));
       return;
     }
-    setSelectedJournalEntryIds((previous) => previous.filter((id) => !journalReversalEntryIds.includes(id)));
+    const reversedIdSet = new Set(journalReversalEntryIds);
+    setSelectedJournalEntryIds((previous) => previous.filter((id) => !reversedIdSet.has(id)));
     setJournalReversalEntryIds([]);
     setJournalReversalReason('');
     setJournalReversalError(null);
@@ -929,7 +951,8 @@ export const AccountingView: React.FC = () => {
       setForceDeleteError(result.error || t('تعذر حذف القيود المحددة.', 'Could not delete the selected journal entries.'));
       return;
     }
-    setSelectedJournalEntryIds((previous) => previous.filter((id) => !forceDeleteEntryIds.includes(id)));
+    const deletedIdSet = new Set(forceDeleteEntryIds);
+    setSelectedJournalEntryIds((previous) => previous.filter((id) => !deletedIdSet.has(id)));
     setForceDeleteResult(t(
       `تم حذف ${result.deleted || 0} قيد نهائيًا وعكس أثرها من أرصدة الحسابات.`,
       `Permanently deleted ${result.deleted || 0} journal(s) and reversed their account balance effects.`
@@ -1763,12 +1786,22 @@ export const AccountingView: React.FC = () => {
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
-                  disabled={selectedReversibleJournalEntryIds.length === 0}
-                  onClick={() => startJournalReversal(selectedReversibleJournalEntryIds)}
+                  disabled={selectedJournalEntryIds.length === 0}
+                  onClick={() => {
+                    const reversible = computeReversibleSelectedIds();
+                    if (reversible.length === 0) {
+                      setJournalReversalResult(t(
+                        'لا يوجد قيد محدد قابل للعكس العادي؛ القيود المرتبطة بمصادر تشغيلية تُعالَج من شاشة مصدرها.',
+                        'None of the selected entries is eligible for normal reversal; source-linked entries must be handled from their source screen.'
+                      ));
+                      return;
+                    }
+                    startJournalReversal(reversible);
+                  }}
                   className="inline-flex items-center gap-1 rounded-lg bg-rose-600 px-3 py-2 text-xs font-bold text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   <RotateCcw className="h-3.5 w-3.5" />
-                  {t('عكس المحدد', 'Reverse selected')} ({selectedReversibleJournalEntryIds.length})
+                  {t('عكس المحدد', 'Reverse selected')} ({selectedJournalEntryIds.length})
                 </button>
                 <button
                   type="button"
@@ -1804,7 +1837,7 @@ export const AccountingView: React.FC = () => {
             />
             {paginatedJournalEntries.map((entry) => {
               const reversalBlockReason = journalReversalBlockReason(entry);
-              const isSelectedForReversal = selectedJournalEntryIds.includes(entry.id);
+              const isSelectedForReversal = selectedJournalEntryIdSet.has(entry.id);
               return (
               <div
                 key={entry.id}
