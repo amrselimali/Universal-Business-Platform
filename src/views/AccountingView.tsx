@@ -33,6 +33,15 @@ export const AccountingView: React.FC = () => {
     formatMoney,
     accounts,
     journalEntries,
+    allCashReceipts,
+    allCashPayments,
+    allInvoices,
+    allReceptionShifts,
+    allDeviceMaintenance,
+    allInventoryAudits,
+    allPayrollRuns,
+    allGoodsReceipts,
+    allGoodsIssues,
     addAccount,
     updateAccount,
     deleteAccount,
@@ -73,6 +82,11 @@ export const AccountingView: React.FC = () => {
   const [journalReversalReason, setJournalReversalReason] = useState('');
   const [journalReversalError, setJournalReversalError] = useState<string | null>(null);
   const [journalReversalResult, setJournalReversalResult] = useState<string | null>(null);
+  const [journalSourceModal, setJournalSourceModal] = useState<{
+    entryNumber: string;
+    description: string;
+    targets: { label: string; view: string; detail: string }[];
+  } | null>(null);
   const rowsPerPage = 50;
 
   // Account Modal State (Add / Edit)
@@ -244,6 +258,100 @@ export const AccountingView: React.FC = () => {
     .map((entry) => entry.id);
   const allSelectableJournalPageEntriesSelected = selectableJournalPageEntryIds.length > 0 &&
     selectableJournalPageEntryIds.every((entryId) => selectedJournalEntryIds.includes(entryId));
+
+  const openJournalSource = (entry: typeof journalEntries[number]) => {
+    const targets: { label: string; view: string; detail: string }[] = [];
+    const addTarget = (label: string, view: string, detail: string) => targets.push({ label, view, detail });
+    const receiptIds = new Set(allCashReceipts
+      .filter((receipt) => receipt.tenantId === entry.tenantId && receipt.journalEntryId === entry.id)
+      .map((receipt) => receipt.id));
+    allCashReceipts
+      .filter((receipt) => receipt.tenantId === entry.tenantId && receipt.journalEntryId === entry.id)
+      .forEach((receipt) => addTarget(
+        t(`سند تحصيل ${receipt.voucherNumber}`, `Cash receipt ${receipt.voucherNumber}`),
+        'cash_receipts',
+        `${receipt.receivedFrom} · ${receipt.date} · ${formatMoney(receipt.amount)}`
+      ));
+    allCashPayments
+      .filter((payment) => payment.tenantId === entry.tenantId && payment.journalEntryId === entry.id)
+      .forEach((payment) => addTarget(
+        t(`سند صرف ${payment.voucherNumber}`, `Cash payment ${payment.voucherNumber}`),
+        'cash_payments',
+        `${payment.paidTo} · ${payment.date} · ${formatMoney(payment.amount)}`
+      ));
+    allInvoices
+      .filter((invoice) => invoice.tenantId === entry.tenantId &&
+        (invoice.journalEntryId === entry.id || invoice.costJournalEntryId === entry.id))
+      .forEach((invoice) => addTarget(
+        t(`فاتورة ${invoice.invoiceNumber}`, `Invoice ${invoice.invoiceNumber}`),
+        'invoices',
+        `${invoice.customerName} · ${invoice.createdAt.slice(0, 10)} · ${formatMoney(invoice.netAmount || 0)}`
+      ));
+    allReceptionShifts.forEach((shift) => {
+      if (shift.tenantId !== entry.tenantId) return;
+      shift.runRows
+        .filter((row) =>
+          (row.journalEntryId === entry.id || row.costJournalEntryId === entry.id) &&
+          !(row.receiptVoucherId && receiptIds.has(row.receiptVoucherId))
+        )
+        .forEach((row) => addTarget(
+          t(`حركة تشغيل ${row.customerName || ''} - ${row.serviceName}`, `Operation ${row.customerName || ''} - ${row.serviceName}`),
+          'reception_ops',
+          `${row.date || shift.shiftDate} · ${formatMoney(row.totalRevenue || 0)}`
+        ));
+      shift.expenses
+        .filter((expense) => expense.journalEntryId === entry.id)
+        .forEach((expense) => addTarget(
+          t(`مصروف شيفت: ${expense.description}`, `Shift expense: ${expense.description}`),
+          'reception_ops',
+          `${expense.date} · ${formatMoney(expense.amount)}`
+        ));
+    });
+    allDeviceMaintenance
+      .filter((record) => record.tenantId === entry.tenantId && record.journalEntryId === entry.id)
+      .forEach((record) => addTarget(
+        t(`صيانة جهاز ${record.deviceName}`, `Device maintenance ${record.deviceName}`),
+        'laser_devices',
+        `${record.maintenanceDate} · ${formatMoney(record.cost)} · ${record.description}`
+      ));
+    allInventoryAudits
+      .filter((audit) => audit.tenantId === entry.tenantId && audit.journalEntryId === entry.id)
+      .forEach((audit) => addTarget(
+        t(`تسوية جرد ${audit.auditNumber}`, `Inventory settlement ${audit.auditNumber}`),
+        'inventory_mgmt',
+        `${audit.auditDate} · ${formatMoney(audit.netDifferenceValue)} · ${audit.status}`
+      ));
+    allPayrollRuns.forEach((run) => {
+      if (run.tenantId !== entry.tenantId) return;
+      run.items
+        .filter((item) => item.journalEntryId === entry.id)
+        .forEach((item) => addTarget(
+          t(`راتب ${item.staffNameAr} - ${run.month}`, `Payroll ${item.staffNameEn} - ${run.month}`),
+          'payroll',
+          `${run.month} · ${formatMoney(item.netSalary)} · ${item.paymentStatus}`
+        ));
+    });
+    allGoodsReceipts
+      .filter((voucher) => voucher.tenantId === entry.tenantId && voucher.journalEntryId === entry.id)
+      .forEach((voucher) => addTarget(
+        t(`إذن استلام ${voucher.grnNumber}`, `Goods receipt ${voucher.grnNumber}`),
+        'goods_receipts',
+        `${voucher.supplierName} · ${voucher.date} · ${formatMoney(voucher.totalValue || voucher.totalCostValue || 0)}`
+      ));
+    allGoodsIssues
+      .filter((voucher) => voucher.tenantId === entry.tenantId && voucher.journalEntryId === entry.id)
+      .forEach((voucher) => addTarget(
+        t(`إذن صرف ${voucher.ginNumber}`, `Goods issue ${voucher.ginNumber}`),
+        'goods_issues',
+        `${voucher.recipientName} · ${voucher.date} · ${formatMoney(voucher.totalCost || voucher.totalCostValue || 0)}`
+      ));
+
+    setJournalSourceModal({
+      entryNumber: entry.entryNumber,
+      description: getJournalEntrySourceInfo(entry.id).description,
+      targets,
+    });
+  };
 
   const trialBalanceAccounts = useMemo(() => {
     const balances = new Map<string, number>();
@@ -1669,6 +1777,14 @@ export const AccountingView: React.FC = () => {
                     )}
                     <button
                       type="button"
+                      onClick={() => openJournalSource(entry)}
+                      className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-indigo-200 px-2 py-1 text-[10px] font-bold text-indigo-700 hover:bg-indigo-50 dark:border-indigo-800 dark:text-indigo-300 dark:hover:bg-indigo-950/40"
+                    >
+                      <ExternalLink className="h-3 w-3" />
+                      {t('المصدر', 'Source')}
+                    </button>
+                    <button
+                      type="button"
                       disabled={!!reversalBlockReason}
                       title={reversalBlockReason || t('إنشاء قيد عكسي في الفترة الحالية', 'Create a reversing entry in the current period')}
                       onClick={() => startJournalReversal([entry.id])}
@@ -2123,6 +2239,76 @@ export const AccountingView: React.FC = () => {
         </div>
       )}
 
+      {journalSourceModal && (
+        <div className="fixed inset-0 z-[79] flex items-center justify-center bg-black/60 p-3 backdrop-blur-sm">
+          <div className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-indigo-200 bg-white p-5 shadow-2xl dark:border-indigo-900/60 dark:bg-slate-900">
+            <div className="flex items-start justify-between gap-3 border-b border-slate-200 pb-3 dark:border-slate-800">
+              <div>
+                <h2 className="text-base font-black text-slate-900 dark:text-white">
+                  {t('مصدر القيد', 'Journal Source')} · {journalSourceModal.entryNumber}
+                </h2>
+                <p className="mt-1 text-xs text-slate-500">{journalSourceModal.description}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setJournalSourceModal(null)}
+                className="rounded-lg p-1 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+                aria-label={t('إغلاق', 'Close')}
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="mt-4 space-y-3">
+              {journalSourceModal.targets.length === 0 ? (
+                <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-200">
+                  {t(
+                    'لا يوجد رابط موثوق لمستند مصدر قابل للفتح لهذا القيد. لا يمكن تعديل أو حذف القيد من هنا حتى لا تتأثر بيانات المصدر أو الأرصدة التابعة.',
+                    'There is no reliable link to an openable source record for this entry. It cannot be changed here because doing so could leave source records or dependent balances inconsistent.'
+                  )}
+                </p>
+              ) : (
+                <>
+                  <p className="text-xs text-slate-600 dark:text-slate-300">
+                    {t(
+                      'اختر المستند لفتح شاشته مباشرة؛ نفّذ التعديل أو الإلغاء من المصدر حتى تُحدّث آثاره المحاسبية والتشغيلية معًا.',
+                      'Choose a source record to open its screen; edit or cancel it there so its accounting and operational effects are updated together.'
+                    )}
+                  </p>
+                  {journalSourceModal.targets.map((target, index) => (
+                    <div key={`${target.view}-${index}`} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 p-3 dark:border-slate-800">
+                      <div>
+                        <p className="text-xs font-bold text-slate-900 dark:text-white">{target.label}</p>
+                        <p className="mt-1 text-[11px] text-slate-500">{target.detail}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setJournalSourceModal(null);
+                          window.dispatchEvent(new CustomEvent('app:navigate', { detail: target.view }));
+                        }}
+                        className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-bold text-white hover:bg-indigo-700"
+                      >
+                        <ExternalLink className="h-3.5 w-3.5" />
+                        {t('فتح شاشة المصدر', 'Open source screen')}
+                      </button>
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+            <div className="mt-4 flex justify-end border-t border-slate-200 pt-3 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setJournalSourceModal(null)}
+                className="rounded-lg px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+              >
+                {t('إغلاق', 'Close')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ADD / EDIT ACCOUNT MODAL */}
       {showUnbalancedJournalModal && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-3 backdrop-blur-sm">
@@ -2328,7 +2514,14 @@ export const AccountingView: React.FC = () => {
                               <div>
                                 <p className="font-mono text-sm font-black text-slate-900 dark:text-white">{entry.entryNumber} · {entry.date}</p>
                                 <p className="text-xs text-slate-600 dark:text-slate-300">{entry.description}</p>
-                                <p className="mt-1 text-xs text-indigo-700 dark:text-indigo-300">{t('المصدر:', 'Source:')} {sourceInfo.description}</p>
+                                <button
+                                  type="button"
+                                  onClick={() => openJournalSource(entry)}
+                                  className="mt-1 inline-flex items-center gap-1 text-start text-xs text-indigo-700 underline decoration-dotted underline-offset-2 hover:text-indigo-900 dark:text-indigo-300 dark:hover:text-indigo-100"
+                                >
+                                  <ExternalLink className="h-3 w-3" />
+                                  {t('المصدر:', 'Source:')} {sourceInfo.description}
+                                </button>
                               </div>
                               <div className="text-end text-xs">
                                 <p>{t('مدين', 'Debit')}: <b className="font-mono">{formatMoney(diagnostic.debit)}</b></p>

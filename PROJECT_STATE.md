@@ -1,5 +1,12 @@
 # PROJECT STATE
 
+## Journal Source Details and Navigation — 2026-10-11
+
+- General Journal and the unbalanced-entry review now provide a source button that opens a popup with source-specific records and key details, including receipt/payment vouchers, invoices, shift operation rows and expenses, maintenance, inventory audits, payroll items, and goods receipts/issues.
+- Each linked record can launch its owning module using the app's existing navigation event. This directs the user to the source workflow, where source edits/cancellations must be applied so their journal/accounting and operational effects remain aligned.
+- Source matches use exact stored journal IDs. Text-only or unmatched markers show that no reliable source record can be opened; the journal remains protected from direct mutation.
+- This change adds source resolution/navigation, not a universal in-popup source editor or deletion API. The source modules retain responsibility for source-specific correction rules; no source or journal data is changed by opening the popup.
+
 ## Journal Quick Filters and Safe Bulk Reversal — 2026-10-11
 
 - General Journal now filters entries by number, date range, account code/name, and debit/credit total ranges. Results retain 50-entry pagination.

@@ -2,6 +2,14 @@
 
 # 2026-10-11
 
+## Journal Source Details and Navigation
+
+- Added a source action beside each General Journal entry and in unbalanced-journal review. The popup resolves exact linked receipts, payments, invoices, operation rows/expenses, maintenance, inventory audits, payroll items, and goods vouchers where source IDs exist.
+- The popup opens the corresponding source module so edits/cancellation are performed by the source workflow and its accounting/operational effects remain synchronized. Text-only or unmatched source markers are identified as lacking a safe direct link.
+- The popup does not hard-delete source-linked journals or documents; sources without a safe linked workflow must not be edited by changing the journal alone.
+
+# 2026-10-11
+
 ## Journal Quick Filters and Safe Bulk Reversal
 
 - Added General Journal filters for entry number, date range, account code/name, and debit/credit amount ranges, while keeping the existing 50-entry pagination.
