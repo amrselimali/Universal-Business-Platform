@@ -251,6 +251,8 @@ export interface Account {
 export interface JournalLine {
   id: string;
   accountId: string;
+  historicalAccountId?: string;
+  historicalAccountCode?: string;
   accountCode: string;
   accountNameAr: string;
   accountNameEn: string;

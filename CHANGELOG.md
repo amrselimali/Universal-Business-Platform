@@ -2,6 +2,16 @@
 
 # 2026-10-11
 
+## Historical Unmapped Journal Account Consolidation
+
+- Added an explicit Trial Balance action to consolidate currently unmapped posted journal lines for the selected branch scope under tenant-level account `9999999`, named `أرصدة تاريخية مجمعة - تحت المراجعة`.
+- The action preserves every line amount/date, journal header/source link, and entry balance; original account code and ID are retained as historical line metadata and shown in General Journal and General Ledger.
+- The user must select the account classification and enter a reason. The account is created with a credit-normal Liability classification by default, matching the current all-branch net credit; this is a temporary reporting classification, not a determination of the missing accounts' original types.
+- Closed periods, duplicate use of code `9999999`, or incompatible existing target accounts stop the operation. Bulk changes are audited and account/journal state remains tenant-scoped.
+- No live browser ledger was accessed or changed by this code change; the operation runs only after an authorized user confirms it in the updated app.
+
+# 2026-10-11
+
 ## Source-Aware Unbalanced Journal Review
 
 - Added an Accounting header action and paginated review dialog for posted unbalanced journals, showing entry totals, difference, source references, and journal lines.
