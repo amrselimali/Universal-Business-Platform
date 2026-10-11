@@ -268,12 +268,11 @@ export const CustomerRefundsView: React.FC = () => {
       if (!Number.isFinite(amountNum) || amountNum <= 0) {
         errors.push({ rowNumber, columnKey: 'amount', columnLabelAr: 'القيمة المستردة', enteredValue: amountRaw, reasonAr: 'القيمة المستردة يجب أن تكون رقمًا أكبر من صفر.' });
       }
+      // Date is optional during import: the posted date is the upload date and the
+      // value written in the file is preserved in the notes.
       const dateRaw = String(row['تاريخ الاسترداد'] ?? row['Refund Date'] ?? '').trim();
       let cleanDate = dateRaw;
       if (dateRaw.includes('T')) cleanDate = dateRaw.split('T')[0];
-      if (cleanDate && !/^\d{4}-\d{2}-\d{2}$/.test(cleanDate)) {
-        errors.push({ rowNumber, columnKey: 'date', columnLabelAr: 'تاريخ الاسترداد', enteredValue: dateRaw, reasonAr: 'صيغة التاريخ يجب أن تكون YYYY-MM-DD.' });
-      }
       const parsed = {
         customerId: matchedCustomer?.id,
         customerCode,
@@ -283,6 +282,7 @@ export const CustomerRefundsView: React.FC = () => {
         unitPrice: Number(row['سعر الوحدة'] ?? row['Unit Price'] ?? '') || 0,
         serviceName: String(row['الخدمة'] ?? row['Service'] ?? '').trim(),
         date: cleanDate,
+        fileDate: cleanDate,
         paymentMethodCode: String(row['كود طريقة الصرف'] ?? row['Payment Method Code'] ?? '').trim(),
         notes: String(row['ملاحظات'] ?? row['Notes'] ?? '').trim(),
       };
@@ -306,12 +306,12 @@ export const CustomerRefundsView: React.FC = () => {
         units,
         unitPrice,
         amount: Number(row.amount),
-        date: row.date || today,
+        date: today,
         paymentMethodId: matchedMethod?.id,
         paymentMethodLabel: matchedMethod?.nameAr || matchedMethod?.nameEn || t('نقداً (كاش)', 'Cash'),
         paymentAccountId: matchedMethod?.linkedAccountId,
         serviceName: row.serviceName || undefined,
-        notes: row.notes || undefined,
+        notes: [row.notes, row.fileDate ? `التاريخ المسجل في الملف: ${row.fileDate}` : ''].filter(Boolean).join(' - ') || undefined,
       });
       if (result.success) successCount += 1;
       else failures.push(`${index + 2}: ${result.error}`);

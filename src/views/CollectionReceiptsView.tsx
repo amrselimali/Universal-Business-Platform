@@ -66,7 +66,7 @@ const collectionExcelColumns: ExcelColumnConfig[] = [
     key: 'date',
     labelAr: 'تاريخ التحصيل',
     labelEn: 'Collection Date',
-    required: true,
+    required: false,
     type: 'date',
     sampleValue: '2026-10-01',
     instructions: 'تاريخ استلام النقدية أو التحويل (YYYY-MM-DD)',
@@ -804,22 +804,10 @@ export const CollectionReceiptsView: React.FC = () => {
         errors.push({ rowNumber: rowNum, columnKey: 'customerCode', columnLabelAr: 'كود العميل', enteredValue: customerCode, reasonAr: 'كود العميل غير موجود في إدارة العملاء. يتم التحقق من العملاء النشطين وغير النشطين.' });
       }
 
-      // Validate Date
+      // Date is optional during import: the posted date is the upload date and the
+      // value written in the file is preserved in the receipt notes.
       let cleanDate = rawDate;
       if (rawDate.includes('T')) cleanDate = rawDate.split('T')[0];
-      const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
-      if (!cleanDate || !dateRegex.test(cleanDate)) {
-        errors.push({
-          rowNumber: rowNum,
-          columnKey: 'date',
-          columnLabelAr: 'تاريخ التحصيل',
-          enteredValue: rawDate,
-          reasonAr: 'تاريخ التحصيل غير صحيح، يجب أن يكون بصيغة YYYY-MM-DD (مثال: 2026-10-01)',
-        });
-      }
-      else if (cleanDate > new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10)) {
-        errors.push({ rowNumber: rowNum, columnKey: 'date', columnLabelAr: 'تاريخ التحصيل', enteredValue: cleanDate, reasonAr: 'تاريخ التحصيل لا يجوز أن يتجاوز تاريخ اليوم.' });
-      }
 
       // Validate Collected Amount
       const amountNum = Number(rawAmount);
@@ -850,6 +838,7 @@ export const CollectionReceiptsView: React.FC = () => {
         customerName,
         patientPhone,
         date: cleanDate,
+        fileDate: cleanDate,
         collectedAmount: Number.isFinite(amountNum) ? amountNum : 0,
         paymentMethod: matchedPaymentMethod?.nameAr || paymentMethod,
         paymentMethodCode,
@@ -897,6 +886,7 @@ export const CollectionReceiptsView: React.FC = () => {
 
   const handleConfirmCollectionImport = (validRows: any[]) => {
     const branchToUse = activeBranch?.id || (branches[0]?.id || 'branch-cairo');
+    const uploadDate = new Date().toISOString().slice(0, 10);
     const result = addCollectionReceiptsBulk(validRows.map((row) => {
       const linkedPaymentMethod = paymentMethods.find((pm) => pm.code === row.paymentMethodCode);
       const paymentType = linkedPaymentMethod?.type === 'Cash' ? 'Cash' : linkedPaymentMethod?.type === 'Card' ? 'Card' : 'Transfer';
@@ -906,7 +896,7 @@ export const CollectionReceiptsView: React.FC = () => {
         partyId: row.customerId,
         receivedFrom: row.customerName,
         amount: Number(row.collectedAmount),
-        date: row.date,
+        date: uploadDate,
         paymentMethod: paymentType,
         paymentMethodLabel: linkedPaymentMethod?.nameAr || row.paymentMethod,
         paymentAccountId: linkedPaymentMethod?.linkedAccountId,
@@ -916,7 +906,7 @@ export const CollectionReceiptsView: React.FC = () => {
         bookedQuantity: Number(row.bookedQuantity) || 1,
         quantity: Number(row.bookedQuantity) || 1,
         receiptNumber: row.receiptNumber,
-        notes: row.notes,
+        notes: [row.notes, row.fileDate ? `التاريخ المسجل في الملف: ${row.fileDate}` : ''].filter(Boolean).join(' - ') || undefined,
         patientPhone: row.patientPhone,
         customerCode: row.customerCode,
         systemCode: parties.find((party) => party.id === row.customerId)?.systemCode,

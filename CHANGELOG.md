@@ -2,6 +2,14 @@
 
 # 2026-10-11
 
+## Import — file date no longer rejects rows (upload date is posted)
+
+- Fixed imported collection receipts / customer refunds not appearing in the detailed customer statements. Root cause: the Excel importer rejected any row whose date was not strictly `YYYY-MM-DD`, so those rows were never recorded (and never appeared in the statement).
+- The importer now accepts the row regardless of the date format: the posted date is the **upload date**, and the date written in the file is appended to the notes (`التاريخ المسجل في الملف: ...`). The date column is now optional in both importers.
+- Files: `src/views/CollectionReceiptsView.tsx`, `src/views/CustomerRefundsView.tsx`.
+
+# 2026-10-11
+
 ## Customer Refunds — Excel import + stricter manual validation
 
 - Added Excel import (via the shared `ExcelDataTransferModal`) to the Customer Dues Settlement screen. Only **customer code (auto-serial)**, **customer name** and **value** are required; all other columns (units, unit price, service, date, payment-method code, notes) are optional and default sensibly.
