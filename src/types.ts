@@ -270,6 +270,9 @@ export interface JournalEntry {
   sourceDocument?: string;
   lines: JournalLine[];
   createdAt: string;
+  voidedAt?: string;
+  voidedBy?: string;
+  voidReason?: string;
 }
 
 // Payment Methods (طرق السداد)
@@ -887,7 +890,7 @@ export interface AuditRecord {
   id: string;
   tenantId: string;
   branchId?: string;
-  entityType: 'Party' | 'Appointment' | 'TreatmentPlan' | 'Staff' | 'PaymentMethod' | 'Product' | 'Invoice' | 'Shift' | 'Tenant' | 'Branch' | 'Warehouse' | 'User' | 'Account';
+  entityType: 'Party' | 'Appointment' | 'TreatmentPlan' | 'Staff' | 'PaymentMethod' | 'Product' | 'Invoice' | 'Shift' | 'Tenant' | 'Branch' | 'Warehouse' | 'User' | 'Account' | 'JournalEntry';
   entityId: string;
   entityName: string;
   actionType: 'CREATE' | 'UPDATE' | 'DELETE' | 'ARCHIVE' | 'RESTORE' | 'CANCEL';

@@ -495,6 +495,20 @@ interface PlatformContextType {
     branchId?: string;
     lines: { accountId: string; debit: number; credit: number; memo?: string }[];
   }) => { success: boolean; error?: string };
+  getJournalEntrySourceInfo: (entryId: string) => {
+    description: string;
+    references: string[];
+    expectedAmount?: number;
+    canEdit: boolean;
+    canVoid: boolean;
+    reason?: string;
+  };
+  repairJournalEntryLines: (
+    entryId: string,
+    lines: { accountId: string; debit: number; credit: number; memo?: string }[],
+    reason: string
+  ) => { success: boolean; error?: string };
+  voidUnlinkedJournalEntry: (entryId: string, reason: string) => { success: boolean; error?: string };
   deleteJournalEntry: (entryId: string) => void;
 
   // Audit Trail & User Activity Logs (سجل التعديلات، المحذوفات، ونشاطات المستخدمين)
@@ -1165,6 +1179,215 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (!entry) return;
     applyJournalLinesToAccounts(entry.lines, true);
     setAllJournals((prev) => prev.filter((j) => j.id !== entryId));
+  };
+
+  const getJournalEntrySourceInfo = (entryId: string) => {
+    const entry = allJournals.find((journal) => journal.id === entryId);
+    if (!entry) {
+      return {
+        description: t('القيد غير موجود', 'Journal entry not found'),
+        references: [],
+        canEdit: false,
+        canVoid: false,
+        reason: t('تعذر العثور على القيد.', 'Could not find the journal entry.'),
+      };
+    }
+
+    const receiptSources = allCashReceipts.filter(
+      (receipt) => receipt.tenantId === entry.tenantId && receipt.journalEntryId === entry.id
+    );
+    const paymentSources = allCashPayments.filter(
+      (payment) => payment.tenantId === entry.tenantId && payment.journalEntryId === entry.id
+    );
+    const receiptIds = new Set(receiptSources.map((receipt) => receipt.id));
+    const linkedInvoices = allInvoices.filter(
+      (invoice) => invoice.tenantId === entry.tenantId &&
+        (invoice.journalEntryId === entry.id || invoice.costJournalEntryId === entry.id)
+    );
+    const linkedRunRows = allReceptionShifts.flatMap((shift) =>
+      shift.tenantId === entry.tenantId
+        ? shift.runRows.filter((row) =>
+            (row.journalEntryId === entry.id || row.costJournalEntryId === entry.id) &&
+            !(row.receiptVoucherId && receiptIds.has(row.receiptVoucherId))
+          ).map((row) => `${t('حركة تشغيل', 'Operation')} ${row.customerName || ''} - ${row.serviceName}`.trim())
+        : []
+    );
+    const linkedExpenses = allReceptionShifts.flatMap((shift) =>
+      shift.tenantId === entry.tenantId
+        ? shift.expenses.filter((expense) => expense.journalEntryId === entry.id)
+            .map((expense) => `${t('مصروف شيفت', 'Shift expense')}: ${expense.description}`)
+        : []
+    );
+    const linkedMaintenance = allDeviceMaintenance
+      .filter((record) => record.tenantId === entry.tenantId && record.journalEntryId === entry.id)
+      .map((record) => `${t('صيانة جهاز', 'Device maintenance')}: ${record.deviceName} - ${record.maintenanceDate}`);
+    const linkedAudits = allInventoryAudits
+      .filter((audit) => audit.tenantId === entry.tenantId && audit.journalEntryId === entry.id)
+      .map((audit) => `${t('تسوية جرد', 'Inventory settlement')}: ${audit.auditNumber}`);
+    const linkedPayroll = allPayrollRuns.flatMap((run) =>
+      run.tenantId === entry.tenantId
+        ? run.items.filter((item) => item.journalEntryId === entry.id)
+            .map((item) => `${t('راتب', 'Payroll')}: ${item.staffNameAr} - ${run.month}`)
+        : []
+    );
+    const linkedGoodsReceipts = allGoodsReceipts
+      .filter((voucher) => voucher.tenantId === entry.tenantId && voucher.journalEntryId === entry.id)
+      .map((voucher) => `${t('إذن استلام مخزني', 'Goods receipt')}: ${voucher.grnNumber}`);
+    const linkedGoodsIssues = allGoodsIssues
+      .filter((voucher) => voucher.tenantId === entry.tenantId && voucher.journalEntryId === entry.id)
+      .map((voucher) => `${t('إذن صرف مخزني', 'Goods issue')}: ${voucher.ginNumber}`);
+    const sourceAmount = Number((
+      receiptSources.reduce((sum, receipt) => sum + Number(receipt.amount), 0) +
+      paymentSources.reduce((sum, payment) => sum + Number(payment.amount), 0)
+    ).toFixed(2));
+    const references = [
+      ...receiptSources.map((receipt) => `${t('سند تحصيل', 'Cash receipt')} ${receipt.voucherNumber} - ${receipt.receivedFrom}`),
+      ...paymentSources.map((payment) => `${t('سند صرف', 'Cash payment')} ${payment.voucherNumber} - ${payment.paidTo}`),
+      ...linkedInvoices.map((invoice) => `${t('فاتورة', 'Invoice')} ${invoice.invoiceNumber}`),
+      ...linkedRunRows,
+      ...linkedExpenses,
+      ...linkedMaintenance,
+      ...linkedAudits,
+      ...linkedPayroll,
+      ...linkedGoodsReceipts,
+      ...linkedGoodsIssues,
+    ];
+    const otherSourceCount = references.length - receiptSources.length - paymentSources.length;
+    const linkedSourceTotal = receiptSources.length + paymentSources.length;
+    const isSupportedVoucherSource = linkedSourceTotal > 0 && otherSourceCount === 0 &&
+      !(receiptSources.length > 0 && paymentSources.length > 0) &&
+      Number.isFinite(sourceAmount) && sourceAmount >= 0;
+    const isManualEntry = entry.entryNumber.startsWith('JV-M-') &&
+      references.length === 0 && !entry.sourceDocument?.trim();
+    const hasUnknownSource = references.length === 0 && !!entry.sourceDocument?.trim();
+    const sourceDescription = references.length
+      ? `${references.slice(0, 10).join('، ')}${references.length > 10 ? `، و${references.length - 10} مستندات أخرى` : ''}`
+      : entry.sourceDocument?.trim() || (isManualEntry ? t('قيد يومية يدوي', 'Manual journal entry') : t('مصدر غير محدد', 'Unknown source'));
+
+    return {
+      description: sourceDescription,
+      references: references.slice(0, 10),
+      expectedAmount: isSupportedVoucherSource
+        ? sourceAmount
+        : undefined,
+      canEdit: isManualEntry || isSupportedVoucherSource,
+      canVoid: isManualEntry,
+      reason: hasUnknownSource
+        ? t('مصدر القيد مسجل كنص فقط دون رابط موثوق؛ يلزم مراجعته من شاشة المصدر.', 'The entry has only a text source marker without a reliable link; review it from the source screen.')
+        : isManualEntry || isSupportedVoucherSource
+          ? undefined
+          : t('القيد مرتبط بمصدر تشغيلي؛ يجب تعديله أو إلغاؤه من شاشة المصدر حتى تُحدّث كل آثاره التابعة.', 'This entry is linked to an operational source; edit or cancel it from that source screen to update dependent effects.'),
+    };
+  };
+
+  const repairJournalEntryLines = (
+    entryId: string,
+    lines: { accountId: string; debit: number; credit: number; memo?: string }[],
+    reason: string
+  ): { success: boolean; error?: string } => {
+    const entry = allJournals.find((journal) => journal.id === entryId);
+    if (!entry) return { success: false, error: t('القيد غير موجود.', 'Journal entry not found.') };
+    if (!entry.isPosted) return { success: false, error: t('لا يمكن تعديل قيد غير مرحل.', 'An unposted journal entry cannot be repaired here.') };
+    const sourceInfo = getJournalEntrySourceInfo(entryId);
+    if (!sourceInfo.canEdit) return { success: false, error: sourceInfo.reason || t('لا يمكن تعديل مصدر هذا القيد من هنا.', 'This journal source cannot be edited here.') };
+    if (!reason.trim()) return { success: false, error: t('يرجى تسجيل سبب التعديل لأغراض المراجعة.', 'Enter a reason for the correction for audit purposes.') };
+    const periodCheck = validatePeriodDate(entry.date, entry.branchId);
+    if (!periodCheck.allowed) return { success: false, error: periodCheck.message || t('الفترة المحاسبية مقفلة.', 'The accounting period is locked.') };
+
+    try {
+      const nextLines: JournalLine[] = lines.map((line, index) => {
+        const account = allAccounts.find((candidate) =>
+          candidate.id === line.accountId &&
+          candidate.tenantId === entry.tenantId &&
+          (!candidate.branchId || candidate.branchId === 'all' || candidate.branchId === entry.branchId)
+        );
+        if (!account) throw new Error(t('اختر حسابًا صالحًا تابعًا لنفس الشركة والفرع.', 'Select a valid account belonging to the same tenant and branch.'));
+        return {
+          id: entry.lines[index]?.id || `line-repair-${Date.now()}-${index}`,
+          accountId: account.id,
+          accountCode: account.code,
+          accountNameAr: account.nameAr,
+          accountNameEn: account.nameEn,
+          debit: Number(line.debit),
+          credit: Number(line.credit),
+          memo: line.memo?.trim() || '',
+        };
+      });
+      assertBalancedJournalLines(nextLines, entry.entryNumber);
+      if (sourceInfo.expectedAmount !== undefined) {
+        const repairedTotal = nextLines.reduce((sum, line) => sum + line.debit, 0);
+        if (Math.abs(repairedTotal - sourceInfo.expectedAmount) >= 0.01) {
+          throw new Error(t(
+            `إجمالي القيد يجب أن يساوي إجمالي المستندات المرتبطة (${sourceInfo.expectedAmount.toFixed(2)}).`,
+            `The journal total must equal the linked source documents (${sourceInfo.expectedAmount.toFixed(2)}).`
+          ));
+        }
+      }
+
+      applyJournalLinesToAccounts(entry.lines, true);
+      applyJournalLinesToAccounts(nextLines);
+      const repairedEntry = { ...entry, lines: nextLines };
+      setAllJournals((previous) => previous.map((journal) => journal.id === entry.id ? repairedEntry : journal));
+      recordAudit({
+        branchId: entry.branchId,
+        entityType: 'JournalEntry',
+        entityId: entry.id,
+        entityName: `${entry.entryNumber} - ${entry.description}`,
+        actionType: 'UPDATE',
+        reason: reason.trim(),
+        diffSummary: `تم تصحيح أسطر القيد مع الحفاظ على رصيد المستندات المصدرية. السبب: ${reason.trim()}`,
+        previousState: entry,
+        newState: repairedEntry,
+      });
+      logUserActivity(
+        'accounting', 'المحاسبة', 'Accounting',
+        'تصحيح قيد يومية غير متوازن', 'Repair unbalanced journal entry',
+        `${entry.entryNumber}: ${reason.trim()}`
+      );
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : t('تعذر تصحيح القيد.', 'Could not repair the journal entry.') };
+    }
+  };
+
+  const voidUnlinkedJournalEntry = (entryId: string, reason: string): { success: boolean; error?: string } => {
+    const entry = allJournals.find((journal) => journal.id === entryId);
+    if (!entry) return { success: false, error: t('القيد غير موجود.', 'Journal entry not found.') };
+    if (!entry.isPosted) return { success: false, error: t('القيد غير مرحل بالفعل.', 'Journal entry is already unposted.') };
+    const sourceInfo = getJournalEntrySourceInfo(entryId);
+    if (!sourceInfo.canVoid) {
+      return { success: false, error: sourceInfo.reason || t('لا يمكن إلغاء قيد مرتبط بمصدر من شاشة المحاسبة.', 'A source-linked journal cannot be voided from Accounting.') };
+    }
+    if (!reason.trim()) return { success: false, error: t('يرجى تسجيل سبب الإلغاء.', 'Enter a reason for voiding this journal.') };
+    const periodCheck = validatePeriodDate(entry.date, entry.branchId);
+    if (!periodCheck.allowed) return { success: false, error: periodCheck.message || t('الفترة المحاسبية مقفلة.', 'The accounting period is locked.') };
+
+    const voidedEntry: JournalEntry = {
+      ...entry,
+      isPosted: false,
+      voidedAt: new Date().toISOString(),
+      voidedBy: currentUser?.name || 'Admin',
+      voidReason: reason.trim(),
+    };
+    applyJournalLinesToAccounts(entry.lines, true);
+    setAllJournals((previous) => previous.map((journal) => journal.id === entry.id ? voidedEntry : journal));
+    recordAudit({
+      branchId: entry.branchId,
+      entityType: 'JournalEntry',
+      entityId: entry.id,
+      entityName: `${entry.entryNumber} - ${entry.description}`,
+      actionType: 'CANCEL',
+      reason: reason.trim(),
+      diffSummary: `تم إلغاء ترحيل القيد اليدوي مع الاحتفاظ بسجله. السبب: ${reason.trim()}`,
+      previousState: entry,
+      newState: voidedEntry,
+    });
+    logUserActivity(
+      'accounting', 'المحاسبة', 'Accounting',
+      'إلغاء قيد يومية يدوي', 'Void manual journal entry',
+      `${entry.entryNumber}: ${reason.trim()}`
+    );
+    return { success: true };
   };
 
   const postJournalEntryWithSync = (entry: Omit<JournalEntry, 'id' | 'createdAt'>): JournalEntry => {
@@ -9683,6 +9906,9 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         updateAccount,
         deleteAccount,
         createManualJournalEntry,
+        getJournalEntrySourceInfo,
+        repairJournalEntryLines,
+        voidUnlinkedJournalEntry,
         auditRecords,
         allAuditRecords,
         userActivityLogs,

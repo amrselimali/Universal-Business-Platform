@@ -1,5 +1,13 @@
 # PROJECT STATE
 
+## Source-Aware Unbalanced Journal Review — 2026-10-11
+
+- Accounting now has a paginated control to review posted unbalanced entries, inspect their debit/credit lines, source references, and differences.
+- A journal repair records an audit/activity reason, validates a balanced replacement, and enforces account ownership for the same tenant/branch. Linked cash receipt/payment journals are editable only when the resulting debit total still equals the linked voucher total; source voucher data and customer/supplier statement movements remain unchanged.
+- Unlinked manual journals can be corrected or logically voided (unposted, retained in history, account snapshot reversed, and void reason/user/time recorded). Period locks prevent repair and void.
+- Journals linked to other operational records or with text-only/ambiguous source markers are read-only in this screen; they must be updated through their source workflow so inventory, payroll, shift, invoice, maintenance, or other downstream effects are not orphaned.
+- The real runtime ledger remains unavailable in this workspace, so no live entries were inspected or modified. The new screen surfaces runtime sources when the user opens the app; unsupported source kinds need their source-specific correction workflow.
+
 ## Legacy Account Matching and Customer Account Display
 
 - Accounting's Chart of Accounts, general journal entries, General Ledger movements, and Trial Balance tables now render at most 50 rows/entries per page with explicit navigation. Filtering/branch changes reset the relevant page. This is client-side render pagination: the current Context/local storage data source still hydrates the underlying arrays in memory; it does not yet fetch pages from Neon.
