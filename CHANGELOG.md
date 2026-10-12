@@ -2,6 +2,14 @@
 
 # 2026-10-12
 
+## Fix reconciliation crash + link receipts by auto-serial customer code only
+
+- Fixed the runtime crash `ReferenceError: journalIndex is not defined`: the `journalIndex` declaration was missing in the collection-receipt reconciliation loop while still being used. Restored `const journalIndex = findCustomerReceiptJournalIndex(receipt, updatedJournals);`.
+- Receipt/refund linking now uses the **auto-serial customer code only** (`customerCode`, with optional leading-zero tolerance). Removed system-code / paper-code / phone / Arabic-name / notes fallbacks in `isReceiptMatchingParty` and `isRefundMatchingParty`.
+- Files: `src/utils/statementUtils.ts`, `src/context/PlatformContext.tsx`.
+
+# 2026-10-12
+
 ## Collection Receipt Cash/Bank Account Resolution & Balance Synchronization Fix
 
 - Resolved errors during startup hydration: `Collection receipt migration skipped: no linked cash/bank account for CR-2026-0004` through `CR-2026-0009`.
@@ -58,6 +66,15 @@
   - Receipts posted with the upload date now prominently display `[تاريخ الإيصال: ...]` inside the description/notes column.
   - Linked quantity movements and package balances reflect all customer collection receipts.
   - Added branch scope toggle and notification banner when receipts exist outside the active date/branch filter.
+
+# 2026-10-11
+
+## Receipt linking by auto-serial customer code + reconciliation resilience
+
+- Collection receipts are now linked to a customer using the **auto-serial customer code only** (system code / paper code / name matching removed) in both the customer statement and the receipt-to-account reconciliation.
+- The reconciliation effect now resolves a missing `partyId` from `receipt.customerCode` (auto-serial) before skipping the receipt, so unlinked receipts are attached to the right customer account.
+- The customer-account reconciliation effect is now wrapped in try/catch so an unexpected error no longer crashes the whole UI (the previous data is preserved and the error is logged).
+- Files: `src/context/PlatformContext.tsx`, `src/components/PartyStatementModal.tsx`.
 
 # 2026-10-11
 

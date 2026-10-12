@@ -117,90 +117,34 @@ const isDummyPhone = (phone?: string): boolean => {
  */
 export const isReceiptMatchingParty = (rcpt: CashReceiptVoucher, party: Party): boolean => {
   if (!party || !rcpt) return false;
+  // Direct link.
   if (rcpt.partyId && rcpt.partyId === party.id) return true;
 
-  const partyCodes = getPartyLookupCodes(party);
-
-  const rcptCandidates = [rcpt.customerCode, rcpt.systemCode, rcpt.partyId];
-  for (const c of rcptCandidates) {
-    if (c !== undefined && c !== null) {
-      const s = String(c).trim().toLowerCase();
-      if (s) {
-        if (partyCodes.has(s)) return true;
-        const norm = s.replace(/^0+/, '');
-        if (norm && partyCodes.has(norm)) return true;
-      }
-    }
-  }
-
-  // Real phone matching
-  const pPhone = party.phone?.replace(/\D/g, '');
-  const rPhone = rcpt.patientPhone?.replace(/\D/g, '');
-  if (!isDummyPhone(pPhone) && !isDummyPhone(rPhone)) {
-    if (pPhone === rPhone || pPhone!.endsWith(rPhone!) || rPhone!.endsWith(pPhone!)) {
-      return true;
-    }
-  }
-
-  // Normalized Arabic Name matching
-  const pName = normalizeArabicName(party.name);
-  const rName = normalizeArabicName(rcpt.receivedFrom);
-  if (pName && rName) {
-    if (pName === rName || pName.includes(rName) || rName.includes(pName)) {
-      return true;
-    }
-    // Token overlap: if both have 2+ words and share at least 2 tokens (e.g. عزه ابراهيم مبارك vs عزه ابراهيم)
-    const pTokens = pName.split(' ').filter((w) => w.length > 1);
-    const rTokens = rName.split(' ').filter((w) => w.length > 1);
-    if (pTokens.length >= 2 && rTokens.length >= 2) {
-      const common = pTokens.filter((t) => rTokens.includes(t));
-      if (common.length >= 2) return true;
-    }
-  }
-
-  // Text notes / description matching for explicit customer code
-  const textBlob = `${rcpt.notes || ''} ${rcpt.description || ''} ${rcpt.referenceInvoiceNo || ''}`.toLowerCase();
-  for (const code of partyCodes) {
-    if (code.length >= 3 && new RegExp(`(?:^|[^0-9a-zA-Z])${code}(?:$|[^0-9a-zA-Z])`).test(textBlob)) {
-      return true;
-    }
-  }
-
-  return false;
+  // Link by the auto-serial customer code ONLY (كود العميل المسلسل الآلي).
+  // No system code / paper code / name / phone matching.
+  const partyAutoCode = String(party.customerCode || '').trim();
+  const rcptAutoCode = String(rcpt.customerCode || '').trim();
+  if (!partyAutoCode || !rcptAutoCode) return false;
+  if (partyAutoCode === rcptAutoCode) return true;
+  const normParty = partyAutoCode.replace(/^0+/, '');
+  const normRcpt = rcptAutoCode.replace(/^0+/, '');
+  return Boolean(normParty) && normParty === normRcpt;
 };
 
 /**
  * Checks whether a customer refund voucher belongs to the given party.
+ * Links by the auto-serial customer code ONLY.
  */
 export const isRefundMatchingParty = (refund: CustomerRefundVoucher, party: Party): boolean => {
   if (!party || !refund) return false;
   if (refund.partyId && refund.partyId === party.id) return true;
 
-  const partyCodes = getPartyLookupCodes(party);
-
-  const candidates = [refund.customerCode, refund.systemCode, refund.partyId];
-  for (const c of candidates) {
-    if (c !== undefined && c !== null) {
-      const s = String(c).trim().toLowerCase();
-      if (s) {
-        if (partyCodes.has(s)) return true;
-        const norm = s.replace(/^0+/, '');
-        if (norm && partyCodes.has(norm)) return true;
-      }
-    }
-  }
-
-  const pName = normalizeArabicName(party.name);
-  const rName = normalizeArabicName(refund.customerName);
-  if (pName && rName) {
-    if (pName === rName || pName.includes(rName) || rName.includes(pName)) return true;
-    const pTokens = pName.split(' ').filter((w) => w.length > 1);
-    const rTokens = rName.split(' ').filter((w) => w.length > 1);
-    if (pTokens.length >= 2 && rTokens.length >= 2) {
-      const common = pTokens.filter((t) => rTokens.includes(t));
-      if (common.length >= 2) return true;
-    }
-  }
-
-  return false;
+  // Link by the auto-serial customer code ONLY (كود العميل المسلسل الآلي).
+  const partyAutoCode = String(party.customerCode || '').trim();
+  const refundAutoCode = String(refund.customerCode || '').trim();
+  if (!partyAutoCode || !refundAutoCode) return false;
+  if (partyAutoCode === refundAutoCode) return true;
+  const normParty = partyAutoCode.replace(/^0+/, '');
+  const normRefund = refundAutoCode.replace(/^0+/, '');
+  return Boolean(normParty) && normParty === normRefund;
 };

@@ -9015,6 +9015,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         receiptsChanged = true;
       }
 
+      const journalIndex = findCustomerReceiptJournalIndex(receipt, updatedJournals);
       if (journalIndex >= 0) {
         const journal = updatedJournals[journalIndex];
         const lineIndex = journal.lines.findIndex(

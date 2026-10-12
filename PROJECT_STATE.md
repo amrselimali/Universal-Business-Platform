@@ -66,6 +66,12 @@
   - Linked quantity movements and package balances now match all receipts by customer code seamlessly.
   - Added branch scope toggle (All Branches vs Active Branch) and proactive banner for any hidden receipts outside date/branch filters.
 - Files: `src/context/PlatformContext.tsx`, `src/views/CustomerRefundsView.tsx`, `src/views/CollectionReceiptsView.tsx`, `src/components/PartyStatementModal.tsx`. Validation: `compile_applet` passed.
+## Receipt linking by auto-serial code + reconciliation guard — 2026-10-11
+
+- Receipt-to-customer matching now uses the auto-serial customer code only (removed systemCode/paperCode/name fallbacks) in the customer statement and the reconciliation.
+- Reconciliation resolves a missing receipt `partyId` from `receipt.customerCode` before skipping it.
+- The reconciliation effect is guarded with try/catch so an unexpected error cannot crash the UI (data preserved, error logged).
+- Files: `src/context/PlatformContext.tsx`, `src/components/PartyStatementModal.tsx`. Validation: tsc unchanged (126 pre-existing); vite build ok.
 
 ## Import date handling fix — 2026-10-11
 
