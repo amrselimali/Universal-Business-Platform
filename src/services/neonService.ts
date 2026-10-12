@@ -424,6 +424,7 @@ export class NeonService {
       }
 
       // 7. Sync Patients
+      try {
       for (const pat of data.patients) {
         await sql`
           INSERT INTO patients (id, tenant_id, file_number, full_name, phone, gender)
@@ -433,7 +434,12 @@ export class NeonService {
         totalSynced++;
       }
 
+      } catch (sectionError) {
+        console.warn(`Neon sync section failed (${"7. Sync Patients"}):`, sectionError);
+      }
+
       // 8. Sync Parties if provided
+      try {
       if (data.parties) {
         for (const pr of data.parties) {
           await sql`
@@ -445,7 +451,12 @@ export class NeonService {
         }
       }
 
+      } catch (sectionError) {
+        console.warn(`Neon sync section failed (${"8. Sync Parties if provided"}):`, sectionError);
+      }
+
       // 9. Sync Appointments if provided
+      try {
       if (data.appointments) {
         for (const apt of data.appointments) {
           await sql`
@@ -470,7 +481,12 @@ export class NeonService {
         }
       }
 
+      } catch (sectionError) {
+        console.warn(`Neon sync section failed (${"9. Sync Appointments if provided"}):`, sectionError);
+      }
+
       // 9.1 Sync Patient Follow-ups if provided
+      try {
       if (data.patientFollowUps) {
         for (const fup of data.patientFollowUps) {
           await sql`
@@ -493,7 +509,12 @@ export class NeonService {
         }
       }
 
+      } catch (sectionError) {
+        console.warn(`Neon sync section failed (${"9.1 Sync Patient Follow-ups if provided"}):`, sectionError);
+      }
+
       // 10. Sync Journal Entries if provided
+      try {
       if (data.journalEntries) {
         for (const jv of data.journalEntries) {
           await sql`
@@ -503,6 +524,10 @@ export class NeonService {
           `;
           totalSynced++;
         }
+      }
+
+      } catch (sectionError) {
+        console.warn(`Neon sync section failed (${"10. Sync Journal Entries if provided"}):`, sectionError);
       }
 
       return {

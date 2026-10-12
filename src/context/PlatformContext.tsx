@@ -664,6 +664,7 @@ interface PlatformContextType {
   neonDb: NeonDbState;
   neonAutoSync: { syncing: boolean; lastRun?: string; lastSavedCount: number; error?: string };
   neonAutoSyncProgress: string;
+  getNeonDatasetSummary: () => { key: string; count: number }[];
   updateNeonConnectionString: (conn: string) => void;
   testNeonConnection: (connOverride?: string) => Promise<boolean>;
   syncAllToNeon: () => Promise<{ success: boolean; message: string; count: number }>;
@@ -8529,6 +8530,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       patients: parties,
       parties,
       appointments,
+      patientFollowUps,
       journalEntries,
     });
     // 2) EVERY dataset as a JSONB document in app_documents (full initial transfer).
@@ -11036,6 +11038,10 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         neonDb,
         neonAutoSync,
         neonAutoSyncProgress,
+        getNeonDatasetSummary: () => buildAllDatasetDocuments().map((doc) => ({
+          key: doc.key,
+          count: Array.isArray(doc.payload) ? doc.payload.length : 0,
+        })),
         updateNeonConnectionString,
         testNeonConnection,
         syncAllToNeon,

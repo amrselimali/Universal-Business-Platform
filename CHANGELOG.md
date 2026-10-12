@@ -2,6 +2,15 @@
 
 # 2026-10-12
 
+## Neon sync resilience + dataset inventory panel
+
+- Root cause of "bookings/follow-ups were not uploaded": the failing `patients` insert **aborted the whole relational sync** (it runs inside one try block, and patients is step 7), so parties, appointments, follow-ups and journal entries never executed. Every sync section is now isolated in its own try/catch, so one failing section no longer stops the rest.
+- `patientFollowUps` was never passed to `syncAllData` from the app, so `patient_follow_ups` could never be filled. It is now passed.
+- Added a **dataset inventory panel** to the Neon screen listing every dataset key that is synced and its current record count, so it is easy to verify what is included.
+- Files: `src/services/neonService.ts`, `src/context/PlatformContext.tsx`, `src/views/NeonHubView.tsx`.
+
+# 2026-10-12
+
 ## Neon upload speed — chunked datasets, parallel uploads and live progress
 
 - The Neon upload used to send one huge HTTP request per dataset, so large datasets (journals, parties) took minutes. Datasets larger than ~0.9 MB are now split into ~0.7 MB chunk documents (`<key>#0`, `<key>#1`, ...) with a small manifest stored under the original key, and chunks are re-assembled transparently on read.
