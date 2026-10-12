@@ -682,6 +682,31 @@ export class NeonService {
     return { mirroredTables, mirroredRows, failures };
   }
 
+  /** Per-dataset record counts in Neon (used to verify the app matches the database). */
+  static async fetchDatasetCounts(
+    connectionString: string,
+    tenantId: string
+  ): Promise<{ success: boolean; counts: { [key: string]: number }; message: string }> {
+    try {
+      const sql = this.getClient(connectionString);
+      const counts: { [key: string]: number } = {};
+      const plain = await sql`
+        SELECT doc_key, jsonb_array_length(payload)::int AS items
+        FROM app_documents
+        WHERE tenant_id = ${tenantId} AND jsonb_typeof(payload) = 'array'`;
+      (plain as any[]).forEach((row) => { counts[row.doc_key] = Number(row.items); });
+      const chunks = await sql`
+        SELECT split_part(doc_key, '#', 1) AS base, SUM(jsonb_array_length(payload))::int AS items
+        FROM app_documents
+        WHERE tenant_id = ${tenantId} AND doc_key LIKE '%#%' AND jsonb_typeof(payload) = 'array'
+        GROUP BY 1`;
+      (chunks as any[]).forEach((row) => { counts[row.base] = Number(row.items); });
+      return { success: true, counts, message: `تم قراءة ${Object.keys(counts).length} مجموعة من Neon` };
+    } catch (err: any) {
+      return { success: false, counts: {}, message: 'فشل قراءة الأعداد من Neon: ' + (err?.message || String(err)) };
+    }
+  }
+
   /**
    * Resolves the tenant that actually holds the data in Neon.
    * The `tenants` table wins when it matches a tenant that also has documents;

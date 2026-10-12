@@ -672,6 +672,7 @@ interface PlatformContextType {
   neonBootstrap: { status: 'idle' | 'loading' | 'ready' | 'error' | 'no-config'; message?: string; usedCache?: boolean; updatedKeys?: number; lastRun?: string; tenantId?: string; datasetCount?: number; progress?: string };
   retryNeonBootstrap: () => Promise<void>;
   neonConnectionInfo: { host: string; database: string } | null;
+  compareWithNeon: () => Promise<{ key: string; appCount: number; neonCount: number | null }[]>;
   updateNeonConnectionString: (conn: string) => void;
   testNeonConnection: (connOverride?: string) => Promise<boolean>;
   syncAllToNeon: () => Promise<{ success: boolean; message: string; count: number }>;
@@ -10850,6 +10851,21 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     });
   };
 
+  /** Compares what the app currently holds with what Neon stores, per dataset. */
+  const compareWithNeon = async (): Promise<{ key: string; appCount: number; neonCount: number | null }[]> => {
+    const rawConnection = String(neonDb.connectionString || '').trim();
+    const tenantId = neonBootstrap.tenantId || tenant?.id || '';
+    const appDocs = buildAllDatasetDocuments();
+    const counts = rawConnection && tenantId
+      ? await NeonService.fetchDatasetCounts(rawConnection, tenantId)
+      : { success: false, counts: {} as { [key: string]: number } };
+    return appDocs.map((doc) => ({
+      key: doc.key,
+      appCount: Array.isArray(doc.payload) ? doc.payload.length : 0,
+      neonCount: counts.counts[doc.key] === undefined ? null : counts.counts[doc.key],
+    }));
+  };
+
   /** Host/database parsed from the connection string, for on-screen verification. */
   const neonConnectionInfo = (() => {
     const raw = String(neonDb.connectionString || '').trim();
@@ -11418,6 +11434,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         neonBootstrap,
         retryNeonBootstrap: bootstrapFromNeon,
         neonConnectionInfo,
+        compareWithNeon,
         // Backwards-compatible alias: patients are the parties of type Customer/Both.
         patients: parties,
         getNeonDatasetSummary: () => buildAllDatasetDocuments().map((doc) => ({
