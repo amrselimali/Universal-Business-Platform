@@ -2,6 +2,13 @@
 
 # 2026-10-12
 
+## Excel import now links customers by auto-serial code only
+
+- Collection-receipt and customer-refund Excel imports now match the customer by the **auto-serial customer code only** (with optional leading-zero tolerance). Removed system-code / paper-code / file-code / Arabic-name fallbacks so imports cannot be attached to the wrong customer.
+- Files: `src/views/CollectionReceiptsView.tsx`, `src/views/CustomerRefundsView.tsx`.
+
+# 2026-10-12
+
 ## Fix undefined identifiers introduced by the statement/reconciliation refactor
 
 - Fixed `ReferenceError: pName is not defined` in the detailed customer statement (`PartyStatementModal`): the journal-identifier list referenced `pName` after it had been renamed to `pNameNorm`. Restored a raw customer-name identifier alongside the normalized one.

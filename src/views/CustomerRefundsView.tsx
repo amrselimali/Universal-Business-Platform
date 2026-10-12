@@ -261,23 +261,15 @@ export const CustomerRefundsView: React.FC = () => {
       const customerName = String(row['اسم العميل'] || row['Customer Name'] || row['العميل'] || '').trim();
       const amountRaw = row['القيمة المستردة'] ?? row['Refund Value'] ?? row['القيمة'] ?? '';
       const amountNum = Number(amountRaw);
-      const matchedCustomer = parties.find((p) => {
-        if (p.type !== 'Customer' && p.type !== 'Both') return false;
-        const pCustCode = String(p.customerCode || '').trim();
-        const pCode = String(p.code || '').trim();
-        const pSysCode = String(p.systemCode || '').trim();
-        return (
-          (customerCode && (
-            pCustCode === customerCode ||
-            pCustCode.replace(/^0+/, '') === normCustomerCode ||
-            pCode === customerCode ||
-            pCode.replace(/^0+/, '') === normCustomerCode ||
-            pSysCode.toLowerCase() === customerCode.toLowerCase()
-          )) ||
-          (customerName && p.name.trim().toLowerCase() === customerName.toLowerCase())
-        );
-      });
-      if (!customerCode && !matchedCustomer) {
+      // Link by the auto-serial customer code ONLY (كود العميل المسلسل الآلي).
+      const matchedCustomer = customerCode
+        ? parties.find((p) => {
+            if (p.type !== 'Customer' && p.type !== 'Both') return false;
+            const pCustCode = String(p.customerCode || '').trim();
+            return pCustCode === customerCode || pCustCode.replace(/^0+/, '') === normCustomerCode;
+          })
+        : undefined;
+      if (!customerCode || !matchedCustomer) {
         errors.push({ rowNumber, columnKey: 'customerCode', columnLabelAr: 'كود العميل', enteredValue: customerCode, reasonAr: 'كود العميل المسلسل مطلوب ويجب أن يكون موجودًا في إدارة العملاء.' });
       }
       if (!customerName || customerName.length < 2) {
