@@ -2,6 +2,16 @@
 
 # 2026-10-12
 
+## Removed the legacy `patients` table — `parties` is the single source
+
+- `parties` and `patients` were two copies of the same records (23,005 vs 22,980 rows, identical ids), because the sync passed the same array to both.
+- Removed every reference to `patients`: the create/alter statements, the sync section, the row-count probe, the `patients` argument of `syncAllData`, and the two call sites that passed `patients: parties`.
+- `syncAllData` now drops the legacy table (`DROP TABLE IF EXISTS patients CASCADE`); the local `patients` context value remains as a backwards-compatible alias of `parties` so existing screens keep working.
+- The live database table was dropped (22,980 rows removed) and `parties` (23,005 rows) was kept.
+- Files: `src/services/neonService.ts`, `src/context/PlatformContext.tsx`, `src/views/NeonHubView.tsx`.
+
+# 2026-10-12
+
 ## Fix: Neon fetch failed with HTTP 507 (response too large)
 
 - Loading the updated datasets failed because every changed document (plus all its chunks) was requested in a single query, and the combined response exceeded Neon's 64 MB HTTP limit.

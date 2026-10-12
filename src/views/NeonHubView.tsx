@@ -223,7 +223,7 @@ export const NeonHubView: React.FC = () => {
     { name: 'accounts', descAr: 'شجرة الحسابات العامة (Chart of Accounts)', count: accounts.length },
     { name: 'journal_entries', descAr: 'دفتر اليومية العامة والقيود المتوازنة', count: invoices.length + 1 },
     { name: 'sales_invoices', descAr: 'فواتير المبيعات ونقاط البيع السريعة', count: invoices.length },
-    { name: 'patients', descAr: 'الملفات الطبية للمرضى والتاريخ الصحي', count: patients.length },
+    { name: 'parties', descAr: 'العملاء والمرضى والموردون (الجدول الموحّد)', count: parties.length },
     { name: 'appointments', descAr: 'مواعيد الأطباء وحجوزات الكشوفات', count: 2 },
   ];
 
