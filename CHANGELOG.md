@@ -2,6 +2,14 @@
 
 # 2026-10-12
 
+## Collection receipts — prevent duplicate imports
+
+- `addCollectionReceiptsBulk` now skips items that are exact duplicates of an already-recorded receipt (same tenant + customer + date + amount + service + draft number) and of earlier items in the same batch, returning `skippedDuplicates`. The collection-receipts Excel import surfaces the skipped count.
+- This prevents the repeated-import duplicates that inflated a customer's statement (e.g. the same 800 receipt appearing several times).
+- Files: `src/context/PlatformContext.tsx`, `src/views/CollectionReceiptsView.tsx`.
+
+# 2026-10-12
+
 ## Fix auto-recovered refunds being attached to the wrong customer
 
 - Root cause of the huge unexplained movements in the detailed customer statement: auto-recovered refund vouchers (derived from `JV-CRF-` journals) were matched to a customer by the **shared customer control account** (`party.accountId`), so every refund was attached to the same first customer.
