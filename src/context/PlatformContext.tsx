@@ -10975,6 +10975,19 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       Object.keys(cached).forEach((key) => { cachedPayloads[key] = cached![key].payload; });
       applyDatasetDocuments(cachedPayloads);
       usedCache = true;
+      // CRITICAL: the cached arrays are ALSO the baseline for the record-level diff.
+      // Without seeding them here, a dataset the cache considers fresh never gets a
+      // baseline, so the push cannot detect deletions and deleted records never reach
+      // the database (they then come back on every reload).
+      Object.keys(cached).forEach((key) => {
+        const value = cached![key].payload;
+        if (Array.isArray(value)) {
+          neonLastSyncedArraysRef.current.set(key, value);
+          if (!neonCursorsRef.current.has(key)) {
+            neonCursorsRef.current.set(key, cached![key].updatedAt || new Date().toISOString());
+          }
+        }
+      });
     }
     // Align the in-app tenant with the resolved Neon tenant.
     if (tenantId && tenant?.id !== tenantId) {
@@ -11234,7 +11247,14 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const pushErrors: string[] = [];
       for (const doc of changed) {
         const currentArray = Array.isArray(doc.payload) ? (doc.payload as any[]) : [];
-        const previousArray = neonLastSyncedArraysRef.current.get(doc.key) || [];
+        let previousArray = neonLastSyncedArraysRef.current.get(doc.key);
+        if (previousArray === undefined) {
+          // SAFETY NET: no baseline yet -> read the live records from the database so
+          // deletions are still detected (an empty baseline would hide removed records).
+          const liveBaseline = await fetchLiveRecords(connectionStringForSync, tenantIdForSync, doc.key);
+          previousArray = liveBaseline.records;
+          neonLastSyncedArraysRef.current.set(doc.key, previousArray);
+        }
         const outcome = await pushRecordChanges(
           connectionStringForSync,
           tenantIdForSync,

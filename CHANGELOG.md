@@ -2,6 +2,15 @@
 
 # 2026-10-12
 
+## CRITICAL FIX: deletions still did not reach the database
+
+- Second root cause found: when the local cache considered a dataset fresh, the bootstrap skipped fetching it and therefore never seeded its **diff baseline**. The record-level push then compared against an empty baseline, which can detect upserts but **never deletions**, so deleted rows were never soft-deleted in `app_records` and came back on every reload.
+- Fixed by seeding the baseline (and the cursor) from the cached arrays, and by adding a push-time safety net: when a dataset has no baseline yet, the live records are read from the database so deletions are always detected.
+- Effect: a deletion made in the app is now always propagated (soft delete) no matter which path the startup took.
+- Files: `src/context/PlatformContext.tsx`.
+
+# 2026-10-12
+
 ## CRITICAL: deleted records came back after a refresh
 
 - Root cause: the startup load read the whole-dataset snapshot from `app_documents`, while deletions are recorded per record in `app_records` (soft delete). The stale snapshot therefore resurrected deleted records on every reload.
