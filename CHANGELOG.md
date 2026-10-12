@@ -2,6 +2,14 @@
 
 # 2026-10-12
 
+## Database-first conversion started: Companies & Branches screen
+
+- `addBranch` and `addWarehouse` are now **database-first**: the new branch/warehouse is sent to the database through the command layer (`saveRecord`) and only appears on the screen after the database accepts it.
+- Until an API session is configured the command layer falls back to the local update, so the screen keeps working during the migration.
+- Files: `src/context/PlatformContext.tsx`.
+
+# 2026-10-12
+
 ## Database-first command layer added
 
 - Added `src/services/commands.ts`: `saveRecord`, `deleteRecord`, `createCollectionReceipt`, `createJournalEntry`, `reloadDataset`.
