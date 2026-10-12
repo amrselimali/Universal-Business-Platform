@@ -2,6 +2,16 @@
 
 # 2026-10-12
 
+## Database-first command layer added
+
+- Added `src/services/commands.ts`: `saveRecord`, `deleteRecord`, `createCollectionReceipt`, `createJournalEntry`, `reloadDataset`.
+- Each command writes to the database FIRST and only then updates the screen state, so the interface can never display something that was not saved. On rejection or network failure the local state is untouched and the error is returned to the caller.
+- Until an API session is configured every command falls back to the local update, which allows converting screens one at a time without stopping the running application.
+- `PROJECT_STATE.md` now carries the conversion recipe, the current status and the recommended screen order.
+- Files: `src/services/commands.ts` (new), `PROJECT_STATE.md`.
+
+# 2026-10-12
+
 ## Commands reach the database almost instantly
 
 - The record push debounce was reduced from 3000 ms to **400 ms**, so a button press is written to `app_records` in under half a second instead of after three seconds (and the window in which closing the page could lose an edit is now negligible).
