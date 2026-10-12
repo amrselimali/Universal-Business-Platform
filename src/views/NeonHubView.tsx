@@ -33,6 +33,7 @@ export const NeonHubView: React.FC = () => {
     getPostgresSchemaSql,
     pullLatestFromNeon,
     neonAutoSync,
+    neonAutoSyncProgress,
     branches,
     allBranches,
     warehouses,
@@ -97,19 +98,19 @@ export const NeonHubView: React.FC = () => {
       // in-browser copy so the backup is never empty.
       const canReadNeon = neonDb.connected && Boolean(neonDb.connectionString) && Boolean(tenant?.id);
       let neonDocs: { [key: string]: any } = {};
-      let sourceLabel = t('بيانات المتصفح (غير متصل بـ nion)', 'browser data (Neon not connected)');
+      let sourceLabel = t('بيانات المتصفح (غير متصل بـ Neon)', 'browser data (Neon not connected)');
 
       if (canReadNeon) {
         const fetched = await NeonService.fetchDocuments(neonDb.connectionString, tenant!.id);
         if (fetched.success && Object.keys(fetched.documents).length > 0) {
           neonDocs = fetched.documents as { [key: string]: any };
           sourceLabel = t(
-            `بيانات nion مباشرة (${Object.keys(neonDocs).length} مجموعة)`,
+            `بيانات Neon مباشرة (${Object.keys(neonDocs).length} مجموعة)`,
             `live Neon data (${Object.keys(neonDocs).length} datasets)`
           );
         } else {
           sourceLabel = t(
-            `تعذر قراءة nion (${fetched.message}) - تم استخدام بيانات المتصفح`,
+            `تعذر قراءة Neon (${fetched.message}) - تم استخدام بيانات المتصفح`,
             `Could not read Neon (${fetched.message}) - browser data used`
           );
         }
@@ -279,7 +280,7 @@ export const NeonHubView: React.FC = () => {
         <Server className="h-4 w-4 shrink-0" />
         <span>{t('المزامنة التلقائية لـ Neon:', 'Automatic Neon sync:')}</span>
         {neonAutoSync.syncing ? (
-          <span>{t('جاري الرفع...', 'Uploading...')}</span>
+          <span>{t('جاري الرفع...', 'Uploading...')} {neonAutoSyncProgress ? `(${neonAutoSyncProgress})` : ''}</span>
         ) : neonAutoSync.error ? (
           <span>{t('فشل الرفع:', 'Upload failed:')} {neonAutoSync.error}</span>
         ) : neonAutoSync.lastRun ? (
