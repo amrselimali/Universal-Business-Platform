@@ -2,6 +2,15 @@
 
 # 2026-10-12
 
+## Fix auto-recovered refunds being attached to the wrong customer
+
+- Root cause of the huge unexplained movements in the detailed customer statement: auto-recovered refund vouchers (derived from `JV-CRF-` journals) were matched to a customer by the **shared customer control account** (`party.accountId`), so every refund was attached to the same first customer.
+- Recovery now matches the customer by the **auto-serial customer code** written in the journal memo (exact name as a fallback) and **skips** refunds it cannot confidently attribute. The refund journal memo now also records the customer code.
+- Recovered refunds (`crf-rec-*`) are derived data and are now rebuilt on each run, which also cleans up previously mis-attributed records.
+- Files: `src/context/PlatformContext.tsx`.
+
+# 2026-10-12
+
 ## Customer statement — accurate movements and opening balance
 
 - Fixed the detailed customer statement pulling in unrelated movements: invoices, reception rows and journal lines are now matched to the customer by the **exact record id** or by the **auto-serial customer code only**. Removed the broad Arabic-name / system-code / paper-code substring matching that produced large unexplained debit/credit movements.

@@ -8628,68 +8628,87 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     });
   }, [allCustomerRefunds, isStorageHydrated]);
 
-  // Auto-recover customer refund vouchers from journals if missing from the refund store
+  // Auto-recover customer refund vouchers from journals if missing from the refund store.
+  // Recovered vouchers are DERIVED data, so they are rebuilt on each run to keep the
+  // customer attribution correct. The customer is matched by the AUTO-SERIAL customer code
+  // parsed from the journal memo (exact name as a fallback) and NEVER by the shared
+  // customer control account, which would attach every refund to the same first customer.
   useEffect(() => {
     if (!isStorageHydrated || allJournals.length === 0) return;
-    const existingJournalIds = new Set(allCustomerRefunds.map((r) => r.journalEntryId).filter(Boolean));
-    const existingVoucherNumbers = new Set(allCustomerRefunds.map((r) => r.voucherNumber.toLowerCase().trim()));
-    const recovered: CustomerRefundVoucher[] = [];
+    setAllCustomerRefunds((prev) => {
+      const userRefunds = prev.filter((r) => !r.id.startsWith('crf-rec-'));
+      const existingJournalIds = new Set(userRefunds.map((r) => r.journalEntryId).filter(Boolean));
+      const existingVoucherNumbers = new Set(userRefunds.map((r) => r.voucherNumber.toLowerCase().trim()));
+      const recovered: CustomerRefundVoucher[] = [];
 
-    allJournals.forEach((journal) => {
-      const isRefundJournal =
-        (journal.entryNumber?.startsWith('JV-CRF-') || journal.sourceDocument?.includes('تسوية مستحقات عميل')) &&
-        !existingJournalIds.has(journal.id);
-      if (!isRefundJournal) return;
+      allJournals.forEach((journal) => {
+        const isRefundJournal =
+          (journal.entryNumber?.startsWith('JV-CRF-') || journal.sourceDocument?.includes('تسوية مستحقات عميل')) &&
+          !existingJournalIds.has(journal.id);
+        if (!isRefundJournal) return;
 
-      const matchVoucher = journal.sourceDocument?.match(/(CRF-[A-Za-z0-9-]+)/);
-      const voucherNumber = matchVoucher ? matchVoucher[1] : `CRF-${journal.date.slice(0, 4)}-${journal.id.slice(-4)}`;
-      if (existingVoucherNumbers.has(voucherNumber.toLowerCase().trim())) return;
+        const matchVoucher = journal.sourceDocument?.match(/(CRF-[A-Za-z0-9-]+)/);
+        const voucherNumber = matchVoucher ? matchVoucher[1] : `CRF-${journal.date.slice(0, 4)}-${journal.id.slice(-4)}`;
+        if (existingVoucherNumbers.has(voucherNumber.toLowerCase().trim())) return;
 
-      const customerLine = journal.lines.find((line) => line.debit > 0);
-      const paymentLine = journal.lines.find((line) => line.credit > 0);
-      const amount = customerLine?.debit || paymentLine?.credit || 0;
-      if (amount <= 0) return;
+        const customerLine = journal.lines.find((line) => line.debit > 0);
+        const paymentLine = journal.lines.find((line) => line.credit > 0);
+        const amount = customerLine?.debit || paymentLine?.credit || 0;
+        if (amount <= 0) return;
 
-      let matchedParty = allParties.find((p) => p.accountId === customerLine?.accountId);
-      if (!matchedParty && customerLine?.memo) {
-        matchedParty = allParties.find((p) => customerLine.memo?.includes(p.name));
-      }
+        const memo = customerLine?.memo || '';
+        const codeMatch = memo.match(/كود\s*([0-9A-Za-z-]+)/);
+        const recoveredCode = codeMatch ? codeMatch[1].trim() : '';
+        const nameMatch = memo.match(/استرداد للعميل\s*(.+?)\s*(?:\(كود|-\s*[\d.]+)/);
+        const recoveredName = nameMatch ? nameMatch[1].trim() : '';
 
-      const unitsMatch = customerLine?.memo?.match(/(\d+(?:\.\d+)?)\s*وحدة/);
-      const units = unitsMatch ? Number(unitsMatch[1]) : 1;
-      const unitPrice = units > 0 ? Number((amount / units).toFixed(2)) : amount;
+        let matchedParty: Party | undefined;
+        if (recoveredCode) {
+          matchedParty = allParties.find((party) => {
+            const code = String(party.customerCode || '').trim();
+            return Boolean(code) && (code === recoveredCode || code.replace(/^0+/, '') === recoveredCode.replace(/^0+/, ''));
+          });
+        }
+        if (!matchedParty && recoveredName) {
+          matchedParty = allParties.find((party) => party.name.trim() === recoveredName);
+        }
+        // Skip refunds we cannot confidently attribute instead of attaching them to a wrong customer.
+        if (!matchedParty) return;
 
-      const recoveredRefund: CustomerRefundVoucher = {
-        id: `crf-rec-${journal.id}`,
-        voucherNumber,
-        date: journal.date,
-        tenantId: journal.tenantId,
-        branchId: journal.branchId,
-        partyId: matchedParty?.id || '',
-        customerCode: matchedParty?.customerCode || matchedParty?.code,
-        systemCode: matchedParty?.systemCode,
-        customerName: matchedParty?.name || 'عميل',
-        units,
-        unitPrice,
-        amount,
-        paymentMethodId: '',
-        paymentMethodLabel: paymentLine?.accountNameAr || 'نقدية',
-        paymentAccountId: paymentLine?.accountId,
-        serviceName: 'استرداد مستحقات عميل',
-        notes: `مستعاد تلقائياً من قيد اليومية ${journal.entryNumber}`,
-        status: journal.isPosted ? 'active' : 'cancelled',
-        journalEntryId: journal.id,
-        createdAt: journal.createdAt || new Date().toISOString(),
-        createdBy: journal.createdBy,
-      };
-      recovered.push(recoveredRefund);
-      existingVoucherNumbers.add(voucherNumber.toLowerCase().trim());
+        const unitsMatch = memo.match(/(\d+(?:\.\d+)?)\s*وحدة/);
+        const units = unitsMatch ? Number(unitsMatch[1]) : 1;
+        const unitPrice = units > 0 ? Number((amount / units).toFixed(2)) : amount;
+
+        recovered.push({
+          id: `crf-rec-${journal.id}`,
+          voucherNumber,
+          date: journal.date,
+          tenantId: journal.tenantId,
+          branchId: journal.branchId,
+          partyId: matchedParty.id,
+          customerCode: matchedParty.customerCode || matchedParty.code,
+          systemCode: matchedParty.systemCode,
+          customerName: matchedParty.name,
+          units,
+          unitPrice,
+          amount,
+          paymentMethodId: '',
+          paymentMethodLabel: paymentLine?.accountNameAr || 'نقدية',
+          paymentAccountId: paymentLine?.accountId,
+          serviceName: 'استرداد مستحقات عميل',
+          notes: `مستعاد تلقائياً من قيد اليومية ${journal.entryNumber}`,
+          status: journal.isPosted ? 'active' : 'cancelled',
+          journalEntryId: journal.id,
+          createdAt: journal.createdAt || new Date().toISOString(),
+          createdBy: journal.createdBy,
+        });
+        existingVoucherNumbers.add(voucherNumber.toLowerCase().trim());
+      });
+
+      if (recovered.length === 0 && userRefunds.length === prev.length) return prev;
+      return [...recovered, ...userRefunds];
     });
-
-    if (recovered.length > 0) {
-      setAllCustomerRefunds((prev) => [...recovered, ...prev]);
-    }
-  }, [allJournals, isStorageHydrated]);
+  }, [allJournals, allParties, isStorageHydrated]);
 
   useEffect(() => {
     if (!isStorageHydrated) return;
@@ -9563,7 +9582,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     customerRefundNumberCounter.current = Math.max(customerRefundNumberCounter.current, allCustomerRefunds.length) + 1;
     const refundNumber = `CRF-${new Date().getFullYear()}-${String(customerRefundNumberCounter.current).padStart(4, '0')}`;
     const journalLines: JournalLine[] = [
-      createJournalLine(customerAccount, amount, 0, `استرداد للعميل ${party.name} - ${units} وحدة × ${unitPrice} - سند ${refundNumber}`, 1),
+      createJournalLine(customerAccount, amount, 0, `استرداد للعميل ${party.name}${party.customerCode ? ` (كود ${party.customerCode})` : ''} - ${units} وحدة × ${unitPrice} - سند ${refundNumber}`, 1),
       createJournalLine(paymentAccount, 0, amount, `استرداد للعميل ${party.name} - صرف نقدية - سند ${refundNumber}`, 2),
     ];
     const journal = postJournalEntryWithSync({
