@@ -477,7 +477,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
     const supplierAccountId = currentParty.type === 'Both'
       ? currentParty.supplierAccountId
       : currentParty.type === 'Supplier' ? currentParty.accountId : undefined;
-    const partyJournalIdentifiers = [pName, pCode, pCustomerCode, pPhone.toLowerCase()]
+    const partyJournalIdentifiers = [currentParty.name.toLowerCase().trim(), pNameNorm, pCode, pCustomerCode, pPhone]
       .filter((identifier): identifier is string => Boolean(identifier));
 
     // 3. Journal Entries mentioning this party

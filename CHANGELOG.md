@@ -2,6 +2,15 @@
 
 # 2026-10-12
 
+## Fix undefined identifiers introduced by the statement/reconciliation refactor
+
+- Fixed `ReferenceError: pName is not defined` in the detailed customer statement (`PartyStatementModal`): the journal-identifier list referenced `pName` after it had been renamed to `pNameNorm`. Restored a raw customer-name identifier alongside the normalized one.
+- Fixed `ReferenceError: customerName is not defined` in the collection-receipt Excel validator (`CollectionReceiptsView`): the customer-name value is now parsed from the row again.
+- These were runtime crashes shown as "unexpected browser exception" when opening a customer statement or importing receipts.
+- Files: `src/components/PartyStatementModal.tsx`, `src/views/CollectionReceiptsView.tsx`.
+
+# 2026-10-12
+
 ## Fix reconciliation crash + link receipts by auto-serial customer code only
 
 - Fixed the runtime crash `ReferenceError: journalIndex is not defined`: the `journalIndex` declaration was missing in the collection-receipt reconciliation loop while still being used. Restored `const journalIndex = findCustomerReceiptJournalIndex(receipt, updatedJournals);`.
