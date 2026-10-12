@@ -2,6 +2,15 @@
 
 # 2026-10-12
 
+## The app can now run through the API (frontend wiring)
+
+- Added `src/services/apiClient.ts`: API URL + JWT session storage, `apiLogin`, `apiHealth`, `apiFetchRecords`, `apiFetchChanges`, `apiUpsertRecords`, `apiDeleteRecords`, `apiPostJournal`, `apiReverseJournal`, `apiPostReceipt`, `apiFetchBalances`, plus `clearApiSession`.
+- `recordSync` now prefers the API for every read and write (startup load, incremental pull, record push, soft delete). When no API URL/token is configured it keeps using the legacy direct connection, so the running app is unaffected until the switch is made.
+- Added an **API connection** panel to the Neon screen: enter the API URL, sign in, get feedback, and sign out. After signing in, reloading the page makes all data flow through the backend (JWT + tenant from the token + RLS).
+- Files: `src/services/apiClient.ts` (new), `src/services/recordSync.ts`, `src/views/NeonHubView.tsx`.
+
+# 2026-10-12
+
 ## Backend API built and verified against the live database
 
 - Added the `server/` project (Fastify 5 + TypeScript + Zod) - the only layer allowed to talk to Postgres now.
