@@ -2,6 +2,15 @@
 
 # 2026-10-12
 
+## Quiet background sync (no repeated database loads)
+
+- The push no longer issues an extra metadata request, so every edit no longer reads Neon again.
+- Locally pushed datasets are marked fresh with a one-pass grace period, so the periodic pull does not immediately download what we just uploaded; their real timestamps are learned on the following tick.
+- The status bar now appears **only for real problems** (unreachable database / no connection configured / first load). Normal background sync is silent and never blocks the interface.
+- Files: `src/context/PlatformContext.tsx`, `src/App.tsx`.
+
+# 2026-10-12
+
 ## Offline-first: run on the device, sync with Neon automatically
 
 - Re-enabled local persistence (localStorage + IndexedDB): the app runs from the device copy and stays usable without internet.

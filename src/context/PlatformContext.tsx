@@ -10758,7 +10758,15 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (!meta.success) return { updated: 0, error: meta.message };
 
     const baseKeys = Object.keys(meta.metadata).filter((key) => !key.includes('#'));
-    const changedKeys = baseKeys.filter((key) => neonDocumentVersionsRef.current[key] !== meta.metadata[key]);
+    const changedKeys = baseKeys.filter((key) => {
+      const known = neonDocumentVersionsRef.current[key];
+      if (known === '') {
+        // Just uploaded locally: skip this pass and learn the real timestamp next time.
+        delete neonDocumentVersionsRef.current[key];
+        return false;
+      }
+      return known !== meta.metadata[key];
+    });
     if (changedKeys.length === 0) {
       setNeonLastRefresh(new Date().toLocaleTimeString(language === 'ar' ? 'ar-EG' : 'en-US'));
       return { updated: 0 };
@@ -11049,17 +11057,9 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       changed.forEach((doc) => {
         neonSyncedPayloadsRef.current[doc.key] = JSON.stringify(doc.payload ?? []);
       });
-      // Learn the new Neon timestamps so the minute refresh does not re-download them.
-      try {
-        const meta = await NeonService.fetchDocumentMetadata(connectionStringForSync, tenantIdForSync);
-        if (meta.success) {
-          changed.forEach((doc) => {
-            if (meta.metadata[doc.key]) neonDocumentVersionsRef.current[doc.key] = meta.metadata[doc.key];
-          });
-        }
-      } catch (versionError) {
-        console.warn('Version refresh after push failed:', versionError);
-      }
+      // Mark the pushed datasets as fresh so the next background pull does not
+      // download them again (the periodic refresh re-learns their timestamps).
+      changed.forEach((doc) => { neonDocumentVersionsRef.current[doc.key] = ''; });
       setNeonAutoSyncProgress('');
       setNeonAutoSync({
         syncing: false,
