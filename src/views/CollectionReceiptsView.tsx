@@ -937,7 +937,8 @@ export const CollectionReceiptsView: React.FC = () => {
       alert(result.error || t('تعذر ترحيل إيصالات التحصيل.', 'Could not post collection receipts.'));
       return;
     }
-    alert(t(`تم استيراد وترحيل ${result.created} إيصال بنجاح والتأثير مباشرة على شجرة الحسابات وحسابات العملاء بالكميات الدائنة.`, `Imported and posted ${result.created} receipts directly to general ledger and customer accounts credit quantity.`));
+    const skipped = result.skippedDuplicates || 0;
+    alert(t(`تم استيراد وترحيل ${result.created} إيصال بنجاح والتأثير مباشرة على شجرة الحسابات وحسابات العملاء بالكميات الدائنة.${skipped ? ` تم تخطي ${skipped} إيصال مكرر (مسجل مسبقاً).` : ''}`, `Imported and posted ${result.created} receipts directly to general ledger and customer accounts credit quantity.${skipped ? ` Skipped ${skipped} duplicate receipt(s) already recorded.` : ''}`));
   };
 
   return (

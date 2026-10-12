@@ -560,7 +560,7 @@ interface PlatformContextType {
     patientPhone?: string;
     customerCode?: string;
     systemCode?: string;
-  }>) => { success: boolean; created: number; error?: string };
+  }>) => { success: boolean; created: number; skippedDuplicates?: number; error?: string };
   deleteCashReceipt: (id: string) => void;
 
   // Customer Refunds / Dues Settlement (تسوية مستحقات عميل واستردادات العملاء)
@@ -9297,12 +9297,44 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       customerCode?: string;
       systemCode?: string;
     }>
-  ): { success: boolean; created: number; error?: string } => {
+  ): { success: boolean; created: number; skippedDuplicates?: number; error?: string } => {
     if (items.length === 0) return { success: true, created: 0 };
 
     for (const item of items) {
       const periodCheck = validatePeriodDate(item.date, item.branchId);
       if (!periodCheck.allowed) return { success: false, created: 0, error: periodCheck.message };
+    }
+
+    // Skip exact duplicates of already-recorded receipts (prevents double imports).
+    const existingReceiptFingerprints = new Set(
+      allCashReceipts
+        .filter((receipt) => receipt.status !== 'cancelled')
+        .map((receipt) => [
+          receipt.tenantId,
+          receipt.partyId || '',
+          receipt.date,
+          Number(receipt.amount || 0).toFixed(2),
+          (receipt.serviceName || '').trim().toLowerCase(),
+          (receipt.referenceInvoiceNo || '').trim().toLowerCase(),
+        ].join('|'))
+    );
+    const batchReceiptFingerprints = new Set<string>();
+    const acceptedItems = items.filter((item) => {
+      const fingerprint = [
+        item.tenantId,
+        item.partyId,
+        item.date,
+        Number(item.amount).toFixed(2),
+        (item.serviceName || '').trim().toLowerCase(),
+        (item.receiptNumber || '').trim().toLowerCase(),
+      ].join('|');
+      if (existingReceiptFingerprints.has(fingerprint) || batchReceiptFingerprints.has(fingerprint)) return false;
+      batchReceiptFingerprints.add(fingerprint);
+      return true;
+    });
+    const skippedDuplicates = items.length - acceptedItems.length;
+    if (acceptedItems.length === 0) {
+      return { success: true, created: 0, skippedDuplicates };
     }
 
     const nextSequence = Math.max(cashReceiptNumberCounter.current, allCashReceipts.length);
@@ -9315,7 +9347,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const controlAccountsByTenant = new Map<string, Account>();
     const seenReceiptNumbers = new Set<string>();
 
-    for (const item of items) {
+    for (const item of acceptedItems) {
       const customer = allParties.find((party) =>
         party.id === item.partyId && party.tenantId === item.tenantId &&
         (party.type === 'Customer' || party.type === 'Both')
@@ -9379,7 +9411,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       }
     }
 
-    items.forEach((item, index) => {
+    acceptedItems.forEach((item, index) => {
       const sequence = nextSequence + index + 1;
       const voucherNumber = `CR-${new Date().getFullYear()}-${String(sequence).padStart(4, '0')}`;
       const receiptId = `rv-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
@@ -9494,7 +9526,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     applyJournalLinesToAccounts(allJournalLines);
     setAllJournals((prev) => [...journalEntries, ...prev]);
     setAllCashReceipts((prev) => [...updatedReceipts, ...prev]);
-    cashReceiptNumberCounter.current = nextSequence + items.length;
+    cashReceiptNumberCounter.current = nextSequence + acceptedItems.length;
 
     // Update parties with their new booked quantity offers and credited balances in customer accounts
     if (partyOffersMap.size > 0 || customerCreditsMap.size > 0 || customerPartiesWithAccounts.size > 0) {
@@ -9528,7 +9560,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       'تسجيل وترحيل إيصالات التحصيل مباشرة للحسابات', 'Post collection receipts directly to accounts',
       `تم تسجيل وترحيل ${updatedReceipts.length} إيصال تحصيل مباشرة في الحسابات العامة وشجرة الحسابات وحسابات العملاء بدون ترحيلها لشيفت التشغيل`
     );
-    return { success: true, created: updatedReceipts.length };
+    return { success: true, created: updatedReceipts.length, skippedDuplicates };
   };
 
   const addCustomerRefund = (data: {
