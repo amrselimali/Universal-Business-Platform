@@ -35,6 +35,7 @@ export const NeonHubView: React.FC = () => {
     neonAutoSync,
     neonAutoSyncProgress,
     neonConnectionInfo,
+    compareWithNeon,
     neonBootstrap,
     getNeonDatasetSummary,
     importAllFromNeon,
@@ -96,7 +97,9 @@ export const NeonHubView: React.FC = () => {
   const [importStage, setImportStage] = useState<'idle' | 'first' | 'second' | 'running'>('idle');
   const [importResult, setImportResult] = useState<string | null>(null);
   const [schemaReport, setSchemaReport] = useState<string | null>(null);
+  const [comparison, setComparison] = useState<{ key: string; appCount: number; neonCount: number | null }[] | null>(null);
   const [showSchemaFailures, setShowSchemaFailures] = useState<string[]>([]);
+  const [comparing, setComparing] = useState(false);
 
   const handleBackupToExcel = async () => {
     setIsExportingExcel(true);
@@ -409,6 +412,56 @@ export const NeonHubView: React.FC = () => {
           <span>/ {neonConnectionInfo.database}</span>
         </div>
       )}
+
+      {/* Verification: app data vs Neon data */}
+      <div className="space-y-2 rounded-2xl border border-slate-200 bg-white p-3.5 dark:border-slate-700 dark:bg-slate-900">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="text-xs font-black text-slate-700 dark:text-slate-200">
+            {t('مقارنة بيانات التطبيق مع Neon', 'Compare app data with Neon')}
+          </span>
+          <button
+            type="button"
+            disabled={comparing}
+            onClick={async () => {
+              setComparing(true);
+              setComparison(await compareWithNeon());
+              setComparing(false);
+            }}
+            className="rounded-xl bg-slate-800 px-3 py-2 text-xs font-bold text-white hover:bg-slate-900 disabled:opacity-50"
+          >
+            {comparing ? t('جاري الفحص...', 'Checking...') : t('فحص التطابق الآن', 'Check now')}
+          </button>
+        </div>
+        {comparison && (
+          <div className="max-h-72 overflow-y-auto rounded-lg border border-slate-100 dark:border-slate-800">
+            <table className="w-full text-[11px]">
+              <thead className="bg-slate-50 dark:bg-slate-800/60">
+                <tr>
+                  <th className="p-1.5 text-start">{t('المجموعة', 'Dataset')}</th>
+                  <th className="p-1.5 text-center">{t('في التطبيق', 'In app')}</th>
+                  <th className="p-1.5 text-center">{t('في Neon', 'In Neon')}</th>
+                  <th className="p-1.5 text-center">{t('الحالة', 'Status')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {comparison.map((row) => {
+                  const mismatch = row.neonCount !== null && row.neonCount !== row.appCount;
+                  return (
+                    <tr key={row.key} className="border-t border-slate-100 dark:border-slate-800">
+                      <td className="p-1.5 font-mono">{row.key}</td>
+                      <td className="p-1.5 text-center font-mono font-bold">{row.appCount}</td>
+                      <td className="p-1.5 text-center font-mono font-bold">{row.neonCount === null ? '—' : row.neonCount}</td>
+                      <td className={`p-1.5 text-center font-bold ${mismatch ? 'text-rose-600' : 'text-emerald-600'}`}>
+                        {row.neonCount === null ? t('غير موجود في Neon', 'missing in Neon') : mismatch ? t('مختلف', 'differs') : t('مطابق', 'match')}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
 
       {/* Automatic Neon sync status (مزامنة تلقائية لكل البيانات) */}
       <div className={`flex flex-wrap items-center gap-2 rounded-2xl border p-3.5 text-xs font-bold ${neonAutoSync.error ? 'border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-200' : 'border-cyan-200 bg-cyan-50 text-cyan-800 dark:border-cyan-900/50 dark:bg-cyan-950/30 dark:text-cyan-200'}`}>

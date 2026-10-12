@@ -2,6 +2,14 @@
 
 # 2026-10-12
 
+## Verification panel: app data vs Neon data, dataset by dataset
+
+- Added `NeonService.fetchDatasetCounts` and a **"Compare app data with Neon"** panel on the Neon screen showing, for every dataset, the record count currently held by the app, the count stored in Neon, and whether they match (with "missing in Neon" when the dataset does not exist there).
+- This makes it possible to prove exactly which datasets differ instead of guessing.
+- Files: `src/services/neonService.ts`, `src/context/PlatformContext.tsx`, `src/views/NeonHubView.tsx`.
+
+# 2026-10-12
+
 ## Direct database mode: no local cache, every dataset read straight from Neon
 
 - `USE_LOCAL_CACHE = false`: the app keeps **no local copy** of business data. Startup reads every dataset directly from Neon, dataset by dataset, with live progress (`x/y`) shown on the gate screen.
