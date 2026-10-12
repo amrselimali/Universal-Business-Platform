@@ -47,7 +47,7 @@ import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 import { GlobalContextMenu } from './components/GlobalContextMenu';
 
 const MainLayout: React.FC = () => {
-  const { language, t, canAccessView, currentUser, activeBranch, neonBootstrap, retryNeonBootstrap, neonDb, updateNeonConnectionString, neonConnectionInfo } = usePlatform();
+  const { language, t, canAccessView, currentUser, activeBranch, neonBootstrap, retryNeonBootstrap, neonDb, updateNeonConnectionString, neonConnectionInfo, neonOnline, syncNow, neonLastRefresh } = usePlatform();
 
   // Load preferred landing view from URL query param, hash, or localStorage (Supports Open in New Tab)
   const [currentView, setCurrentView] = useState<string>(() => {
@@ -318,11 +318,10 @@ const MainLayout: React.FC = () => {
   };
 
   // ==========================================================================
-  // Neon-first gate: the app does not start until Neon data is loaded.
+  // Loading gate (offline-first): block only while the first load is running.
+  // After that the app runs on the local copy and syncs with Neon when online.
   // ==========================================================================
-  if (neonBootstrap.status !== 'ready') {
-    const isNoConfig = neonBootstrap.status === 'no-config';
-    const isError = neonBootstrap.status === 'error';
+  if (neonBootstrap.status === 'loading') {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-950 p-4">
         <div className="w-full max-w-xl space-y-4 rounded-3xl border border-slate-800 bg-slate-900 p-6 text-center shadow-2xl">
@@ -332,77 +331,16 @@ const MainLayout: React.FC = () => {
           <h1 className="text-lg font-black text-white">
             {t('قاعدة البيانات السحابية (Neon)', 'Cloud Database (Neon)')}
           </h1>
-          {isNoConfig ? (
-            <p className="text-xs leading-6 text-slate-300">
-              {t(
-                'التطبيق يعتمد الآن حصريًا على بيانات Neon. يرجى إدخال رابط الاتصال للمتابعة.',
-                'The app now relies exclusively on Neon data. Enter the connection string to continue.'
-              )}
-            </p>
-          ) : (
-            <p className={`text-xs leading-6 ${isError ? 'text-rose-300' : 'text-slate-300'}`}>
-              {neonBootstrap.message || t('جاري تحميل البيانات...', 'Loading data...')}
-            </p>
-          )}
-
-          {neonBootstrap.status === 'loading' && (
-            <div className="mx-auto h-1.5 w-full overflow-hidden rounded-full bg-slate-800">
-              <div className="h-full w-1/2 animate-pulse rounded-full bg-cyan-500" />
-            </div>
-          )}
-
-          {(isNoConfig || isError) && (
-            <input
-              type="text"
-              defaultValue={neonDb.connectionString}
-              onChange={(event) => updateNeonConnectionString(event.target.value)}
-              placeholder="postgresql://...@ep-xxx.neon.tech/neondb?sslmode=require"
-              className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-xs text-white outline-none focus:border-cyan-500"
-            />
-          )}
-
-          <div className="flex items-center justify-center gap-2">
-            <button
-              type="button"
-              onClick={() => void retryNeonBootstrap()}
-              disabled={neonBootstrap.status === 'loading'}
-              className="flex items-center gap-2 rounded-xl bg-cyan-600 px-5 py-2.5 text-xs font-black text-white hover:bg-cyan-700 disabled:opacity-50"
-            >
-              <RefreshCw className="h-4 w-4" />
-              {isError ? t('إعادة المحاولة', 'Retry') : t('اتصال وتحميل البيانات', 'Connect & load data')}
-            </button>
+          <p className="text-xs leading-6 text-slate-300">
+            {neonBootstrap.message || t('جاري تحميل البيانات...', 'Loading data...')}
+          </p>
+          <div className="mx-auto h-1.5 w-full overflow-hidden rounded-full bg-slate-800">
+            <div className="h-full w-1/2 animate-pulse rounded-full bg-cyan-500" />
           </div>
-
-          {neonConnectionInfo && (
-            <p className="rounded-xl border border-slate-700 bg-slate-800/60 p-2.5 font-mono text-[10px] text-cyan-300">
-              {t('قاعدة البيانات المتصلة:', 'Connected database:')}{' '}
-              {neonConnectionInfo.host} / {neonConnectionInfo.database}
-            </p>
-          )}
-
-          <button
-            type="button"
-            onClick={() => {
-              const confirmed = window.confirm(
-                t(
-                  'سيتم إعادة تشغيل التطبيق وقراءة البيانات المحلية القديمة من هذا المتصفح بدل Neon، ثم يمكنك رفعها إلى Neon من زر المزامنة الكاملة. هل تريد المتابعة؟',
-                  'The app will restart and read the old local browser data instead of Neon, then you can push it back with the full sync button. Continue?'
-                )
-              );
-              if (confirmed) {
-                setRecoveryMode(true);
-                window.location.reload();
-              }
-            }}
-            className="text-[11px] font-bold text-amber-300 underline hover:text-amber-200"
-          >
-            {t('استعادة من البيانات المحلية القديمة (هذا المتصفح)', 'Recover from the old local data (this browser)')}
-          </button>
-
           <p className="text-[10px] text-slate-500">
             {t(
-              'لا يتم تشغيل التطبيق بدون الاتصال بقاعدة البيانات.',
-              'The app cannot run without a database connection.'
+              'يتم التحميل من قاعدة البيانات السحابية ثم يعمل التطبيق دون إنترنت ويزامن تلقائيًا عند التوفر.',
+              'Loads from the cloud database, then the app runs offline and syncs automatically when it is available.'
             )}
           </p>
         </div>
@@ -418,6 +356,29 @@ const MainLayout: React.FC = () => {
         onNavigate={(view) => setCurrentView(view)}
         currentView={currentView}
       />
+
+      {/* Offline / sync status: runs locally and syncs with Neon when online */}
+      {!neonOnline || neonBootstrap.status !== 'ready' ? (
+        <div className="flex flex-wrap items-center gap-3 border-b border-amber-200 bg-amber-50 px-4 py-1.5 text-[11px] font-bold text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-200">
+          {!neonOnline ? (
+            <span>{t('لا يوجد اتصال بالإنترنت — التطبيق يعمل على البيانات المحلية وسيتزامن تلقائيًا عند التوفر.', 'Offline — running on local data, it will sync automatically when the internet returns.')}</span>
+          ) : (
+            <span>{neonBootstrap.message || t('جارٍ مزامنة قاعدة البيانات...', 'Syncing with the database...')}</span>
+          )}
+          {neonLastRefresh && (
+            <span className="font-mono text-[10px] opacity-70">
+              {t('آخر مزامنة:', 'last sync:')} {neonLastRefresh}
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => void syncNow()}
+            className="ms-auto rounded-lg bg-amber-600 px-2.5 py-1 text-[10px] text-white hover:bg-amber-700"
+          >
+            {t('مزامنة الآن', 'Sync now')}
+          </button>
+        </div>
+      ) : null}
 
       {/* User Custom Quick Actions & Speed Bar */}
       <QuickActionsBar

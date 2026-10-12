@@ -2,6 +2,15 @@
 
 # 2026-10-12
 
+## Offline-first: run on the device, sync with Neon automatically
+
+- Re-enabled local persistence (localStorage + IndexedDB): the app runs from the device copy and stays usable without internet.
+- Added connectivity awareness: an `online` listener triggers an **immediate** pull from Neon (instead of waiting for the minute tick), while an `offline` listener flags the state.
+- The startup gate now only blocks while the first load is running; if Neon is unreachable the app keeps working on local data and shows a warning bar with the last sync time and a **Sync now** button.
+- Files: `src/utils/persistenceMode.ts`, `src/utils/safeStorage.ts`, `src/context/PlatformContext.tsx`, `src/App.tsx`.
+
+# 2026-10-12
+
 ## Relational mirror fixed: every table is now filled
 
 - The typed tables were empty (e.g. `cash_receipts` had 0 rows) because the mirror could not run against legacy tables: they lacked the `payload` column, had NOT NULL columns the mirror does not fill, no unique key for `ON CONFLICT`, and datasets without an `id`.

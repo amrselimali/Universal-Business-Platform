@@ -56,7 +56,7 @@ export async function idbDelete(key: string): Promise<boolean> {
 
 // Set value in IndexedDB (handles hundreds of megabytes safely)
 export async function idbSet(key: string, value: any): Promise<boolean> {
-  if (isNeonOnlyMode() && LEGACY_DATA_KEYS.has(key)) return true;
+  if (isNeonOnlyMode() && LEGACY_DATA_KEYS.has(key)) return true; // no-op only in Neon-only mode
   try {
     const db = await openIndexedDB();
     return new Promise((resolve, reject) => {

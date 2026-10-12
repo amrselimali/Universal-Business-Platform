@@ -12,7 +12,7 @@
 // Recovery mode: when `erp_local_recovery` is '1' the app reads the previous local
 // (browser) data again so it can be pushed back to Neon after an accidental overwrite.
 const RECOVERY_FLAG = 'erp_local_recovery';
-let neonOnly = true;
+let neonOnly = false;
 try {
   neonOnly = localStorage.getItem(RECOVERY_FLAG) !== '1';
 } catch {
