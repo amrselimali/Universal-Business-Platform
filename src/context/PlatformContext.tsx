@@ -119,6 +119,7 @@ import {
 } from '../data/initialData';
 import { NeonService } from '../services/neonService';
 import { autoTranslateArabic } from '../utils/translator';
+import { exportDatabaseToMultiSheetExcel } from '../utils/fullDatabaseExcelBackup';
 import { normalizeStatementDate, isReceiptMatchingParty } from '../utils/statementUtils';
 
 const normalizeCustomerPartyCodes = (parties: Party[]): Party[] => {
@@ -665,6 +666,7 @@ interface PlatformContextType {
   neonAutoSync: { syncing: boolean; lastRun?: string; lastSavedCount: number; error?: string };
   neonAutoSyncProgress: string;
   getNeonDatasetSummary: () => { key: string; count: number }[];
+  importAllFromNeon: () => Promise<{ success: boolean; message: string; imported: number; backupFilename?: string }>;
   updateNeonConnectionString: (conn: string) => void;
   testNeonConnection: (connOverride?: string) => Promise<boolean>;
   syncAllToNeon: () => Promise<{ success: boolean; message: string; count: number }>;
@@ -10505,6 +10507,127 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   ];
 
+
+  // ==========================================================================
+  // Import everything from Neon (استيراد كل البيانات من Neon)
+  // --------------------------------------------------------------------------
+  // Steps: (1) download a safety backup of the CURRENT local data, (2) read all
+  // documents from Neon, (3) apply them to the app state. Datasets missing in Neon
+  // are left untouched (nothing is deleted locally).
+  // ==========================================================================
+  const buildBackupPayload = () => ({
+    tenantName: (tenant as any)?.nameAr || (tenant as any)?.name || 'المؤسسة الطبية',
+    branches: allBranches,
+    warehouses: allWarehouses,
+    users: allUsers,
+    parties: allParties,
+    products: allProducts,
+    stockLevels,
+    stockMovements: allStockMovements,
+    accounts: allAccounts,
+    journalEntries: allJournals,
+    invoices: allInvoices,
+    cashReceipts: allCashReceipts,
+    cashPayments: allCashPayments,
+    goodsReceipts: allGoodsReceipts,
+    goodsIssues: allGoodsIssues,
+    receptionShifts: allReceptionShifts,
+    attendanceRecords: allAttendanceRecords,
+    staffMembers: allStaffMembers,
+    appointments: allAppointments,
+    patientFollowUps: allPatientFollowUps,
+    paymentMethods: allPaymentMethods,
+    laserDevices: allLaserDevices,
+  });
+
+  const importAllFromNeon = async (): Promise<{
+    success: boolean;
+    message: string;
+    imported: number;
+    backupFilename?: string;
+  }> => {
+    const rawConnection = String(neonDb.connectionString || '').trim();
+    if (!rawConnection.startsWith('postgres://') && !rawConnection.startsWith('postgresql://')) {
+      return { success: false, message: 'الرجاء إدخال رابط اتصال Neon صالح أولاً', imported: 0 };
+    }
+    const tenantIdForImport = tenant?.id;
+    if (!tenantIdForImport) return { success: false, message: 'لا يوجد كيان محدد', imported: 0 };
+
+    // 1) Safety backup of the current local data (downloads a file before any change).
+    let backupFilename: string | undefined;
+    try {
+      const backup = exportDatabaseToMultiSheetExcel(buildBackupPayload());
+      if (backup.success) backupFilename = backup.filename;
+    } catch (backupError) {
+      console.warn('Pre-import backup failed:', backupError);
+    }
+
+    // 2) Read everything from Neon.
+    const fetched = await NeonService.fetchDocuments(rawConnection, tenantIdForImport);
+    if (!fetched.success) {
+      return { success: false, message: fetched.message, imported: 0, backupFilename };
+    }
+    const docs = fetched.documents as { [key: string]: unknown };
+
+    // 3) Apply. Only datasets present in Neon are replaced; the rest keep their local value.
+    let imported = 0;
+    const apply = (key: string, setter: (value: any) => void) => {
+      const value = docs[key];
+      if (!Array.isArray(value)) return;
+      setter(value);
+      neonSyncedPayloadsRef.current[key] = JSON.stringify(value);
+      imported += 1;
+    };
+
+    apply('erp_tenants', setAllTenants);
+    apply('erp_users', setAllUsers);
+    apply('erp_branches', setAllBranches);
+    apply('erp_warehouses', setAllWarehouses);
+    apply('erp_categories', setAllCategories);
+    apply('erp_products', setAllProducts);
+    apply('erp_stock_movements', setAllStockMovements);
+    apply('erp_stock_levels', setStockLevels);
+    apply('erp_accounts', setAllAccounts);
+    apply('erp_journals', setAllJournals);
+    apply('erp_parties_backup', setAllParties);
+    apply('erp_invoices', setAllInvoices);
+    apply('erp_appointments', setAllAppointments);
+    apply('erp_patient_followups', setAllPatientFollowUps);
+    apply('erp_treatment_plans', setAllTreatmentPlans);
+    apply('erp_cash_receipts', setAllCashReceipts);
+    apply('erp_customer_refunds', setAllCustomerRefunds);
+    apply('erp_cash_payments', setAllCashPayments);
+    apply('erp_reception_shifts', setAllReceptionShifts);
+    apply('erp_pos_shifts', setAllPosShifts);
+    apply('erp_payment_methods', setAllPaymentMethods);
+    apply('erp_tax_invoices', setAllSpecializedTaxInvoices);
+    apply('erp_goods_receipts', setAllGoodsReceipts);
+    apply('erp_goods_issues', setAllGoodsIssues);
+    apply('erp_staff_members', setAllStaffMembers);
+    apply('erp_payroll_runs', setAllPayrollRuns);
+    apply('erp_attendance_records', setAllAttendanceRecords);
+    apply('erp_inventory_audits', setAllInventoryAudits);
+    apply('erp_device_maintenance', setAllDeviceMaintenance);
+    apply('clinic_laser_devices', setAllLaserDevices);
+    apply('erp_period_locks', setAllPeriodLocks);
+    apply('erp_audit_records', setAllAuditRecords);
+    apply('erp_activity_logs', setAllUserActivityLogs);
+    apply('erp_notifications_history', setAllNotifications);
+
+    logUserActivity(
+      'neon', 'قاعدة البيانات السحابية', 'Neon Database',
+      'استيراد كل البيانات من Neon', 'Import all data from Neon',
+      `تم استيراد ${imported} مجموعة بيانات من Neon${backupFilename ? ` (نسخة احتياطية: ${backupFilename})` : ''}`
+    );
+
+    return {
+      success: true,
+      imported,
+      backupFilename,
+      message: `تم استيراد ${imported} مجموعة بيانات من Neon${backupFilename ? ` — وتم تنزيل نسخة احتياطية قبل الاستيراد (${backupFilename})` : ''}`,
+    };
+  };
+
   // ==========================================================================
   // Automatic Neon sync (مزامنة تلقائية لكل البيانات إلى Neon)
   // --------------------------------------------------------------------------
@@ -11038,6 +11161,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         neonDb,
         neonAutoSync,
         neonAutoSyncProgress,
+        importAllFromNeon,
         getNeonDatasetSummary: () => buildAllDatasetDocuments().map((doc) => ({
           key: doc.key,
           count: Array.isArray(doc.payload) ? doc.payload.length : 0,
