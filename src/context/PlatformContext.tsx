@@ -123,6 +123,8 @@ import { autoTranslateArabic } from '../utils/translator';
 import { exportDatabaseToMultiSheetExcel } from '../utils/fullDatabaseExcelBackup';
 import { pushRecordChanges, pullChangedRecords, mergeRecords } from '../services/recordSync';
 import { postJournal } from '../services/accountingApi';
+import { postCustomerReceipt } from '../services/accountingApi';
+import { postCustomerRefund } from '../services/accountingApi';
 import { normalizeStatementDate, isReceiptMatchingParty } from '../utils/statementUtils';
 
 const normalizeCustomerPartyCodes = (parties: Party[]): Party[] => {
@@ -9719,6 +9721,43 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setAllCashReceipts((prev) => [...updatedReceipts, ...prev]);
     cashReceiptNumberCounter.current = nextSequence + acceptedItems.length;
 
+    // STEP 2 of the accounting migration: mirror each receipt into the atomic database
+    // ledger (debit payment account / credit customer account + receipt record).
+    // Best-effort and non-blocking: offline or unreachable Neon simply skips it, and the
+    // local path above remains the offline fallback. Large imports are skipped to avoid
+    // flooding the connection (the full sync already carries every receipt).
+    {
+      const step2Connection = String(neonDb.connectionString || '').trim();
+      const step2Tenant = tenant?.id;
+      const step2Enabled = neonBootstrap.status === 'ready'
+        && Boolean(step2Tenant)
+        && (step2Connection.startsWith('postgres://') || step2Connection.startsWith('postgresql://'));
+      if (step2Enabled && updatedReceipts.length <= 100) {
+        void (async () => {
+          for (const receipt of updatedReceipts) {
+            const customerCode = String(receipt.customerCode || '').trim();
+            const paymentAccountId = String(receipt.bankOrSafeAccountId || '').trim();
+            if (!customerCode || !paymentAccountId) continue;
+            const outcome = await postCustomerReceipt({
+              connectionString: step2Connection,
+              tenantId: step2Tenant as string,
+              branchId: receipt.branchId,
+              customerCode,
+              amount: Number(receipt.amount) || 0,
+              date: receipt.date,
+              paymentAccountId,
+              service: receipt.serviceName,
+              receipt: receipt as unknown as Record<string, unknown>,
+              actor: currentUser?.name,
+            });
+            if (!outcome.success) {
+              console.warn('Server-side receipt mirror skipped:', receipt.voucherNumber, outcome.error);
+            }
+          }
+        })().catch((mirrorError) => console.warn('Server-side receipt mirror failed:', mirrorError));
+      }
+    }
+
     // Update parties with their new booked quantity offers and credited balances in customer accounts
     if (partyOffersMap.size > 0 || customerCreditsMap.size > 0 || customerPartiesWithAccounts.size > 0) {
       setAllParties((prev) =>
@@ -9844,6 +9883,37 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     };
 
     setAllCustomerRefunds((prev) => [newRefund, ...prev]);
+
+    // STEP 3 of the accounting migration: mirror the refund into the atomic database
+    // ledger (debit customer account / credit payment account + refund record).
+    // Best-effort and non-blocking; the local path above stays the offline fallback.
+    {
+      const step3Connection = String(neonDb.connectionString || '').trim();
+      const step3Tenant = tenant?.id;
+      const step3Enabled = neonBootstrap.status === 'ready'
+        && Boolean(step3Tenant)
+        && (step3Connection.startsWith('postgres://') || step3Connection.startsWith('postgresql://'));
+      const customerCodeForMirror = String(party.customerCode || party.code || '').trim();
+      if (step3Enabled && customerCodeForMirror && data.paymentAccountId) {
+        void postCustomerRefund({
+          connectionString: step3Connection,
+          tenantId: step3Tenant as string,
+          branchId: data.branchId,
+          customerCode: customerCodeForMirror,
+          amount,
+          units,
+          date: data.date,
+          paymentAccountId: data.paymentAccountId,
+          service: data.serviceName,
+          refund: newRefund as unknown as Record<string, unknown>,
+          actor: currentUser?.name,
+        }).then((outcome) => {
+          if (!outcome.success) {
+            console.warn('Server-side refund mirror skipped:', newRefund.voucherNumber, outcome.error);
+          }
+        }).catch((mirrorError) => console.warn('Server-side refund mirror failed:', mirrorError));
+      }
+    }
 
     // Reduce the customer's remaining booked units (and total) across offers, newest first.
     let unitsToReduce = units;

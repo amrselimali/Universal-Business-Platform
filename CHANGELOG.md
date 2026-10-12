@@ -2,6 +2,15 @@
 
 # 2026-10-12
 
+## Accounting migration steps 2 & 3: collection receipts and refunds mirror into the DB ledger
+
+- `addCollectionReceiptsBulk` now mirrors every created receipt into the atomic database ledger via `fn_post_customer_receipt` (debit payment-method account / credit customer account + receipt record). Batches above 100 receipts skip the mirror because the full record sync already carries them.
+- `addCustomerRefund` mirrors the refund through `fn_post_customer_refund` (debit customer account / credit payment account + refund record).
+- Both calls are **best-effort and non-blocking**: offline or unreachable Neon simply skips them, the local path stays the offline fallback, and rejections are logged for review without interrupting the user.
+- Files: `src/context/PlatformContext.tsx`.
+
+# 2026-10-12
+
 ## Accounting migration step 1: manual journals also recorded in the database ledger
 
 - `createManualJournalEntry` now sends the entry to the database as well, so `fn_post_journal` validates it and writes the header, lines and account balances atomically into `gl_journals` / `gl_journal_lines`.
