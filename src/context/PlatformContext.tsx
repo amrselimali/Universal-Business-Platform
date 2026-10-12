@@ -11317,7 +11317,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         lastSavedCount: changed.length,
         lastRun: new Date().toLocaleTimeString(language === 'ar' ? 'ar-EG' : 'en-US'),
       });
-    }, 3000);
+    }, 400);
 
     return () => {
       if (neonAutoSyncTimerRef.current !== null) {
