@@ -57,7 +57,7 @@ import {
   NotificationCategory,
 } from '../types';
 import { safeLocalStorageSet, safeLocalStorageGet, idbSet, idbGet, idbDelete, persistDataset, loadPersistedDataset } from '../utils/safeStorage';
-import { persistLocal, readLocal, DOCUMENTS_CACHE_KEY, DocumentsCache, isNeonOnlyMode, USE_LOCAL_CACHE } from '../utils/persistenceMode';
+import { persistLocal, readLocal, DOCUMENTS_CACHE_KEY, DocumentsCache, isNeonOnlyMode, USE_LOCAL_CACHE, purgeLegacyLocalCopies } from '../utils/persistenceMode';
 import { INITIAL_NOTIFICATION_RULES, INITIAL_NOTIFICATIONS_HISTORY } from '../data/notificationRulesData';
 import { playNotificationSound } from '../utils/audioAlert';
 import {
@@ -8615,15 +8615,38 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       journalEntries,
     });
     // 2) EVERY dataset as a JSONB document in app_documents (full initial transfer).
+    // SINGLE SOURCE OF TRUTH: the full sync also writes RECORDS only (app_records).
+    // Whole-dataset snapshots in app_documents are no longer written, so there is never
+    // a second, staler copy of the business data.
     const allDocs = buildAllDatasetDocuments();
     setNeonAutoSyncProgress(`0/${allDocs.length}`);
-    const documentResult = await NeonService.saveDocuments(
-      neonDb.connectionString,
-      tenant?.id || '',
-      allDocs,
-      (done, total) => setNeonAutoSyncProgress(`${done}/${total}`)
-    );
+    let pushedRecords = 0;
+    const syncErrors: string[] = [];
+    for (let index = 0; index < allDocs.length; index += 1) {
+      const doc = allDocs[index];
+      const currentArray = Array.isArray(doc.payload) ? (doc.payload as any[]) : [];
+      setNeonAutoSyncProgress(`${index + 1}/${allDocs.length}`);
+      const outcome = await pushRecordChanges(
+        neonDb.connectionString,
+        tenant?.id || '',
+        doc.key,
+        [],
+        currentArray,
+        currentUser?.name
+      );
+      if (outcome.error) syncErrors.push(`${doc.key}: ${outcome.error}`);
+      else pushedRecords += outcome.pushed;
+      neonLastSyncedArraysRef.current.set(doc.key, currentArray);
+      neonSyncedPayloadsRef.current[doc.key] = JSON.stringify(currentArray);
+    }
     setNeonAutoSyncProgress('');
+    const documentResult = {
+      success: syncErrors.length === 0,
+      saved: allDocs.length,
+      message: syncErrors.length === 0
+        ? `تم رفع ${pushedRecords} سجل إلى app_records`
+        : syncErrors[0],
+    };
     // 3) Mirror EVERY dataset into its matching typed table so no table stays empty.
     const documentsByKey: { [key: string]: unknown } = {};
     allDocs.forEach((doc) => { documentsByKey[doc.key] = doc.payload; });
@@ -11184,6 +11207,14 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return () => window.clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [neonBootstrap.status, neonDb.connectionString, accounts.length]);
+
+  // Single source of truth: delete the legacy browser copies so the device can never
+  // serve stale data that would then be pushed back to Neon.
+  useEffect(() => {
+    if (!isStorageHydrated) return;
+    if (isNeonOnlyMode()) purgeLegacyLocalCopies();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isStorageHydrated]);
 
   // Run once on startup, after storage hydration.
   useEffect(() => {

@@ -12,7 +12,7 @@
 // Recovery mode: when `erp_local_recovery` is '1' the app reads the previous local
 // (browser) data again so it can be pushed back to Neon after an accidental overwrite.
 const RECOVERY_FLAG = 'erp_local_recovery';
-let neonOnly = false;
+let neonOnly = true;
 try {
   neonOnly = localStorage.getItem(RECOVERY_FLAG) !== '1';
 } catch {
@@ -79,3 +79,30 @@ export interface CachedDocument {
 }
 
 export type DocumentsCache = { [key: string]: CachedDocument };
+
+/**
+ * Legacy business datasets that used to be persisted in the browser.
+ * They are removed once on startup so the device never keeps a second copy of the data:
+ * Neon (app_records) is the single source of truth.
+ */
+export const LEGACY_LOCAL_KEYS = [
+  'erp_tenants', 'erp_users', 'erp_branches', 'erp_warehouses', 'erp_categories',
+  'erp_products', 'erp_stock', 'erp_stock_movements', 'erp_accounts', 'erp_journals',
+  'erp_parties', 'erp_parties_backup', 'erp_invoices', 'erp_cash_receipts', 'erp_cash_payments',
+  'erp_customer_refunds', 'erp_reception_shifts', 'erp_pos_shifts', 'erp_payment_methods',
+  'erp_tax_invoices', 'erp_goods_receipts', 'erp_goods_issues', 'erp_staff_members',
+  'erp_payroll_runs', 'erp_attendance_records', 'erp_inventory_audits', 'erp_device_maintenance',
+  'clinic_laser_devices', 'erp_period_locks', 'erp_audit_records', 'erp_user_activity_logs',
+  'erp_notifications_history', 'erp_appointments', 'erp_patient_follow_ups', 'erp_treatment_plans',
+];
+
+/** Removes the legacy browser copies. Safe to run repeatedly. */
+export const purgeLegacyLocalCopies = (): void => {
+  LEGACY_LOCAL_KEYS.forEach((key) => {
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      /* ignore */
+    }
+  });
+};

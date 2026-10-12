@@ -2,6 +2,16 @@
 
 # 2026-10-12
 
+## Single source of truth: Neon only (the duplicate browser copy removed)
+
+- Root cause of "commands come back": the offline-first switch had re-enabled the legacy per-dataset browser persistence, so the device kept a SECOND copy of the business data and could push stale rows back to Neon.
+- `NEON_ONLY` is enabled again: the app never reads or writes the legacy localStorage/IndexedDB dataset keys, and `purgeLegacyLocalCopies()` deletes the old browser copies once on startup so no stale data can ever be served.
+- The full sync now writes **records only** (`app_records`, via the record-level diff); whole-dataset snapshots in `app_documents` are no longer written, so Neon holds one authoritative copy inside `app_records`.
+- Startup already reads the live records and deletions are soft-deleted per record, so a record removed in the app can no longer reappear.
+- Files: `src/utils/persistenceMode.ts`, `src/context/PlatformContext.tsx`.
+
+# 2026-10-12
+
 ## The app can now run through the API (frontend wiring)
 
 - Added `src/services/apiClient.ts`: API URL + JWT session storage, `apiLogin`, `apiHealth`, `apiFetchRecords`, `apiFetchChanges`, `apiUpsertRecords`, `apiDeleteRecords`, `apiPostJournal`, `apiReverseJournal`, `apiPostReceipt`, `apiFetchBalances`, plus `clearApiSession`.
