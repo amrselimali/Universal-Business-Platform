@@ -274,9 +274,13 @@ export function buildCreateTableSql(schema: NeonTableSchema): string {
 
 /** Builds the ADD COLUMN statements that keep an existing table up to date. */
 export function buildAlterTableSql(schema: NeonTableSchema): string[] {
-  return schema.columns
+  const statements = schema.columns
     .filter((column) => !column.create)
     .map((column) => `ALTER TABLE ${schema.table} ADD COLUMN IF NOT EXISTS ${column.name} ${column.type};`);
+  // Existing tables (created by older syncs) may not have the payload/synced_at columns yet.
+  statements.push(`ALTER TABLE ${schema.table} ADD COLUMN IF NOT EXISTS payload JSONB;`);
+  statements.push(`ALTER TABLE ${schema.table} ADD COLUMN IF NOT EXISTS synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW();`);
+  return statements;
 }
 
 /** The CREATE TABLE statement for the unified document store. */
