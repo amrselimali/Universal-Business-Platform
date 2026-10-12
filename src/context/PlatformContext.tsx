@@ -8520,6 +8520,9 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const syncAllToNeon = async (): Promise<{ success: boolean; message: string; count: number }> => {
+    if (neonBootstrap.status !== 'ready') {
+      return { success: false, message: 'انتظر حتى يكتمل تحميل البيانات من Neon قبل الرفع (حماية من استبدال البيانات).', count: 0 };
+    }
     if (!neonDb.connectionString) {
       return { success: false, message: 'الرجاء إدخال رابط اتصال Neon أولاً', count: 0 };
     }
@@ -10874,6 +10877,9 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   useEffect(() => {
     if (!isStorageHydrated) return;
+    // SAFETY: never push anything before the Neon bootstrap has completed. Without this
+    // guard the app could upload its initial/demo state over the real Neon data.
+    if (neonBootstrap.status !== 'ready') return;
     const rawConnection = String(neonDb.connectionString || '').trim();
     if (!rawConnection.startsWith('postgres://') && !rawConnection.startsWith('postgresql://')) return;
     const tenantIdForSync = tenant?.id;
@@ -10888,6 +10894,10 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const documents = buildAllDatasetDocuments();
 
       const changed = documents.filter((doc) => {
+        // SAFETY: only datasets that were actually loaded from Neon (or already pushed)
+        // may be uploaded. This guarantees the app can never overwrite Neon with its
+        // initial/demo state for a dataset it never read.
+        if (!Object.prototype.hasOwnProperty.call(neonSyncedPayloadsRef.current, doc.key)) return false;
         const serialized = JSON.stringify(doc.payload ?? []);
         return neonSyncedPayloadsRef.current[doc.key] !== serialized;
       });
@@ -10923,6 +10933,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     };
   }, [
     isStorageHydrated,
+    neonBootstrap.status,
     neonDb.connectionString,
     tenant?.id,
     language,
