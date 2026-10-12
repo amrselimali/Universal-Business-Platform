@@ -673,6 +673,7 @@ interface PlatformContextType {
   retryNeonBootstrap: () => Promise<void>;
   neonConnectionInfo: { host: string; database: string } | null;
   compareWithNeon: () => Promise<{ key: string; appCount: number; neonCount: number | null }[]>;
+  neonLastRefresh: string;
   updateNeonConnectionString: (conn: string) => void;
   testNeonConnection: (connOverride?: string) => Promise<boolean>;
   syncAllToNeon: () => Promise<{ success: boolean; message: string; count: number }>;
@@ -10689,6 +10690,10 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     progress?: string;
   }>({ status: 'idle' });
   const neonBootstrapRanRef = useRef(false);
+  /** Last known Neon `updated_at` per dataset (used by the 1-minute refresh). */
+  const neonDocumentVersionsRef = useRef<{ [key: string]: string }>({});
+  const neonActiveTenantIdRef = useRef<string>('');
+  const [neonLastRefresh, setNeonLastRefresh] = useState<string>('');
 
   /** Applies a key -> payload map onto the app state (shared by bootstrap + import). */
   const applyDatasetDocuments = (docs: { [key: string]: unknown }): number => {
@@ -10737,6 +10742,52 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return applied;
   };
 
+  // ---------------------------------------------------------------------------
+  // Incremental pull: download only the datasets whose Neon version changed since
+  // the last check, apply them and refresh the local cache. Runs every minute.
+  // ---------------------------------------------------------------------------
+  const refreshFromNeon = async (): Promise<{ updated: number; error?: string }> => {
+    const rawConnection = String(neonDb.connectionString || '').trim();
+    const isNeonUrl = rawConnection.startsWith('postgres://') || rawConnection.startsWith('postgresql://');
+    const tenantId = neonActiveTenantIdRef.current;
+    if (!isNeonUrl || !tenantId) return { updated: 0, error: 'not-ready' };
+
+    const meta = await NeonService.fetchDocumentMetadata(rawConnection, tenantId);
+    if (!meta.success) return { updated: 0, error: meta.message };
+
+    const baseKeys = Object.keys(meta.metadata).filter((key) => !key.includes('#'));
+    const changedKeys = baseKeys.filter((key) => neonDocumentVersionsRef.current[key] !== meta.metadata[key]);
+    if (changedKeys.length === 0) {
+      setNeonLastRefresh(new Date().toLocaleTimeString(language === 'ar' ? 'ar-EG' : 'en-US'));
+      return { updated: 0 };
+    }
+
+    const documents: { [key: string]: unknown } = {};
+    for (const key of changedKeys) {
+      const result = await NeonService.fetchDocumentByKey(rawConnection, tenantId, key);
+      if (!result.success) return { updated: 0, error: result.message };
+      if (result.value !== undefined) documents[key] = result.value;
+    }
+    const applied = applyDatasetDocuments(documents);
+    changedKeys.forEach((key) => { neonDocumentVersionsRef.current[key] = meta.metadata[key]; });
+
+    // Keep the local cache aligned with Neon.
+    if (USE_LOCAL_CACHE) {
+      try {
+        const cached = (await idbGet<DocumentsCache>(`${DOCUMENTS_CACHE_KEY}:${tenantId}`)) || {};
+        changedKeys.forEach((key) => {
+          if (documents[key] !== undefined) cached[key] = { payload: documents[key], updatedAt: meta.metadata[key] };
+        });
+        await idbSet(`${DOCUMENTS_CACHE_KEY}:${tenantId}`, cached);
+      } catch (cacheError) {
+        console.warn('Cache refresh failed:', cacheError);
+      }
+    }
+
+    setNeonLastRefresh(new Date().toLocaleTimeString(language === 'ar' ? 'ar-EG' : 'en-US'));
+    return { updated: applied };
+  };
+
   const bootstrapFromNeon = async (): Promise<void> => {
     const rawConnection = String(neonDb.connectionString || '').trim();
     const isNeonUrl = rawConnection.startsWith('postgres://') || rawConnection.startsWith('postgresql://');
@@ -10781,7 +10832,21 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (knownTenant) {
         setTenant(knownTenant);
       } else {
-        setTenant((previous) => ({ ...previous, id: tenantId }));
+        // The tenant that owns the data is missing from the local tenant list: add it so
+        // the app (and every screen filter) uses the right tenant instead of an empty one.
+        const identity = await NeonService.fetchTenantIdentity(rawConnection, tenantId);
+        const recoveredTenant: Tenant = {
+          ...(tenant as Tenant),
+          id: tenantId,
+          code: identity?.code || tenantId,
+          name: identity?.name || tenantId,
+          currency: (identity?.currency as any) || 'EGP',
+          taxRate: identity?.taxRate ?? 0.14,
+        };
+        setAllTenants((previous) => previous.some((candidate) => candidate.id === tenantId)
+          ? previous
+          : [recoveredTenant, ...previous]);
+        setTenant(recoveredTenant);
       }
       try {
         localStorage.setItem('erp_active_tenant_id', tenantId);
@@ -10825,6 +10890,11 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const changedKeys = keysToFetch;
     const fetched = { success: true, documents: fetchedDocuments, message: '' };
     const appliedNow = applyDatasetDocuments(fetched.documents);
+    neonActiveTenantIdRef.current = tenantId;
+    keysToFetch.forEach((key) => {
+      if (fetchedDocuments[key] !== undefined) neonDocumentVersionsRef.current[key] = meta.metadata[key];
+    });
+    setNeonLastRefresh(new Date().toLocaleTimeString(language === 'ar' ? 'ar-EG' : 'en-US'));
 
     // 4) Refresh the cache (drop keys removed in Neon, store the new versions).
     const nextCache: DocumentsCache = { ...(cached || {}) };
@@ -10880,6 +10950,16 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     void bootstrapFromNeon();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [neonDb.connectionString]);
+
+  // Every minute: pull whatever changed in Neon so the local cache always matches it.
+  useEffect(() => {
+    if (neonBootstrap.status !== 'ready') return;
+    const interval = window.setInterval(() => {
+      void refreshFromNeon();
+    }, 60_000);
+    return () => window.clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [neonBootstrap.status, neonDb.connectionString, tenant?.id, language]);
 
   // Run once on startup, after storage hydration.
   useEffect(() => {
@@ -10949,6 +11029,17 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       changed.forEach((doc) => {
         neonSyncedPayloadsRef.current[doc.key] = JSON.stringify(doc.payload ?? []);
       });
+      // Learn the new Neon timestamps so the minute refresh does not re-download them.
+      try {
+        const meta = await NeonService.fetchDocumentMetadata(connectionStringForSync, tenantIdForSync);
+        if (meta.success) {
+          changed.forEach((doc) => {
+            if (meta.metadata[doc.key]) neonDocumentVersionsRef.current[doc.key] = meta.metadata[doc.key];
+          });
+        }
+      } catch (versionError) {
+        console.warn('Version refresh after push failed:', versionError);
+      }
       setNeonAutoSyncProgress('');
       setNeonAutoSync({
         syncing: false,
@@ -11435,6 +11526,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         retryNeonBootstrap: bootstrapFromNeon,
         neonConnectionInfo,
         compareWithNeon,
+        neonLastRefresh,
         // Backwards-compatible alias: patients are the parties of type Customer/Both.
         patients: parties,
         getNeonDatasetSummary: () => buildAllDatasetDocuments().map((doc) => ({

@@ -682,6 +682,28 @@ export class NeonService {
     return { mirroredTables, mirroredRows, failures };
   }
 
+  /** Reads the tenant identity from the `tenants` table (used when a tenant is missing locally). */
+  static async fetchTenantIdentity(
+    connectionString: string,
+    tenantId: string
+  ): Promise<{ code: string; name: string; currency: string; taxRate: number } | null> {
+    try {
+      const sql = this.getClient(connectionString);
+      const rows = await sql`SELECT code, name_ar, currency, tax_rate FROM tenants WHERE id = ${tenantId} LIMIT 1`;
+      const row = (rows as any[])[0];
+      if (!row) return null;
+      return {
+        code: String(row.code || tenantId),
+        name: String(row.name_ar || row.code || tenantId),
+        currency: String(row.currency || 'EGP'),
+        taxRate: Number(row.tax_rate ?? 0.14),
+      };
+    } catch (error) {
+      console.warn('fetchTenantIdentity failed:', error);
+      return null;
+    }
+  }
+
   /** Per-dataset record counts in Neon (used to verify the app matches the database). */
   static async fetchDatasetCounts(
     connectionString: string,
