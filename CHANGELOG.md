@@ -2,6 +2,14 @@
 
 # 2026-10-12
 
+## Fix: app opened the wrong tenant (looked like a different database)
+
+- Live inspection of the configured Neon database showed **two tenants** inside the same `app_documents` store: `tenant-eg-003` (the one in the `tenants` table, 162 documents, large receipts/journals/parties) and `tenant-eg-001` (141 documents, almost empty business data). The app was starting on `tenant-eg-001`, so it looked like another database.
+- Added `NeonService.resolveActiveTenantId` (prefers the tenant present in the `tenants` table that also has documents, else the tenant with the most documents) and the bootstrap now **aligns the in-app tenant with the Neon tenant** and persists the choice.
+- Files: `src/services/neonService.ts`, `src/context/PlatformContext.tsx`.
+
+# 2026-10-12
+
 ## Neon-only mode: Neon is the single source of truth (with a fast local cache)
 
 - Added `src/utils/persistenceMode.ts` and enabled **NEON_ONLY** mode: the app no longer reads or writes the legacy per-dataset localStorage/IndexedDB keys. Only session/config keys (Neon URL, current user, language, active tenant/shift) remain local.

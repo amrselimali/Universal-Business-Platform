@@ -721,6 +721,37 @@ export class NeonService {
     return { mirroredTables, mirroredRows, failures };
   }
 
+  /**
+   * Resolves the tenant that actually holds the data in Neon.
+   * The `tenants` table wins when it matches a tenant that also has documents;
+   * otherwise the tenant with the most documents is used.
+   */
+  static async resolveActiveTenantId(connectionString: string): Promise<string> {
+    try {
+      const sql = this.getClient(connectionString);
+      let tenantsTableId = '';
+      try {
+        const rows = await sql`SELECT id FROM tenants ORDER BY created_at ASC NULLS LAST LIMIT 1`;
+        tenantsTableId = String((rows as any[])[0]?.id ?? '');
+      } catch (error) {
+        console.warn('resolveActiveTenantId (tenants) failed:', error);
+      }
+
+      const counts = await sql`
+        SELECT tenant_id, COUNT(*)::int AS docs
+        FROM app_documents GROUP BY tenant_id ORDER BY docs DESC`;
+      const list = counts as any[];
+      if (tenantsTableId && list.some((row) => String(row.tenant_id) === tenantsTableId)) {
+        return tenantsTableId;
+      }
+      if (list.length > 0) return String(list[0].tenant_id);
+      return tenantsTableId;
+    } catch (error) {
+      console.warn('resolveActiveTenantId failed:', error);
+      return '';
+    }
+  }
+
   /** Resolves a tenant id straight from Neon (used on a fresh device with no local state). */
   static async fetchFirstTenantId(connectionString: string): Promise<string> {
     try {
