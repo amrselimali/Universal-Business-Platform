@@ -2,6 +2,14 @@
 
 # 2026-10-12
 
+## Commands reach the database almost instantly
+
+- The record push debounce was reduced from 3000 ms to **400 ms**, so a button press is written to `app_records` in under half a second instead of after three seconds (and the window in which closing the page could lose an edit is now negligible).
+- Reminder of the current model: the screen edits the in-memory state first and the (near-instant) sync writes the change per record to Neon. A fully database-first model, where every button is a server call and the screen is read-only, is the next architectural step and is described in the project state.
+- Files: `src/context/PlatformContext.tsx`.
+
+# 2026-10-12
+
 ## app_documents removed: app_records is now the only data store
 
 - Tenant resolution (`resolveActiveTenantId`, `fetchFirstTenantId`), dataset counts and dataset loading now read `app_records` instead of the legacy `app_documents` snapshots.
