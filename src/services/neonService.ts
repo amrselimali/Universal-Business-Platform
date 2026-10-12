@@ -425,14 +425,12 @@ export class NeonService {
 
       // 7. Sync Patients
       try {
-      for (const pat of data.patients) {
-        await sql`
-          INSERT INTO patients (id, tenant_id, file_number, full_name, phone, gender)
-          VALUES (${pat.id}, ${data.tenant.id}, ${pat.fileNumber || ''}, ${pat.fullName || pat.name || ''}, ${pat.phone || ''}, ${pat.gender || ''})
-          ON CONFLICT (id) DO NOTHING;
-        `;
-        totalSynced++;
-      }
+        totalSynced += await NeonService.insertRowsInBatches(
+          sql, 'patients',
+          ['id', 'tenant_id', 'file_number', 'full_name', 'phone', 'gender'],
+          data.patients.map((pat) => [pat.id, data.tenant.id, pat.fileNumber || '', pat.fullName || pat.name || '', pat.phone || '', pat.gender || '']),
+          'ON CONFLICT (id) DO NOTHING'
+        );
 
       } catch (sectionError) {
         console.warn(`Neon sync section failed (${"7. Sync Patients"}):`, sectionError);
@@ -441,14 +439,12 @@ export class NeonService {
       // 8. Sync Parties if provided
       try {
       if (data.parties) {
-        for (const pr of data.parties) {
-          await sql`
-            INSERT INTO parties (id, tenant_id, name, name_en, type, phone, email, balance)
-            VALUES (${pr.id}, ${data.tenant.id}, ${pr.name}, ${pr.nameEn}, ${pr.type}, ${pr.phone}, ${pr.email || ''}, ${pr.balance})
-            ON CONFLICT (id) DO UPDATE SET balance = EXCLUDED.balance, name = EXCLUDED.name;
-          `;
-          totalSynced++;
-        }
+          totalSynced += await NeonService.insertRowsInBatches(
+            sql, 'parties',
+            ['id', 'tenant_id', 'name', 'name_en', 'type', 'phone', 'email', 'balance'],
+            data.parties.map((pr) => [pr.id, data.tenant.id, pr.name, pr.nameEn, pr.type, pr.phone, pr.email || '', pr.balance]),
+            'ON CONFLICT (id) DO UPDATE SET balance = EXCLUDED.balance, name = EXCLUDED.name'
+          );
       }
 
       } catch (sectionError) {
@@ -458,27 +454,21 @@ export class NeonService {
       // 9. Sync Appointments if provided
       try {
       if (data.appointments) {
-        for (const apt of data.appointments) {
-          await sql`
-            INSERT INTO appointments (
-              id, tenant_id, branch_id, patient_id, patient_name, patient_phone,
-              paper_code, system_code, customer_code, doctor_name, service_name_ar,
-              price, deposit, remaining_balance, appointment_date, appointment_time,
-              status, lead_source, notes
-            )
-            VALUES (
-              ${apt.id}, ${data.tenant.id}, ${apt.branchId}, ${apt.patientId}, ${apt.patientName},
-              ${apt.patientPhone || ''}, ${apt.paperCode || ''}, ${apt.systemCode || ''},
-              ${apt.customerCode || ''}, ${apt.doctorName}, ${apt.serviceNameAr},
-              ${apt.price}, ${apt.deposit || 0}, ${apt.remainingBalance || 0}, ${apt.date}, ${apt.time},
-              ${apt.status}, ${apt.leadSource || ''}, ${apt.notes || ''}
-            )
-            ON CONFLICT (id) DO UPDATE SET
-              status = EXCLUDED.status,
-              notes = EXCLUDED.notes;
-          `;
-          totalSynced++;
-        }
+          totalSynced += await NeonService.insertRowsInBatches(
+            sql, 'appointments',
+            ['id', 'tenant_id', 'branch_id', 'patient_id', 'patient_name', 'patient_phone',
+              'paper_code', 'system_code', 'customer_code', 'doctor_name', 'service_name_ar',
+              'price', 'deposit', 'remaining_balance', 'appointment_date', 'appointment_time',
+              'status', 'lead_source', 'notes'],
+            data.appointments.map((apt) => [
+              apt.id, data.tenant.id, apt.branchId, apt.patientId, apt.patientName,
+              apt.patientPhone || '', apt.paperCode || '', apt.systemCode || '',
+              apt.customerCode || '', apt.doctorName, apt.serviceNameAr,
+              apt.price, apt.deposit || 0, apt.remainingBalance || 0, apt.date, apt.time,
+              apt.status, apt.leadSource || '', apt.notes || '',
+            ]),
+            'ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, notes = EXCLUDED.notes'
+          );
       }
 
       } catch (sectionError) {
@@ -488,25 +478,19 @@ export class NeonService {
       // 9.1 Sync Patient Follow-ups if provided
       try {
       if (data.patientFollowUps) {
-        for (const fup of data.patientFollowUps) {
-          await sql`
-            INSERT INTO patient_follow_ups (
-              id, tenant_id, branch_id, patient_id, patient_name, patient_phone,
-              paper_code, system_code, customer_code, follow_up_date, follow_up_time,
-              reason, type, status, notes, created_by
-            )
-            VALUES (
-              ${fup.id}, ${data.tenant.id}, ${fup.branchId}, ${fup.patientId}, ${fup.patientName},
-              ${fup.patientPhone || ''}, ${fup.paperCode || ''}, ${fup.systemCode || ''},
-              ${fup.customerCode || ''}, ${fup.followUpDate}, ${fup.followUpTime || ''},
-              ${fup.reason}, ${fup.type}, ${fup.status}, ${fup.notes || ''}, ${fup.createdBy || ''}
-            )
-            ON CONFLICT (id) DO UPDATE SET
-              status = EXCLUDED.status,
-              notes = EXCLUDED.notes;
-          `;
-          totalSynced++;
-        }
+          totalSynced += await NeonService.insertRowsInBatches(
+            sql, 'patient_follow_ups',
+            ['id', 'tenant_id', 'branch_id', 'patient_id', 'patient_name', 'patient_phone',
+              'paper_code', 'system_code', 'customer_code', 'follow_up_date', 'follow_up_time',
+              'reason', 'type', 'status', 'notes', 'created_by'],
+            data.patientFollowUps.map((fup) => [
+              fup.id, data.tenant.id, fup.branchId, fup.patientId, fup.patientName,
+              fup.patientPhone || '', fup.paperCode || '', fup.systemCode || '',
+              fup.customerCode || '', fup.followUpDate, fup.followUpTime || '',
+              fup.reason, fup.type, fup.status, fup.notes || '', fup.createdBy || '',
+            ]),
+            'ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, notes = EXCLUDED.notes'
+          );
       }
 
       } catch (sectionError) {
@@ -516,14 +500,12 @@ export class NeonService {
       // 10. Sync Journal Entries if provided
       try {
       if (data.journalEntries) {
-        for (const jv of data.journalEntries) {
-          await sql`
-            INSERT INTO journal_entries (id, tenant_id, branch_id, entry_number, date, description, is_posted)
-            VALUES (${jv.id}, ${data.tenant.id}, ${jv.branchId}, ${jv.entryNumber}, ${jv.date}, ${jv.description}, ${jv.isPosted})
-            ON CONFLICT (id) DO NOTHING;
-          `;
-          totalSynced++;
-        }
+          totalSynced += await NeonService.insertRowsInBatches(
+            sql, 'journal_entries',
+            ['id', 'tenant_id', 'branch_id', 'entry_number', 'date', 'description', 'is_posted'],
+            data.journalEntries.map((jv) => [jv.id, data.tenant.id, jv.branchId, jv.entryNumber, jv.date, jv.description, jv.isPosted]),
+            'ON CONFLICT (id) DO NOTHING'
+          );
       }
 
       } catch (sectionError) {
@@ -543,6 +525,32 @@ export class NeonService {
         message: `حدث خطأ أثناء المزامنة: ${err.message || 'فشل الاتصال'}`,
       };
     }
+  }
+
+  /**
+   * Inserts many rows using ONE request per batch instead of one request per row.
+   * Row-by-row inserts made large datasets (tens of thousands of appointments) take
+   * hours and appear stuck, because every row was a separate HTTP round-trip.
+   */
+  private static async insertRowsInBatches(
+    sql: any,
+    table: string,
+    columns: string[],
+    rows: unknown[][],
+    onConflictSql = '',
+    batchSize = 300
+  ): Promise<number> {
+    if (rows.length === 0) return 0;
+    let inserted = 0;
+    for (let start = 0; start < rows.length; start += batchSize) {
+      const slice = rows.slice(start, start + batchSize);
+      const params: unknown[] = [];
+      const tuples = slice.map((row) => `(${row.map((value) => { params.push(value === undefined ? null : value); return `$${params.length}`; }).join(', ')})`);
+      const text = `INSERT INTO ${table} (${columns.join(', ')}) VALUES ${tuples.join(', ')} ${onConflictSql}`.trim();
+      await sql.query(text, params);
+      inserted += slice.length;
+    }
+    return inserted;
   }
 
   // --- Realtime Direct Insertion Methods ---
