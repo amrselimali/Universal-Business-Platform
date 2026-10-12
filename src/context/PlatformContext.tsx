@@ -57,6 +57,7 @@ import {
   NotificationCategory,
 } from '../types';
 import { safeLocalStorageSet, safeLocalStorageGet, idbSet, idbGet, persistDataset, loadPersistedDataset } from '../utils/safeStorage';
+import { persistLocal, readLocal, DOCUMENTS_CACHE_KEY, DocumentsCache, isNeonOnlyMode } from '../utils/persistenceMode';
 import { INITIAL_NOTIFICATION_RULES, INITIAL_NOTIFICATIONS_HISTORY } from '../data/notificationRulesData';
 import { playNotificationSound } from '../utils/audioAlert';
 import {
@@ -668,6 +669,8 @@ interface PlatformContextType {
   getNeonDatasetSummary: () => { key: string; count: number }[];
   importAllFromNeon: () => Promise<{ success: boolean; message: string; imported: number; backupFilename?: string }>;
   migrateNeonSchema: () => Promise<{ success: boolean; message: string; created: number; updated: number; total: number; failures: string[] }>;
+  neonBootstrap: { status: 'idle' | 'loading' | 'ready' | 'error' | 'no-config'; message?: string; usedCache?: boolean; updatedKeys?: number; lastRun?: string };
+  retryNeonBootstrap: () => Promise<void>;
   updateNeonConnectionString: (conn: string) => void;
   testNeonConnection: (connOverride?: string) => Promise<boolean>;
   syncAllToNeon: () => Promise<{ success: boolean; message: string; count: number }>;
@@ -703,7 +706,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // 2. Users & Authentication (Declared first so currentUser is always available)
   const [allUsers, setAllUsers] = useState<AppUser[]>(() => {
     try {
-      const saved = localStorage.getItem('erp_users');
+      const saved = readLocal('erp_users');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
@@ -732,7 +735,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   });
 
   useEffect(() => {
-    localStorage.setItem('erp_users', JSON.stringify(allUsers));
+    persistLocal('erp_users', JSON.stringify(allUsers));
   }, [allUsers]);
 
   useEffect(() => {
@@ -746,7 +749,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // 3. Tenants & Companies Management
   const [allTenants, setAllTenants] = useState<Tenant[]>(() => {
     try {
-      const saved = localStorage.getItem('erp_tenants');
+      const saved = readLocal('erp_tenants');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
@@ -802,7 +805,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   });
 
   useEffect(() => {
-    localStorage.setItem('erp_tenants', JSON.stringify(allTenants));
+    persistLocal('erp_tenants', JSON.stringify(allTenants));
   }, [allTenants]);
 
   useEffect(() => {
@@ -838,7 +841,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // 4. Branches & Warehouses
   const [allBranches, setAllBranches] = useState<Branch[]>(() => {
     try {
-      const saved = localStorage.getItem('erp_branches');
+      const saved = readLocal('erp_branches');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
@@ -855,7 +858,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const [allWarehouses, setAllWarehouses] = useState<Warehouse[]>(() => {
     try {
-      const saved = localStorage.getItem('erp_warehouses');
+      const saved = readLocal('erp_warehouses');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
@@ -871,11 +874,11 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   });
 
   useEffect(() => {
-    localStorage.setItem('erp_branches', JSON.stringify(allBranches));
+    persistLocal('erp_branches', JSON.stringify(allBranches));
   }, [allBranches]);
 
   useEffect(() => {
-    localStorage.setItem('erp_warehouses', JSON.stringify(allWarehouses));
+    persistLocal('erp_warehouses', JSON.stringify(allWarehouses));
   }, [allWarehouses]);
 
   // Derived branches: strictly filtered by active tenant AND user permissions!
@@ -944,7 +947,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // 5. Activity Logs & Audit Trail (سجل النشاطات والتعديلات)
   const [allAuditRecords, setAllAuditRecords] = useState<AuditRecord[]>(() => {
     try {
-      const saved = localStorage.getItem('erp_audit_records');
+      const saved = readLocal('erp_audit_records');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) return parsed;
@@ -957,7 +960,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const [allUserActivityLogs, setAllUserActivityLogs] = useState<UserActivityLog[]>(() => {
     try {
-      const saved = localStorage.getItem('erp_user_activity_logs');
+      const saved = readLocal('erp_user_activity_logs');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) return parsed;
@@ -969,11 +972,11 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   });
 
   useEffect(() => {
-    safeLocalStorageSet('erp_audit_records', JSON.stringify(allAuditRecords));
+    persistLocal('erp_audit_records', JSON.stringify(allAuditRecords));
   }, [allAuditRecords]);
 
   useEffect(() => {
-    safeLocalStorageSet('erp_user_activity_logs', JSON.stringify(allUserActivityLogs));
+    persistLocal('erp_user_activity_logs', JSON.stringify(allUserActivityLogs));
   }, [allUserActivityLogs]);
 
   const auditRecords = allAuditRecords.filter((a) => a.tenantId === tenant?.id);
@@ -1021,7 +1024,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // 6. Payment Methods (طرق السداد)
   const [allPaymentMethods, setAllPaymentMethods] = useState<PaymentMethod[]>(() => {
     try {
-      const saved = localStorage.getItem('erp_payment_methods');
+      const saved = readLocal('erp_payment_methods');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
@@ -1044,7 +1047,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   });
 
   useEffect(() => {
-    localStorage.setItem('erp_payment_methods', JSON.stringify(allPaymentMethods));
+    persistLocal('erp_payment_methods', JSON.stringify(allPaymentMethods));
   }, [allPaymentMethods]);
 
   const paymentMethods = allPaymentMethods.filter((p) => p.tenantId === tenant?.id);
@@ -1052,7 +1055,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // 13. Accounting & Accounts
   const [allAccounts, setAllAccounts] = useState<Account[]>(() => {
     try {
-      const saved = localStorage.getItem('erp_accounts');
+      const saved = readLocal('erp_accounts');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
@@ -1065,7 +1068,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const [allJournals, setAllJournals] = useState<JournalEntry[]>(() => {
     try {
-      const saved = localStorage.getItem('erp_journals');
+      const saved = readLocal('erp_journals');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
@@ -1077,7 +1080,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   });
 
   useEffect(() => {
-    localStorage.setItem('erp_accounts', JSON.stringify(allAccounts));
+    persistLocal('erp_accounts', JSON.stringify(allAccounts));
   }, [allAccounts]);
 
   const accounts = allAccounts.filter((a) => a.tenantId === tenant?.id);
@@ -1086,7 +1089,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // Accounting Period Locks (إقفال الفترات المحاسبية)
   const [allPeriodLocks, setAllPeriodLocks] = useState<AccountingPeriodLock[]>(() => {
     try {
-      const saved = localStorage.getItem('erp_period_locks');
+      const saved = readLocal('erp_period_locks');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
@@ -1109,7 +1112,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   });
 
   useEffect(() => {
-    localStorage.setItem('erp_period_locks', JSON.stringify(allPeriodLocks));
+    persistLocal('erp_period_locks', JSON.stringify(allPeriodLocks));
   }, [allPeriodLocks]);
 
   const periodLocks = allPeriodLocks.filter((l) => l.tenantId === tenant?.id);
@@ -1887,7 +1890,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // 7. Staff, Doctors & Technicians (الأطباء والتكنيشن والموظفين)
   const [allStaffMembers, setAllStaffMembers] = useState<StaffMember[]>(() => {
     try {
-      const saved = localStorage.getItem('erp_staff_members');
+      const saved = readLocal('erp_staff_members');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
@@ -1899,7 +1902,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   });
 
   useEffect(() => {
-    localStorage.setItem('erp_staff_members', JSON.stringify(allStaffMembers));
+    persistLocal('erp_staff_members', JSON.stringify(allStaffMembers));
   }, [allStaffMembers]);
 
   const staffMembers = allStaffMembers.filter((s) => s.tenantId === tenant?.id);
@@ -2018,7 +2021,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // 8. Unified Parties (Customers, Patients & Suppliers)
   const [allParties, setAllParties] = useState<Party[]>(() => {
     try {
-      const saved = localStorage.getItem('erp_parties');
+      const saved = readLocal('erp_parties');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
@@ -2032,7 +2035,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   });
 
   useEffect(() => {
-    safeLocalStorageSet('erp_parties', JSON.stringify(allParties));
+    persistLocal('erp_parties', JSON.stringify(allParties));
   }, [allParties]);
 
   const parties = allParties.filter((p) => p.tenantId === tenant?.id);
@@ -2682,7 +2685,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // 9. Bookings & Follow-ups (شاشة الحجز والمتابعة)
   const [allAppointments, setAllAppointments] = useState<Appointment[]>(() => {
     try {
-      const saved = localStorage.getItem('erp_appointments');
+      const saved = readLocal('erp_appointments');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
@@ -2695,7 +2698,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const [allTreatmentPlans, setAllTreatmentPlans] = useState<TreatmentPlan[]>(() => {
     try {
-      const saved = localStorage.getItem('erp_treatment_plans');
+      const saved = readLocal('erp_treatment_plans');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
@@ -2709,7 +2712,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // Patient Follow-ups State
   const [allPatientFollowUps, setAllPatientFollowUps] = useState<PatientFollowUp[]>(() => {
     try {
-      const saved = localStorage.getItem('erp_patient_follow_ups');
+      const saved = readLocal('erp_patient_follow_ups');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
@@ -3240,7 +3243,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // 9.5 Laser Devices State & Management (شاشة وإدارة أجهزة الليزر والمعدات)
   const [allLaserDevices, setAllLaserDevices] = useState<LaserDevice[]>(() => {
     try {
-      const saved = localStorage.getItem('clinic_laser_devices');
+      const saved = readLocal('clinic_laser_devices');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
@@ -3252,7 +3255,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   });
 
   useEffect(() => {
-    localStorage.setItem('clinic_laser_devices', JSON.stringify(allLaserDevices));
+    persistLocal('clinic_laser_devices', JSON.stringify(allLaserDevices));
   }, [allLaserDevices]);
 
   const laserDevices = allLaserDevices.filter((d) => {
@@ -3367,7 +3370,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // 9.5 Laser Device Maintenance & Warranty Tracking (صيانة الأجهزة وحساب المورد والضمان)
   const [allDeviceMaintenance, setAllDeviceMaintenance] = useState<DeviceMaintenanceRecord[]>(() => {
     try {
-      const saved = localStorage.getItem('erp_device_maintenance');
+      const saved = readLocal('erp_device_maintenance');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
@@ -3379,7 +3382,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   });
 
   useEffect(() => {
-    localStorage.setItem('erp_device_maintenance', JSON.stringify(allDeviceMaintenance));
+    persistLocal('erp_device_maintenance', JSON.stringify(allDeviceMaintenance));
   }, [allDeviceMaintenance]);
 
   const deviceMaintenanceRecords = allDeviceMaintenance.filter((m) => {
@@ -3626,7 +3629,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // 10. Reception Operating Screen & Shifts (شاشة التشغيل للريسيبشن)
   const [allReceptionShifts, setAllReceptionShifts] = useState<ReceptionShift[]>(() => {
     try {
-      const saved = localStorage.getItem('erp_reception_shifts');
+      const saved = readLocal('erp_reception_shifts');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
@@ -5356,7 +5359,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // 11. Categories & Items
   const [allCategories, setAllCategories] = useState<ItemCategory[]>(() => {
     try {
-      const saved = localStorage.getItem('erp_categories');
+      const saved = readLocal('erp_categories');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
@@ -5368,7 +5371,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   });
 
   useEffect(() => {
-    localStorage.setItem('erp_categories', JSON.stringify(allCategories));
+    persistLocal('erp_categories', JSON.stringify(allCategories));
   }, [allCategories]);
 
   const categories = allCategories.filter((c) => c.tenantId === tenant?.id);
@@ -5407,7 +5410,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // 12. Products & Inventory
   const [allProducts, setAllProducts] = useState<Product[]>(() => {
     try {
-      const saved = localStorage.getItem('erp_products');
+      const saved = readLocal('erp_products');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
@@ -5425,7 +5428,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const [stockLevels, setStockLevels] = useState<StockLevel[]>(() => {
     try {
-      const saved = localStorage.getItem('erp_stock');
+      const saved = readLocal('erp_stock');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
@@ -5442,16 +5445,16 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   });
 
   useEffect(() => {
-    localStorage.setItem('erp_products', JSON.stringify(allProducts));
+    persistLocal('erp_products', JSON.stringify(allProducts));
   }, [allProducts]);
 
   useEffect(() => {
-    localStorage.setItem('erp_stock', JSON.stringify(stockLevels));
+    persistLocal('erp_stock', JSON.stringify(stockLevels));
   }, [stockLevels]);
 
   const [allStockMovements, setAllStockMovements] = useState<StockMovement[]>(() => {
     try {
-      const saved = localStorage.getItem('erp_stock_movements');
+      const saved = readLocal('erp_stock_movements');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
@@ -5544,7 +5547,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   });
 
   useEffect(() => {
-    localStorage.setItem('erp_stock_movements', JSON.stringify(allStockMovements));
+    persistLocal('erp_stock_movements', JSON.stringify(allStockMovements));
   }, [allStockMovements]);
 
   const stockMovements = useMemo(() => {
@@ -5718,7 +5721,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // 12.1 Inventory Audits & Settlements (الجرد الفعلي واستخراج الفروق والتسوية وربطها بالمرتبات)
   const [allInventoryAudits, setAllInventoryAudits] = useState<InventoryAudit[]>(() => {
     try {
-      const saved = localStorage.getItem('erp_inventory_audits');
+      const saved = readLocal('erp_inventory_audits');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
@@ -5730,7 +5733,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   });
 
   useEffect(() => {
-    localStorage.setItem('erp_inventory_audits', JSON.stringify(allInventoryAudits));
+    persistLocal('erp_inventory_audits', JSON.stringify(allInventoryAudits));
   }, [allInventoryAudits]);
 
   const inventoryAudits = allInventoryAudits.filter((a) => a.tenantId === tenant?.id);
@@ -5998,7 +6001,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // 13b. Staff Payroll & Salaries (مسير الرواتب والأجور)
   const [allPayrollRuns, setAllPayrollRuns] = useState<PayrollRun[]>(() => {
     try {
-      const saved = localStorage.getItem('erp_payroll_runs');
+      const saved = readLocal('erp_payroll_runs');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
@@ -6010,7 +6013,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   });
 
   useEffect(() => {
-    localStorage.setItem('erp_payroll_runs', JSON.stringify(allPayrollRuns));
+    persistLocal('erp_payroll_runs', JSON.stringify(allPayrollRuns));
   }, [allPayrollRuns]);
 
   const payrollRuns = allPayrollRuns.filter((p) => p.tenantId === tenant?.id);
@@ -6347,7 +6350,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // 14. POS & Invoices with Multi-Branch Shift Isolation
   const [allPosShifts, setAllPosShifts] = useState<PosShift[]>(() => {
     try {
-      const saved = localStorage.getItem('erp_pos_shifts');
+      const saved = readLocal('erp_pos_shifts');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
@@ -6377,7 +6380,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   });
 
   useEffect(() => {
-    localStorage.setItem('erp_pos_shifts', JSON.stringify(allPosShifts));
+    persistLocal('erp_pos_shifts', JSON.stringify(allPosShifts));
   }, [allPosShifts]);
 
   // Derived active POS shift strictly for current active branch
@@ -6392,7 +6395,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const [allInvoices, setAllInvoices] = useState<SalesInvoice[]>(() => {
     try {
-      const saved = localStorage.getItem('erp_invoices');
+      const saved = readLocal('erp_invoices');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
@@ -6404,7 +6407,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   });
 
   useEffect(() => {
-    safeLocalStorageSet('erp_invoices', JSON.stringify(allInvoices));
+    persistLocal('erp_invoices', JSON.stringify(allInvoices));
   }, [allInvoices]);
 
   const invoices = allInvoices.filter((i) => i.tenantId === tenant?.id);
@@ -8641,7 +8644,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // ==========================================
   const [allCashReceipts, setAllCashReceipts] = useState<CashReceiptVoucher[]>(() => {
     try {
-      const saved = localStorage.getItem('erp_cash_receipts');
+      const saved = readLocal('erp_cash_receipts');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) {
@@ -8670,7 +8673,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // Customer Refunds / Dues Settlement (تسوية مستحقات عميل واستردادات العملاء)
   const [allCustomerRefunds, setAllCustomerRefunds] = useState<CustomerRefundVoucher[]>(() => {
     try {
-      const saved = safeLocalStorageGet('erp_customer_refunds');
+      const saved = readLocal('erp_customer_refunds');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) return parsed as CustomerRefundVoucher[];
@@ -8684,7 +8687,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   useEffect(() => {
     if (!isStorageHydrated) return;
     try {
-      safeLocalStorageSet('erp_customer_refunds', JSON.stringify(allCustomerRefunds));
+      persistLocal('erp_customer_refunds', JSON.stringify(allCustomerRefunds));
     } catch (e) {
       console.warn(e);
     }
@@ -9305,7 +9308,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const [allCashPayments, setAllCashPayments] = useState<CashPaymentVoucher[]>(() => {
     try {
-      const saved = localStorage.getItem('erp_cash_payments');
+      const saved = readLocal('erp_cash_payments');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) {
@@ -9323,7 +9326,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const [allSpecializedTaxInvoices, setAllSpecializedTaxInvoices] = useState<SpecializedTaxInvoice[]>(() => {
     try {
-      const saved = localStorage.getItem('erp_tax_invoices');
+      const saved = readLocal('erp_tax_invoices');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) {
@@ -9341,7 +9344,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const [allGoodsReceipts, setAllGoodsReceipts] = useState<GoodsReceiptVoucher[]>(() => {
     try {
-      const saved = localStorage.getItem('erp_goods_receipts');
+      const saved = readLocal('erp_goods_receipts');
       if (saved) return JSON.parse(saved);
     } catch (e) {
       console.error(e);
@@ -9351,7 +9354,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const [allGoodsIssues, setAllGoodsIssues] = useState<GoodsIssueVoucher[]>(() => {
     try {
-      const saved = localStorage.getItem('erp_goods_issues');
+      const saved = readLocal('erp_goods_issues');
       if (saved) return JSON.parse(saved);
     } catch (e) {
       console.error(e);
@@ -10110,7 +10113,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     const updated = [newPayment, ...allCashPayments];
     setAllCashPayments(updated);
-    localStorage.setItem('erp_cash_payments', JSON.stringify(updated));
+    persistLocal('erp_cash_payments', JSON.stringify(updated));
 
     logUserActivity(
       'fiscal_documents',
@@ -10127,7 +10130,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const deleteCashPayment = (id: string) => {
     const updated = allCashPayments.filter((p) => p.id !== id);
     setAllCashPayments(updated);
-    localStorage.setItem('erp_cash_payments', JSON.stringify(updated));
+    persistLocal('erp_cash_payments', JSON.stringify(updated));
   };
 
   const addSpecializedTaxInvoice = async (
@@ -10163,7 +10166,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     const updated = [newInvoice, ...allSpecializedTaxInvoices];
     setAllSpecializedTaxInvoices(updated);
-    localStorage.setItem('erp_tax_invoices', JSON.stringify(updated));
+    persistLocal('erp_tax_invoices', JSON.stringify(updated));
 
     logUserActivity(
       'fiscal_documents',
@@ -10180,7 +10183,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const deleteSpecializedTaxInvoice = (id: string) => {
     const updated = allSpecializedTaxInvoices.filter((i) => i.id !== id);
     setAllSpecializedTaxInvoices(updated);
-    localStorage.setItem('erp_tax_invoices', JSON.stringify(updated));
+    persistLocal('erp_tax_invoices', JSON.stringify(updated));
   };
 
   const cancelSpecializedTaxInvoice = (id: string, reason: string) => {
@@ -10199,7 +10202,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       return i;
     });
     setAllSpecializedTaxInvoices(updated);
-    localStorage.setItem('erp_tax_invoices', JSON.stringify(updated));
+    persistLocal('erp_tax_invoices', JSON.stringify(updated));
 
     logUserActivity(
       'fiscal_documents',
@@ -10230,7 +10233,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     const updated = [newGrn, ...allGoodsReceipts];
     setAllGoodsReceipts(updated);
-    localStorage.setItem('erp_goods_receipts', JSON.stringify(updated));
+    persistLocal('erp_goods_receipts', JSON.stringify(updated));
 
     logUserActivity(
       'fiscal_documents',
@@ -10247,7 +10250,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const deleteGoodsReceipt = (id: string) => {
     const updated = allGoodsReceipts.filter((g) => g.id !== id);
     setAllGoodsReceipts(updated);
-    localStorage.setItem('erp_goods_receipts', JSON.stringify(updated));
+    persistLocal('erp_goods_receipts', JSON.stringify(updated));
   };
 
   const addGoodsIssue = (data: Omit<GoodsIssueVoucher, 'id' | 'ginNumber' | 'createdAt'>): GoodsIssueVoucher => {
@@ -10269,7 +10272,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     const updated = [newGin, ...allGoodsIssues];
     setAllGoodsIssues(updated);
-    localStorage.setItem('erp_goods_issues', JSON.stringify(updated));
+    persistLocal('erp_goods_issues', JSON.stringify(updated));
 
     logUserActivity(
       'fiscal_documents',
@@ -10286,13 +10289,13 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const deleteGoodsIssue = (id: string) => {
     const updated = allGoodsIssues.filter((g) => g.id !== id);
     setAllGoodsIssues(updated);
-    localStorage.setItem('erp_goods_issues', JSON.stringify(updated));
+    persistLocal('erp_goods_issues', JSON.stringify(updated));
   };
 
   // Staff Attendance & Biometrics
   const [allAttendanceRecords, setAllAttendanceRecords] = useState<AttendanceRecord[]>(() => {
     try {
-      const saved = localStorage.getItem('erp_attendance_records');
+      const saved = readLocal('erp_attendance_records');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
@@ -10305,7 +10308,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const [biometricDevices, setBiometricDevices] = useState<BiometricDeviceConfig[]>(() => {
     try {
-      const saved = localStorage.getItem('erp_biometric_devices');
+      const saved = readLocal('erp_biometric_devices');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
@@ -10317,11 +10320,11 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   });
 
   useEffect(() => {
-    localStorage.setItem('erp_attendance_records', JSON.stringify(allAttendanceRecords));
+    persistLocal('erp_attendance_records', JSON.stringify(allAttendanceRecords));
   }, [allAttendanceRecords]);
 
   useEffect(() => {
-    localStorage.setItem('erp_biometric_devices', JSON.stringify(biometricDevices));
+    persistLocal('erp_biometric_devices', JSON.stringify(biometricDevices));
   }, [biometricDevices]);
 
   const attendanceRecords = allAttendanceRecords.filter((a) => a.tenantId === tenant?.id);
@@ -10467,7 +10470,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // 15. Notification Engine & Dynamic Rules (نظام وقواعد التنبيهات الفورية)
   const [notificationRules, setNotificationRules] = useState<NotificationRule[]>(() => {
     try {
-      const saved = localStorage.getItem('erp_notification_rules');
+      const saved = readLocal('erp_notification_rules');
       if (saved) return JSON.parse(saved);
     } catch (e) {
       console.error(e);
@@ -10477,7 +10480,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   useEffect(() => {
     try {
-      localStorage.setItem('erp_notification_rules', JSON.stringify(notificationRules));
+      persistLocal('erp_notification_rules', JSON.stringify(notificationRules));
     } catch (e) {
       console.error(e);
     }
@@ -10485,7 +10488,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const [allNotifications, setAllNotifications] = useState<AppNotification[]>(() => {
     try {
-      const saved = localStorage.getItem('erp_notifications_history');
+      const saved = readLocal('erp_notifications_history');
       if (saved) return JSON.parse(saved);
     } catch (e) {
       console.error(e);
@@ -10495,7 +10498,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   useEffect(() => {
     try {
-      localStorage.setItem('erp_notifications_history', JSON.stringify(allNotifications));
+      persistLocal('erp_notifications_history', JSON.stringify(allNotifications));
     } catch (e) {
       console.error(e);
     }
@@ -10662,6 +10665,154 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       message: `تم استيراد ${imported} مجموعة بيانات من Neon${backupFilename ? ` — وتم تنزيل نسخة احتياطية قبل الاستيراد (${backupFilename})` : ''}`,
     };
   };
+
+
+  // ==========================================================================
+  // Neon-only bootstrap (التشغيل من Neon حصريًا مع كاش محلي للسرعة)
+  // --------------------------------------------------------------------------
+  // 1) The local cache is applied instantly so startup is fast.
+  // 2) Neon metadata (doc_key + updated_at) is compared with the cache.
+  // 3) ONLY the datasets whose Neon version is newer are re-fetched and applied.
+  // 4) If Neon cannot be reached the app stops and asks the user to retry.
+  // ==========================================================================
+  const [neonBootstrap, setNeonBootstrap] = useState<{
+    status: 'idle' | 'loading' | 'ready' | 'error' | 'no-config';
+    message?: string;
+    usedCache?: boolean;
+    updatedKeys?: number;
+    lastRun?: string;
+  }>({ status: 'idle' });
+  const neonBootstrapRanRef = useRef(false);
+
+  /** Applies a key -> payload map onto the app state (shared by bootstrap + import). */
+  const applyDatasetDocuments = (docs: { [key: string]: unknown }): number => {
+    let applied = 0;
+    const apply = (key: string, setter: (value: any) => void) => {
+      const value = docs[key];
+      if (!Array.isArray(value)) return;
+      setter(value);
+      neonSyncedPayloadsRef.current[key] = JSON.stringify(value);
+      applied += 1;
+    };
+    apply('erp_tenants', setAllTenants);
+    apply('erp_users', setAllUsers);
+    apply('erp_branches', setAllBranches);
+    apply('erp_warehouses', setAllWarehouses);
+    apply('erp_categories', setAllCategories);
+    apply('erp_products', setAllProducts);
+    apply('erp_stock_movements', setAllStockMovements);
+    apply('erp_stock_levels', setStockLevels);
+    apply('erp_accounts', setAllAccounts);
+    apply('erp_journals', setAllJournals);
+    apply('erp_parties_backup', setAllParties);
+    apply('erp_invoices', setAllInvoices);
+    apply('erp_appointments', setAllAppointments);
+    apply('erp_patient_followups', setAllPatientFollowUps);
+    apply('erp_treatment_plans', setAllTreatmentPlans);
+    apply('erp_cash_receipts', setAllCashReceipts);
+    apply('erp_customer_refunds', setAllCustomerRefunds);
+    apply('erp_cash_payments', setAllCashPayments);
+    apply('erp_reception_shifts', setAllReceptionShifts);
+    apply('erp_pos_shifts', setAllPosShifts);
+    apply('erp_payment_methods', setAllPaymentMethods);
+    apply('erp_tax_invoices', setAllSpecializedTaxInvoices);
+    apply('erp_goods_receipts', setAllGoodsReceipts);
+    apply('erp_goods_issues', setAllGoodsIssues);
+    apply('erp_staff_members', setAllStaffMembers);
+    apply('erp_payroll_runs', setAllPayrollRuns);
+    apply('erp_attendance_records', setAllAttendanceRecords);
+    apply('erp_inventory_audits', setAllInventoryAudits);
+    apply('erp_device_maintenance', setAllDeviceMaintenance);
+    apply('clinic_laser_devices', setAllLaserDevices);
+    apply('erp_period_locks', setAllPeriodLocks);
+    apply('erp_audit_records', setAllAuditRecords);
+    apply('erp_activity_logs', setAllUserActivityLogs);
+    apply('erp_notifications_history', setAllNotifications);
+    return applied;
+  };
+
+  const bootstrapFromNeon = async (): Promise<void> => {
+    const rawConnection = String(neonDb.connectionString || '').trim();
+    const isNeonUrl = rawConnection.startsWith('postgres://') || rawConnection.startsWith('postgresql://');
+    if (!isNeonUrl) {
+      setNeonBootstrap({ status: 'no-config', message: 'لم يتم إدخال رابط اتصال Neon بعد.' });
+      return;
+    }
+
+    setNeonBootstrap({ status: 'loading', message: 'جاري قراءة البيانات من Neon...' });
+
+    // 1) Local cache first (fast start).
+    let cached: DocumentsCache | null = null;
+    try {
+      cached = await idbGet<DocumentsCache>(DOCUMENTS_CACHE_KEY);
+    } catch {
+      cached = null;
+    }
+    let usedCache = false;
+    if (cached && Object.keys(cached).length > 0) {
+      const cachedPayloads: { [key: string]: unknown } = {};
+      Object.keys(cached).forEach((key) => { cachedPayloads[key] = cached![key].payload; });
+      applyDatasetDocuments(cachedPayloads);
+      usedCache = true;
+    }
+
+    // 2) Resolve the tenant id (current, first known, or read from Neon).
+    let tenantId = tenant?.id || allTenants[0]?.id || '';
+    if (!tenantId) {
+      tenantId = await NeonService.fetchFirstTenantId(rawConnection);
+    }
+    if (!tenantId) {
+      setNeonBootstrap({ status: 'error', message: 'لا توجد بيانات لهذا الكيان في Neon بعد.' });
+      return;
+    }
+
+    // 3) Diff against the cache and fetch ONLY what changed.
+    const meta = await NeonService.fetchDocumentMetadata(rawConnection, tenantId);
+    if (!meta.success) {
+      setNeonBootstrap({ status: 'error', message: meta.message });
+      return;
+    }
+    const baseKeys = Object.keys(meta.metadata).filter((key) => !key.includes('#'));
+    const changedKeys = baseKeys.filter((key) => !cached || !cached[key] || cached[key].updatedAt !== meta.metadata[key]);
+    const fetched = changedKeys.length > 0
+      ? await NeonService.fetchDocumentsByKeys(rawConnection, tenantId, changedKeys)
+      : { success: true, documents: {} as { [key: string]: unknown }, message: '' };
+    if (!fetched.success) {
+      setNeonBootstrap({ status: 'error', message: fetched.message });
+      return;
+    }
+    const appliedNow = applyDatasetDocuments(fetched.documents);
+
+    // 4) Refresh the cache (drop keys removed in Neon, store the new versions).
+    const nextCache: DocumentsCache = { ...(cached || {}) };
+    Object.keys(nextCache).forEach((key) => { if (!baseKeys.includes(key)) delete nextCache[key]; });
+    changedKeys.forEach((key) => {
+      if (fetched.documents[key] !== undefined) {
+        nextCache[key] = { payload: fetched.documents[key], updatedAt: meta.metadata[key] };
+      }
+    });
+    try {
+      await idbSet(DOCUMENTS_CACHE_KEY, nextCache);
+    } catch (cacheError) {
+      console.warn('Failed to refresh the local Neon cache:', cacheError);
+    }
+
+    setNeonBootstrap({
+      status: 'ready',
+      usedCache,
+      updatedKeys: appliedNow,
+      lastRun: new Date().toLocaleTimeString(language === 'ar' ? 'ar-EG' : 'en-US'),
+      message: `تم التحميل من Neon (${baseKeys.length} مجموعة${changedKeys.length ? ` · ${changedKeys.length} محدّثة` : ' · بدون تغييرات'})`,
+    });
+  };
+
+  // Run once on startup, after storage hydration.
+  useEffect(() => {
+    if (!isStorageHydrated || neonBootstrapRanRef.current) return;
+    neonBootstrapRanRef.current = true;
+    void bootstrapFromNeon();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isStorageHydrated]);
 
   // ==========================================================================
   // Automatic Neon sync (مزامنة تلقائية لكل البيانات إلى Neon)
@@ -11198,6 +11349,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         neonAutoSyncProgress,
         importAllFromNeon,
         migrateNeonSchema,
+        neonBootstrap,
+        retryNeonBootstrap: bootstrapFromNeon,
         getNeonDatasetSummary: () => buildAllDatasetDocuments().map((doc) => ({
           key: doc.key,
           count: Array.isArray(doc.payload) ? doc.payload.length : 0,

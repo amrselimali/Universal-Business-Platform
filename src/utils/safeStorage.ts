@@ -1,4 +1,14 @@
 // Safe Storage Utility with IndexedDB Fallback and Quota Protection
+import { isNeonOnlyMode } from './persistenceMode';
+
+/** Legacy per-dataset keys that are no longer persisted when Neon is the only store. */
+const LEGACY_DATA_KEYS = new Set([
+  'erp_cash_receipts',
+  'erp_customer_refunds',
+  'erp_journals',
+  'erp_parties_backup',
+  'erp_reception_shifts',
+]);
 // Prevents QuotaExceededError crashes when dealing with large datasets (10,000+ records)
 
 const DB_NAME = 'ERP_ENTERPRISE_DB';
@@ -29,6 +39,7 @@ function openIndexedDB(): Promise<IDBDatabase> {
 
 // Set value in IndexedDB (handles hundreds of megabytes safely)
 export async function idbSet(key: string, value: any): Promise<boolean> {
+  if (isNeonOnlyMode() && LEGACY_DATA_KEYS.has(key)) return true;
   try {
     const db = await openIndexedDB();
     return new Promise((resolve, reject) => {
@@ -46,6 +57,7 @@ export async function idbSet(key: string, value: any): Promise<boolean> {
 
 // Get value from IndexedDB
 export async function idbGet<T = any>(key: string): Promise<T | null> {
+  if (isNeonOnlyMode() && LEGACY_DATA_KEYS.has(key)) return null;
   try {
     const db = await openIndexedDB();
     return new Promise((resolve, reject) => {

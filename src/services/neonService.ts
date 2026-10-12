@@ -720,6 +720,92 @@ export class NeonService {
     }
     return { mirroredTables, mirroredRows, failures };
   }
+
+  /** Resolves a tenant id straight from Neon (used on a fresh device with no local state). */
+  static async fetchFirstTenantId(connectionString: string): Promise<string> {
+    try {
+      const sql = this.getClient(connectionString);
+      const rows = await sql`SELECT tenant_id FROM app_documents LIMIT 1`;
+      const first = (rows as any[])[0];
+      if (first?.tenant_id) return String(first.tenant_id);
+    } catch (error) {
+      console.warn('fetchFirstTenantId failed:', error);
+    }
+    try {
+      const sql = this.getClient(connectionString);
+      const rows = await sql`SELECT id FROM tenants LIMIT 1`;
+      const first = (rows as any[])[0];
+      if (first?.id) return String(first.id);
+    } catch (error) {
+      console.warn('fetchFirstTenantId (tenants) failed:', error);
+    }
+    return '';
+  }
+
+  /** Lightweight metadata only (doc_key + updated_at) used to diff against the local cache. */
+  static async fetchDocumentMetadata(
+    connectionString: string,
+    tenantId: string
+  ): Promise<{ success: boolean; metadata: { [key: string]: string }; message: string }> {
+    try {
+      const sql = this.getClient(connectionString);
+      const rows = await sql`
+        SELECT doc_key, updated_at FROM app_documents WHERE tenant_id = ${tenantId}
+      `;
+      const metadata: { [key: string]: string } = {};
+      (rows as any[]).forEach((row) => {
+        const raw = row.updated_at;
+        metadata[row.doc_key] = raw instanceof Date ? raw.toISOString() : String(raw ?? '');
+      });
+      return { success: true, metadata, message: `تم قراءة ${Object.keys(metadata).length} مفتاح` };
+    } catch (err: any) {
+      return { success: false, metadata: {}, message: 'فشل قراءة بيانات المزامنة: ' + (err?.message || String(err)) };
+    }
+  }
+
+  /** Fetches ONLY the requested documents (plus their chunks) - used for incremental startup. */
+  static async fetchDocumentsByKeys(
+    connectionString: string,
+    tenantId: string,
+    keys: string[]
+  ): Promise<{ success: boolean; documents: { [key: string]: unknown }; message: string }> {
+    if (keys.length === 0) return { success: true, documents: {}, message: 'لا توجد اختلافات' };
+    try {
+      const sql = this.getClient(connectionString);
+      const params: unknown[] = [tenantId];
+      const conditions: string[] = [];
+      for (const key of keys) {
+        params.push(key);
+        conditions.push(`doc_key = $${params.length}`);
+        params.push(`${key}#%`);
+        conditions.push(`doc_key LIKE $${params.length}`);
+      }
+      const text = `SELECT doc_key, payload FROM app_documents WHERE tenant_id = $1 AND (${conditions.join(' OR ')})`;
+      const rows: any = await (sql as any).query(text, params);
+
+      const raw: { [key: string]: unknown } = {};
+      (rows as any[]).forEach((row) => { raw[row.doc_key] = row.payload; });
+
+      const documents: { [key: string]: unknown } = {};
+      keys.forEach((key) => {
+        const value: any = raw[key];
+        if (value && typeof value === 'object' && (value as any).__chunked) {
+          const count = Number((value as any).count) || 0;
+          const merged: unknown[] = [];
+          for (let i = 0; i < count; i += 1) {
+            const chunk = raw[`${key}#${i}`];
+            if (Array.isArray(chunk)) merged.push(...chunk);
+          }
+          documents[key] = merged;
+        } else if (value !== undefined) {
+          documents[key] = value;
+        }
+      });
+      return { success: true, documents, message: `تم تحميل ${Object.keys(documents).length} مجموعة محدّثة` };
+    } catch (err: any) {
+      return { success: false, documents: {}, message: 'فشل تحميل المجموعات المحدّثة: ' + (err?.message || String(err)) };
+    }
+  }
   // --- Realtime Direct Insertion Methods ---
 
   static async insertProductDirect(connectionString: string, tenantId: string, product: Product): Promise<boolean> {

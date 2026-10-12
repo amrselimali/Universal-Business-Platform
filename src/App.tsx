@@ -38,7 +38,7 @@ import { AttendanceManagementView } from './views/AttendanceManagementView';
 import { EmployeeDossierView } from './views/EmployeeDossierView';
 import { SmartNotificationsView } from './views/SmartNotificationsView';
 import { SystemManualView } from './views/SystemManualView';
-import { ShieldAlert, ArrowRight, ArrowLeft } from 'lucide-react';
+import { ShieldAlert, ArrowRight, ArrowLeft, Database, RefreshCw } from 'lucide-react';
 import { QuickActionsBar } from './components/QuickActionsBar';
 import { CommandPaletteModal } from './components/CommandPaletteModal';
 import { CustomizeQuickButtonsModal } from './components/CustomizeQuickButtonsModal';
@@ -46,7 +46,7 @@ import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 import { GlobalContextMenu } from './components/GlobalContextMenu';
 
 const MainLayout: React.FC = () => {
-  const { language, t, canAccessView, currentUser, activeBranch } = usePlatform();
+  const { language, t, canAccessView, currentUser, activeBranch, neonBootstrap, retryNeonBootstrap, neonDb, updateNeonConnectionString } = usePlatform();
 
   // Load preferred landing view from URL query param, hash, or localStorage (Supports Open in New Tab)
   const [currentView, setCurrentView] = useState<string>(() => {
@@ -315,6 +315,73 @@ const MainLayout: React.FC = () => {
         return <DashboardView onNavigate={(view) => setCurrentView(view)} />;
     }
   };
+
+  // ==========================================================================
+  // Neon-first gate: the app does not start until Neon data is loaded.
+  // ==========================================================================
+  if (neonBootstrap.status !== 'ready') {
+    const isNoConfig = neonBootstrap.status === 'no-config';
+    const isError = neonBootstrap.status === 'error';
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-950 p-4">
+        <div className="w-full max-w-xl space-y-4 rounded-3xl border border-slate-800 bg-slate-900 p-6 text-center shadow-2xl">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-cyan-600 text-white">
+            <Database className="h-6 w-6" />
+          </div>
+          <h1 className="text-lg font-black text-white">
+            {t('قاعدة البيانات السحابية (Neon)', 'Cloud Database (Neon)')}
+          </h1>
+          {isNoConfig ? (
+            <p className="text-xs leading-6 text-slate-300">
+              {t(
+                'التطبيق يعتمد الآن حصريًا على بيانات Neon. يرجى إدخال رابط الاتصال للمتابعة.',
+                'The app now relies exclusively on Neon data. Enter the connection string to continue.'
+              )}
+            </p>
+          ) : (
+            <p className={`text-xs leading-6 ${isError ? 'text-rose-300' : 'text-slate-300'}`}>
+              {neonBootstrap.message || t('جاري تحميل البيانات...', 'Loading data...')}
+            </p>
+          )}
+
+          {neonBootstrap.status === 'loading' && (
+            <div className="mx-auto h-1.5 w-full overflow-hidden rounded-full bg-slate-800">
+              <div className="h-full w-1/2 animate-pulse rounded-full bg-cyan-500" />
+            </div>
+          )}
+
+          {(isNoConfig || isError) && (
+            <input
+              type="text"
+              defaultValue={neonDb.connectionString}
+              onChange={(event) => updateNeonConnectionString(event.target.value)}
+              placeholder="postgresql://...@ep-xxx.neon.tech/neondb?sslmode=require"
+              className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-xs text-white outline-none focus:border-cyan-500"
+            />
+          )}
+
+          <div className="flex items-center justify-center gap-2">
+            <button
+              type="button"
+              onClick={() => void retryNeonBootstrap()}
+              disabled={neonBootstrap.status === 'loading'}
+              className="flex items-center gap-2 rounded-xl bg-cyan-600 px-5 py-2.5 text-xs font-black text-white hover:bg-cyan-700 disabled:opacity-50"
+            >
+              <RefreshCw className="h-4 w-4" />
+              {isError ? t('إعادة المحاولة', 'Retry') : t('اتصال وتحميل البيانات', 'Connect & load data')}
+            </button>
+          </div>
+
+          <p className="text-[10px] text-slate-500">
+            {t(
+              'لا يتم تشغيل التطبيق بدون الاتصال بقاعدة البيانات.',
+              'The app cannot run without a database connection.'
+            )}
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen w-full flex-col bg-slate-100 font-sans text-slate-900 antialiased dark:bg-slate-950 dark:text-slate-100 overflow-hidden">
