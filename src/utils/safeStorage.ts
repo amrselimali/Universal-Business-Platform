@@ -37,6 +37,23 @@ function openIndexedDB(): Promise<IDBDatabase> {
   });
 }
 
+// Delete a value from IndexedDB
+export async function idbDelete(key: string): Promise<boolean> {
+  try {
+    const db = await openIndexedDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readwrite');
+      const store = tx.objectStore(STORE_NAME);
+      const req = store.delete(key);
+      req.onsuccess = () => resolve(true);
+      req.onerror = () => reject(req.error);
+    });
+  } catch (err) {
+    console.warn(`[IndexedDB] Failed to delete ${key}:`, err);
+    return false;
+  }
+}
+
 // Set value in IndexedDB (handles hundreds of megabytes safely)
 export async function idbSet(key: string, value: any): Promise<boolean> {
   if (isNeonOnlyMode() && LEGACY_DATA_KEYS.has(key)) return true;

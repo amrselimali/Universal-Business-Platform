@@ -2,6 +2,15 @@
 
 # 2026-10-12
 
+## Fix: app showed the old data again (stale cross-tenant cache)
+
+- Root cause: the local cache was stored under a single tenant-agnostic key (`erp_documents_cache`), so a cache filled while the app was on the WRONG tenant was applied first on the next start - the app looked like it had reverted to the old data.
+- The tenant is now resolved from Neon **before** the cache is read, and the cache is stored per tenant (`erp_documents_cache:<tenantId>`), so a cache belonging to another tenant can never be displayed.
+- The legacy tenant-agnostic cache key is deleted on startup (`idbDelete`), and any failure while refreshing from Neon keeps the blocking error screen instead of silently showing stale data.
+- Files: `src/context/PlatformContext.tsx`, `src/utils/safeStorage.ts`.
+
+# 2026-10-12
+
 ## Removed the legacy `patients` table — `parties` is the single source
 
 - `parties` and `patients` were two copies of the same records (23,005 vs 22,980 rows, identical ids), because the sync passed the same array to both.

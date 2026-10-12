@@ -56,7 +56,7 @@ import {
   NotificationSeverity,
   NotificationCategory,
 } from '../types';
-import { safeLocalStorageSet, safeLocalStorageGet, idbSet, idbGet, persistDataset, loadPersistedDataset } from '../utils/safeStorage';
+import { safeLocalStorageSet, safeLocalStorageGet, idbSet, idbGet, idbDelete, persistDataset, loadPersistedDataset } from '../utils/safeStorage';
 import { persistLocal, readLocal, DOCUMENTS_CACHE_KEY, DocumentsCache, isNeonOnlyMode } from '../utils/persistenceMode';
 import { INITIAL_NOTIFICATION_RULES, INITIAL_NOTIFICATIONS_HISTORY } from '../data/notificationRulesData';
 import { playNotificationSound } from '../utils/audioAlert';
@@ -10738,12 +10738,26 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       return;
     }
 
-    setNeonBootstrap({ status: 'loading', message: 'جاري قراءة البيانات من Neon...' });
+    setNeonBootstrap({ status: 'loading', message: 'جاري تحديد الكيان وقراءة البيانات من Neon...' });
 
-    // 1) Local cache first (fast start).
+    // Drop the legacy tenant-agnostic cache so stale data can never be displayed.
+    try {
+      await idbDelete('erp_documents_cache');
+    } catch {
+      /* ignore */
+    }
+
+    // 1) Resolve the tenant that actually holds data in Neon FIRST, because the local
+    // cache is stored per tenant (a cache belonging to another tenant must never be shown).
+    let tenantId = await NeonService.resolveActiveTenantId(rawConnection);
+    if (!tenantId) tenantId = tenant?.id || allTenants[0]?.id || '';
+    if (!tenantId) tenantId = await NeonService.fetchFirstTenantId(rawConnection);
+
+    // 2) Local cache for THIS tenant only (fast start).
+    const cacheKey = `${DOCUMENTS_CACHE_KEY}:${tenantId}`;
     let cached: DocumentsCache | null = null;
     try {
-      cached = await idbGet<DocumentsCache>(DOCUMENTS_CACHE_KEY);
+      cached = await idbGet<DocumentsCache>(cacheKey);
     } catch {
       cached = null;
     }
@@ -10754,11 +10768,6 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       applyDatasetDocuments(cachedPayloads);
       usedCache = true;
     }
-
-    // 2) Resolve the tenant that actually holds data in Neon (Neon is the source of truth).
-    let tenantId = await NeonService.resolveActiveTenantId(rawConnection);
-    if (!tenantId) tenantId = tenant?.id || allTenants[0]?.id || '';
-    if (!tenantId) tenantId = await NeonService.fetchFirstTenantId(rawConnection);
     // Align the in-app tenant with the resolved Neon tenant.
     if (tenantId && tenant?.id !== tenantId) {
       const knownTenant = allTenants.find((candidate) => candidate.id === tenantId);
@@ -10804,7 +10813,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       }
     });
     try {
-      await idbSet(DOCUMENTS_CACHE_KEY, nextCache);
+      await idbSet(cacheKey, nextCache);
     } catch (cacheError) {
       console.warn('Failed to refresh the local Neon cache:', cacheError);
     }
