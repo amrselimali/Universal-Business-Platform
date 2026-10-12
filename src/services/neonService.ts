@@ -773,6 +773,55 @@ export class NeonService {
     return '';
   }
 
+
+  /**
+   * Fetches ONE dataset (with its chunks) using several small requests so no single
+   * Neon response exceeds the 64 MB HTTP limit.
+   */
+  static async fetchDocumentByKey(
+    connectionString: string,
+    tenantId: string,
+    key: string
+  ): Promise<{ success: boolean; value?: unknown; message: string }> {
+    try {
+      const sql = this.getClient(connectionString);
+      const rows = await sql`
+        SELECT payload FROM app_documents WHERE tenant_id = ${tenantId} AND doc_key = ${key}
+      `;
+      const payload: any = (rows as any[])[0]?.payload;
+      if (payload === undefined) return { success: true, value: undefined, message: 'غير موجود' };
+
+      if (payload && typeof payload === 'object' && (payload as any).__chunked) {
+        const count = Number((payload as any).count) || 0;
+        const merged: unknown[] = [];
+        const CHUNKS_PER_REQUEST = 4;
+        for (let start = 0; start < count; start += CHUNKS_PER_REQUEST) {
+          const names: string[] = [];
+          for (let index = start; index < Math.min(start + CHUNKS_PER_REQUEST, count); index += 1) {
+            names.push(`${key}#${index}`);
+          }
+          const params: unknown[] = [tenantId];
+          const conditions = names.map((name) => {
+            params.push(name);
+            return `doc_key = $${params.length}`;
+          });
+          const chunkRows: any = await (sql as any).query(
+            `SELECT doc_key, payload FROM app_documents WHERE tenant_id = $1 AND (${conditions.join(' OR ')})`,
+            params
+          );
+          names.forEach((name) => {
+            const found = (chunkRows as any[]).find((row) => row.doc_key === name);
+            if (Array.isArray(found?.payload)) merged.push(...found.payload);
+          });
+        }
+        return { success: true, value: merged, message: `تم تجميع ${merged.length} سجل` };
+      }
+
+      return { success: true, value: payload, message: '' };
+    } catch (err: any) {
+      return { success: false, message: `فشل تحميل (${key}): ` + (err?.message || String(err)) };
+    }
+  }
   /** Lightweight metadata only (doc_key + updated_at) used to diff against the local cache. */
   static async fetchDocumentMetadata(
     connectionString: string,
@@ -794,48 +843,22 @@ export class NeonService {
     }
   }
 
-  /** Fetches ONLY the requested documents (plus their chunks) - used for incremental startup. */
+  /** Fetches the requested datasets one-by-one (each in its own small request). */
   static async fetchDocumentsByKeys(
     connectionString: string,
     tenantId: string,
     keys: string[]
   ): Promise<{ success: boolean; documents: { [key: string]: unknown }; message: string }> {
     if (keys.length === 0) return { success: true, documents: {}, message: 'لا توجد اختلافات' };
-    try {
-      const sql = this.getClient(connectionString);
-      const params: unknown[] = [tenantId];
-      const conditions: string[] = [];
-      for (const key of keys) {
-        params.push(key);
-        conditions.push(`doc_key = $${params.length}`);
-        params.push(`${key}#%`);
-        conditions.push(`doc_key LIKE $${params.length}`);
+    const documents: { [key: string]: unknown } = {};
+    for (const key of keys) {
+      const result = await NeonService.fetchDocumentByKey(connectionString, tenantId, key);
+      if (!result.success) {
+        return { success: false, documents, message: result.message };
       }
-      const text = `SELECT doc_key, payload FROM app_documents WHERE tenant_id = $1 AND (${conditions.join(' OR ')})`;
-      const rows: any = await (sql as any).query(text, params);
-
-      const raw: { [key: string]: unknown } = {};
-      (rows as any[]).forEach((row) => { raw[row.doc_key] = row.payload; });
-
-      const documents: { [key: string]: unknown } = {};
-      keys.forEach((key) => {
-        const value: any = raw[key];
-        if (value && typeof value === 'object' && (value as any).__chunked) {
-          const count = Number((value as any).count) || 0;
-          const merged: unknown[] = [];
-          for (let i = 0; i < count; i += 1) {
-            const chunk = raw[`${key}#${i}`];
-            if (Array.isArray(chunk)) merged.push(...chunk);
-          }
-          documents[key] = merged;
-        } else if (value !== undefined) {
-          documents[key] = value;
-        }
-      });
-      return { success: true, documents, message: `تم تحميل ${Object.keys(documents).length} مجموعة محدّثة` };
-    } catch (err: any) {
-      return { success: false, documents: {}, message: 'فشل تحميل المجموعات المحدّثة: ' + (err?.message || String(err)) };
+      if (result.value !== undefined) documents[key] = result.value;
     }
+    return { success: true, documents, message: `تم تحميل ${Object.keys(documents).length} مجموعة محدّثة` };
   }
   // --- Realtime Direct Insertion Methods ---
 
@@ -1336,35 +1359,12 @@ export class NeonService {
     tenantId: string,
     keys?: string[]
   ): Promise<{ success: boolean; documents: { [key: string]: unknown }; message: string }> {
-    try {
-      const sql = this.getClient(connectionString);
-      const rows = await sql`
-        SELECT doc_key, payload FROM app_documents WHERE tenant_id = ${tenantId}
-      `;
-      const raw: { [key: string]: unknown } = {};
-      (rows as any[]).forEach((row) => { raw[row.doc_key] = row.payload; });
-
-      const documents: { [key: string]: unknown } = {};
-      Object.keys(raw).forEach((key) => {
-        if (key.includes('#')) return; // chunk rows are merged below
-        if (keys && keys.length > 0 && !keys.includes(key)) return;
-        const value: any = raw[key];
-        if (value && typeof value === 'object' && (value as any).__chunked) {
-          const count = Number((value as any).count) || 0;
-          const merged: unknown[] = [];
-          for (let i = 0; i < count; i += 1) {
-            const chunk = raw[`${key}#${i}`];
-            if (Array.isArray(chunk)) merged.push(...chunk);
-          }
-          documents[key] = merged;
-        } else {
-          documents[key] = value;
-        }
-      });
-
-      return { success: true, documents, message: `تم تحميل ${Object.keys(documents).length} مجموعة بيانات من Neon` };
-    } catch (err: any) {
-      return { success: false, documents: {}, message: 'فشل تحميل البيانات من Neon: ' + (err?.message || String(err)) };
-    }
+    // Read the key list first (tiny query), then fetch each dataset separately so no
+    // response can exceed Neon's 64 MB HTTP limit.
+    const meta = await NeonService.fetchDocumentMetadata(connectionString, tenantId);
+    if (!meta.success) return { success: false, documents: {}, message: meta.message };
+    const allKeys = Object.keys(meta.metadata).filter((key) => !key.includes('#'));
+    const targetKeys = keys && keys.length > 0 ? allKeys.filter((key) => keys.includes(key)) : allKeys;
+    return NeonService.fetchDocumentsByKeys(connectionString, tenantId, targetKeys);
   }
 }

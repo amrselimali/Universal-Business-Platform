@@ -2,6 +2,14 @@
 
 # 2026-10-12
 
+## Fix: Neon fetch failed with HTTP 507 (response too large)
+
+- Loading the updated datasets failed because every changed document (plus all its chunks) was requested in a single query, and the combined response exceeded Neon's 64 MB HTTP limit.
+- Added `NeonService.fetchDocumentByKey`, which reads ONE dataset per request and reads its chunked documents in small groups (4 chunks per request). `fetchDocumentsByKeys` and `fetchDocuments` now loop dataset-by-dataset instead of issuing one giant query.
+- Files: `src/services/neonService.ts`.
+
+# 2026-10-12
+
 ## Fix: app opened the wrong tenant (looked like a different database)
 
 - Live inspection of the configured Neon database showed **two tenants** inside the same `app_documents` store: `tenant-eg-003` (the one in the `tenants` table, 162 documents, large receipts/journals/parties) and `tenant-eg-001` (141 documents, almost empty business data). The app was starting on `tenant-eg-001`, so it looked like another database.
