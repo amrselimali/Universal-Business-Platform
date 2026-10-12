@@ -671,6 +671,7 @@ interface PlatformContextType {
   migrateNeonSchema: () => Promise<{ success: boolean; message: string; created: number; updated: number; total: number; failures: string[] }>;
   neonBootstrap: { status: 'idle' | 'loading' | 'ready' | 'error' | 'no-config'; message?: string; usedCache?: boolean; updatedKeys?: number; lastRun?: string };
   retryNeonBootstrap: () => Promise<void>;
+  neonConnectionInfo: { host: string; database: string } | null;
   updateNeonConnectionString: (conn: string) => void;
   testNeonConnection: (connOverride?: string) => Promise<boolean>;
   syncAllToNeon: () => Promise<{ success: boolean; message: string; count: number }>;
@@ -10756,10 +10757,23 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       usedCache = true;
     }
 
-    // 2) Resolve the tenant id (current, first known, or read from Neon).
-    let tenantId = tenant?.id || allTenants[0]?.id || '';
-    if (!tenantId) {
-      tenantId = await NeonService.fetchFirstTenantId(rawConnection);
+    // 2) Resolve the tenant that actually holds data in Neon (Neon is the source of truth).
+    let tenantId = await NeonService.resolveActiveTenantId(rawConnection);
+    if (!tenantId) tenantId = tenant?.id || allTenants[0]?.id || '';
+    if (!tenantId) tenantId = await NeonService.fetchFirstTenantId(rawConnection);
+    // Align the in-app tenant with the resolved Neon tenant.
+    if (tenantId && tenant?.id !== tenantId) {
+      const knownTenant = allTenants.find((candidate) => candidate.id === tenantId);
+      if (knownTenant) {
+        setTenant(knownTenant);
+      } else {
+        setTenant((previous) => ({ ...previous, id: tenantId }));
+      }
+      try {
+        localStorage.setItem('erp_active_tenant_id', tenantId);
+      } catch {
+        /* ignore */
+      }
     }
     if (!tenantId) {
       setNeonBootstrap({ status: 'error', message: 'لا توجد بيانات لهذا الكيان في Neon بعد.' });
@@ -10805,6 +10819,21 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       message: `تم التحميل من Neon (${baseKeys.length} مجموعة${changedKeys.length ? ` · ${changedKeys.length} محدّثة` : ' · بدون تغييرات'})`,
     });
   };
+
+  /** Host/database parsed from the connection string, for on-screen verification. */
+  const neonConnectionInfo = (() => {
+    const raw = String(neonDb.connectionString || '').trim();
+    const match = raw.match(/@([^/:]+)(?::\d+)?\/([^?]+)/);
+    if (!match) return null;
+    return { host: match[1], database: match[2] };
+  })();
+
+  // Re-run the whole bootstrap whenever the target database changes.
+  useEffect(() => {
+    if (!isStorageHydrated || !neonBootstrapRanRef.current) return;
+    void bootstrapFromNeon();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [neonDb.connectionString]);
 
   // Run once on startup, after storage hydration.
   useEffect(() => {
@@ -11351,6 +11380,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         migrateNeonSchema,
         neonBootstrap,
         retryNeonBootstrap: bootstrapFromNeon,
+        neonConnectionInfo,
         getNeonDatasetSummary: () => buildAllDatasetDocuments().map((doc) => ({
           key: doc.key,
           count: Array.isArray(doc.payload) ? doc.payload.length : 0,
