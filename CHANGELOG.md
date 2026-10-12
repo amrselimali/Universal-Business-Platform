@@ -2,6 +2,16 @@
 
 # 2026-10-12
 
+## Neon-only mode: Neon is the single source of truth (with a fast local cache)
+
+- Added `src/utils/persistenceMode.ts` and enabled **NEON_ONLY** mode: the app no longer reads or writes the legacy per-dataset localStorage/IndexedDB keys. Only session/config keys (Neon URL, current user, language, active tenant/shift) remain local.
+- **Fast startup without duplicating the source of truth**: a permanent local cache (`erp_documents_cache` in IndexedDB) is applied instantly, then Neon metadata (`doc_key` + `updated_at`) is compared with the cache and **only the datasets whose Neon version is newer are re-fetched** (`fetchDocumentMetadata` / `fetchDocumentsByKeys`).
+- **The app does not start without Neon**: `App`/`MainLayout` now render a gate that shows loading, an error with a retry button, or a connection-string prompt when Neon is not configured.
+- Exposed `neonBootstrap` (status/message/usedCache/updatedKeys/lastRun) and `retryNeonBootstrap`.
+- Files: `src/utils/persistenceMode.ts` (new), `src/utils/safeStorage.ts`, `src/services/neonService.ts`, `src/context/PlatformContext.tsx`, `src/App.tsx`.
+
+# 2026-10-12
+
 ## Every table is now populated (no more half-empty schema)
 
 - Previously only the 12 legacy relational tables received data; the other tables created by the schema migration stayed empty.
