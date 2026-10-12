@@ -932,7 +932,8 @@ export class NeonService {
   static async saveDocuments(
     connectionString: string,
     tenantId: string,
-    documents: { key: string; payload: unknown }[]
+    documents: { key: string; payload: unknown }[],
+    onProgress?: (done: number, total: number, label: string) => void
   ): Promise<{ success: boolean; saved: number; message: string }> {
     if (documents.length === 0) return { success: true, saved: 0, message: 'لا توجد تغييرات للرفع' };
     try {
@@ -941,21 +942,76 @@ export class NeonService {
       if (!ready) {
         return { success: false, saved: 0, message: 'تعذر إنشاء جدول التخزين الموحّد app_documents' };
       }
-      let saved = 0;
+
+      // Large datasets are split into small chunk documents so no single HTTP request
+      // becomes huge (the previous single-request-per-dataset behaviour made big
+      // datasets like journals/parties take minutes).
+      const tasks: { key: string; payload: unknown }[] = [];
       for (const doc of documents) {
-        await sql`
-          INSERT INTO app_documents (tenant_id, doc_key, payload, updated_at)
-          VALUES (${tenantId}, ${doc.key}, ${JSON.stringify(doc.payload)}::jsonb, NOW())
-          ON CONFLICT (tenant_id, doc_key) DO UPDATE SET
-            payload = EXCLUDED.payload,
-            updated_at = NOW();
-        `;
-        saved += 1;
+        const serialized = JSON.stringify(doc.payload ?? []);
+        if (Array.isArray(doc.payload) && serialized.length > NeonService.CHUNK_THRESHOLD_BYTES) {
+          const chunks = NeonService.splitIntoChunks(doc.payload);
+          tasks.push({ key: doc.key, payload: { __chunked: true, count: chunks.length } });
+          chunks.forEach((chunk, index) => tasks.push({ key: `${doc.key}#${index}`, payload: chunk }));
+        } else {
+          tasks.push(doc);
+        }
       }
-      return { success: true, saved, message: `تم رفع ${saved} مجموعة بيانات إلى Neon` };
+
+      let done = 0;
+      let failed: string | null = null;
+      const total = tasks.length;
+      let cursor = 0;
+      const CONCURRENCY = 4;
+      const runners = Array.from({ length: Math.min(CONCURRENCY, total) }, async () => {
+        while (cursor < total && !failed) {
+          const task = tasks[cursor++];
+          try {
+            await sql`
+              INSERT INTO app_documents (tenant_id, doc_key, payload, updated_at)
+              VALUES (${tenantId}, ${task.key}, ${JSON.stringify(task.payload ?? [])}::jsonb, NOW())
+              ON CONFLICT (tenant_id, doc_key) DO UPDATE SET
+                payload = EXCLUDED.payload,
+                updated_at = NOW();
+            `;
+            done += 1;
+            if (onProgress) onProgress(done, total, task.key);
+          } catch (taskError: any) {
+            failed = `${task.key}: ${taskError?.message || String(taskError)}`;
+          }
+        }
+      });
+      await Promise.all(runners);
+
+      if (failed) {
+        return { success: false, saved: done, message: `فشل رفع (${failed})` };
+      }
+      return { success: true, saved: documents.length, message: `تم رفع ${documents.length} مجموعة بيانات إلى Neon` };
     } catch (err: any) {
       return { success: false, saved: 0, message: 'فشل رفع البيانات إلى Neon: ' + (err?.message || String(err)) };
     }
+  }
+
+  private static readonly CHUNK_THRESHOLD_BYTES = 900_000;
+  private static readonly CHUNK_TARGET_BYTES = 700_000;
+
+  /** Splits a large array into chunks whose JSON stays under the target size. */
+  private static splitIntoChunks(items: unknown[]): unknown[][] {
+    const chunks: unknown[][] = [];
+    let current: unknown[] = [];
+    let currentSize = 2; // brackets
+    for (const item of items) {
+      const itemSize = JSON.stringify(item ?? null).length + 1;
+      if (current.length > 0 && currentSize + itemSize > NeonService.CHUNK_TARGET_BYTES) {
+        chunks.push(current);
+        current = [];
+        currentSize = 2;
+      }
+      current.push(item);
+      currentSize += itemSize;
+    }
+    if (current.length > 0) chunks.push(current);
+    return chunks;
   }
 
   static async fetchDocuments(
@@ -968,11 +1024,27 @@ export class NeonService {
       const rows = await sql`
         SELECT doc_key, payload FROM app_documents WHERE tenant_id = ${tenantId}
       `;
+      const raw: { [key: string]: unknown } = {};
+      (rows as any[]).forEach((row) => { raw[row.doc_key] = row.payload; });
+
       const documents: { [key: string]: unknown } = {};
-      (rows as any[]).forEach((row) => {
-        if (keys && keys.length > 0 && !keys.includes(row.doc_key)) return;
-        documents[row.doc_key] = row.payload;
+      Object.keys(raw).forEach((key) => {
+        if (key.includes('#')) return; // chunk rows are merged below
+        if (keys && keys.length > 0 && !keys.includes(key)) return;
+        const value: any = raw[key];
+        if (value && typeof value === 'object' && (value as any).__chunked) {
+          const count = Number((value as any).count) || 0;
+          const merged: unknown[] = [];
+          for (let i = 0; i < count; i += 1) {
+            const chunk = raw[`${key}#${i}`];
+            if (Array.isArray(chunk)) merged.push(...chunk);
+          }
+          documents[key] = merged;
+        } else {
+          documents[key] = value;
+        }
       });
+
       return { success: true, documents, message: `تم تحميل ${Object.keys(documents).length} مجموعة بيانات من Neon` };
     } catch (err: any) {
       return { success: false, documents: {}, message: 'فشل تحميل البيانات من Neon: ' + (err?.message || String(err)) };

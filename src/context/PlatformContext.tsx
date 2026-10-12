@@ -663,6 +663,7 @@ interface PlatformContextType {
   // Neon PostgreSQL
   neonDb: NeonDbState;
   neonAutoSync: { syncing: boolean; lastRun?: string; lastSavedCount: number; error?: string };
+  neonAutoSyncProgress: string;
   updateNeonConnectionString: (conn: string) => void;
   testNeonConnection: (connOverride?: string) => Promise<boolean>;
   syncAllToNeon: () => Promise<{ success: boolean; message: string; count: number }>;
@@ -8531,11 +8532,15 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       journalEntries,
     });
     // 2) EVERY dataset as a JSONB document in app_documents (full initial transfer).
+    const allDocs = buildAllDatasetDocuments();
+    setNeonAutoSyncProgress(`0/${allDocs.length}`);
     const documentResult = await NeonService.saveDocuments(
       neonDb.connectionString,
       tenant?.id || '',
-      buildAllDatasetDocuments()
+      allDocs,
+      (done, total) => setNeonAutoSyncProgress(`${done}/${total}`)
     );
+    setNeonAutoSyncProgress('');
     if (documentResult.success) {
       buildAllDatasetDocuments().forEach((doc) => {
         neonSyncedPayloadsRef.current[doc.key] = JSON.stringify(doc.payload ?? []);
@@ -10514,6 +10519,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     lastSavedCount: number;
     error?: string;
   }>({ syncing: false, lastSavedCount: 0 });
+  const [neonAutoSyncProgress, setNeonAutoSyncProgress] = useState<string>('');
 
   useEffect(() => {
     if (!isStorageHydrated) return;
@@ -10537,15 +10543,20 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (changed.length === 0) return;
 
       setNeonAutoSync((prev) => ({ ...prev, syncing: true, error: undefined }));
-      const result = await NeonService.saveDocuments(connectionStringForSync, tenantIdForSync, changed);
+      setNeonAutoSyncProgress(`0/${changed.length}`);
+      const result = await NeonService.saveDocuments(connectionStringForSync, tenantIdForSync, changed, (done, total) => {
+        setNeonAutoSyncProgress(`${done}/${total}`);
+      });
       if (!result.success) {
         console.error('Automatic Neon sync failed:', result.message);
         setNeonAutoSync((prev) => ({ ...prev, syncing: false, error: result.message }));
+        setNeonAutoSyncProgress('');
         return;
       }
       changed.forEach((doc) => {
         neonSyncedPayloadsRef.current[doc.key] = JSON.stringify(doc.payload ?? []);
       });
+      setNeonAutoSyncProgress('');
       setNeonAutoSync({
         syncing: false,
         lastSavedCount: changed.length,
@@ -11024,6 +11035,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         dismissToastNotification,
         neonDb,
         neonAutoSync,
+        neonAutoSyncProgress,
         updateNeonConnectionString,
         testNeonConnection,
         syncAllToNeon,

@@ -2,6 +2,15 @@
 
 # 2026-10-12
 
+## Neon upload speed — chunked datasets, parallel uploads and live progress
+
+- The Neon upload used to send one huge HTTP request per dataset, so large datasets (journals, parties) took minutes. Datasets larger than ~0.9 MB are now split into ~0.7 MB chunk documents (`<key>#0`, `<key>#1`, ...) with a small manifest stored under the original key, and chunks are re-assembled transparently on read.
+- Chunk documents are uploaded with a small concurrency pool (4 parallel requests) instead of strictly sequentially.
+- Added live progress reporting: `neonAutoSyncProgress` (done/total) is shown in the Neon screen's sync status card while uploading.
+- Files: `src/services/neonService.ts`, `src/context/PlatformContext.tsx`, `src/views/NeonHubView.tsx`.
+
+# 2026-10-12
+
 ## Fix Neon sync error: patients.file_number NOT NULL
 
 - The full transfer to Neon succeeded for all 34 document datasets, but the legacy relational mirror failed with `null value in column "file_number" of relation "patients" violates not-null constraint`.
