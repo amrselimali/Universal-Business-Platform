@@ -1,4 +1,5 @@
 import { neon } from '@neondatabase/serverless';
+import { APP_DOCUMENTS_DDL, NEON_SCHEMA_TABLES, buildAlterTableSql, buildCreateTableSql } from './neonSchema';
 import {
   Product,
   Account,
@@ -553,6 +554,74 @@ export class NeonService {
     return inserted;
   }
 
+
+  /**
+   * Creates (or updates) every dataset table in Neon from the shared schema definition.
+   * Idempotent: safe to run repeatedly; existing tables/columns are preserved and only
+   * missing ones are added. Returns a per-table report.
+   */
+  static async runFullSchemaMigration(connectionString: string): Promise<{
+    success: boolean;
+    created: number;
+    updated: number;
+    total: number;
+    failures: string[];
+    message: string;
+  }> {
+    const failures: string[] = [];
+    let created = 0;
+    let updated = 0;
+    try {
+      const sql = this.getClient(connectionString);
+
+      // Unified document store first.
+      try {
+        await sql.query(APP_DOCUMENTS_DDL);
+        created += 1;
+      } catch (error: any) {
+        failures.push(`app_documents: ${error?.message || String(error)}`);
+      }
+
+      for (const schema of NEON_SCHEMA_TABLES) {
+        try {
+          await sql.query(buildCreateTableSql(schema));
+          created += 1;
+        } catch (error: any) {
+          failures.push(`${schema.table} (create): ${error?.message || String(error)}`);
+          continue;
+        }
+        for (const statement of buildAlterTableSql(schema)) {
+          try {
+            await sql.query(statement);
+            updated += 1;
+          } catch (error: any) {
+            failures.push(`${schema.table} (alter): ${error?.message || String(error)}`);
+          }
+        }
+      }
+
+      const total = NEON_SCHEMA_TABLES.length + 1;
+      return {
+        success: failures.length === 0,
+        created,
+        updated,
+        total,
+        failures,
+        message: failures.length === 0
+          ? `تم ترحيل وتحديث ${total} جدول بنجاح (${updated} عمود إضافي)`
+          : `تم تنفيذ الترحيل على ${created} جدول مع ${failures.length} ملاحظة`,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        created,
+        updated,
+        total: NEON_SCHEMA_TABLES.length + 1,
+        failures: [...failures, error?.message || String(error)],
+        message: 'فشل ترحيل الهيكل: ' + (error?.message || String(error)),
+      };
+    }
+  }
   // --- Realtime Direct Insertion Methods ---
 
   static async insertProductDirect(connectionString: string, tenantId: string, product: Product): Promise<boolean> {

@@ -36,6 +36,7 @@ export const NeonHubView: React.FC = () => {
     neonAutoSyncProgress,
     getNeonDatasetSummary,
     importAllFromNeon,
+    migrateNeonSchema,
     branches,
     allBranches,
     warehouses,
@@ -92,6 +93,8 @@ export const NeonHubView: React.FC = () => {
   const [backupFeedback, setBackupFeedback] = useState<string | null>(null);
   const [importStage, setImportStage] = useState<'idle' | 'first' | 'second' | 'running'>('idle');
   const [importResult, setImportResult] = useState<string | null>(null);
+  const [schemaReport, setSchemaReport] = useState<string | null>(null);
+  const [showSchemaFailures, setShowSchemaFailures] = useState<string[]>([]);
 
   const handleBackupToExcel = async () => {
     setIsExportingExcel(true);
@@ -255,6 +258,21 @@ export const NeonHubView: React.FC = () => {
           </button>
 
           <button
+            onClick={async () => {
+              setSchemaReport(null);
+              setShowSchemaFailures([]);
+              const result = await migrateNeonSchema();
+              setSchemaReport(result.message + ` · ${t('جداول:', 'tables:')} ${result.created}/${result.total} · ${t('أعمدة محدّثة:', 'columns updated:')} ${result.updated}`);
+              setShowSchemaFailures(result.failures);
+            }}
+            className="flex items-center gap-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 px-4 py-2 text-xs font-black text-white shadow-xs transition-all cursor-pointer"
+            title={t('إنشاء/تحديث كل جداول البيانات في Neon بنفس هيكل التطبيق', 'Create/update every data table in Neon to match the app structure')}
+          >
+            <Layers className="h-4 w-4" />
+            <span>{t('ترحيل وتحديث الهيكل', 'Migrate & Update Schema')}</span>
+          </button>
+
+          <button
             onClick={() => { setImportResult(null); setImportStage('first'); }}
             disabled={importStage === 'running'}
             className="flex items-center gap-2 rounded-xl bg-rose-600 hover:bg-rose-700 px-4 py-2 text-xs font-black text-white shadow-xs transition-all cursor-pointer disabled:opacity-50"
@@ -277,6 +295,24 @@ export const NeonHubView: React.FC = () => {
       </div>
 
       {/* Backup Success Feedback Banner */}
+      {schemaReport && (
+        <div className="space-y-2 rounded-2xl border border-indigo-200 bg-indigo-50 p-4 text-xs font-bold text-indigo-900 dark:border-indigo-900/50 dark:bg-indigo-950/30 dark:text-indigo-200">
+          <div className="flex items-center justify-between">
+            <span>{schemaReport}</span>
+            <button onClick={() => { setSchemaReport(null); setShowSchemaFailures([]); }} className="text-indigo-600 hover:text-indigo-800">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          {showSchemaFailures.length > 0 && (
+            <ul className="max-h-40 space-y-1 overflow-y-auto rounded-lg bg-white/70 p-2 font-mono text-[10px] text-rose-700 dark:bg-slate-900/60 dark:text-rose-300">
+              {showSchemaFailures.slice(0, 40).map((failure, index) => (
+                <li key={index}>{failure}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
       {importResult && (
         <div className="flex items-center justify-between p-4 bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 rounded-2xl text-xs font-bold text-indigo-800 dark:text-indigo-200">
           <div className="flex items-center gap-2">

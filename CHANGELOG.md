@@ -2,6 +2,15 @@
 
 # 2026-10-12
 
+## Migrate & Update Schema button for Neon
+
+- Added a shared schema definition (`src/services/neonSchema.ts`) describing a matching Neon table for every local dataset: typed key columns for querying plus a `payload` JSONB column holding the full record, so nested structures (journal lines, shift rows, party offers) are preserved.
+- Added `NeonService.runFullSchemaMigration` and a **"Migrate & Update Schema"** button on the Neon screen. It creates every missing table (`CREATE TABLE IF NOT EXISTS`) and adds every missing column (`ALTER TABLE ... ADD COLUMN IF NOT EXISTS`), which makes it idempotent and safe to re-run later to evolve the schema.
+- The screen reports how many tables/columns were processed and lists any failures.
+- Files: `src/services/neonSchema.ts` (new), `src/services/neonService.ts`, `src/context/PlatformContext.tsx`, `src/views/NeonHubView.tsx`.
+
+# 2026-10-12
+
 ## Neon relational sync: batched inserts (appointments/follow-ups were unusable)
 
 - Root cause of "appointments/follow-ups were not uploaded": the relational mirror inserted **one row per HTTP request**. With 62,653 appointments, 61,425 follow-ups, 22,980 parties and 10,348 receipts that meant ~155,000 sequential round-trips, i.e. hours - effectively never finishing.

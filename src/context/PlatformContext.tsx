@@ -667,6 +667,7 @@ interface PlatformContextType {
   neonAutoSyncProgress: string;
   getNeonDatasetSummary: () => { key: string; count: number }[];
   importAllFromNeon: () => Promise<{ success: boolean; message: string; imported: number; backupFilename?: string }>;
+  migrateNeonSchema: () => Promise<{ success: boolean; message: string; created: number; updated: number; total: number; failures: string[] }>;
   updateNeonConnectionString: (conn: string) => void;
   testNeonConnection: (connOverride?: string) => Promise<boolean>;
   syncAllToNeon: () => Promise<{ success: boolean; message: string; count: number }>;
@@ -8582,6 +8583,33 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return res;
   };
 
+
+  const migrateNeonSchema = async (): Promise<{ success: boolean; message: string; created: number; updated: number; total: number; failures: string[] }> => {
+    const rawConnection = String(neonDb.connectionString || '').trim();
+    if (!rawConnection.startsWith('postgres://') && !rawConnection.startsWith('postgresql://')) {
+      return { success: false, message: 'الرجاء إدخال رابط اتصال Neon صالح أولاً', created: 0, updated: 0, total: 0, failures: [] };
+    }
+    setNeonDb((prev) => ({ ...prev, isSyncing: true }));
+    const result = await NeonService.runFullSchemaMigration(rawConnection);
+    setNeonDb((prev) => {
+      const next = {
+        ...prev,
+        isSyncing: false,
+        connected: result.created > 0 ? true : prev.connected,
+        tablesCount: result.total ? result.total : prev.tablesCount,
+        error: result.success ? undefined : result.message,
+      };
+      localStorage.setItem('erp_neon_cfg', JSON.stringify(next));
+      return next;
+    });
+    logUserActivity(
+      'neon', 'قاعدة البيانات السحابية', 'Neon Database',
+      'ترحيل وتحديث هيكل الجداول', 'Migrate & update database schema',
+      `${result.message} (جداول: ${result.created}، أعمدة محدّثة: ${result.updated})`
+    );
+    return result;
+  };
+
   const runNeonMigrations = async (): Promise<{ success: boolean; message: string }> => {
     if (!neonDb.connectionString) {
       return { success: false, message: 'الرجاء إدخال رابط اتصال Neon أولاً' };
@@ -11162,6 +11190,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         neonAutoSync,
         neonAutoSyncProgress,
         importAllFromNeon,
+        migrateNeonSchema,
         getNeonDatasetSummary: () => buildAllDatasetDocuments().map((doc) => ({
           key: doc.key,
           count: Array.isArray(doc.payload) ? doc.payload.length : 0,
