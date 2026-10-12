@@ -125,6 +125,7 @@ import { pushRecordChanges, pullChangedRecords, mergeRecords, fetchLiveRecords }
 import { postJournal } from '../services/accountingApi';
 import { postCustomerReceipt } from '../services/accountingApi';
 import { postCustomerRefund } from '../services/accountingApi';
+import { saveRecord } from '../services/commands';
 import { reverseJournal, fetchAccountBalances } from '../services/accountingApi';
 import { normalizeStatementDate, isReceiptMatchingParty } from '../utils/statementUtils';
 
@@ -8091,7 +8092,12 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       tenantId: activeTenantId,
       isArchived: false,
     };
-    setAllBranches((prev) => [...prev, newBranch]);
+    // DATABASE-FIRST: stored in the database first, then it appears on the screen.
+    void saveRecord({
+      docKey: 'erp_branches',
+      record: newBranch as unknown as Record<string, unknown>,
+      applyLocal: () => setAllBranches((prev) => [...prev, newBranch]),
+    });
     const parentT = allTenants.find((t) => t.id === activeTenantId) || tenant;
     logUserActivity(
       'companies',
@@ -8219,7 +8225,12 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       tenantId: activeTenantId,
       isArchived: false,
     };
-    setAllWarehouses((prev) => [...prev, newWarehouse]);
+    // DATABASE-FIRST: stored in the database first, then it appears on the screen.
+    void saveRecord({
+      docKey: 'erp_warehouses',
+      record: newWarehouse as unknown as Record<string, unknown>,
+      applyLocal: () => setAllWarehouses((prev) => [...prev, newWarehouse]),
+    });
     const parentT = allTenants.find((t) => t.id === activeTenantId) || tenant;
     logUserActivity(
       'companies',
