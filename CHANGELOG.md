@@ -2,6 +2,14 @@
 
 # 2026-10-12
 
+## Recovery mode: read the old local browser data again
+
+- Added a recovery switch (`erp_local_recovery`): when enabled, Neon-only mode is turned off so the app reads the previous local browser data again, which can then be pushed back to Neon with the full-sync button.
+- The startup gate offers a **"Recover from the old local data (this browser)"** action that enables recovery mode and reloads.
+- Files: `src/utils/persistenceMode.ts`, `src/App.tsx`.
+
+# 2026-10-12
+
 ## CRITICAL: prevent the app from overwriting Neon with its initial/demo state
 
 - The automatic push could run **before** the Neon bootstrap finished, so the app's initial/demo state was uploaded to Neon and **replaced real data**.

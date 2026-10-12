@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { PlatformProvider, usePlatform } from './context/PlatformContext';
+import { setRecoveryMode } from './utils/persistenceMode';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { LoginView } from './views/LoginView';
@@ -378,6 +379,25 @@ const MainLayout: React.FC = () => {
               {neonConnectionInfo.host} / {neonConnectionInfo.database}
             </p>
           )}
+
+          <button
+            type="button"
+            onClick={() => {
+              const confirmed = window.confirm(
+                t(
+                  'سيتم إعادة تشغيل التطبيق وقراءة البيانات المحلية القديمة من هذا المتصفح بدل Neon، ثم يمكنك رفعها إلى Neon من زر المزامنة الكاملة. هل تريد المتابعة؟',
+                  'The app will restart and read the old local browser data instead of Neon, then you can push it back with the full sync button. Continue?'
+                )
+              );
+              if (confirmed) {
+                setRecoveryMode(true);
+                window.location.reload();
+              }
+            }}
+            className="text-[11px] font-bold text-amber-300 underline hover:text-amber-200"
+          >
+            {t('استعادة من البيانات المحلية القديمة (هذا المتصفح)', 'Recover from the old local data (this browser)')}
+          </button>
 
           <p className="text-[10px] text-slate-500">
             {t(
