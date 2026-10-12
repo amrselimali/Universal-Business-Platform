@@ -2,6 +2,15 @@
 
 # 2026-10-12
 
+## Backup button now reads live data from Neon
+
+- The "Backup to Excel" button in the Neon screen previously exported the **in-browser** state while claiming to back up the database. It now reads every dataset from Neon's `app_documents` store first and only falls back to the browser copy for datasets missing in Neon.
+- The result message clearly states the source (live Neon data with the dataset count, or browser data when Neon is not connected / unreadable).
+- Stock levels are now part of the automatic Neon sync (`erp_stock_levels`) so the backup covers them from Neon too.
+- Files: `src/views/NeonHubView.tsx`, `src/context/PlatformContext.tsx`.
+
+# 2026-10-12
+
 ## All data now syncs automatically to Neon (unified document store)
 
 - Added the `app_documents` table (one JSONB row per dataset per tenant) plus `NeonService.saveDocuments` / `NeonService.fetchDocuments` / `NeonService.ensureDocumentsTable`.

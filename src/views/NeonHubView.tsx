@@ -17,6 +17,7 @@ import {
   X,
 } from 'lucide-react';
 import { exportDatabaseToMultiSheetExcel } from '../utils/fullDatabaseExcelBackup';
+import { NeonService } from '../services/neonService';
 
 export const NeonHubView: React.FC = () => {
   const {
@@ -86,37 +87,68 @@ export const NeonHubView: React.FC = () => {
   const [isExportingExcel, setIsExportingExcel] = useState<boolean>(false);
   const [backupFeedback, setBackupFeedback] = useState<string | null>(null);
 
-  const handleBackupToExcel = () => {
+  const handleBackupToExcel = async () => {
     setIsExportingExcel(true);
     setBackupFeedback(null);
     try {
+      // Read the data from Neon when connected (single source of truth); each dataset is a
+      // JSONB document in app_documents. Any dataset missing in Neon falls back to the
+      // in-browser copy so the backup is never empty.
+      const canReadNeon = neonDb.connected && Boolean(neonDb.connectionString) && Boolean(tenant?.id);
+      let neonDocs: { [key: string]: any } = {};
+      let sourceLabel = t('بيانات المتصفح (غير متصل بـ nion)', 'browser data (Neon not connected)');
+
+      if (canReadNeon) {
+        const fetched = await NeonService.fetchDocuments(neonDb.connectionString, tenant!.id);
+        if (fetched.success && Object.keys(fetched.documents).length > 0) {
+          neonDocs = fetched.documents as { [key: string]: any };
+          sourceLabel = t(
+            `بيانات nion مباشرة (${Object.keys(neonDocs).length} مجموعة)`,
+            `live Neon data (${Object.keys(neonDocs).length} datasets)`
+          );
+        } else {
+          sourceLabel = t(
+            `تعذر قراءة nion (${fetched.message}) - تم استخدام بيانات المتصفح`,
+            `Could not read Neon (${fetched.message}) - browser data used`
+          );
+        }
+      }
+
+      const fromNeon = <T,>(key: string, fallback: T): T => {
+        const value = neonDocs[key];
+        return Array.isArray(value) ? (value as unknown as T) : fallback;
+      };
+
       const res = exportDatabaseToMultiSheetExcel({
-        tenantName: tenant?.nameAr || 'المؤسسة الطبية',
-        branches: allBranches || branches,
-        warehouses: allWarehouses || warehouses,
-        users: allUsers || users,
-        parties: allParties || parties,
-        products: allProducts || products,
-        stockLevels: stockLevels,
-        stockMovements: allStockMovements || stockMovements,
-        accounts: allAccounts || accounts,
-        journalEntries: allJournals || journalEntries,
-        invoices: allInvoices || invoices,
-        cashReceipts: allCashReceipts || cashReceipts,
-        cashPayments: allCashPayments || cashPayments,
-        goodsReceipts: allGoodsReceipts || goodsReceipts,
-        goodsIssues: allGoodsIssues || goodsIssues,
-        receptionShifts: allReceptionShifts || receptionShifts,
-        attendanceRecords: allAttendanceRecords || attendanceRecords,
-        staffMembers: allStaffMembers || staffMembers,
-        appointments: allAppointments || appointments,
-        patientFollowUps: allPatientFollowUps || patientFollowUps,
-        paymentMethods: allPaymentMethods || paymentMethods,
-        laserDevices: allLaserDevices || laserDevices,
+        tenantName: (tenant as any)?.nameAr || (tenant as any)?.name || 'المؤسسة الطبية',
+        branches: fromNeon('erp_branches', allBranches || branches),
+        warehouses: fromNeon('erp_warehouses', allWarehouses || warehouses),
+        users: fromNeon('erp_users', allUsers || users),
+        parties: fromNeon('erp_parties_backup', allParties || parties),
+        products: fromNeon('erp_products', allProducts || products),
+        stockLevels: fromNeon('erp_stock_levels', stockLevels),
+        stockMovements: fromNeon('erp_stock_movements', allStockMovements || stockMovements),
+        accounts: fromNeon('erp_accounts', allAccounts || accounts),
+        journalEntries: fromNeon('erp_journals', allJournals || journalEntries),
+        invoices: fromNeon('erp_invoices', allInvoices || invoices),
+        cashReceipts: fromNeon('erp_cash_receipts', allCashReceipts || cashReceipts),
+        cashPayments: fromNeon('erp_cash_payments', allCashPayments || cashPayments),
+        goodsReceipts: fromNeon('erp_goods_receipts', allGoodsReceipts || goodsReceipts),
+        goodsIssues: fromNeon('erp_goods_issues', allGoodsIssues || goodsIssues),
+        receptionShifts: fromNeon('erp_reception_shifts', allReceptionShifts || receptionShifts),
+        attendanceRecords: fromNeon('erp_attendance_records', allAttendanceRecords || attendanceRecords),
+        staffMembers: fromNeon('erp_staff_members', allStaffMembers || staffMembers),
+        appointments: fromNeon('erp_appointments', allAppointments || appointments),
+        patientFollowUps: fromNeon('erp_patient_followups', allPatientFollowUps || patientFollowUps),
+        paymentMethods: fromNeon('erp_payment_methods', allPaymentMethods || paymentMethods),
+        laserDevices: fromNeon('clinic_laser_devices', allLaserDevices || laserDevices),
       });
 
       if (res.success) {
-        setBackupFeedback(t(`تم تصدير النسخة الاحتياطية بنجاح إلى ملف: ${res.filename} (يحتوي على 24 جدول منفصل تشمل الحجوزات والمتابعات)`, `Database backup exported successfully to: ${res.filename} with 24 separate sheets including bookings and follow-ups!`));
+        setBackupFeedback(t(
+          `تم تصدير النسخة الاحتياطية بنجاح إلى ملف: ${res.filename} (24 جدول) - المصدر: ${sourceLabel}`,
+          `Backup exported to ${res.filename} (24 sheets) - source: ${sourceLabel}`
+        ));
       } else {
         setBackupFeedback(t('فشل في تصدير النسخة الاحتياطية: ' + res.filename, 'Failed to export backup: ' + res.filename));
       }
