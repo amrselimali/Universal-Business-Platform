@@ -57,7 +57,7 @@ import {
   NotificationCategory,
 } from '../types';
 import { safeLocalStorageSet, safeLocalStorageGet, idbSet, idbGet, idbDelete, persistDataset, loadPersistedDataset } from '../utils/safeStorage';
-import { persistLocal, readLocal, DOCUMENTS_CACHE_KEY, DocumentsCache, isNeonOnlyMode } from '../utils/persistenceMode';
+import { persistLocal, readLocal, DOCUMENTS_CACHE_KEY, DocumentsCache, isNeonOnlyMode, USE_LOCAL_CACHE } from '../utils/persistenceMode';
 import { INITIAL_NOTIFICATION_RULES, INITIAL_NOTIFICATIONS_HISTORY } from '../data/notificationRulesData';
 import { playNotificationSound } from '../utils/audioAlert';
 import {
@@ -669,7 +669,7 @@ interface PlatformContextType {
   getNeonDatasetSummary: () => { key: string; count: number }[];
   importAllFromNeon: () => Promise<{ success: boolean; message: string; imported: number; backupFilename?: string }>;
   migrateNeonSchema: () => Promise<{ success: boolean; message: string; created: number; updated: number; total: number; failures: string[] }>;
-  neonBootstrap: { status: 'idle' | 'loading' | 'ready' | 'error' | 'no-config'; message?: string; usedCache?: boolean; updatedKeys?: number; lastRun?: string; tenantId?: string; datasetCount?: number };
+  neonBootstrap: { status: 'idle' | 'loading' | 'ready' | 'error' | 'no-config'; message?: string; usedCache?: boolean; updatedKeys?: number; lastRun?: string; tenantId?: string; datasetCount?: number; progress?: string };
   retryNeonBootstrap: () => Promise<void>;
   neonConnectionInfo: { host: string; database: string } | null;
   updateNeonConnectionString: (conn: string) => void;
@@ -10685,6 +10685,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     lastRun?: string;
     tenantId?: string;
     datasetCount?: number;
+    progress?: string;
   }>({ status: 'idle' });
   const neonBootstrapRanRef = useRef(false);
 
@@ -10767,7 +10768,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       cached = null;
     }
     let usedCache = false;
-    if (cached && Object.keys(cached).length > 0) {
+    if (USE_LOCAL_CACHE && cached && Object.keys(cached).length > 0) {
       const cachedPayloads: { [key: string]: unknown } = {};
       Object.keys(cached).forEach((key) => { cachedPayloads[key] = cached![key].payload; });
       applyDatasetDocuments(cachedPayloads);
@@ -10799,14 +10800,29 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       return;
     }
     const baseKeys = Object.keys(meta.metadata).filter((key) => !key.includes('#'));
-    const changedKeys = baseKeys.filter((key) => !cached || !cached[key] || cached[key].updatedAt !== meta.metadata[key]);
-    const fetched = changedKeys.length > 0
-      ? await NeonService.fetchDocumentsByKeys(rawConnection, tenantId, changedKeys)
-      : { success: true, documents: {} as { [key: string]: unknown }, message: '' };
-    if (!fetched.success) {
-      setNeonBootstrap({ status: 'error', message: fetched.message });
-      return;
+    // In direct-DB mode every dataset is read from the database; otherwise only the
+    // ones whose Neon version is newer than the local cache.
+    const keysToFetch = USE_LOCAL_CACHE
+      ? baseKeys.filter((key) => !cached || !cached[key] || cached[key].updatedAt !== meta.metadata[key])
+      : baseKeys;
+
+    const fetchedDocuments: { [key: string]: unknown } = {};
+    for (let index = 0; index < keysToFetch.length; index += 1) {
+      const key = keysToFetch[index];
+      setNeonBootstrap({
+        status: 'loading',
+        progress: `${index + 1}/${keysToFetch.length}`,
+        message: `تحميل البيانات من Neon... (${index + 1}/${keysToFetch.length}) ${key}`,
+      });
+      const result = await NeonService.fetchDocumentByKey(rawConnection, tenantId, key);
+      if (!result.success) {
+        setNeonBootstrap({ status: 'error', message: result.message });
+        return;
+      }
+      if (result.value !== undefined) fetchedDocuments[key] = result.value;
     }
+    const changedKeys = keysToFetch;
+    const fetched = { success: true, documents: fetchedDocuments, message: '' };
     const appliedNow = applyDatasetDocuments(fetched.documents);
 
     // 4) Refresh the cache (drop keys removed in Neon, store the new versions).
@@ -10818,7 +10834,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       }
     });
     try {
-      await idbSet(cacheKey, nextCache);
+      if (USE_LOCAL_CACHE) await idbSet(cacheKey, nextCache);
     } catch (cacheError) {
       console.warn('Failed to refresh the local Neon cache:', cacheError);
     }

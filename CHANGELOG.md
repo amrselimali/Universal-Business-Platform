@@ -2,6 +2,14 @@
 
 # 2026-10-12
 
+## Direct database mode: no local cache, every dataset read straight from Neon
+
+- `USE_LOCAL_CACHE = false`: the app keeps **no local copy** of business data. Startup reads every dataset directly from Neon, dataset by dataset, with live progress (`x/y`) shown on the gate screen.
+- The local IndexedDB cache is neither read nor written; Neon remains the only store. A dataset is still never uploaded unless it was actually read from Neon.
+- Files: `src/utils/persistenceMode.ts`, `src/context/PlatformContext.tsx`.
+
+# 2026-10-12
+
 ## Version history: every overwritten document is archived before it is replaced
 
 - Added `app_documents_history` (with an index on tenant/doc_key/archived_at) and `saveDocuments` now archives the previous version of each document immediately before overwriting it, so an accidental overwrite can always be traced and restored.
