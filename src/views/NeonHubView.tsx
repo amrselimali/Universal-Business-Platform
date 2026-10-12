@@ -34,6 +34,7 @@ export const NeonHubView: React.FC = () => {
     pullLatestFromNeon,
     neonAutoSync,
     neonAutoSyncProgress,
+    getNeonDatasetSummary,
     branches,
     allBranches,
     warehouses,
@@ -294,6 +295,21 @@ export const NeonHubView: React.FC = () => {
           {neonDb.connected ? t('متصل', 'connected') : t('غير متصل', 'not connected')}
         </span>
       </div>
+
+      {/* Dataset inventory: which datasets are included in the Neon sync and how many records each holds. */}
+      <details className="rounded-2xl border border-slate-200 bg-white p-3.5 text-xs dark:border-slate-700 dark:bg-slate-900">
+        <summary className="cursor-pointer font-black text-slate-700 dark:text-slate-200">
+          {t('قائمة المجموعات وأعدادها (للمراجعة)', 'Dataset inventory (review)')}
+        </summary>
+        <div className="mt-3 grid grid-cols-1 gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
+          {getNeonDatasetSummary().map((item) => (
+            <div key={item.key} className="flex items-center justify-between gap-2 rounded-lg border border-slate-100 px-2.5 py-1.5 dark:border-slate-800">
+              <span className="font-mono text-[11px] text-slate-500">{item.key}</span>
+              <span className="font-mono font-black text-slate-800 dark:text-slate-100">{item.count}</span>
+            </div>
+          ))}
+        </div>
+      </details>
 
       {/* Connection Box */}
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs dark:border-slate-800 dark:bg-slate-900 space-y-4">
