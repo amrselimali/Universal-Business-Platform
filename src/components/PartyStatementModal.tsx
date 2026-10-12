@@ -130,12 +130,14 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
   const scopedShifts = useMemo(() => (effectiveBranchScoped ? receptionShifts.filter((shift) => shift.branchId === effectiveBranchScoped) : receptionShifts), [receptionShifts, effectiveBranchScoped]);
   const allAvailableReceipts = useMemo(() => {
     const map = new Map<string, CashReceiptVoucher>();
+    // Exclude archived receipts exactly like the collection receipts screen,
+    // otherwise the statement would show receipts the user cannot see or cancel.
     allCashReceipts.forEach((r) => {
       if (!tenant?.id || !r.tenantId || r.tenantId === tenant.id) {
-        map.set(r.id, r);
+        if (!r.isArchived) map.set(r.id, r);
       }
     });
-    cashReceipts.forEach((r) => map.set(r.id, r));
+    cashReceipts.forEach((r) => { if (!r.isArchived) map.set(r.id, r); });
     return Array.from(map.values());
   }, [allCashReceipts, cashReceipts, tenant?.id]);
   const scopedReceipts = useMemo(() => (effectiveBranchScoped ? allAvailableReceipts.filter((rcpt) => rcpt.branchId === effectiveBranchScoped) : allAvailableReceipts), [allAvailableReceipts, effectiveBranchScoped]);
