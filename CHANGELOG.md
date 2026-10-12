@@ -2,6 +2,14 @@
 
 # 2026-10-12
 
+## Collection receipts screen — "Show hidden receipts" toggle
+
+- Added a **Show hidden receipts** toggle to the collection receipts screen. When enabled, receipts that are normally hidden there are listed: receipts linked to shift rows, receipts matching legacy shift rows, and receipts from other branches.
+- This removes the dead end where a receipt appeared in the customer statement but could not be found in the receipts screen to review or cancel it.
+- Files: `src/views/CollectionReceiptsView.tsx`.
+
+# 2026-10-12
+
 ## Statement no longer shows archived receipts (root cause of the "phantom" receipts)
 
 - The detailed customer statement included **archived** collection receipts, while the collection receipts screen (active view) hides them — so receipts like `CR-2026-0007/0008/0009` appeared in the statement but were impossible to see or cancel in the screen.
