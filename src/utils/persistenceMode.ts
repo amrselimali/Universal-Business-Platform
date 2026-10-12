@@ -20,6 +20,11 @@ try {
 }
 
 export const RECOVERY_STORAGE_KEY = RECOVERY_FLAG;
+
+// Direct-DB mode: when enabled the app talks ONLY to Neon and keeps no local copy of
+// the business data (no IndexedDB cache). Startup then reads every dataset directly
+// from the database.
+export const USE_LOCAL_CACHE = false;
 export const isRecoveryMode = (): boolean => !neonOnly;
 export const setRecoveryMode = (enabled: boolean): void => {
   try {
