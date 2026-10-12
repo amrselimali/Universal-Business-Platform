@@ -282,9 +282,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
         const matchRcpt =
           rcpt.partyId
             ? rcpt.partyId === currentParty.id
-            : (Boolean(pCode && rcpt.systemCode?.toLowerCase().trim() === pCode) ||
-              Boolean(pCustomerCode && rcpt.customerCode?.toLowerCase().trim() === pCustomerCode) ||
-              Boolean(rcpt.receivedFrom && rcpt.receivedFrom.toLowerCase().trim() === pName));
+            : Boolean(pCustomerCode && rcpt.customerCode?.toLowerCase().trim() === pCustomerCode);
 
         if (matchRcpt) {
           const amt = Number(rcpt.amount) || 0;
@@ -480,9 +478,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
       .filter((rcpt) => {
         const matchRcpt = rcpt.partyId
           ? rcpt.partyId === currentParty.id
-          : (Boolean(pCode && rcpt.systemCode?.toLowerCase().trim() === pCode) ||
-            Boolean(pCustomerCode && rcpt.customerCode?.toLowerCase().trim() === pCustomerCode) ||
-            Boolean(rcpt.receivedFrom && rcpt.receivedFrom.toLowerCase().trim() === pName));
+          : Boolean(pCustomerCode && rcpt.customerCode?.toLowerCase().trim() === pCustomerCode);
         return matchRcpt;
       })
       .filter((rcpt) => rcpt.date >= filterStart && rcpt.date <= filterEnd)

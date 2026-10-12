@@ -2,6 +2,15 @@
 
 # 2026-10-11
 
+## Receipt linking by auto-serial customer code + reconciliation resilience
+
+- Collection receipts are now linked to a customer using the **auto-serial customer code only** (system code / paper code / name matching removed) in both the customer statement and the receipt-to-account reconciliation.
+- The reconciliation effect now resolves a missing `partyId` from `receipt.customerCode` (auto-serial) before skipping the receipt, so unlinked receipts are attached to the right customer account.
+- The customer-account reconciliation effect is now wrapped in try/catch so an unexpected error no longer crashes the whole UI (the previous data is preserved and the error is logged).
+- Files: `src/context/PlatformContext.tsx`, `src/components/PartyStatementModal.tsx`.
+
+# 2026-10-11
+
 ## Import — file date no longer rejects rows (upload date is posted)
 
 - Fixed imported collection receipts / customer refunds not appearing in the detailed customer statements. Root cause: the Excel importer rejected any row whose date was not strictly `YYYY-MM-DD`, so those rows were never recorded (and never appeared in the statement).

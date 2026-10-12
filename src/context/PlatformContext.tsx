@@ -8604,6 +8604,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   useEffect(() => {
     if (!isStorageHydrated) return;
 
+    try {
     const accountsForReconciliation = [...allAccounts];
     const accountBalanceDeltas = new Map<string, number>();
     const consolidatedBalances = new Map<string, number>();
@@ -8778,8 +8779,18 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     });
 
     const reconciledReceipts = allCashReceipts.map((receipt) => {
-      if (receipt.status !== 'active' || receipt.journalPostingSuppressed || !receipt.partyId) return receipt;
-      const receiptParty = updatedParties.get(receipt.partyId) || allParties.find((party) => party.id === receipt.partyId);
+      if (receipt.status !== 'active' || receipt.journalPostingSuppressed) return receipt;
+      // Link the receipt to its customer using the auto-serial customer code ONLY.
+      let receiptPartyId = receipt.partyId;
+      if (!receiptPartyId && receipt.customerCode) {
+        const matchedByAutoCode = allParties.find((party) =>
+          (party.type === 'Customer' || party.type === 'Both') &&
+          String(party.customerCode || party.code || '').trim() === String(receipt.customerCode).trim()
+        );
+        if (matchedByAutoCode) receiptPartyId = matchedByAutoCode.id;
+      }
+      if (!receiptPartyId) return receipt;
+      const receiptParty = updatedParties.get(receiptPartyId) || allParties.find((party) => party.id === receiptPartyId);
       if (!receiptParty || (receiptParty.type !== 'Customer' && receiptParty.type !== 'Both')) return receipt;
       if (isDateLockedInPeriod(receipt.date, allPeriodLocks, receipt.tenantId, receipt.branchId).isLocked) return receipt;
 
@@ -8806,6 +8817,10 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
       const journalIndex = findCustomerReceiptJournalIndex(receipt, updatedJournals);
       const nextReceipt = { ...receipt };
+      if (nextReceipt.partyId !== receiptPartyId) {
+        nextReceipt.partyId = receiptPartyId;
+        receiptsChanged = true;
+      }
       if (!receipt.customerBalanceApplied) {
         const currentParty = updatedParties.get(receiptParty.id) || receiptParty;
         updatedParties.set(receiptParty.id, {
@@ -8934,6 +8949,9 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
     if (journalsChanged) setAllJournals(updatedJournals);
     if (receiptsChanged) setAllCashReceipts(reconciledReceipts);
+    } catch (reconciliationError) {
+      console.error('Customer account reconciliation failed; existing data is preserved.', reconciliationError);
+    }
   }, [allAccounts, allCashReceipts, allJournals, allParties, allPeriodLocks, isStorageHydrated]);
 
   const [allCashPayments, setAllCashPayments] = useState<CashPaymentVoucher[]>(() => {

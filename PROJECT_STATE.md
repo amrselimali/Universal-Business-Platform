@@ -1,5 +1,12 @@
 # PROJECT STATE
 
+## Receipt linking by auto-serial code + reconciliation guard — 2026-10-11
+
+- Receipt-to-customer matching now uses the auto-serial customer code only (removed systemCode/paperCode/name fallbacks) in the customer statement and the reconciliation.
+- Reconciliation resolves a missing receipt `partyId` from `receipt.customerCode` before skipping it.
+- The reconciliation effect is guarded with try/catch so an unexpected error cannot crash the UI (data preserved, error logged).
+- Files: `src/context/PlatformContext.tsx`, `src/components/PartyStatementModal.tsx`. Validation: tsc unchanged (126 pre-existing); vite build ok.
+
 ## Import date handling fix — 2026-10-11
 
 - Imported collection receipts and refunds were being dropped when the file date was not `YYYY-MM-DD`, so they never showed in the detailed customer statements.
