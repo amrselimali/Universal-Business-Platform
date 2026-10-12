@@ -674,6 +674,8 @@ interface PlatformContextType {
   neonConnectionInfo: { host: string; database: string } | null;
   compareWithNeon: () => Promise<{ key: string; appCount: number; neonCount: number | null }[]>;
   neonLastRefresh: string;
+  neonOnline: boolean;
+  syncNow: () => Promise<{ updated: number; error?: string }>;
   updateNeonConnectionString: (conn: string) => void;
   testNeonConnection: (connOverride?: string) => Promise<boolean>;
   syncAllToNeon: () => Promise<{ success: boolean; message: string; count: number }>;
@@ -10961,6 +10963,24 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [neonBootstrap.status, neonDb.connectionString, tenant?.id, language]);
 
+  // Offline-first: the app runs on the local copy and syncs with Neon whenever the
+  // internet becomes available (immediately, not on the next minute tick).
+  const [neonOnline, setNeonOnline] = useState<boolean>(typeof navigator !== 'undefined' ? navigator.onLine : true);
+  useEffect(() => {
+    const handleOnline = () => {
+      setNeonOnline(true);
+      void refreshFromNeon();
+    };
+    const handleOffline = () => setNeonOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [neonBootstrap.status, neonDb.connectionString, tenant?.id, language]);
+
   // Run once on startup, after storage hydration.
   useEffect(() => {
     if (!isStorageHydrated || neonBootstrapRanRef.current) return;
@@ -11527,6 +11547,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         neonConnectionInfo,
         compareWithNeon,
         neonLastRefresh,
+        neonOnline,
+        syncNow: refreshFromNeon,
         // Backwards-compatible alias: patients are the parties of type Customer/Both.
         patients: parties,
         getNeonDatasetSummary: () => buildAllDatasetDocuments().map((doc) => ({
