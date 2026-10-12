@@ -1,5 +1,25 @@
 # PROJECT STATE
 
+## Database-first conversion — recipe and current status (2026-10-12)
+
+### Where we are
+- Neon is the single source of truth: `app_records` (161,760 live rows) and the atomic ledger `gl_journals`/`gl_journal_lines`. `app_documents` was archived and dropped.
+- The backend API exists (`server/`, Fastify + JWT + RLS + `set_config('app.tenant_id')`) and was verified live against the database.
+- The app still edits its in-memory state first and pushes the change per record to `app_records` (now within ~400 ms). So commands DO reach the database, but the screen is still the writer rather than a pure view.
+
+### The target model (database-first)
+Screen = view only. Button = database operation. Steps per screen:
+1. Build the record the button should create/change (pure data).
+2. Call the command layer (`src/services/commands.ts`): `saveRecord`, `deleteRecord`, `createCollectionReceipt`, `createJournalEntry`, `reloadDataset`.
+3. The database is written FIRST; the local state updates only after the database confirms.
+4. On rejection/network error the local state is untouched and the error is shown.
+5. Re-read the dataset (`reloadDataset`) or rely on the incremental pull to refresh the view.
+
+While no API session is configured the command layer falls back to the local update, so screens can be converted one at a time without stopping the application.
+
+### Remaining work
+- Convert the 35 screens (~150-200 buttons) one at a time using the recipe above; estimated 3-4 weeks. Recommended order: collection receipts, refunds, general journal, POS/invoices (needs idempotency keys), then the rest.
+
 ## Collection Receipt Cash/Bank Account Resolution & Balance Synchronization Fix — 2026-10-12
 
 - Resolved migration and hydration errors: `Collection receipt migration skipped: no linked cash/bank account for CR-2026-0004` through `CR-2026-0009`.
