@@ -1,5 +1,5 @@
 import { neon } from '@neondatabase/serverless';
-import { APP_DOCUMENTS_DDL, NEON_SCHEMA_TABLES, NeonTableSchema, buildAlterTableSql, buildCreateTableSql } from './neonSchema';
+import { APP_DOCUMENTS_DDL, APP_DOCUMENTS_HISTORY_DDL, APP_DOCUMENTS_HISTORY_INDEX_DDL, NEON_SCHEMA_TABLES, NeonTableSchema, buildAlterTableSql, buildCreateTableSql } from './neonSchema';
 import {
   Product,
   Account,
@@ -1233,6 +1233,15 @@ export class NeonService {
       if (!ready) {
         return { success: false, saved: 0, message: 'تعذر إنشاء جدول التخزين الموحّد app_documents' };
       }
+      // Best-effort archive so an accidental overwrite can always be recovered.
+      let historyReady = false;
+      try {
+        await sql.query(APP_DOCUMENTS_HISTORY_DDL);
+        await sql.query(APP_DOCUMENTS_HISTORY_INDEX_DDL);
+        historyReady = true;
+      } catch (historyError) {
+        console.warn('app_documents_history unavailable:', historyError);
+      }
 
       // Large datasets are split into small chunk documents so no single HTTP request
       // becomes huge (the previous single-request-per-dataset behaviour made big
@@ -1258,6 +1267,17 @@ export class NeonService {
         while (cursor < total && !failed) {
           const task = tasks[cursor++];
           try {
+            if (historyReady) {
+              try {
+                await sql`
+                  INSERT INTO app_documents_history (tenant_id, doc_key, payload)
+                  SELECT tenant_id, doc_key, payload FROM app_documents
+                  WHERE tenant_id = ${tenantId} AND doc_key = ${task.key}
+                `;
+              } catch (archiveError) {
+                console.warn('Archive before overwrite failed:', archiveError);
+              }
+            }
             await sql`
               INSERT INTO app_documents (tenant_id, doc_key, payload, updated_at)
               VALUES (${tenantId}, ${task.key}, ${JSON.stringify(task.payload ?? [])}::jsonb, NOW())
