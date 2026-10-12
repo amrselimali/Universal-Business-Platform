@@ -2,6 +2,15 @@
 
 # 2026-10-12
 
+## Statement no longer shows archived receipts (root cause of the "phantom" receipts)
+
+- The detailed customer statement included **archived** collection receipts, while the collection receipts screen (active view) hides them — so receipts like `CR-2026-0007/0008/0009` appeared in the statement but were impossible to see or cancel in the screen.
+- The statement (and the balance synchronization) now exclude archived receipts, matching the collection receipts screen.
+- Added a safety try/catch around the customer reconciliation effect so an unexpected error preserves existing data instead of surfacing as a browser exception.
+- Files: `src/components/PartyStatementModal.tsx`, `src/context/PlatformContext.tsx`.
+
+# 2026-10-12
+
 ## Customer balance sync follow-ups
 
 - The reconciliation effect (which recomputes each customer's card balance from the statement sources) now also depends on `allCustomerRefunds`, so refunds that are auto-recovered after the first pass are immediately reflected in the card balance.

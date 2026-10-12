@@ -8713,6 +8713,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   useEffect(() => {
     if (!isStorageHydrated) return;
 
+    try {
     const accountsForReconciliation = [...allAccounts];
     const missingControlAccounts: Account[] = [];
 
@@ -9137,7 +9138,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         return partyByAutoCode.get(candidate) || partyByAutoCode.get(candidate.replace(/^0+/, ''));
       };
 
-      const activeReceipts = allCashReceipts.filter((receipt) => receipt.status !== 'cancelled');
+      const activeReceipts = allCashReceipts.filter((receipt) => receipt.status !== 'cancelled' && !receipt.isArchived);
       const receiptIds = new Set(activeReceipts.map((receipt) => receipt.id));
       const receiptJournalAmounts = new Set(activeReceipts
         .filter((receipt) => receipt.journalEntryId)
@@ -9231,6 +9232,9 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
     if (journalsChanged) setAllJournals(updatedJournals);
     if (receiptsChanged) setAllCashReceipts(reconciledReceipts);
+    } catch (reconciliationError) {
+      console.error('Customer reconciliation failed; existing data is preserved.', reconciliationError);
+    }
   }, [allAccounts, allCashReceipts, allCustomerRefunds, allJournals, allParties, allPeriodLocks, isStorageHydrated]);
 
   const [allCashPayments, setAllCashPayments] = useState<CashPaymentVoucher[]>(() => {
