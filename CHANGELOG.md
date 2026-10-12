@@ -2,6 +2,14 @@
 
 # 2026-10-12
 
+## Import all data from Neon (with safety backup and double confirmation)
+
+- Added an **"Import all data from Neon"** action on the Neon screen. It (1) downloads a full multi-sheet Excel backup of the current local data, (2) reads every dataset document from Neon's `app_documents`, and (3) applies them to the app state. Datasets missing in Neon are left untouched, so nothing is deleted locally.
+- The action is protected by a **two-step confirmation dialog** and reports how many datasets were imported plus the backup file name. Imported datasets are also marked as synced so the automatic push does not immediately overwrite them with stale local state.
+- Files: `src/context/PlatformContext.tsx`, `src/views/NeonHubView.tsx`.
+
+# 2026-10-12
+
 ## Neon sync resilience + dataset inventory panel
 
 - Root cause of "bookings/follow-ups were not uploaded": the failing `patients` insert **aborted the whole relational sync** (it runs inside one try block, and patients is step 7), so parties, appointments, follow-ups and journal entries never executed. Every sync section is now isolated in its own try/catch, so one failing section no longer stops the rest.

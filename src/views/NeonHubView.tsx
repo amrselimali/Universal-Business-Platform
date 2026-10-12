@@ -35,6 +35,7 @@ export const NeonHubView: React.FC = () => {
     neonAutoSync,
     neonAutoSyncProgress,
     getNeonDatasetSummary,
+    importAllFromNeon,
     branches,
     allBranches,
     warehouses,
@@ -89,6 +90,8 @@ export const NeonHubView: React.FC = () => {
   const [checkingCounts, setCheckingCounts] = useState<boolean>(false);
   const [isExportingExcel, setIsExportingExcel] = useState<boolean>(false);
   const [backupFeedback, setBackupFeedback] = useState<string | null>(null);
+  const [importStage, setImportStage] = useState<'idle' | 'first' | 'second' | 'running'>('idle');
+  const [importResult, setImportResult] = useState<string | null>(null);
 
   const handleBackupToExcel = async () => {
     setIsExportingExcel(true);
@@ -251,6 +254,16 @@ export const NeonHubView: React.FC = () => {
             <span>{isExportingExcel ? t('جاري إنشاء النسخة الاحتياطية...', 'Creating Backup...') : t('نسخة احتياطية (إكسل شامل)', 'Backup to Excel')}</span>
           </button>
 
+          <button
+            onClick={() => { setImportResult(null); setImportStage('first'); }}
+            disabled={importStage === 'running'}
+            className="flex items-center gap-2 rounded-xl bg-rose-600 hover:bg-rose-700 px-4 py-2 text-xs font-black text-white shadow-xs transition-all cursor-pointer disabled:opacity-50"
+            title={t('استيراد كل البيانات من Neon إلى التطبيق', 'Import all data from Neon into the app')}
+          >
+            <RefreshCw className="h-4 w-4" />
+            <span>{t('استيراد كل البيانات من Neon', 'Import all data from Neon')}</span>
+          </button>
+
           <a
             href="https://console.neon.tech"
             target="_blank"
@@ -264,6 +277,18 @@ export const NeonHubView: React.FC = () => {
       </div>
 
       {/* Backup Success Feedback Banner */}
+      {importResult && (
+        <div className="flex items-center justify-between p-4 bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 rounded-2xl text-xs font-bold text-indigo-800 dark:text-indigo-200">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-5 h-5 text-indigo-600 dark:text-indigo-400 shrink-0" />
+            <span>{importResult}</span>
+          </div>
+          <button onClick={() => setImportResult(null)} className="text-indigo-600 hover:text-indigo-800">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {backupFeedback && (
         <div className="flex items-center justify-between p-4 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-2xl text-xs font-bold text-emerald-800 dark:text-emerald-200">
           <div className="flex items-center gap-2">
@@ -273,6 +298,67 @@ export const NeonHubView: React.FC = () => {
           <button onClick={() => setBackupFeedback(null)} className="text-emerald-600 hover:text-emerald-800">
             <X className="w-4 h-4" />
           </button>
+        </div>
+      )}
+
+      {/* Import-from-Neon modal with double confirmation (تأكيد مزدوج) */}
+      {importStage !== 'idle' && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-3 backdrop-blur-sm">
+          <div className="w-full max-w-lg space-y-4 rounded-2xl border border-rose-200 bg-white p-5 shadow-2xl dark:border-rose-900/60 dark:bg-slate-900">
+            <h2 className="flex items-center gap-2 text-base font-black text-slate-900 dark:text-white">
+              <AlertCircle className="h-5 w-5 text-rose-600" />
+              {t('استيراد كل البيانات من Neon', 'Import all data from Neon')}
+            </h2>
+
+            {importStage === 'first' && (
+              <>
+                <p className="text-xs text-slate-600 dark:text-slate-300 leading-6">
+                  {t(
+                    'سيتم استبدال بيانات التطبيق الحالية بكل ما هو مخزَّن في Neon. سيتم تنزيل نسخة احتياطية تلقائيًا قبل الاستيراد. المجموعات غير الموجودة في Neon لن تُمس.',
+                    'The app data will be replaced with everything stored in Neon. A safety backup is downloaded automatically first. Datasets missing in Neon are left untouched.'
+                  )}
+                </p>
+                <div className="flex items-center justify-end gap-2">
+                  <button onClick={() => setImportStage('idle')} className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300">
+                    {t('إلغاء', 'Cancel')}
+                  </button>
+                  <button onClick={() => setImportStage('second')} className="rounded-xl bg-amber-600 px-4 py-2 text-xs font-bold text-white hover:bg-amber-700">
+                    {t('متابعة', 'Continue')}
+                  </button>
+                </div>
+              </>
+            )}
+
+            {importStage === 'second' && (
+              <>
+                <p className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs font-bold text-rose-800 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-200">
+                  {t('تأكيد أخير: لا يمكن التراجع عن هذه العملية إلا من النسخة الاحتياطية.', 'Final confirmation: this cannot be undone except from the backup file.')}
+                </p>
+                <div className="flex items-center justify-end gap-2">
+                  <button onClick={() => setImportStage('idle')} className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300">
+                    {t('رجوع', 'Back')}
+                  </button>
+                  <button
+                    onClick={async () => {
+                      setImportStage('running');
+                      const result = await importAllFromNeon();
+                      setImportResult(result.message);
+                      setImportStage('idle');
+                    }}
+                    className="rounded-xl bg-rose-600 px-4 py-2 text-xs font-bold text-white hover:bg-rose-700"
+                  >
+                    {t('تأكيد الاستيراد النهائي', 'Confirm final import')}
+                  </button>
+                </div>
+              </>
+            )}
+
+            {importStage === 'running' && (
+              <p className="text-xs font-bold text-slate-600 dark:text-slate-300">
+                {t('جاري الاستيراد من Neon...', 'Importing from Neon...')}
+              </p>
+            )}
+          </div>
         </div>
       )}
 
