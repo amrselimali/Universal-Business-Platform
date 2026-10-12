@@ -1832,7 +1832,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
                   {Math.abs(cardBalanceDifference) > 0.01 && (
                     <p role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-[11px] font-semibold text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-200">
                       {t(
-                        `المرجع الصحيح هو مجموع الحركات. رصيد بطاقة العميل المسجل (${formatMoney(cardBalance)} ج.م) يختلف عنه بمقدار ${formatMoney(cardBalanceDifference)} ج.م — يلزم تصحيح رصيد البطاقة ليطابق مجموع الحركات.`,
+                        `المرجع الصحيح هو مجموع الحركات. رصيد بطاقة العميل المسجل (${formatMoney(cardBalance)}) يختلف عنه بمقدار ${formatMoney(cardBalanceDifference)} — يلزم تصحيح رصيد البطاقة ليطابق مجموع الحركات.`,
                         `The movements total is the correct reference. The recorded customer card balance (${formatMoney(cardBalance)}) differs by ${formatMoney(cardBalanceDifference)} — the card balance needs correcting to match the movements.`
                       )}
                     </p>

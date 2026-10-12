@@ -2,6 +2,15 @@
 
 # 2026-10-12
 
+## Customer balance sync follow-ups
+
+- The reconciliation effect (which recomputes each customer's card balance from the statement sources) now also depends on `allCustomerRefunds`, so refunds that are auto-recovered after the first pass are immediately reflected in the card balance.
+- Fixed duplicated currency text (`ج.م ج.م`) in the statement's card/movements difference notice.
+- Collection receipts with **no branch assigned** are no longer hidden in the collection receipts screen for a specific active branch, so branch-less receipts can be reviewed/deleted.
+- Files: `src/context/PlatformContext.tsx`, `src/components/PartyStatementModal.tsx`, `src/views/CollectionReceiptsView.tsx`.
+
+# 2026-10-12
+
 ## Customer card balance now derives from the same sources as the statement
 
 - The party card balance (`party.balance`) was updated by only a few operations plus the imported opening value, while the statement total was derived from all documents — so the two disagreed by exactly the old "opening balance".

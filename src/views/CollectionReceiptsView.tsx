@@ -352,7 +352,10 @@ export const CollectionReceiptsView: React.FC = () => {
 
     const shiftReceiptVoucherIds = new Set(branchShifts.flatMap((shift) => shift.runRows.map((row) => row.receiptVoucherId).filter(Boolean) as string[]));
     cashReceipts.forEach((receipt) => {
-      if (!receipt.partyId || (currentBranchId && receipt.branchId !== currentBranchId)) return;
+      if (!receipt.partyId) return;
+      // Show receipts that belong to the current branch OR have no branch assigned
+      // (otherwise branch-less receipts would be invisible and impossible to review).
+      if (currentBranchId && receipt.branchId && receipt.branchId !== currentBranchId) return;
       if (shiftReceiptVoucherIds.has(receipt.id)) return;
       const matchingLegacyRunRow = branchShifts.some((shift) => shift.runRows.some((row) =>
         (row.customerId === receipt.partyId || row.patientId === receipt.partyId) &&

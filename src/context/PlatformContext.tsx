@@ -9231,7 +9231,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
     if (journalsChanged) setAllJournals(updatedJournals);
     if (receiptsChanged) setAllCashReceipts(reconciledReceipts);
-  }, [allAccounts, allCashReceipts, allJournals, allParties, allPeriodLocks, isStorageHydrated]);
+  }, [allAccounts, allCashReceipts, allCustomerRefunds, allJournals, allParties, allPeriodLocks, isStorageHydrated]);
 
   const [allCashPayments, setAllCashPayments] = useState<CashPaymentVoucher[]>(() => {
     try {
