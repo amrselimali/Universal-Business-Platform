@@ -92,13 +92,6 @@ export class NeonService {
       }
 
       try {
-        const patRes = await sql`SELECT COUNT(*)::int as c FROM patients`;
-        counts['patients'] = patRes && patRes[0] ? Number(patRes[0].c) : 0;
-      } catch {
-        counts['patients'] = 0;
-      }
-
-      try {
         const aptRes = await sql`SELECT COUNT(*)::int as c FROM appointments`;
         counts['appointments'] = aptRes && aptRes[0] ? Number(aptRes[0].c) : 0;
       } catch {
@@ -172,7 +165,6 @@ export class NeonService {
       stockLevels: StockLevel[];
       accounts: Account[];
       invoices: SalesInvoice[];
-      patients: Patient[];
       parties?: Party[];
       appointments?: Appointment[];
       patientFollowUps?: PatientFollowUp[];
@@ -282,27 +274,9 @@ export class NeonService {
         );
       `;
 
-      await sql`
-        CREATE TABLE IF NOT EXISTS patients (
-          id VARCHAR(100) PRIMARY KEY,
-          tenant_id VARCHAR(100) NOT NULL,
-          file_number VARCHAR(50),
-          full_name VARCHAR(255) NOT NULL,
-          phone VARCHAR(50),
-          date_of_birth DATE,
-          gender VARCHAR(20),
-          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-        );
-      `;
-
-      // Older databases created patients.file_number as NOT NULL; relax it so parties
-      // without a file number can still be mirrored (idempotent and safe).
-      try {
-        await sql`ALTER TABLE patients ALTER COLUMN file_number DROP NOT NULL`;
-      } catch {
-        // Column already nullable or the role cannot alter it; the inserts below
-        // still use fallback values.
-      }
+      // The legacy `patients` table is removed: `parties` is now the single source
+      // for customers / patients.
+      await sql`DROP TABLE IF EXISTS patients CASCADE`;
 
       await sql`
         CREATE TABLE IF NOT EXISTS parties (
@@ -422,19 +396,6 @@ export class NeonService {
           ON CONFLICT (id) DO NOTHING;
         `;
         totalSynced++;
-      }
-
-      // 7. Sync Patients
-      try {
-        totalSynced += await NeonService.insertRowsInBatches(
-          sql, 'patients',
-          ['id', 'tenant_id', 'file_number', 'full_name', 'phone', 'gender'],
-          data.patients.map((pat) => [pat.id, data.tenant.id, pat.fileNumber || '', pat.fullName || pat.name || '', pat.phone || '', pat.gender || '']),
-          'ON CONFLICT (id) DO NOTHING'
-        );
-
-      } catch (sectionError) {
-        console.warn(`Neon sync section failed (${"7. Sync Patients"}):`, sectionError);
       }
 
       // 8. Sync Parties if provided
@@ -908,10 +869,10 @@ export class NeonService {
     try {
       const sql = this.getClient(connectionString);
       await sql`
-        INSERT INTO patients (id, tenant_id, file_number, full_name, phone, gender)
-        VALUES (${patient.id}, ${tenantId}, ${patient.fileNumber || ''}, ${patient.fullName || patient.name || ''}, ${patient.phone || ''}, ${patient.gender || ''})
+        INSERT INTO parties (id, tenant_id, name, phone, balance)
+        VALUES (${patient.id}, ${tenantId}, ${patient.fullName || patient.name || ''}, ${patient.phone || ''}, 0)
         ON CONFLICT (id) DO UPDATE SET
-          full_name = EXCLUDED.full_name,
+          name = EXCLUDED.name,
           phone = EXCLUDED.phone;
       `;
       return true;
@@ -1116,16 +1077,6 @@ export class NeonService {
         );
       `;
 
-      await sql`
-        CREATE TABLE IF NOT EXISTS patients (
-          id VARCHAR(100) PRIMARY KEY,
-          tenant_id VARCHAR(100) NOT NULL,
-          file_number VARCHAR(50),
-          full_name VARCHAR(255) NOT NULL,
-          phone VARCHAR(50),
-          gender VARCHAR(20)
-        );
-      `;
 
       await sql`
         CREATE TABLE IF NOT EXISTS appointments (
