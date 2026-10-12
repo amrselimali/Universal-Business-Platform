@@ -564,6 +564,25 @@ export class NeonService {
         }
       }
 
+      // Every mirror table needs a primary key: Neon's table editor (and ON CONFLICT)
+      // require one, and legacy tables created by older syncs often lack it.
+      for (const schema of NEON_SCHEMA_TABLES) {
+        try {
+          const pk = await sql.query(
+            `SELECT COUNT(*)::int AS c FROM information_schema.table_constraints WHERE table_schema='public' AND table_name=$1 AND constraint_type='PRIMARY KEY'`,
+            [schema.table]
+          );
+          if (Number(pk[0]?.c) === 0) {
+            await sql.query(`UPDATE ${schema.table} SET id = 'row-' || ctid WHERE id IS NULL`, []);
+            await sql.query(`DELETE FROM ${schema.table} a USING ${schema.table} b WHERE a.ctid > b.ctid AND a.id = b.id`, []);
+            await sql.query(`ALTER TABLE ${schema.table} ADD PRIMARY KEY (id)`, []);
+            updated += 1;
+          }
+        } catch (primaryKeyError: any) {
+          failures.push(`${schema.table} (primary key): ${primaryKeyError?.message || String(primaryKeyError)}`);
+        }
+      }
+
       const total = NEON_SCHEMA_TABLES.length + 1;
       return {
         success: failures.length === 0,

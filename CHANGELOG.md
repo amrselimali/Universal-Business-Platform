@@ -2,6 +2,15 @@
 
 # 2026-10-12
 
+## Primary keys for every mirror table
+
+- 22 tables (including `staff_members`) had no PRIMARY KEY, so Neon's table editor refused to edit/delete rows and `ON CONFLICT` could not work.
+- Added a migration step that, for every dataset table, checks `information_schema.table_constraints` and (when missing) fills NULL ids, removes duplicate ids and runs `ALTER TABLE ... ADD PRIMARY KEY (id)`.
+- Applied to the live database: activity_logs, attendance_records, audit_records, cash_payments, cash_receipts, categories, customer_refunds, device_maintenance, goods_issues, goods_receipts, inventory_audits, laser_devices, notifications_history, payment_methods, payroll_runs, period_locks, pos_shifts, reception_shifts, specialized_tax_invoices, staff_members, treatment_plans, users.
+- Files: `src/services/neonService.ts`.
+
+# 2026-10-12
+
 ## Quiet background sync (no repeated database loads)
 
 - The push no longer issues an extra metadata request, so every edit no longer reads Neon again.
