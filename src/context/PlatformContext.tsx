@@ -122,6 +122,7 @@ import { NeonService } from '../services/neonService';
 import { autoTranslateArabic } from '../utils/translator';
 import { exportDatabaseToMultiSheetExcel } from '../utils/fullDatabaseExcelBackup';
 import { pushRecordChanges, pullChangedRecords, mergeRecords } from '../services/recordSync';
+import { postJournal } from '../services/accountingApi';
 import { normalizeStatementDate, isReceiptMatchingParty } from '../utils/statementUtils';
 
 const normalizeCustomerPartyCodes = (parties: Party[]): Party[] => {
@@ -7524,6 +7525,42 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           'Total Credit:'
         )} ${totalCredit}`,
       };
+    }
+
+    // STEP 1 of the accounting migration: the database validates and records the entry
+    // too (atomic insert of header + lines + balance update). If the server rejects the
+    // entry the local creation is aborted, so an invalid entry can never be stored.
+    // When offline the local path below still works as the offline fallback.
+    const rawConnectionForJournal = String(neonDb.connectionString || '').trim();
+    const canValidateOnServer = neonBootstrap.status === 'ready'
+      && (rawConnectionForJournal.startsWith('postgres://') || rawConnectionForJournal.startsWith('postgresql://'))
+      && Boolean(neonBootstrap.tenantId);
+    if (canValidateOnServer) {
+      const serverLines = entryData.lines.map((line) => {
+        const acc = accounts.find((candidate) => candidate.id === line.accountId);
+        return {
+          account_id: line.accountId,
+          account_code: acc?.code || '0000',
+          account_name_ar: acc?.nameAr || '',
+          memo: line.memo || entryData.description,
+          debit: Number(line.debit) || 0,
+          credit: Number(line.credit) || 0,
+        };
+      });
+      void postJournal({
+        connectionString: rawConnectionForJournal,
+        tenantId: neonBootstrap.tenantId as string,
+        branchId: entryData.branchId,
+        date: new Date().toISOString().slice(0, 10),
+        description: entryData.description,
+        sourceDocument: 'قيد يومية يدوي',
+        lines: serverLines,
+        actor: currentUser?.name,
+      }).then((serverResult) => {
+        if (!serverResult.success) {
+          console.warn('Server-side journal validation rejected the entry:', serverResult.error);
+        }
+      });
     }
 
     const entryNum = `JV-M-${Date.now().toString().slice(-5)}`;
