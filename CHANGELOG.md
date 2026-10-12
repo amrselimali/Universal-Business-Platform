@@ -2,6 +2,16 @@
 
 # 2026-10-12
 
+## CRITICAL: prevent the app from overwriting Neon with its initial/demo state
+
+- The automatic push could run **before** the Neon bootstrap finished, so the app's initial/demo state was uploaded to Neon and **replaced real data**.
+- Added two safety guards:
+  1. The automatic sync (and the manual full sync) now refuse to run unless `neonBootstrap.status === 'ready'`.
+  2. A dataset is only uploaded if it was **actually loaded from Neon** (or previously pushed) - a dataset that was never read from Neon is never written to Neon, so demo data can never overwrite real data.
+- Files: `src/context/PlatformContext.tsx`.
+
+# 2026-10-12
+
 ## Show which database and tenant the app is really using
 
 - Added an always-visible **"Connected database: <host> / <database>"** line on the startup gate and on the Neon screen, plus the **resolved tenant id** and dataset count in the sync status card.
