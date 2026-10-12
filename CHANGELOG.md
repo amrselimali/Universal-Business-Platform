@@ -2,6 +2,15 @@
 
 # 2026-10-12
 
+## Full initial transfer to Neon + visible sync status
+
+- `syncAllToNeon` now pushes **every dataset** to `app_documents` (34 documents) in addition to the tagged relational tables, so existing data can be transferred once with the sync button.
+- The automatic sync no longer requires the "connected" flag: it runs whenever a valid Neon connection string is configured, and reports failures instead of silently doing nothing.
+- Added a **live sync status card** in the Neon screen: uploading / last upload time + dataset count / explicit error message / connected state.
+- Files: `src/context/PlatformContext.tsx`, `src/views/NeonHubView.tsx`.
+
+# 2026-10-12
+
 ## Backup button now reads live data from Neon
 
 - The "Backup to Excel" button in the Neon screen previously exported the **in-browser** state while claiming to back up the database. It now reads every dataset from Neon's `app_documents` store first and only falls back to the browser copy for datasets missing in Neon.

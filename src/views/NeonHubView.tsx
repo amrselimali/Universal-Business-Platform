@@ -32,6 +32,7 @@ export const NeonHubView: React.FC = () => {
     fetchRemoteCounts,
     getPostgresSchemaSql,
     pullLatestFromNeon,
+    neonAutoSync,
     branches,
     allBranches,
     warehouses,
@@ -272,6 +273,26 @@ export const NeonHubView: React.FC = () => {
           </button>
         </div>
       )}
+
+      {/* Automatic Neon sync status (مزامنة تلقائية لكل البيانات) */}
+      <div className={`flex flex-wrap items-center gap-2 rounded-2xl border p-3.5 text-xs font-bold ${neonAutoSync.error ? 'border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-200' : 'border-cyan-200 bg-cyan-50 text-cyan-800 dark:border-cyan-900/50 dark:bg-cyan-950/30 dark:text-cyan-200'}`}>
+        <Server className="h-4 w-4 shrink-0" />
+        <span>{t('المزامنة التلقائية لـ Neon:', 'Automatic Neon sync:')}</span>
+        {neonAutoSync.syncing ? (
+          <span>{t('جاري الرفع...', 'Uploading...')}</span>
+        ) : neonAutoSync.error ? (
+          <span>{t('فشل الرفع:', 'Upload failed:')} {neonAutoSync.error}</span>
+        ) : neonAutoSync.lastRun ? (
+          <span>
+            {t('آخر رفع:', 'Last upload:')} {neonAutoSync.lastRun} · {neonAutoSync.lastSavedCount} {t('مجموعة', 'datasets')}
+          </span>
+        ) : (
+          <span>{t('في انتظار أول تغيير لنقل البيانات إلى Neon.', 'Waiting for the first change to transfer data to Neon.')}</span>
+        )}
+        <span className="ms-auto text-[10px] font-mono">
+          {neonDb.connected ? t('متصل', 'connected') : t('غير متصل', 'not connected')}
+        </span>
+      </div>
 
       {/* Connection Box */}
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs dark:border-slate-800 dark:bg-slate-900 space-y-4">

@@ -8516,6 +8516,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       return { success: false, message: 'الرجاء إدخال رابط اتصال Neon أولاً', count: 0 };
     }
     setNeonDb((prev) => ({ ...prev, isSyncing: true }));
+    // 1) Tagged tables (relational mirror)
     const res = await NeonService.syncAllData(neonDb.connectionString, {
       tenant,
       branches,
@@ -8529,6 +8530,18 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       appointments,
       journalEntries,
     });
+    // 2) EVERY dataset as a JSONB document in app_documents (full initial transfer).
+    const documentResult = await NeonService.saveDocuments(
+      neonDb.connectionString,
+      tenant?.id || '',
+      buildAllDatasetDocuments()
+    );
+    if (documentResult.success) {
+      buildAllDatasetDocuments().forEach((doc) => {
+        neonSyncedPayloadsRef.current[doc.key] = JSON.stringify(doc.payload ?? []);
+      });
+      setNeonAutoSync((prev) => ({ ...prev, lastRun: new Date().toLocaleTimeString(language === 'ar' ? 'ar-EG' : 'en-US'), lastSavedCount: documentResult.saved }));
+    }
     setNeonDb((prev) => {
       const next = {
         ...prev,
@@ -8540,7 +8553,14 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       localStorage.setItem('erp_neon_cfg', JSON.stringify(next));
       return next;
     });
-    return { success: res.success, message: res.message, count: res.insertedCount };
+    const combinedMessage = documentResult.success
+      ? `${res.message} — وتم رفع ${documentResult.saved} مجموعة بيانات كاملة إلى app_documents`
+      : `${res.message} — لكن فشل رفع المجموعات الكاملة: ${documentResult.message}`;
+    return {
+      success: res.success && documentResult.success,
+      message: combinedMessage,
+      count: res.insertedCount + documentResult.saved,
+    };
   };
 
   const fixNeonSchema = async (): Promise<{ success: boolean; message: string }> => {
@@ -10437,6 +10457,47 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   }, [allNotifications]);
 
+
+  // Single list of every dataset that lives in Neon (used by the automatic sync,
+  // the full transfer and the backup export).
+  const buildAllDatasetDocuments = (): { key: string; payload: unknown }[] => [
+    { key: 'erp_tenants', payload: allTenants },
+    { key: 'erp_users', payload: allUsers },
+    { key: 'erp_branches', payload: allBranches },
+    { key: 'erp_warehouses', payload: allWarehouses },
+    { key: 'erp_categories', payload: allCategories },
+    { key: 'erp_products', payload: allProducts },
+    { key: 'erp_stock_movements', payload: allStockMovements },
+    { key: 'erp_stock_levels', payload: stockLevels },
+    { key: 'erp_accounts', payload: allAccounts },
+    { key: 'erp_journals', payload: allJournals },
+    { key: 'erp_parties_backup', payload: allParties },
+    { key: 'erp_invoices', payload: allInvoices },
+    { key: 'erp_appointments', payload: allAppointments },
+    { key: 'erp_patient_followups', payload: allPatientFollowUps },
+    { key: 'erp_treatment_plans', payload: allTreatmentPlans },
+    { key: 'erp_cash_receipts', payload: allCashReceipts },
+    { key: 'erp_customer_refunds', payload: allCustomerRefunds },
+    { key: 'erp_cash_payments', payload: allCashPayments },
+    { key: 'erp_reception_shifts', payload: allReceptionShifts },
+    { key: 'erp_pos_shifts', payload: allPosShifts },
+    { key: 'erp_payment_methods', payload: allPaymentMethods },
+    { key: 'erp_tax_invoices', payload: allSpecializedTaxInvoices },
+    { key: 'erp_goods_receipts', payload: allGoodsReceipts },
+    { key: 'erp_goods_issues', payload: allGoodsIssues },
+    { key: 'erp_staff_members', payload: allStaffMembers },
+    { key: 'erp_payroll_runs', payload: allPayrollRuns },
+    { key: 'erp_attendance_records', payload: allAttendanceRecords },
+    { key: 'erp_inventory_audits', payload: allInventoryAudits },
+    { key: 'erp_device_maintenance', payload: allDeviceMaintenance },
+    { key: 'clinic_laser_devices', payload: allLaserDevices },
+    { key: 'erp_period_locks', payload: allPeriodLocks },
+    { key: 'erp_audit_records', payload: allAuditRecords },
+    { key: 'erp_activity_logs', payload: allUserActivityLogs },
+    { key: 'erp_notifications_history', payload: allNotifications },
+
+  ];
+
   // ==========================================================================
   // Automatic Neon sync (مزامنة تلقائية لكل البيانات إلى Neon)
   // --------------------------------------------------------------------------
@@ -10456,7 +10517,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   useEffect(() => {
     if (!isStorageHydrated) return;
-    if (!neonDb.connected || !neonDb.connectionString) return;
+    const rawConnection = String(neonDb.connectionString || '').trim();
+    if (!rawConnection.startsWith('postgres://') && !rawConnection.startsWith('postgresql://')) return;
     const tenantIdForSync = tenant?.id;
     if (!tenantIdForSync) return;
     const connectionStringForSync = neonDb.connectionString;
@@ -10466,42 +10528,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
 
     neonAutoSyncTimerRef.current = window.setTimeout(async () => {
-      const documents: { key: string; payload: unknown }[] = [
-        { key: 'erp_tenants', payload: allTenants },
-        { key: 'erp_users', payload: allUsers },
-        { key: 'erp_branches', payload: allBranches },
-        { key: 'erp_warehouses', payload: allWarehouses },
-        { key: 'erp_categories', payload: allCategories },
-        { key: 'erp_products', payload: allProducts },
-        { key: 'erp_stock_movements', payload: allStockMovements },
-        { key: 'erp_stock_levels', payload: stockLevels },
-        { key: 'erp_accounts', payload: allAccounts },
-        { key: 'erp_journals', payload: allJournals },
-        { key: 'erp_parties_backup', payload: allParties },
-        { key: 'erp_invoices', payload: allInvoices },
-        { key: 'erp_appointments', payload: allAppointments },
-        { key: 'erp_patient_followups', payload: allPatientFollowUps },
-        { key: 'erp_treatment_plans', payload: allTreatmentPlans },
-        { key: 'erp_cash_receipts', payload: allCashReceipts },
-        { key: 'erp_customer_refunds', payload: allCustomerRefunds },
-        { key: 'erp_cash_payments', payload: allCashPayments },
-        { key: 'erp_reception_shifts', payload: allReceptionShifts },
-        { key: 'erp_pos_shifts', payload: allPosShifts },
-        { key: 'erp_payment_methods', payload: allPaymentMethods },
-        { key: 'erp_tax_invoices', payload: allSpecializedTaxInvoices },
-        { key: 'erp_goods_receipts', payload: allGoodsReceipts },
-        { key: 'erp_goods_issues', payload: allGoodsIssues },
-        { key: 'erp_staff_members', payload: allStaffMembers },
-        { key: 'erp_payroll_runs', payload: allPayrollRuns },
-        { key: 'erp_attendance_records', payload: allAttendanceRecords },
-        { key: 'erp_inventory_audits', payload: allInventoryAudits },
-        { key: 'erp_device_maintenance', payload: allDeviceMaintenance },
-        { key: 'clinic_laser_devices', payload: allLaserDevices },
-        { key: 'erp_period_locks', payload: allPeriodLocks },
-        { key: 'erp_audit_records', payload: allAuditRecords },
-        { key: 'erp_activity_logs', payload: allUserActivityLogs },
-        { key: 'erp_notifications_history', payload: allNotifications },
-      ];
+      const documents = buildAllDatasetDocuments();
 
       const changed = documents.filter((doc) => {
         const serialized = JSON.stringify(doc.payload ?? []);
@@ -10534,7 +10561,6 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     };
   }, [
     isStorageHydrated,
-    neonDb.connected,
     neonDb.connectionString,
     tenant?.id,
     language,
