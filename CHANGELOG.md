@@ -2,6 +2,14 @@
 
 # 2026-10-12
 
+## Neon relational sync: batched inserts (appointments/follow-ups were unusable)
+
+- Root cause of "appointments/follow-ups were not uploaded": the relational mirror inserted **one row per HTTP request**. With 62,653 appointments, 61,425 follow-ups, 22,980 parties and 10,348 receipts that meant ~155,000 sequential round-trips, i.e. hours - effectively never finishing.
+- Added `NeonService.insertRowsInBatches` (one request per 300 rows, `sql.query` with `$n` placeholders) and switched patients, parties, appointments, patient follow-ups and journal entries to it. The same data now uploads in a few dozen requests.
+- Files: `src/services/neonService.ts`.
+
+# 2026-10-12
+
 ## Import all data from Neon (with safety backup and double confirmation)
 
 - Added an **"Import all data from Neon"** action on the Neon screen. It (1) downloads a full multi-sheet Excel backup of the current local data, (2) reads every dataset document from Neon's `app_documents`, and (3) applies them to the app state. Datasets missing in Neon are left untouched, so nothing is deleted locally.
