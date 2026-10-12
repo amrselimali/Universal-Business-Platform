@@ -2,6 +2,14 @@
 
 # 2026-10-12
 
+## Customer statement — remove card balance from selector + clarify reference
+
+- Removed the recorded balance shown next to each customer name in the statement's customer selector.
+- The card/movements difference notice now states explicitly that the **movements total is the correct reference** and the **card balance needs correcting** (instead of framing the movements as the questionable side).
+- Files: `src/components/PartyStatementModal.tsx`.
+
+# 2026-10-12
+
 ## Customer statement — remove the fabricated opening balance
 
 - The statement was showing an artificial "opening balance" for many customers because it folded the residual between the recorded card balance and the displayed movements into `رصيد أول المدة`. That residual is no longer fabricated.
