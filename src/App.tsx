@@ -357,19 +357,16 @@ const MainLayout: React.FC = () => {
         currentView={currentView}
       />
 
-      {/* Offline / sync status: runs locally and syncs with Neon when online */}
-      {!neonOnline || neonBootstrap.status !== 'ready' ? (
+      {/* Sync problems only. Normal background sync is silent and never blocks the UI. */}
+      {neonBootstrap.status !== 'ready' ? (
         <div className="flex flex-wrap items-center gap-3 border-b border-amber-200 bg-amber-50 px-4 py-1.5 text-[11px] font-bold text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-200">
-          {!neonOnline ? (
-            <span>{t('لا يوجد اتصال بالإنترنت — التطبيق يعمل على البيانات المحلية وسيتزامن تلقائيًا عند التوفر.', 'Offline — running on local data, it will sync automatically when the internet returns.')}</span>
-          ) : (
-            <span>{neonBootstrap.message || t('جارٍ مزامنة قاعدة البيانات...', 'Syncing with the database...')}</span>
-          )}
-          {neonLastRefresh && (
-            <span className="font-mono text-[10px] opacity-70">
-              {t('آخر مزامنة:', 'last sync:')} {neonLastRefresh}
-            </span>
-          )}
+          <span>
+            {neonBootstrap.status === 'error'
+              ? t('تعذر الاتصال بقاعدة البيانات — التطبيق يعمل على البيانات المحلية.', 'Cannot reach the database — the app is running on local data.')
+              : neonBootstrap.status === 'no-config'
+                ? t('لم يتم إعداد رابط قاعدة البيانات بعد.', 'No database connection configured yet.')
+                : t('جارٍ مزامنة قاعدة البيانات...', 'Syncing with the database...')}
+          </span>
           <button
             type="button"
             onClick={() => void syncNow()}
