@@ -34,63 +34,17 @@ import {
   Undo2,
 } from 'lucide-react';
 
-const normalizeCode = (val?: string | number | null): string => {
-  if (val === undefined || val === null) return '';
-  const s = String(val).trim().toLowerCase();
-  const digits = s.replace(/^0+/, '');
-  return digits || '0';
-};
+import {
+  normalizeStatementDate,
+  normalizeArabicName,
+  getPartyLookupCodes,
+  isReceiptMatchingParty,
+  isRefundMatchingParty,
+} from '../utils/statementUtils';
 
-const normalizeArabic = (text?: string): string => {
-  if (!text) return '';
-  return text
-    .trim()
-    .toLowerCase()
-    .replace(/[أإآ]/g, 'ا')
-    .replace(/ة/g, 'ه')
-    .replace(/ى/g, 'ي')
-    .replace(/\s+/g, ' ');
-};
-
-const isPartyReceiptMatch = (rcpt: CashReceiptVoucher, party: Party): boolean => {
-  if (!party || !rcpt) return false;
-  if (rcpt.partyId && rcpt.partyId === party.id) return true;
-
-  const partyCode = normalizeCode(party.customerCode || party.code);
-  const rcptCode = normalizeCode(rcpt.customerCode);
-  if (partyCode && rcptCode && partyCode === rcptCode) return true;
-
-  if (party.systemCode && rcpt.systemCode && party.systemCode.trim().toLowerCase() === rcpt.systemCode.trim().toLowerCase()) return true;
-
-  const partyPhone = party.phone?.replace(/\D/g, '');
-  const rcptPhone = rcpt.patientPhone?.replace(/\D/g, '');
-  if (partyPhone && rcptPhone && partyPhone.length >= 7 && rcptPhone.length >= 7) {
-    if (partyPhone === rcptPhone || partyPhone.endsWith(rcptPhone) || rcptPhone.endsWith(partyPhone)) return true;
-  }
-
-  const partyNameNorm = normalizeArabic(party.name);
-  const rcptNameNorm = normalizeArabic(rcpt.receivedFrom);
-  if (partyNameNorm && rcptNameNorm && (partyNameNorm === rcptNameNorm || partyNameNorm.includes(rcptNameNorm) || rcptNameNorm.includes(partyNameNorm))) return true;
-
-  return false;
-};
-
-const isPartyRefundMatch = (refund: CustomerRefundVoucher, party: Party): boolean => {
-  if (!party || !refund) return false;
-  if (refund.partyId && refund.partyId === party.id) return true;
-
-  const partyCode = normalizeCode(party.customerCode || party.code);
-  const refundCode = normalizeCode(refund.customerCode);
-  if (partyCode && refundCode && partyCode === refundCode) return true;
-
-  if (party.systemCode && refund.systemCode && party.systemCode.trim().toLowerCase() === refund.systemCode.trim().toLowerCase()) return true;
-
-  const partyNameNorm = normalizeArabic(party.name);
-  const refundNameNorm = normalizeArabic(refund.customerName);
-  if (partyNameNorm && refundNameNorm && (partyNameNorm === refundNameNorm || partyNameNorm.includes(refundNameNorm) || refundNameNorm.includes(partyNameNorm))) return true;
-
-  return false;
-};
+const isPartyReceiptMatch = isReceiptMatchingParty;
+const isPartyRefundMatch = isRefundMatchingParty;
+const normalizeArabic = normalizeArabicName;
 
 interface PartyStatementModalProps {
   initialPartyId?: string | null;
@@ -130,6 +84,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
     invoices,
     receptionShifts,
     cashReceipts,
+    allCashReceipts,
     customerRefunds,
     journalEntries,
     deviceMaintenanceRecords,
@@ -174,7 +129,17 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
   const effectiveBranchScoped = includeAllBranches ? null : branchScoped;
   const scopedInvoices = useMemo(() => (effectiveBranchScoped ? invoices.filter((inv) => inv.branchId === effectiveBranchScoped) : invoices), [invoices, effectiveBranchScoped]);
   const scopedShifts = useMemo(() => (effectiveBranchScoped ? receptionShifts.filter((shift) => shift.branchId === effectiveBranchScoped) : receptionShifts), [receptionShifts, effectiveBranchScoped]);
-  const scopedReceipts = useMemo(() => (effectiveBranchScoped ? cashReceipts.filter((rcpt) => rcpt.branchId === effectiveBranchScoped) : cashReceipts), [cashReceipts, effectiveBranchScoped]);
+  const allAvailableReceipts = useMemo(() => {
+    const map = new Map<string, CashReceiptVoucher>();
+    allCashReceipts.forEach((r) => {
+      if (!tenant?.id || !r.tenantId || r.tenantId === tenant.id) {
+        map.set(r.id, r);
+      }
+    });
+    cashReceipts.forEach((r) => map.set(r.id, r));
+    return Array.from(map.values());
+  }, [allCashReceipts, cashReceipts, tenant?.id]);
+  const scopedReceipts = useMemo(() => (effectiveBranchScoped ? allAvailableReceipts.filter((rcpt) => rcpt.branchId === effectiveBranchScoped) : allAvailableReceipts), [allAvailableReceipts, effectiveBranchScoped]);
   const scopedRefunds = useMemo(() => (effectiveBranchScoped ? customerRefunds.filter((refund) => refund.branchId === effectiveBranchScoped) : customerRefunds), [customerRefunds, effectiveBranchScoped]);
   const scopedJournals = useMemo(() => (effectiveBranchScoped ? journalEntries.filter((entry) => entry.branchId === effectiveBranchScoped) : journalEntries), [journalEntries, effectiveBranchScoped]);
 
@@ -274,8 +239,9 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
       paymentMethod?: string;
     }> = [];
 
-    const pName = currentParty.name.toLowerCase().trim();
-    const pPhone = currentParty.phone.trim();
+    const partyCodes = getPartyLookupCodes(currentParty);
+    const pNameNorm = normalizeArabicName(currentParty.name);
+    const pPhone = currentParty.phone?.replace(/\D/g, '') || '';
     const pCode = currentParty.systemCode?.toLowerCase().trim();
     const pCustomerCode = (currentParty.customerCode || currentParty.code)?.toLowerCase().trim();
 
@@ -283,12 +249,18 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
     if (currentParty.type === 'Customer' || currentParty.type === 'Both') {
       // Invoices
       scopedInvoices.forEach((inv) => {
+        const invCustomerNameNorm = normalizeArabicName(inv.customerName);
+        const invCustId = String(inv.customerId || '').trim().toLowerCase();
         const matchCustomer =
           inv.customerId === currentParty.id ||
-          (inv.customerName && inv.customerName.toLowerCase().trim() === pName);
+          partyCodes.has(invCustId) ||
+          partyCodes.has(invCustId.replace(/^0+/, '')) ||
+          partyCodes.has(String((inv as any).customerCode || '').trim().toLowerCase()) ||
+          partyCodes.has(String((inv as any).systemCode || '').trim().toLowerCase()) ||
+          (invCustomerNameNorm && pNameNorm && (invCustomerNameNorm === pNameNorm || invCustomerNameNorm.includes(pNameNorm) || pNameNorm.includes(invCustomerNameNorm)));
 
         if (matchCustomer) {
-          const invDate = inv.createdAt.slice(0, 10);
+          const invDate = normalizeStatementDate(inv.createdAt) || inv.createdAt.slice(0, 10);
           const totalCharged = inv.netAmount || 0;
           const paid = (inv.cashPaid || 0) + (inv.cardPaid || 0);
 
@@ -323,22 +295,25 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
       // Reception Shift Run Rows
       scopedShifts.forEach((shift) => {
         shift.runRows.forEach((row) => {
+          const rowPatientNorm = normalizeArabicName(row.patientName || row.customerName);
+          const rowCodes = [row.customerId, row.patientId, row.systemCode, row.customerCode, (row as any).patientCode]
+            .filter((c): c is string => Boolean(c))
+            .map((c) => String(c).trim().toLowerCase());
           const matchRow =
             row.customerId === currentParty.id ||
             row.patientId === currentParty.id ||
-            (row.patientName && row.patientName.toLowerCase().trim() === pName) ||
-            (row.customerName && row.customerName.toLowerCase().trim() === pName) ||
-            (row.patientPhone && row.patientPhone.trim() === pPhone) ||
-            (pCode && row.systemCode && row.systemCode.toLowerCase().trim() === pCode);
+            rowCodes.some((rc) => partyCodes.has(rc) || partyCodes.has(rc.replace(/^0+/, ''))) ||
+            (rowPatientNorm && pNameNorm && (rowPatientNorm === pNameNorm || rowPatientNorm.includes(pNameNorm) || pNameNorm.includes(rowPatientNorm)));
 
           if (matchRow) {
-            const rowDate = row.date || shift.shiftDate || shift.openedAt.slice(0, 10);
+            const rawRowDate = row.date || shift.shiftDate || shift.openedAt;
+            const rowDate = normalizeStatementDate(rawRowDate) || '1970-01-01';
             const revenue = row.totalRevenue || 0;
             const linkedReceipt = scopedReceipts.find((receipt) =>
-              receipt.status !== 'cancelled' && isPartyReceiptMatch(receipt, currentParty) &&
+              receipt.status !== 'cancelled' && isReceiptMatchingParty(receipt, currentParty) &&
               (receipt.id === row.receiptVoucherId ||
                 (Boolean(receipt.journalEntryId) && receipt.journalEntryId === row.journalEntryId &&
-                  receipt.date === rowDate &&
+                  (normalizeStatementDate(receipt.date) === rowDate || receipt.date === rowDate) &&
                   Math.abs(Number(receipt.amount || 0) - Number(row.collectedAmount || 0)) < 0.01))
             );
             const collected = linkedReceipt ? 0 : row.collectedAmount || 0;
@@ -375,10 +350,11 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
       // Direct Collection Receipts / Cash Receipt Vouchers (سندات وإيصالات التحصيل المسجلة للعميل)
       scopedReceipts.forEach((rcpt) => {
         if (rcpt.status === 'cancelled') return;
-        if (!isPartyReceiptMatch(rcpt, currentParty)) return;
+        if (!isReceiptMatchingParty(rcpt, currentParty)) return;
 
         const amt = Number(rcpt.amount) || 0;
         if (amt > 0) {
+          const rcptDate = normalizeStatementDate(rcpt.date) || rcpt.date || '1970-01-01';
           let originalDateStr = '';
           const sourceText = [rcpt.notes, rcpt.description].filter(Boolean).join(' ');
           const m = sourceText.match(/(?:تاريخ الإيصال|التاريخ المسجل في الملف|تاريخ التحصيل)[\s:]*([0-9\-/T]+)/);
@@ -394,7 +370,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
           const notesText = cleanNotes ? ` - ${cleanNotes}` : '';
 
           rawMovements.push({
-            date: rcpt.date,
+            date: rcptDate,
             docNumber: rcpt.voucherNumber || rcpt.referenceInvoiceNo || `CR-${rcpt.id.slice(-5)}`,
             docType: 'Invoice',
             docTypeAr: 'إيصال تحصيل نقدية (دائن)',
@@ -409,12 +385,13 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
       // Customer refunds (استردادات العملاء) — recorded as a DEBIT against the customer
       scopedRefunds.forEach((refund) => {
         if (refund.status === 'cancelled') return;
-        if (!isPartyRefundMatch(refund, currentParty)) return;
+        if (!isRefundMatchingParty(refund, currentParty)) return;
         const refundAmount = Number(refund.amount) || 0;
         if (refundAmount <= 0) return;
+        const refundDate = normalizeStatementDate(refund.date) || refund.date || '1970-01-01';
         const unitsInfo = refund.units ? ` [وحدات مستردة: ${refund.units}]` : '';
         rawMovements.push({
-          date: refund.date,
+          date: refundDate,
           docNumber: refund.voucherNumber,
           docType: 'ExpensePayment',
           docTypeAr: 'استرداد للعميل (مدين)',
@@ -432,10 +409,11 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
         shift.expenses.forEach((exp) => {
           const matchSupplier =
             exp.supplierId === currentParty.id ||
-            (exp.supplierName && exp.supplierName.toLowerCase().trim() === pName);
+            (exp.supplierName && normalizeArabicName(exp.supplierName) === pNameNorm);
 
           if (matchSupplier) {
-            const expDate = exp.date?.slice(0, 10) || shift.shiftDate || shift.openedAt.slice(0, 10);
+            const rawExpDate = exp.date?.slice(0, 10) || shift.shiftDate || shift.openedAt;
+            const expDate = normalizeStatementDate(rawExpDate) || '1970-01-01';
             rawMovements.push({
               date: expDate,
               docNumber: exp.receiptNumber ? `RCP-${exp.receiptNumber}` : `EXP-${exp.id.slice(-5)}`,
@@ -454,11 +432,12 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
       deviceMaintenanceRecords.forEach((maint) => {
         const matchSupplier =
           maint.supplierId === currentParty.id ||
-          (maint.supplierName && maint.supplierName.toLowerCase().trim() === pName);
+          (maint.supplierName && normalizeArabicName(maint.supplierName) === pNameNorm);
 
         if (matchSupplier) {
+          const maintDate = normalizeStatementDate(maint.maintenanceDate) || '1970-01-01';
           rawMovements.push({
-            date: maint.maintenanceDate,
+            date: maintDate,
             docNumber: maint.invoiceNumber ? `INV-${maint.invoiceNumber}` : `MNT-${maint.id.slice(-5)}`,
             docType: 'ExpensePayment',
             docTypeAr: 'فاتورة صيانة جهاز ليزر',
@@ -470,7 +449,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
 
           if (maint.paymentStatus !== 'OnCredit') {
             rawMovements.push({
-              date: maint.maintenanceDate,
+              date: maintDate,
               docNumber: `PAY-MNT-${maint.id.slice(-5)}`,
               docType: 'ExpensePayment',
               docTypeAr: 'سداد فوري لصيانة جهاز',
@@ -486,7 +465,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
 
     const receiptJournalIds = new Set(
       scopedReceipts
-        .filter((receipt) => isPartyReceiptMatch(receipt, currentParty) && receipt.status !== 'cancelled')
+        .filter((receipt) => isReceiptMatchingParty(receipt, currentParty) && receipt.status !== 'cancelled')
         .map((receipt) => receipt.journalEntryId)
         .filter((journalId): journalId is string => Boolean(journalId))
     );
@@ -510,12 +489,14 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
       const matchingLines = entry.lines.filter(
         (line) => (!hasSharedCustomerControlAccount && line.accountId === currentParty.accountId) ||
           (supplierAccountId && line.accountId === supplierAccountId) ||
-          partyJournalIdentifiers.some((identifier) => line.memo?.toLowerCase().includes(identifier))
+          partyJournalIdentifiers.some((identifier) => line.memo?.toLowerCase().includes(identifier)) ||
+          Array.from(partyCodes).some((code) => code.length >= 3 && line.memo?.toLowerCase().includes(code))
       );
 
+      const entryDate = normalizeStatementDate(entry.date) || '1970-01-01';
       matchingLines.forEach((line) => {
         rawMovements.push({
-          date: entry.date,
+          date: entryDate,
           docNumber: entry.entryNumber,
           docType: 'JournalEntry',
           docTypeAr: isCollectionPosting
@@ -530,8 +511,22 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
 
     rawMovements.sort((a, b) => a.date.localeCompare(b.date));
 
+    // Lifetime totals of all recorded movements
+    const totalLifetimeDebits = Number(rawMovements.reduce((sum, m) => sum + m.debit, 0).toFixed(2));
+    const totalLifetimeCredits = Number(rawMovements.reduce((sum, m) => sum + m.credit, 0).toFixed(2));
+    const netLifetimeMovement = Number((totalLifetimeDebits - totalLifetimeCredits).toFixed(2));
+
+    // Recorded ledger balance on the party card
+    const ledgerRecordedBalance = Number(currentParty.balance || 0);
+
+    // Initial base opening balance prior to recorded system movements
+    // If the customer has an initial balance from import/migration that is not explained by the movements,
+    // this residual is preserved as the true opening balance brought forward.
+    const initialBroughtForward = Math.abs(ledgerRecordedBalance - netLifetimeMovement) > 0.005
+      ? Number((ledgerRecordedBalance - netLifetimeMovement).toFixed(2))
+      : 0;
+
     // Calculate opening balance before filterStart
-    let openBal = 0;
     const totalPriorDebits = rawMovements
       .filter((m) => m.date < filterStart)
       .reduce((sum, m) => sum + m.debit, 0);
@@ -539,7 +534,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
       .filter((m) => m.date < filterStart)
       .reduce((sum, m) => sum + m.credit, 0);
 
-    openBal = totalPriorDebits - totalPriorCredits;
+    const openBal = Number((initialBroughtForward + totalPriorDebits - totalPriorCredits).toFixed(2));
 
     const inRangeMovements = rawMovements.filter(
       (m) => m.date >= filterStart && m.date <= filterEnd
@@ -547,7 +542,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
 
     let running = openBal;
     const finalMovements: StatementLine[] = inRangeMovements.map((m, idx) => {
-      running += m.debit - m.credit;
+      running = Number((running + m.debit - m.credit).toFixed(2));
       return {
         ...m,
         id: `stmt-${idx}-${m.docNumber}`,
@@ -555,9 +550,9 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
       };
     });
 
-    const sumDebits = inRangeMovements.reduce((s, m) => s + m.debit, 0);
-    const sumCredits = inRangeMovements.reduce((s, m) => s + m.credit, 0);
-    const closeBal = running;
+    const sumDebits = Number(inRangeMovements.reduce((s, m) => s + m.debit, 0).toFixed(2));
+    const sumCredits = Number(inRangeMovements.reduce((s, m) => s + m.credit, 0).toFixed(2));
+    const closeBal = Number(running.toFixed(2));
 
     return {
       openingBalance: openBal,
@@ -566,7 +561,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
       totalDebits: sumDebits,
       totalCredits: sumCredits,
     };
-  }, [currentParty, branchScoped, invoices, receptionShifts, cashReceipts, customerRefunds, journalEntries, deviceMaintenanceRecords, filterStart, filterEnd]);
+  }, [currentParty, branchScoped, invoices, receptionShifts, scopedReceipts, customerRefunds, journalEntries, deviceMaintenanceRecords, filterStart, filterEnd]);
 
   // QUANTITY & SERVICE MOVEMENTS FROM COLLECTION RECEIPTS
   // (حركات الكميات والخدمة المقيدة من إيصالات التحصيل)
@@ -579,7 +574,10 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
     return scopedReceipts
       .filter((rcpt) => rcpt.status !== 'cancelled' && !rcpt.isArchived)
       .filter((rcpt) => isPartyReceiptMatch(rcpt, currentParty))
-      .filter((rcpt) => rcpt.date >= filterStart && rcpt.date <= filterEnd)
+      .filter((rcpt) => {
+        const d = normalizeStatementDate(rcpt.date) || rcpt.date;
+        return d >= filterStart && d <= filterEnd;
+      })
       .map((rcpt) => {
         let originalDateStr = '';
         const sourceText = [rcpt.notes, rcpt.description].filter(Boolean).join(' ');
@@ -591,7 +589,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
           : baseService;
         return {
           id: rcpt.id,
-          date: rcpt.date,
+          date: normalizeStatementDate(rcpt.date) || rcpt.date,
           voucherNumber: rcpt.voucherNumber || rcpt.referenceInvoiceNo || `CR-${rcpt.id.slice(-5)}`,
           service: displayService,
           quantity: Number(rcpt.bookedQuantity || rcpt.quantity || 0),
@@ -613,10 +611,13 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
     if (!currentParty) return [];
     return scopedRefunds
       .filter((refund) => refund.status !== 'cancelled' && isPartyRefundMatch(refund, currentParty))
-      .filter((refund) => refund.date >= filterStart && refund.date <= filterEnd)
+      .filter((refund) => {
+        const d = normalizeStatementDate(refund.date) || refund.date;
+        return d >= filterStart && d <= filterEnd;
+      })
       .map((refund) => ({
         id: refund.id,
-        date: refund.date,
+        date: normalizeStatementDate(refund.date) || refund.date,
         voucherNumber: refund.voucherNumber,
         service: refund.serviceName || 'استرداد مستحقات',
         units: Number(refund.units || 0),

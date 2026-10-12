@@ -33,6 +33,7 @@ import {
   CellValidationError,
   ExcelValidationResult,
 } from '../components/ExcelDataTransferModal';
+import { normalizeArabicName, normalizeStatementDate } from '../utils/statementUtils';
 
 const collectionExcelColumns: ExcelColumnConfig[] = [
   {
@@ -774,22 +775,35 @@ export const CollectionReceiptsView: React.FC = () => {
 
       const customerCode = String(row['كود العميل'] || row['Customer Code'] || '').trim();
       const normCustomerCode = customerCode.replace(/^0+/, '');
-      const customerName = String(row['اسم العميل / المسدد'] || row['العميل'] || row['اسم العميل'] || row['Customer Name'] || '').trim();
+      const normCustomerName = normalizeArabicName(customerName);
       const matchedCustomer = parties.find((p) => {
         if (p.type !== 'Customer' && p.type !== 'Both' && p.type) return false;
         const pCustCode = String(p.customerCode || '').trim();
         const pCode = String(p.code || '').trim();
         const pSysCode = String(p.systemCode || '').trim();
-        return (
-          (customerCode && (
-            pCustCode === customerCode ||
-            pCustCode.replace(/^0+/, '') === normCustomerCode ||
-            pCode === customerCode ||
-            pCode.replace(/^0+/, '') === normCustomerCode ||
-            pSysCode.toLowerCase() === customerCode.toLowerCase()
-          )) ||
-          (customerName && p.name.trim().toLowerCase() === customerName.toLowerCase())
-        );
+        const pPaperCode = String(p.paperCode || '').trim();
+        const pFileCode = String(p.fileCode || '').trim();
+
+        if (customerCode) {
+          if (
+            pCustCode === customerCode || pCustCode.replace(/^0+/, '') === normCustomerCode ||
+            pCode === customerCode || pCode.replace(/^0+/, '') === normCustomerCode ||
+            pSysCode === customerCode || pSysCode.replace(/^0+/, '') === normCustomerCode ||
+            pPaperCode === customerCode || pPaperCode.replace(/^0+/, '') === normCustomerCode ||
+            pFileCode === customerCode || pFileCode.replace(/^0+/, '') === normCustomerCode
+          ) {
+            return true;
+          }
+        }
+
+        if (normCustomerName && p.name) {
+          const pNormName = normalizeArabicName(p.name);
+          if (pNormName === normCustomerName || pNormName.includes(normCustomerName) || normCustomerName.includes(pNormName)) {
+            return true;
+          }
+        }
+
+        return false;
       });
       const patientPhone = String(row['رقم الهاتف'] || row['الموبايل'] || row['الهاتف'] || row['Phone Number'] || '').trim();
       const rawDate = String(row['تاريخ التحصيل'] || row['التاريخ'] || row['Collection Date'] || row['Date'] || '').trim();
@@ -869,7 +883,29 @@ export const CollectionReceiptsView: React.FC = () => {
 
     const allRowsAsIs = rawRows.map((row) => {
       const customerCode = String(row['كود العميل'] || row['Customer Code'] || '').trim();
-      const customer = parties.find((p) => (p.type === 'Customer' || p.type === 'Both') && [p.customerCode, p.code].some((code) => String(code || '').trim() === customerCode));
+      const normCustCode = customerCode.replace(/^0+/, '');
+      const custName = String(row['اسم العميل / المسدد'] || row['العميل'] || row['اسم العميل'] || row['Customer Name'] || '').trim();
+      const normCustName = normalizeArabicName(custName);
+      const customer = parties.find((p) => {
+        if (p.type !== 'Customer' && p.type !== 'Both' && p.type) return false;
+        const pCustCode = String(p.customerCode || '').trim();
+        const pCode = String(p.code || '').trim();
+        const pSysCode = String(p.systemCode || '').trim();
+        const pPaperCode = String(p.paperCode || '').trim();
+        if (customerCode) {
+          if (
+            pCustCode === customerCode || pCustCode.replace(/^0+/, '') === normCustCode ||
+            pCode === customerCode || pCode.replace(/^0+/, '') === normCustCode ||
+            pSysCode === customerCode || pSysCode.replace(/^0+/, '') === normCustCode ||
+            pPaperCode === customerCode || pPaperCode.replace(/^0+/, '') === normCustCode
+          ) return true;
+        }
+        if (normCustName && p.name) {
+          const pNormName = normalizeArabicName(p.name);
+          if (pNormName === normCustName || pNormName.includes(normCustName) || normCustName.includes(pNormName)) return true;
+        }
+        return false;
+      });
       const methodCode = String(row['كود طريقة التحصيل'] || row['كود طريقة السداد'] || row['Payment Method Code'] || '').trim();
       const method = paymentMethods.find((pm) => String(pm.code || '').trim().toLowerCase() === methodCode.toLowerCase());
       const prodName = String(row['المنتج / الصنف البيعي'] || row['المنتج'] || row['الصنف'] || row['Product / Item'] || row['Product'] || '');

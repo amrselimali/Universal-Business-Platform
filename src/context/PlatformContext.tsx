@@ -74,6 +74,7 @@ import {
   resolveCustomerAggregationAccount,
   resolveCustomerPartyAccount,
   resolveCustomerControlAccount,
+  resolveCashOrBankAccount,
   findCustomerReceiptJournalIndex,
   assertBalancedJournalLines,
   resolveAccount,
@@ -118,6 +119,7 @@ import {
 } from '../data/initialData';
 import { NeonService } from '../services/neonService';
 import { autoTranslateArabic } from '../utils/translator';
+import { normalizeStatementDate, isReceiptMatchingParty } from '../utils/statementUtils';
 
 const normalizeCustomerPartyCodes = (parties: Party[]): Party[] => {
   const hasCashSupplier = parties.some((party) =>
@@ -8695,22 +8697,20 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const accountsForReconciliation = [...allAccounts];
     const missingControlAccounts: Account[] = [];
 
-    const tenantIdsWithCustomers = new Set(
-      allParties
-        .filter((p) => p.type === 'Customer' || p.type === 'Both')
-        .map((p) => p.tenantId)
-        .filter(Boolean)
-    );
+    const tenantIdsWithPartiesOrReceipts = new Set([
+      ...allParties.filter((p) => p.type === 'Customer' || p.type === 'Both').map((p) => p.tenantId).filter(Boolean),
+      ...allCashReceipts.map((r) => r.tenantId).filter(Boolean),
+    ]);
 
-    tenantIdsWithCustomers.forEach((tId) => {
-      const existing = accountsForReconciliation.find(
+    tenantIdsWithPartiesOrReceipts.forEach((tId) => {
+      const existingControl = accountsForReconciliation.find(
         (a) =>
           a.tenantId === tId &&
           (a.code === '1120' ||
             (a.code === '2000' && a.type === 'Asset' && a.isDebitNormal) ||
             (a.type === 'Asset' && a.isDebitNormal && (a.nameAr.includes('العملاء') || a.nameEn?.toLowerCase().includes('receivable')) && !a.code.includes('-')))
       );
-      if (!existing) {
+      if (!existingControl) {
         const newAcc: Account = {
           id: `acc-${tId}-1120`,
           tenantId: tId,
@@ -8725,10 +8725,35 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         accountsForReconciliation.push(newAcc);
         missingControlAccounts.push(newAcc);
       }
+
+      const existingCash = accountsForReconciliation.find(
+        (a) =>
+          a.tenantId === tId &&
+          (a.code === '1111' || a.code === '1110' || (a.code.startsWith('111') && a.type === 'Asset' && a.isDebitNormal))
+      );
+      if (!existingCash) {
+        const newCashAcc: Account = {
+          id: `acc-${tId}-1111`,
+          tenantId: tId,
+          code: '1111',
+          nameAr: 'الخزينة الرئيسية (النقدية بالصندوق)',
+          nameEn: 'Main Cashier Drawer',
+          type: 'Asset',
+          isDebitNormal: true,
+          balance: 0,
+          level: 3,
+        };
+        accountsForReconciliation.push(newCashAcc);
+        missingControlAccounts.push(newCashAcc);
+      }
     });
 
     if (missingControlAccounts.length > 0) {
-      setAllAccounts((prev) => [...prev, ...missingControlAccounts]);
+      setAllAccounts((prev) => {
+        const existingIds = new Set(prev.map((a) => a.id));
+        const toAdd = missingControlAccounts.filter((a) => !existingIds.has(a.id));
+        return toAdd.length > 0 ? [...prev, ...toAdd] : prev;
+      });
     }
 
     const accountBalanceDeltas = new Map<string, number>();
@@ -8888,7 +8913,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const control = resolveCustomerControlAccount(accountsForReconciliation, party.tenantId);
       if (!control.account) {
         if (!warnedTenants.has(party.tenantId)) {
-          console.error(`Collection receipt migration skipped: ${control.error} Tenant: ${party.tenantId}`);
+          console.warn(`Collection receipt migration notice: ${control.error} Tenant: ${party.tenantId}`);
           warnedTenants.add(party.tenantId);
         }
         return;
@@ -8904,34 +8929,36 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     });
 
     const reconciledReceipts = allCashReceipts.map((receipt) => {
-      if (receipt.status !== 'active' || receipt.journalPostingSuppressed || !receipt.partyId) return receipt;
-      const receiptParty = updatedParties.get(receipt.partyId) || allParties.find((party) => party.id === receipt.partyId);
-      if (!receiptParty || (receiptParty.type !== 'Customer' && receiptParty.type !== 'Both')) return receipt;
-      if (isDateLockedInPeriod(receipt.date, allPeriodLocks, receipt.tenantId, receipt.branchId).isLocked) return receipt;
-
-      const receivableAccount = controlAccountsByTenant.get(receipt.tenantId);
-      if (!receivableAccount) return receipt;
-      if (!Number.isFinite(Number(receipt.amount)) || Number(receipt.amount) <= 0) {
-        console.error(`Collection receipt migration skipped: invalid amount on ${receipt.voucherNumber}.`);
-        return receipt;
-      }
-      const receiptMethod = allPaymentMethods.find((method) =>
-        method.tenantId === receipt.tenantId &&
-        (!method.branchId || method.branchId === receipt.branchId) &&
-        (method.nameAr === receipt.paymentMethodLabel || method.nameEn === receipt.paymentMethodLabel)
-      );
-      const paymentAccountId = receipt.bankOrSafeAccountId || receiptMethod?.linkedAccountId;
-      const paymentAccount = accountsForReconciliation.find(
-        (account) => account.id === paymentAccountId && account.tenantId === receipt.tenantId &&
-          account.type === 'Asset' && account.isDebitNormal
-      );
-      if (!paymentAccount || paymentAccount.id === receivableAccount.id) {
-        console.error(`Collection receipt migration skipped: no linked cash/bank account for ${receipt.voucherNumber}.`);
-        return receipt;
+      let resolvedParty = receipt.partyId
+        ? (updatedParties.get(receipt.partyId) || allParties.find((party) => party.id === receipt.partyId))
+        : undefined;
+      if (!resolvedParty) {
+        resolvedParty = allParties.find((party) => isReceiptMatchingParty(receipt, party));
       }
 
-      const journalIndex = findCustomerReceiptJournalIndex(receipt, updatedJournals);
       const nextReceipt = { ...receipt };
+      const normalizedDate = normalizeStatementDate(receipt.date) || receipt.date;
+      if (normalizedDate && normalizedDate !== receipt.date) {
+        nextReceipt.date = normalizedDate;
+        receiptsChanged = true;
+      }
+
+      if (resolvedParty && (!nextReceipt.partyId || nextReceipt.partyId !== resolvedParty.id)) {
+        nextReceipt.partyId = resolvedParty.id;
+        if (!nextReceipt.customerCode && (resolvedParty.customerCode || resolvedParty.code)) {
+          nextReceipt.customerCode = resolvedParty.customerCode || resolvedParty.code;
+        }
+        if (!nextReceipt.systemCode && resolvedParty.systemCode) {
+          nextReceipt.systemCode = resolvedParty.systemCode;
+        }
+        receiptsChanged = true;
+      }
+
+      const receiptParty = resolvedParty ? (updatedParties.get(resolvedParty.id) || resolvedParty) : undefined;
+      if (receipt.status !== 'active' || receipt.journalPostingSuppressed || !receiptParty) return nextReceipt;
+      if (receiptParty.type !== 'Customer' && receiptParty.type !== 'Both') return nextReceipt;
+
+      // Always apply customer balance if not yet applied to the party card
       if (!receipt.customerBalanceApplied) {
         const currentParty = updatedParties.get(receiptParty.id) || receiptParty;
         updatedParties.set(receiptParty.id, {
@@ -8939,6 +8966,52 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           balance: Number((Number(currentParty.balance || 0) - (Number(receipt.amount) || 0)).toFixed(2)),
         });
         nextReceipt.customerBalanceApplied = true;
+        receiptsChanged = true;
+      }
+
+      if (isDateLockedInPeriod(receipt.date, allPeriodLocks, receipt.tenantId, receipt.branchId).isLocked) return nextReceipt;
+
+      const receivableAccount = controlAccountsByTenant.get(receipt.tenantId);
+      if (!receivableAccount) return nextReceipt;
+      if (!Number.isFinite(Number(receipt.amount)) || Number(receipt.amount) <= 0) {
+        console.warn(`Collection receipt migration notice: invalid amount on ${receipt.voucherNumber}.`);
+        return nextReceipt;
+      }
+
+      const receiptMethod = allPaymentMethods.find((method) =>
+        method.tenantId === receipt.tenantId &&
+        (!method.branchId || method.branchId === receipt.branchId) &&
+        (method.nameAr === receipt.paymentMethodLabel || method.nameEn === receipt.paymentMethodLabel ||
+         method.id === receipt.paymentMethodLabel || method.code === receipt.paymentMethod)
+      );
+      const preferredAccountId = receipt.bankOrSafeAccountId || receiptMethod?.linkedAccountId;
+      const resolvedCash = resolveCashOrBankAccount(
+        accountsForReconciliation,
+        receipt.tenantId,
+        preferredAccountId,
+        receipt.paymentMethod || receiptMethod?.type,
+        receivableAccount.id
+      );
+
+      let paymentAccount = resolvedCash.account;
+      if (!paymentAccount || paymentAccount.id === receivableAccount.id) {
+        paymentAccount = {
+          id: `acc-${receipt.tenantId}-1111`,
+          tenantId: receipt.tenantId,
+          code: '1111',
+          nameAr: 'الخزينة الرئيسية (النقدية بالصندوق)',
+          nameEn: 'Main Cashier Drawer',
+          type: 'Asset',
+          isDebitNormal: true,
+          balance: 0,
+          level: 3,
+        };
+        accountsForReconciliation.push(paymentAccount);
+        missingControlAccounts.push(paymentAccount);
+      }
+
+      if (paymentAccount && !nextReceipt.bankOrSafeAccountId) {
+        nextReceipt.bankOrSafeAccountId = paymentAccount.id;
         receiptsChanged = true;
       }
 
@@ -9034,9 +9107,13 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       })
       .map((account) => account.id));
 
-    if (accountBalanceDeltas.size > 0 || removableCustomerSubledgerIds.size > 0) {
+    if (accountBalanceDeltas.size > 0 || removableCustomerSubledgerIds.size > 0 || missingControlAccounts.length > 0) {
       setAllAccounts((previous) => {
-        return previous.filter((account) => !removableCustomerSubledgerIds.has(account.id)).map((account) => {
+        const filtered = previous.filter((account) => !removableCustomerSubledgerIds.has(account.id));
+        const existingIds = new Set(filtered.map((a) => a.id));
+        const toAdd = missingControlAccounts.filter((a) => !existingIds.has(a.id));
+        const combined = [...filtered, ...toAdd];
+        return combined.map((account) => {
           const delta = accountBalanceDeltas.get(account.id);
           return delta === undefined
             ? account
@@ -9399,28 +9476,31 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setAllCashReceipts((prev) => [...updatedReceipts, ...prev]);
     cashReceiptNumberCounter.current = nextSequence + items.length;
 
-    // Update parties with their new booked quantity offers in customer accounts
-    if (partyOffersMap.size > 0) {
+    // Update parties with their new booked quantity offers and credited balances in customer accounts
+    if (partyOffersMap.size > 0 || customerCreditsMap.size > 0 || customerPartiesWithAccounts.size > 0) {
       setAllParties((prev) =>
         prev.map((party) => {
           const linkedParty = customerPartiesWithAccounts.get(party.id) || party;
           const newOffers = partyOffersMap.get(party.id);
           const customerCredit = customerCreditsMap.get(party.id) || 0;
+          const nextBalance = customerCredit > 0
+            ? Number((Number(linkedParty.balance || 0) - customerCredit).toFixed(2))
+            : linkedParty.balance;
+
           if (!newOffers || newOffers.length === 0) {
-            return customerCredit > 0
-              ? { ...linkedParty, balance: Number((Number(linkedParty.balance || 0) - customerCredit).toFixed(2)) }
-              : linkedParty;
+            return {
+              ...linkedParty,
+              balance: nextBalance,
+            };
           }
           const existingOffers = linkedParty.offers || [];
           return {
             ...linkedParty,
-            balance: Number((Number(linkedParty.balance || 0) - customerCredit).toFixed(2)),
+            balance: nextBalance,
             offers: [...newOffers, ...existingOffers],
           };
         })
       );
-    } else if (customerPartiesWithAccounts.size > 0) {
-      setAllParties((prev) => prev.map((party) => customerPartiesWithAccounts.get(party.id) || party));
     }
 
     logUserActivity(

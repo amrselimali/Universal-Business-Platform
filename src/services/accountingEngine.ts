@@ -256,11 +256,93 @@ export function assertBalancedJournalLines(
   }
 }
 
+export function resolveCashOrBankAccount(
+  accounts: Account[],
+  tenantId: string,
+  preferredAccountId?: string,
+  paymentMethodType?: string,
+  receivableAccountId?: string
+): { account?: Account; error?: string } {
+  const tenantAccounts = accounts.filter((account) => account.tenantId === tenantId);
+
+  // 1. Direct ID match
+  if (preferredAccountId) {
+    const direct = tenantAccounts.find(
+      (a) => a.id === preferredAccountId && a.type === 'Asset' && a.isDebitNormal && a.id !== receivableAccountId
+    );
+    if (direct) return { account: direct };
+
+    // Also check if preferredAccountId is a code or matches code
+    const byCode = tenantAccounts.find(
+      (a) => (a.code === preferredAccountId || `acc-${a.code}` === preferredAccountId || a.code === preferredAccountId.replace(/^acc-/, '')) &&
+        a.type === 'Asset' && a.isDebitNormal && a.id !== receivableAccountId
+    );
+    if (byCode) return { account: byCode };
+  }
+
+  // 2. Based on paymentMethodType (Card/Transfer -> 1112 Bank; Cash/other -> 1111 Safe)
+  const isBank = paymentMethodType === 'Card' || paymentMethodType === 'Transfer';
+  const primaryCode = isBank ? '1112' : '1111';
+  const secondaryCode = isBank ? '1111' : '1112';
+
+  const primary = tenantAccounts.find(
+    (a) => a.code === primaryCode && a.type === 'Asset' && a.isDebitNormal && a.id !== receivableAccountId
+  );
+  if (primary) return { account: primary };
+
+  const secondary = tenantAccounts.find(
+    (a) => a.code === secondaryCode && a.type === 'Asset' && a.isDebitNormal && a.id !== receivableAccountId
+  );
+  if (secondary) return { account: secondary };
+
+  // 3. Any 1110 (نقدية وما في حكمها) or 111x
+  const cashGroup = tenantAccounts.find(
+    (a) => a.code.startsWith('111') && a.type === 'Asset' && a.isDebitNormal && a.id !== receivableAccountId
+  );
+  if (cashGroup) return { account: cashGroup };
+
+  // 4. Any Asset account by name (خزينة، بنك، نقدية)
+  const byName = tenantAccounts.find(
+    (a) =>
+      a.type === 'Asset' &&
+      a.isDebitNormal &&
+      a.id !== receivableAccountId &&
+      (a.nameAr.includes('خزينة') || a.nameAr.includes('نقدية') || a.nameAr.includes('صندوق') || a.nameAr.includes('بنك'))
+  );
+  if (byName) return { account: byName };
+
+  // 5. Any Asset with debit normal != receivable
+  const anyAsset = tenantAccounts.find(
+    (a) => a.type === 'Asset' && a.isDebitNormal && a.id !== receivableAccountId
+  );
+  if (anyAsset) return { account: anyAsset };
+
+  // 6. Synthesize standard 1111 cash account if tenant exists
+  if (tenantId) {
+    return {
+      account: {
+        id: `acc-${tenantId}-1111`,
+        tenantId,
+        code: '1111',
+        nameAr: 'الخزينة الرئيسية (النقدية بالصندوق)',
+        nameEn: 'Main Cashier Drawer',
+        type: 'Asset',
+        isDebitNormal: true,
+        balance: 0,
+        level: 3,
+      },
+    };
+  }
+
+  return { error: 'لا يوجد حساب خزينة أو بنك مسجل لهذا الكيان.' };
+}
+
 export function buildCustomerCollectionJournalLines(params: {
   accounts: Account[];
   tenantId: string;
   amount: number;
   paymentAccountId?: string;
+  paymentMethodType?: string;
   memo: string;
 }): JournalLine[] {
   const controlAccount = resolveCustomerControlAccount(params.accounts, params.tenantId);
@@ -273,11 +355,23 @@ export function buildCustomerCollectionJournalLines(params: {
     throw new Error('مبلغ إيصال التحصيل يجب أن يكون رقمًا موجبًا وصحيحًا.');
   }
 
-  const paymentAccount = params.accounts.find(
-    (account) => account.id === params.paymentAccountId && account.tenantId === params.tenantId
+  let paymentAccount = params.accounts.find(
+    (account) => account.id === params.paymentAccountId && account.tenantId === params.tenantId &&
+      account.type === 'Asset' && account.isDebitNormal && account.id !== controlAccount.account!.id
   );
-  if (!paymentAccount || paymentAccount.type !== 'Asset' || !paymentAccount.isDebitNormal ||
-    paymentAccount.id === controlAccount.account.id) {
+
+  if (!paymentAccount) {
+    const resolvedCash = resolveCashOrBankAccount(
+      params.accounts,
+      params.tenantId,
+      params.paymentAccountId,
+      params.paymentMethodType,
+      controlAccount.account.id
+    );
+    paymentAccount = resolvedCash.account;
+  }
+
+  if (!paymentAccount || paymentAccount.id === controlAccount.account.id) {
     throw new Error('طريقة الدفع غير مرتبطة بحساب خزينة/بنك صالح لهذا الكيان؛ لم يتم ترحيل الإيصال.');
   }
 

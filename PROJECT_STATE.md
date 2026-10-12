@@ -1,6 +1,18 @@
 # PROJECT STATE
 
-## Fix Customer Control Account Resolution & Migration Errors (1120 vs 2000) — 2026-10-11
+## Collection Receipt Cash/Bank Account Resolution & Balance Synchronization Fix — 2026-10-12
+
+- Resolved migration and hydration errors: `Collection receipt migration skipped: no linked cash/bank account for CR-2026-0004` through `CR-2026-0009`.
+- Root causes identified and resolved:
+  1. **Strict payment account resolution during reconciliation**: Receipts imported or created without direct `bankOrSafeAccountId` or whose payment methods lacked a pre-mapped account ID for the tenant were failing the strict lookup in `accountsForReconciliation`. This caused `PlatformContext.tsx` to log `console.error` and prematurely abort processing for those receipts.
+  2. **Skipped customer balance reduction**: Because the loop returned early on missing cash accounts, line 8960 (`!receipt.customerBalanceApplied`) never executed for those receipts. As a result, the customer's recorded ledger balance (`p.balance`) remained stale (e.g. at `-1,749.40` or `-1,049.40`) while the detailed statement matched the receipts via `isPartyReceiptMatch`, producing conflicting balances between the customer selector dropdown and the detailed movements table.
+  3. **Payment account fallback and provisioning**: Added `resolveCashOrBankAccount` in `src/services/accountingEngine.ts` to locate tenant safe/bank accounts (`1111` / `1112` / `1110`) by ID, code, payment method type, or name, and synthesize standard `acc-${tenantId}-1111` ('الخزينة الرئيسية (النقدية بالصندوق)') if missing.
+  4. **Customer balance decoupling from journal errors**: In `PlatformContext.tsx`, customer balance application (`customerBalanceApplied`) is executed as soon as the customer is matched, ensuring customer subledger balances are never held hostage by GL safe-account mapping issues.
+  5. **Auto-provisioning safe accounts**: Added automatic provisioning of account `1111` for all tenants with active receipts or parties during reconciliation startup.
+  6. **Bulk import credit application**: Ensured `customerCreditsMap` updates `allParties` even when `partyOffersMap` has zero booked session offers.
+- Files: `src/services/accountingEngine.ts`, `src/context/PlatformContext.tsx`, `src/components/PartyStatementModal.tsx`. Validation: `compile_applet` passed.
+
+
 
 - Resolved errors during hydration and customer reconciliation:
   - Error 0 & 1 (`Customer account linking skipped: لا يوجد حساب عملاء مسجل بالكود 2000 لهذا الكيان. Tenant: tenant-2718 / tenant-eg-004`).

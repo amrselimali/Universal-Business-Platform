@@ -1,5 +1,26 @@
 # CHANGELOG
 
+# 2026-10-12
+
+## Collection Receipt Cash/Bank Account Resolution & Balance Synchronization Fix
+
+- Resolved errors during startup hydration: `Collection receipt migration skipped: no linked cash/bank account for CR-2026-0004` through `CR-2026-0009`.
+- Root cause: Collection receipt migration previously aborted if no cash or bank account was explicitly matched by ID or method label, which skipped applying the receipt credit (`customerBalanceApplied`) to the customer's ledger balance (`p.balance`). This caused a mismatch between the balance displayed in the customer select dropdown and the running/closing balance calculated from movements in the detailed statement of account.
+- Implemented `resolveCashOrBankAccount` in `accountingEngine.ts` to automatically detect tenant cash/bank accounts (`1111`, `1112`, `1110`) by ID, code, payment method type, or name, with a synthesized fallback (`acc-${tenantId}-1111`).
+- Decoupled customer ledger balance adjustments from journal account errors so customer dues are always credited immediately upon matching.
+- Auto-provisioned account `1111` ('الخزينة الرئيسية (النقدية بالصندوق)') for all tenants during reconciliation.
+- Ensured `customerCreditsMap` reduces customer balance in bulk imports even when no booked session offers are generated.
+- Files: `src/services/accountingEngine.ts`, `src/context/PlatformContext.tsx`, `src/components/PartyStatementModal.tsx`.
+
+## Customer Statement & Droplist Balance Discrepancy & Date Comparison Fix
+
+- Fixed mismatch between the customer balance shown next to the name/code in the customer selector dropdown (`p.balance`) and the detailed movements ledger (`closingBalance`).
+- Resolved string date comparison bug: dates formatted as `DD/MM/YYYY` (e.g. `11/10/2026`) were incorrectly evaluating as less than `'1970-01-01'`, causing collection receipts to be pushed into opening balance rather than appearing in the period movements table.
+- Added automatic calculation of initial brought-forward balance (`initialBroughtForward`) so that customer starting balances from Excel or legacy data are honored, guaranteeing that `closingBalance` in "All" periods matches `party.balance` exactly.
+- Enhanced customer matching across auto-serial codes (`21045`), system codes (`9502`), paper codes (`9502`), and normalized Arabic spelling variants, preventing receipts from being dropped or unlinked.
+- Upgraded collection receipt reconciliation to resolve unlinked receipts and apply outstanding amounts to customer ledger balances so the full true balance (e.g. `-6,549.40`) is displayed.
+- Files: `src/utils/statementUtils.ts`, `src/context/PlatformContext.tsx`, `src/views/CollectionReceiptsView.tsx`, `src/components/PartyStatementModal.tsx`.
+
 # 2026-10-11
 
 ## Customer Control Account Resolution & Migration Errors Fix (1120 vs 2000)
