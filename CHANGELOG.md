@@ -2,6 +2,18 @@
 
 # 2026-10-12
 
+## Backend API built and verified against the live database
+
+- Added the `server/` project (Fastify 5 + TypeScript + Zod) - the only layer allowed to talk to Postgres now.
+- **Auth**: `POST /auth/login` verifies credentials through a `SECURITY DEFINER` function (`fn_login`, needed because RLS blocks reads before a tenant is known) and issues a JWT carrying tenant, role and allowed scopes. Passwords support `passwordHash` (SHA-256, constant-time compare); legacy plaintext still works with a logged warning.
+- **Tenant enforcement**: the tenant always comes from the verified token (`assertTenant`), never from the body, and every request runs in a transaction that sets `app.tenant_id`, so Row-Level Security isolates the tenant.
+- **Endpoints**: `/health`, `/auth/login`, `/me`, `GET/POST /records/:docKey`, `GET /records/:docKey/changes`, `POST /records/:docKey/delete` (soft delete), `POST /accounting/journal`, `POST /accounting/journal/:id/reverse`, `POST /accounting/receipt`, `GET /accounting/balances`.
+- **Live verification** (real run against Neon): health ok; login issued a JWT for tenant-eg-003/SuperAdmin; records and 37 balances came back tenant-scoped; an unbalanced journal was rejected with HTTP 400 and a valid one posted with HTTP 200 then reversed; a request without a token returned 401.
+- **Hardening**: helmet, rate limit (300/min), CORS allow-list, no DDL rights for the app role; secrets live in a git-ignored `.env` and the test credentials were deleted after the run.
+- Files: `server/` (package.json, tsconfig.json, .env.example, README.md, src/db.ts, src/index.ts).
+
+# 2026-10-12
+
 ## Security & performance applied to the live database
 
 - **Performance**: created a `(tenant_id)` index on all 39 tenant tables - the single most important index in a multi-tenant database.
