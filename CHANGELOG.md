@@ -2,6 +2,15 @@
 
 # 2026-10-12
 
+## CRITICAL: deleted records came back after a refresh
+
+- Root cause: the startup load read the whole-dataset snapshot from `app_documents`, while deletions are recorded per record in `app_records` (soft delete). The stale snapshot therefore resurrected deleted records on every reload.
+- Added `fetchLiveRecords` (keyset pagination, 2000 records per request, soft-deleted rows excluded) and the bootstrap now builds each dataset from the LIVE records in `app_records` instead of the snapshot.
+- Effect: deleting a record in the app now stays deleted everywhere, on every device and after every refresh.
+- Files: `src/services/recordSync.ts`, `src/context/PlatformContext.tsx`.
+
+# 2026-10-12
+
 ## Accounting migration steps 4 & 5
 
 - **Step 4 - reversals**: `reverseJournalEntries` now mirrors each reversal into the database ledger through `fn_reverse_journal` (the original is kept and the opposite entry is posted atomically). Best-effort, non-blocking, offline-safe, and skipped for batches above 50 entries.

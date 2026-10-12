@@ -121,7 +121,7 @@ import {
 import { NeonService } from '../services/neonService';
 import { autoTranslateArabic } from '../utils/translator';
 import { exportDatabaseToMultiSheetExcel } from '../utils/fullDatabaseExcelBackup';
-import { pushRecordChanges, pullChangedRecords, mergeRecords } from '../services/recordSync';
+import { pushRecordChanges, pullChangedRecords, mergeRecords, fetchLiveRecords } from '../services/recordSync';
 import { postJournal } from '../services/accountingApi';
 import { postCustomerReceipt } from '../services/accountingApi';
 import { postCustomerRefund } from '../services/accountingApi';
@@ -11030,12 +11030,15 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         progress: `${index + 1}/${keysToFetch.length}`,
         message: `تحميل البيانات من Neon... (${index + 1}/${keysToFetch.length}) ${key}`,
       });
-      const result = await NeonService.fetchDocumentByKey(rawConnection, tenantId, key);
-      if (!result.success) {
-        setNeonBootstrap({ status: 'error', message: result.message });
+      // Read the LIVE records from app_records (soft-deleted excluded). Loading the
+      // whole-dataset snapshot instead would resurrect records the user deleted, because
+      // deletions are recorded per record and not inside the snapshot.
+      const live = await fetchLiveRecords(rawConnection, tenantId, key);
+      if (live.error) {
+        setNeonBootstrap({ status: 'error', message: live.error });
         return;
       }
-      if (result.value !== undefined) fetchedDocuments[key] = result.value;
+      fetchedDocuments[key] = live.records;
     }
     const changedKeys = keysToFetch;
     const fetched = { success: true, documents: fetchedDocuments, message: '' };

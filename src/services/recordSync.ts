@@ -136,3 +136,50 @@ export function mergeRecords(local: any[], incoming: SyncRecord[], deletedIds: s
  */
 export const OUTBOX_NOTE =
   'Updates made offline stay in the local state and are pushed automatically once the connection returns.';
+
+/**
+ * Reads the LIVE records of a dataset from the database (soft-deleted ones excluded),
+ * using keyset pagination so a dataset with tens of thousands of records never exceeds
+ * the HTTP response limit.
+ *
+ * This is what the app must load on startup: reading the whole-dataset snapshot from
+ * `app_documents` would resurrect records that were deleted (the deletion is recorded
+ * per record in `app_records`, not in the snapshot).
+ */
+export async function fetchLiveRecords(
+  connectionString: string,
+  tenantId: string,
+  docKey: string,
+  onProgress?: (loaded: number) => void
+): Promise<{ records: any[]; error?: string }> {
+  const PAGE = 2000;
+  const records: any[] = [];
+  let lastId: string | null = null;
+  try {
+    const sql = getClient(connectionString);
+    for (;;) {
+      const rows: any = lastId === null
+        ? await sql.query(
+            `SELECT record_id, payload FROM app_records
+              WHERE tenant_id = $1 AND doc_key = $2 AND deleted_at IS NULL
+              ORDER BY record_id LIMIT $3`,
+            [tenantId, docKey, PAGE]
+          )
+        : await sql.query(
+            `SELECT record_id, payload FROM app_records
+              WHERE tenant_id = $1 AND doc_key = $2 AND deleted_at IS NULL AND record_id > $3
+              ORDER BY record_id LIMIT $4`,
+            [tenantId, docKey, lastId, PAGE]
+          );
+      const list = rows as any[];
+      if (list.length === 0) break;
+      list.forEach((row) => records.push({ ...(row.payload || {}), id: String(row.record_id) }));
+      lastId = String(list[list.length - 1].record_id);
+      if (onProgress) onProgress(records.length);
+      if (list.length < PAGE) break;
+    }
+    return { records };
+  } catch (error: any) {
+    return { records, error: error?.message || String(error) };
+  }
+}
