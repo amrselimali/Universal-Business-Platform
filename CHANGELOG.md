@@ -2,6 +2,14 @@
 
 # 2026-10-12
 
+## Version history: every overwritten document is archived before it is replaced
+
+- Added `app_documents_history` (with an index on tenant/doc_key/archived_at) and `saveDocuments` now archives the previous version of each document immediately before overwriting it, so an accidental overwrite can always be traced and restored.
+- The table and index were also created directly in the live database.
+- Files: `src/services/neonSchema.ts`, `src/services/neonService.ts`.
+
+# 2026-10-12
+
 ## Recovery mode: read the old local browser data again
 
 - Added a recovery switch (`erp_local_recovery`): when enabled, Neon-only mode is turned off so the app reads the previous local browser data again, which can then be pushed back to Neon with the full-sync button.
