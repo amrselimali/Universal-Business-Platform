@@ -2,6 +2,15 @@
 
 # 2026-10-12
 
+## Relational mirror fixed: every table is now filled
+
+- The typed tables were empty (e.g. `cash_receipts` had 0 rows) because the mirror could not run against legacy tables: they lacked the `payload` column, had NOT NULL columns the mirror does not fill, no unique key for `ON CONFLICT`, and datasets without an `id`.
+- `mirrorDataset` now: adds any missing column, adds `payload`, relaxes NOT NULL columns, generates a synthetic id when a record has none, replaces the table content, and inserts in batches of 300. `buildAlterTableSql` also adds `payload` / `synced_at` to existing tables.
+- The whole database was re-mirrored: `cash_receipts` 10,348 · `journal_entries` 3,987 · `parties` 22,980 · `appointments` 62,653 · `patient_follow_ups` 61,425 · `customer_refunds` 246 · `accounts` 37 ...
+- Files: `src/services/neonService.ts`, `src/services/neonSchema.ts`.
+
+# 2026-10-12
+
 ## Fix: screens were empty although the data matched Neon + 1-minute pull
 
 - Root cause: the dataset records all carry `tenantId = tenant-eg-003`, but the app's tenant list (`erp_tenants`) only contained `tenant-eg-001` / `tenant-eg-002`, so every screen filtered the data out. The missing tenant was added to `erp_tenants` in the database, and the bootstrap now **recreates the tenant that owns the data** (identity read from the `tenants` table) when it is missing locally.

@@ -637,17 +637,47 @@ export class NeonService {
     records: unknown[]
   ): Promise<number> {
     if (!Array.isArray(records) || records.length === 0) return 0;
+    // Legacy tables may miss the payload column or require columns the mirror does not
+    // fill in; make the table accept the mirrored rows.
+    for (const column of [...schema.columns, { name: 'payload', type: 'JSONB' }]) {
+      try {
+        await sql.query(`ALTER TABLE ${schema.table} ADD COLUMN IF NOT EXISTS ${column.name} ${column.type}`, []);
+      } catch {
+        /* column already exists or cannot be altered */
+      }
+    }
+    try {
+      const notNull = await sql.query(
+        `SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name=$1 AND is_nullable='NO' AND column_default IS NULL`,
+        [schema.table]
+      );
+      for (const row of notNull as any[]) {
+        if (row.column_name === 'id') continue;
+        try { await sql.query(`ALTER TABLE ${schema.table} ALTER COLUMN ${row.column_name} DROP NOT NULL`, []); } catch { /* ignore */ }
+      }
+    } catch {
+      /* ignore */
+    }
+
     const insertColumns = [...schema.columns.map((column) => column.name), 'payload'];
-    const rows = records.map((record: any) => [
-      ...schema.columns.map((column) => NeonService.resolveColumnValue(record, column.name, tenantId)),
-      JSON.stringify(record ?? {}),
-    ]);
+    const rows = records.map((record: any, index: number) => {
+      const values = schema.columns.map((column) => {
+        const value = NeonService.resolveColumnValue(record, column.name, tenantId);
+        if (column.name === 'id' && (value === null || value === undefined)) {
+          return `${schema.table}-${index}`;
+        }
+        return value;
+      });
+      return [...values, JSON.stringify(record ?? {})];
+    });
+    // Full replace keeps the mirror identical to the document store.
+    await sql.query(`DELETE FROM ${schema.table}`, []);
     return NeonService.insertRowsInBatches(
       sql,
       schema.table,
       insertColumns,
       rows,
-      'ON CONFLICT (id) DO UPDATE SET payload = EXCLUDED.payload, synced_at = NOW()',
+      '',
       ['payload']
     );
   }
