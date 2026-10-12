@@ -2,6 +2,15 @@
 
 # 2026-10-12
 
+## Customer statement — remove the fabricated opening balance
+
+- The statement was showing an artificial "opening balance" for many customers because it folded the residual between the recorded card balance and the displayed movements into `رصيد أول المدة`. That residual is no longer fabricated.
+- The opening balance is now derived only from real movements recorded before the selected period (so it is 0 for the "All" range).
+- When the recorded card balance differs from the displayed movements, an explicit notice shows the difference instead of hiding it in the opening balance.
+- Files: `src/components/PartyStatementModal.tsx`.
+
+# 2026-10-12
+
 ## Collection receipts — prevent duplicate imports
 
 - `addCollectionReceiptsBulk` now skips items that are exact duplicates of an already-recorded receipt (same tenant + customer + date + amount + service + draft number) and of earlier items in the same batch, returning `skippedDuplicates`. The collection-receipts Excel import surfaces the skipped count.

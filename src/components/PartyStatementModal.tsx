@@ -216,7 +216,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
   }, [dateFilter, startDate, endDate]);
 
   // Generate All Monetary Statement Movements for selected party
-  const { openingBalance, periodMovements, closingBalance, totalDebits, totalCredits } = useMemo(() => {
+  const { openingBalance, periodMovements, closingBalance, totalDebits, totalCredits, cardBalance, cardBalanceDifference } = useMemo(() => {
     if (!currentParty) {
       return {
         openingBalance: 0,
@@ -224,6 +224,8 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
         closingBalance: 0,
         totalDebits: 0,
         totalCredits: 0,
+        cardBalance: 0,
+        cardBalanceDifference: 0,
       };
     }
 
@@ -512,17 +514,12 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
     const totalLifetimeCredits = Number(rawMovements.reduce((sum, m) => sum + m.credit, 0).toFixed(2));
     const netLifetimeMovement = Number((totalLifetimeDebits - totalLifetimeCredits).toFixed(2));
 
-    // Recorded ledger balance on the party card
+    // Recorded ledger balance on the party card (shown in the header only).
     const ledgerRecordedBalance = Number(currentParty.balance || 0);
 
-    // Initial base opening balance prior to recorded system movements
-    // If the customer has an initial balance from import/migration that is not explained by the movements,
-    // this residual is preserved as the true opening balance brought forward.
-    const initialBroughtForward = Math.abs(ledgerRecordedBalance - netLifetimeMovement) > 0.005
-      ? Number((ledgerRecordedBalance - netLifetimeMovement).toFixed(2))
-      : 0;
-
-    // Calculate opening balance before filterStart
+    // Opening balance = real movements recorded BEFORE the selected period only.
+    // No artificial plug: any residual between the card balance and the recorded
+    // movements is reported separately instead of being folded into the opening balance.
     const totalPriorDebits = rawMovements
       .filter((m) => m.date < filterStart)
       .reduce((sum, m) => sum + m.debit, 0);
@@ -530,7 +527,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
       .filter((m) => m.date < filterStart)
       .reduce((sum, m) => sum + m.credit, 0);
 
-    const openBal = Number((initialBroughtForward + totalPriorDebits - totalPriorCredits).toFixed(2));
+    const openBal = Number((totalPriorDebits - totalPriorCredits).toFixed(2));
 
     const inRangeMovements = rawMovements.filter(
       (m) => m.date >= filterStart && m.date <= filterEnd
@@ -556,6 +553,8 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
       closingBalance: closeBal,
       totalDebits: sumDebits,
       totalCredits: sumCredits,
+      cardBalance: ledgerRecordedBalance,
+      cardBalanceDifference: Number((ledgerRecordedBalance - closeBal).toFixed(2)),
     };
   }, [currentParty, branchScoped, invoices, receptionShifts, scopedReceipts, customerRefunds, journalEntries, deviceMaintenanceRecords, filterStart, filterEnd]);
 
@@ -1829,6 +1828,15 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
                       </span>
                     </div>
                   </div>
+
+                  {Math.abs(cardBalanceDifference) > 0.01 && (
+                    <p role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-[11px] font-semibold text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-200">
+                      {t(
+                        `رصيد بطاقة العميل المسجل (${formatMoney(cardBalance)} ج.م) يختلف عن مجموع الحركات المعروضة بمقدار ${formatMoney(cardBalanceDifference)} ج.م. لا يتم تصنيع رصيد أول مدة تلقائيًا؛ راجع الحركات أو رصيد البطاقة.`,
+                        `The recorded customer card balance (${formatMoney(cardBalance)}) differs from the displayed movements by ${formatMoney(cardBalanceDifference)}. No opening balance is auto-fabricated; review the movements or the card balance.`
+                      )}
+                    </p>
+                  )}
 
                   {/* Statement Movements Table */}
                   <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden shadow-xs">
