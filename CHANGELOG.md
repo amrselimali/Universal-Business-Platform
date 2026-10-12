@@ -2,6 +2,15 @@
 
 # 2026-10-12
 
+## Every table is now populated (no more half-empty schema)
+
+- Previously only the 12 legacy relational tables received data; the other tables created by the schema migration stayed empty.
+- Added `NeonService.mirrorAllTables` / `mirrorDataset` with a column resolver (camelCase + explicit aliases) that maps each local record onto its typed table columns and always stores the complete record in the `payload` JSONB column (`$n::jsonb`).
+- `syncAllToNeon` now runs three steps: tagged legacy tables → `app_documents` (all datasets) → **mirror every dataset into its typed table**, and reports how many rows went into how many tables.
+- Files: `src/services/neonService.ts`, `src/context/PlatformContext.tsx`.
+
+# 2026-10-12
+
 ## Migrate & Update Schema button for Neon
 
 - Added a shared schema definition (`src/services/neonSchema.ts`) describing a matching Neon table for every local dataset: typed key columns for querying plus a `payload` JSONB column holding the full record, so nested structures (journal lines, shift rows, party offers) are preserved.

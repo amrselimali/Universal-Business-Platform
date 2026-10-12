@@ -8546,6 +8546,10 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       (done, total) => setNeonAutoSyncProgress(`${done}/${total}`)
     );
     setNeonAutoSyncProgress('');
+    // 3) Mirror EVERY dataset into its matching typed table so no table stays empty.
+    const documentsByKey: { [key: string]: unknown } = {};
+    allDocs.forEach((doc) => { documentsByKey[doc.key] = doc.payload; });
+    const mirrorResult = await NeonService.mirrorAllTables(neonDb.connectionString, tenant?.id || '', documentsByKey);
     if (documentResult.success) {
       buildAllDatasetDocuments().forEach((doc) => {
         neonSyncedPayloadsRef.current[doc.key] = JSON.stringify(doc.payload ?? []);
@@ -8563,8 +8567,11 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       localStorage.setItem('erp_neon_cfg', JSON.stringify(next));
       return next;
     });
+    const mirrorNote = mirrorResult.mirroredTables > 0
+      ? ` — ونُقلت ${mirrorResult.mirroredRows} سجلًا إلى ${mirrorResult.mirroredTables} جدول مُصنَّف`
+      : '';
     const combinedMessage = documentResult.success
-      ? `${res.message} — وتم رفع ${documentResult.saved} مجموعة بيانات كاملة إلى app_documents`
+      ? `${res.message} — وتم رفع ${documentResult.saved} مجموعة بيانات كاملة إلى app_documents${mirrorNote}`
       : `${res.message} — لكن فشل رفع المجموعات الكاملة: ${documentResult.message}`;
     return {
       success: res.success && documentResult.success,

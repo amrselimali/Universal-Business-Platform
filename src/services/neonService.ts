@@ -1,5 +1,5 @@
 import { neon } from '@neondatabase/serverless';
-import { APP_DOCUMENTS_DDL, NEON_SCHEMA_TABLES, buildAlterTableSql, buildCreateTableSql } from './neonSchema';
+import { APP_DOCUMENTS_DDL, NEON_SCHEMA_TABLES, NeonTableSchema, buildAlterTableSql, buildCreateTableSql } from './neonSchema';
 import {
   Product,
   Account,
@@ -539,14 +539,17 @@ export class NeonService {
     columns: string[],
     rows: unknown[][],
     onConflictSql = '',
+    jsonColumns: string[] = [],
     batchSize = 300
   ): Promise<number> {
+    const columnIndexes = new Map(columns.map((column, index) => [column, index]));
+    const jsonIndexes = new Set(jsonColumns.map((column) => columnIndexes.get(column)).filter((index): index is number => index !== undefined));
     if (rows.length === 0) return 0;
     let inserted = 0;
     for (let start = 0; start < rows.length; start += batchSize) {
       const slice = rows.slice(start, start + batchSize);
       const params: unknown[] = [];
-      const tuples = slice.map((row) => `(${row.map((value) => { params.push(value === undefined ? null : value); return `$${params.length}`; }).join(', ')})`);
+      const tuples = slice.map((row) => `(${row.map((value, columnIndex) => { params.push(value === undefined ? null : value); const placeholder = `$${params.length}`; return jsonIndexes.has(columnIndex) ? `${placeholder}::jsonb` : placeholder; }).join(', ')})`);
       const text = `INSERT INTO ${table} (${columns.join(', ')}) VALUES ${tuples.join(', ')} ${onConflictSql}`.trim();
       await sql.query(text, params);
       inserted += slice.length;
@@ -621,6 +624,101 @@ export class NeonService {
         message: 'فشل ترحيل الهيكل: ' + (error?.message || String(error)),
       };
     }
+  }
+
+  /** Explicit column -> local field aliases where the names differ. */
+  private static readonly COLUMN_ALIASES: { [column: string]: string[] } = {
+    account_type: ['type', 'accountType'],
+    party_type: ['type', 'partyType'],
+    user_role: ['role', 'userRole'],
+    staff_role: ['role', 'staffRole'],
+    method_type: ['type', 'methodType'],
+    movement_type: ['type', 'movementType'],
+    notification_type: ['type', 'notificationType'],
+    entry_date: ['date', 'entryDate'],
+    invoice_date: ['createdAt', 'date', 'invoiceDate'],
+    receipt_date: ['date', 'receiptDate'],
+    refund_date: ['date', 'refundDate'],
+    payment_date: ['date', 'paymentDate'],
+    appointment_date: ['date', 'appointmentDate'],
+    appointment_time: ['time', 'appointmentTime'],
+    attendance_date: ['date', 'attendanceDate'],
+    audit_date: ['date', 'auditDate'],
+    voucher_date: ['date', 'voucherDate'],
+    performed_at: ['timestamp', 'performedAt'],
+    logged_at: ['timestamp', 'loggedAt'],
+    total_amount: ['totalWithFee', 'total', 'netAmount', 'totalAmount'],
+    name_ar: ['nameAr', 'name'],
+    name_en: ['nameEn'],
+  };
+
+  /** Resolves the value of one table column from a local record. */
+  private static resolveColumnValue(record: any, columnName: string, tenantId: string): unknown {
+    if (columnName === 'tenant_id') return record?.tenantId || tenantId;
+    const camel = columnName.replace(/_([a-z])/g, (_match, letter: string) => letter.toUpperCase());
+    const candidates = [
+      ...(NeonService.COLUMN_ALIASES[columnName] || []),
+      camel,
+      columnName,
+    ];
+    for (const candidate of candidates) {
+      const value = record?.[candidate];
+      if (value !== undefined && value !== null) return value;
+    }
+    return null;
+  }
+
+  /** Mirrors ONE dataset into its matching typed table (one request per 300 rows). */
+  static async mirrorDataset(
+    sql: any,
+    tenantId: string,
+    schema: NeonTableSchema,
+    records: unknown[]
+  ): Promise<number> {
+    if (!Array.isArray(records) || records.length === 0) return 0;
+    const insertColumns = [...schema.columns.map((column) => column.name), 'payload'];
+    const rows = records.map((record: any) => [
+      ...schema.columns.map((column) => NeonService.resolveColumnValue(record, column.name, tenantId)),
+      JSON.stringify(record ?? {}),
+    ]);
+    return NeonService.insertRowsInBatches(
+      sql,
+      schema.table,
+      insertColumns,
+      rows,
+      'ON CONFLICT (id) DO UPDATE SET payload = EXCLUDED.payload, synced_at = NOW()',
+      ['payload']
+    );
+  }
+
+  /** Mirrors EVERY dataset into its typed table (so no table stays empty). */
+  static async mirrorAllTables(
+    connectionString: string,
+    tenantId: string,
+    documents: { [key: string]: unknown }
+  ): Promise<{ mirroredTables: number; mirroredRows: number; failures: string[] }> {
+    const failures: string[] = [];
+    let mirroredTables = 0;
+    let mirroredRows = 0;
+    try {
+      const sql = this.getClient(connectionString);
+      for (const schema of NEON_SCHEMA_TABLES) {
+        const records = documents[schema.sourceKey];
+        if (!Array.isArray(records) || records.length === 0) continue;
+        try {
+          const rows = await NeonService.mirrorDataset(sql, tenantId, schema, records);
+          if (rows > 0) {
+            mirroredTables += 1;
+            mirroredRows += rows;
+          }
+        } catch (tableError: any) {
+          failures.push(`${schema.table}: ${tableError?.message || String(tableError)}`);
+        }
+      }
+    } catch (error: any) {
+      failures.push(error?.message || String(error));
+    }
+    return { mirroredTables, mirroredRows, failures };
   }
   // --- Realtime Direct Insertion Methods ---
 
