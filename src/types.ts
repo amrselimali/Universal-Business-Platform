@@ -1029,6 +1029,7 @@ export interface CashReceiptVoucher {
   checkDate?: string;
   referenceInvoiceNo?: string;
   description: string;
+  notes?: string;
   serviceId?: string;
   serviceName?: string;
   productId?: string;

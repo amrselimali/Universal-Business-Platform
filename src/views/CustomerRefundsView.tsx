@@ -51,6 +51,7 @@ export const CustomerRefundsView: React.FC = () => {
   const today = new Date().toISOString().slice(0, 10);
   const [dateFrom, setDateFrom] = useState<string>(today);
   const [dateTo, setDateTo] = useState<string>(today);
+  const [showAllBranches, setShowAllBranches] = useState<boolean>(true);
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'cancelled'>('all');
   const [search, setSearch] = useState<string>('');
 
@@ -79,10 +80,11 @@ export const CustomerRefundsView: React.FC = () => {
 
   const activeBranchId = activeBranch?.id;
 
-  // Only active branch data
+  // Filter refunds by branch (supports showing all branches or active branch)
   const branchRefunds = useMemo(() => {
-    return customerRefunds.filter((refund) => !activeBranchId || refund.branchId === activeBranchId);
-  }, [customerRefunds, activeBranchId]);
+    if (showAllBranches || !activeBranchId) return customerRefunds;
+    return customerRefunds.filter((refund) => refund.branchId === activeBranchId);
+  }, [customerRefunds, activeBranchId, showAllBranches]);
 
   const filteredRefunds = useMemo(() => {
     const q = search.toLowerCase().trim();
@@ -255,11 +257,27 @@ export const CustomerRefundsView: React.FC = () => {
       const rowNumber = index + 2;
       const errorsBefore = errors.length;
       const customerCode = String(row['كود العميل'] || row['Customer Code'] || '').trim();
+      const normCustomerCode = customerCode.replace(/^0+/, '');
       const customerName = String(row['اسم العميل'] || row['Customer Name'] || row['العميل'] || '').trim();
       const amountRaw = row['القيمة المستردة'] ?? row['Refund Value'] ?? row['القيمة'] ?? '';
       const amountNum = Number(amountRaw);
-      const matchedCustomer = parties.find((p) => (p.type === 'Customer' || p.type === 'Both') && [p.customerCode, p.code].some((c) => String(c || '').trim() === customerCode));
-      if (!customerCode || !matchedCustomer) {
+      const matchedCustomer = parties.find((p) => {
+        if (p.type !== 'Customer' && p.type !== 'Both') return false;
+        const pCustCode = String(p.customerCode || '').trim();
+        const pCode = String(p.code || '').trim();
+        const pSysCode = String(p.systemCode || '').trim();
+        return (
+          (customerCode && (
+            pCustCode === customerCode ||
+            pCustCode.replace(/^0+/, '') === normCustomerCode ||
+            pCode === customerCode ||
+            pCode.replace(/^0+/, '') === normCustomerCode ||
+            pSysCode.toLowerCase() === customerCode.toLowerCase()
+          )) ||
+          (customerName && p.name.trim().toLowerCase() === customerName.toLowerCase())
+        );
+      });
+      if (!customerCode && !matchedCustomer) {
         errors.push({ rowNumber, columnKey: 'customerCode', columnLabelAr: 'كود العميل', enteredValue: customerCode, reasonAr: 'كود العميل المسلسل مطلوب ويجب أن يكون موجودًا في إدارة العملاء.' });
       }
       if (!customerName || customerName.length < 2) {
@@ -275,8 +293,8 @@ export const CustomerRefundsView: React.FC = () => {
       if (dateRaw.includes('T')) cleanDate = dateRaw.split('T')[0];
       const parsed = {
         customerId: matchedCustomer?.id,
-        customerCode,
-        customerName,
+        customerCode: matchedCustomer?.customerCode || matchedCustomer?.code || customerCode,
+        customerName: matchedCustomer?.name || customerName,
         amount: Number.isFinite(amountNum) ? amountNum : 0,
         units: Number(row['عدد الوحدات'] ?? row['Units'] ?? '') || 0,
         unitPrice: Number(row['سعر الوحدة'] ?? row['Unit Price'] ?? '') || 0,
@@ -299,6 +317,7 @@ export const CustomerRefundsView: React.FC = () => {
       const matchedMethod = paymentMethods.find((m) => String(m.code || '').trim().toLowerCase() === String(row.paymentMethodCode || '').trim().toLowerCase()) || paymentMethods[0];
       const units = Number(row.units) > 0 ? Number(row.units) : 1;
       const unitPrice = Number(row.unitPrice) > 0 ? Number(row.unitPrice) : Number((Number(row.amount) / units).toFixed(2));
+      const actualFileDate = row.fileDate || row.date;
       const result = addCustomerRefund({
         tenantId: tenant?.id || 'tenant-eg-001',
         branchId: activeBranchId || branches[0]?.id || '',
@@ -311,7 +330,7 @@ export const CustomerRefundsView: React.FC = () => {
         paymentMethodLabel: matchedMethod?.nameAr || matchedMethod?.nameEn || t('نقداً (كاش)', 'Cash'),
         paymentAccountId: matchedMethod?.linkedAccountId,
         serviceName: row.serviceName || undefined,
-        notes: [row.notes, row.fileDate ? `التاريخ المسجل في الملف: ${row.fileDate}` : ''].filter(Boolean).join(' - ') || undefined,
+        notes: [row.notes, actualFileDate ? `تاريخ المستند: ${actualFileDate}` : ''].filter(Boolean).join(' - ') || undefined,
       });
       if (result.success) successCount += 1;
       else failures.push(`${index + 2}: ${result.error}`);
@@ -341,10 +360,19 @@ export const CustomerRefundsView: React.FC = () => {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <span className="inline-flex items-center gap-1.5 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-bold text-indigo-700 dark:border-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300">
+          <button
+            type="button"
+            onClick={() => setShowAllBranches(!showAllBranches)}
+            className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-bold transition-all cursor-pointer ${
+              showAllBranches
+                ? 'border-indigo-300 bg-indigo-600 text-white shadow-xs'
+                : 'border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300'
+            }`}
+            title={t('التبديل بين عرض حركات الفرع الحالي أو كافة فروع الشركة', 'Toggle between active branch and all branches')}
+          >
             <Building2 className="h-3.5 w-3.5" />
-            {activeBranch?.name || t('الفرع المفعّل', 'Active branch')}
-          </span>
+            {showAllBranches ? t('كافة الفروع', 'All Branches') : (activeBranch?.name || t('الفرع المفعّل', 'Active branch'))}
+          </button>
           <button
             type="button"
             onClick={() => setShowExcelModal(true)}
@@ -440,6 +468,26 @@ export const CustomerRefundsView: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {filteredRefunds.length === 0 && customerRefunds.length > 0 && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50/80 p-4 text-xs font-semibold text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-200 flex flex-wrap items-center justify-between gap-3 shadow-xs">
+          <div>
+            <span className="font-bold">
+              {t(`تنبيه: يوجد ${customerRefunds.length} حركة تسوية مسجلة في النظام غير ظاهرة حالياً بسبب فلتر التاريخ أو الفرع.`, `Notice: There are ${customerRefunds.length} recorded refund movements in the system currently filtered out by date or branch.`)}
+            </span>
+            <p className="text-[11px] text-amber-700 dark:text-amber-300 mt-0.5">
+              {t('انقر على الزر المجاور لعرض كل الحركات لكافة الفروع وكافة التواريخ فوراً.', 'Click the button to show all transactions across all branches and all dates immediately.')}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => { setDateFrom(''); setDateTo(''); setShowAllBranches(true); setSearch(''); setStatusFilter('all'); }}
+            className="rounded-xl bg-amber-600 px-3.5 py-2 text-xs font-bold text-white hover:bg-amber-700 shadow-xs cursor-pointer"
+          >
+            {t('عرض كافة الحركات والفروع والتواريخ الآن', 'Show All Movements & Dates Now')}
+          </button>
+        </div>
+      )}
 
       {/* Refunds table */}
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">

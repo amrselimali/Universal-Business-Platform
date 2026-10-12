@@ -1,5 +1,71 @@
 # PROJECT STATE
 
+## Collection Receipt Cash/Bank Account Resolution & Balance Synchronization Fix — 2026-10-12
+
+- Resolved migration and hydration errors: `Collection receipt migration skipped: no linked cash/bank account for CR-2026-0004` through `CR-2026-0009`.
+- Root causes identified and resolved:
+  1. **Strict payment account resolution during reconciliation**: Receipts imported or created without direct `bankOrSafeAccountId` or whose payment methods lacked a pre-mapped account ID for the tenant were failing the strict lookup in `accountsForReconciliation`. This caused `PlatformContext.tsx` to log `console.error` and prematurely abort processing for those receipts.
+  2. **Skipped customer balance reduction**: Because the loop returned early on missing cash accounts, line 8960 (`!receipt.customerBalanceApplied`) never executed for those receipts. As a result, the customer's recorded ledger balance (`p.balance`) remained stale (e.g. at `-1,749.40` or `-1,049.40`) while the detailed statement matched the receipts via `isPartyReceiptMatch`, producing conflicting balances between the customer selector dropdown and the detailed movements table.
+  3. **Payment account fallback and provisioning**: Added `resolveCashOrBankAccount` in `src/services/accountingEngine.ts` to locate tenant safe/bank accounts (`1111` / `1112` / `1110`) by ID, code, payment method type, or name, and synthesize standard `acc-${tenantId}-1111` ('الخزينة الرئيسية (النقدية بالصندوق)') if missing.
+  4. **Customer balance decoupling from journal errors**: In `PlatformContext.tsx`, customer balance application (`customerBalanceApplied`) is executed as soon as the customer is matched, ensuring customer subledger balances are never held hostage by GL safe-account mapping issues.
+  5. **Auto-provisioning safe accounts**: Added automatic provisioning of account `1111` for all tenants with active receipts or parties during reconciliation startup.
+  6. **Bulk import credit application**: Ensured `customerCreditsMap` updates `allParties` even when `partyOffersMap` has zero booked session offers.
+- Files: `src/services/accountingEngine.ts`, `src/context/PlatformContext.tsx`, `src/components/PartyStatementModal.tsx`. Validation: `compile_applet` passed.
+
+
+
+- Resolved errors during hydration and customer reconciliation:
+  - Error 0 & 1 (`Customer account linking skipped: لا يوجد حساب عملاء مسجل بالكود 2000 لهذا الكيان. Tenant: tenant-2718 / tenant-eg-004`).
+  - Error 2 (`Collection receipt migration skipped: الحساب 2000 ليس أصلًا ذا طبيعة مدينة، لذلك لا يمكن استخدامه كحساب تحكم للعملاء. Tenant: tenant-eg-001`).
+- Root cause: `resolveCustomerControlAccount` and `resolveCustomerPartyAccount` in `accountingEngine.ts` strictly looked for account code `2000` and required it to be an Asset with normal debit balance. In the chart of accounts (`INITIAL_ACCOUNTS` and `baseAccountDefs`), account `2000` is Liabilities (`الخصوم والالتزامات`, type `Liability`, `isDebitNormal: false`), while the true customer receivable control account is code `1120` (`العملاء والمدينون التجاريون`, type `Asset`, `isDebitNormal: true`). This caused `tenant-eg-001` to be rejected as non-asset, and tenants without custom code `2000` to be skipped completely.
+- Fix:
+  - Updated `resolveCustomerControlAccount` in `src/services/accountingEngine.ts` to prioritize standard account `1120` (Asset, debit normal), custom `2000` only if configured as debit-normal Asset, any Asset customer receivable account, and synthesize a tenant-scoped `1120` account fallback.
+  - Unified `resolveCustomerPartyAccount` with `resolveCustomerControlAccount`.
+  - Added auto-provisioning of missing `1120` control accounts for any tenant with customers in `PlatformContext.tsx`.
+  - Updated `PartyStatementModal.tsx` to recognize both `1120` and `2000` as shared customer control accounts.
+- Files: `src/services/accountingEngine.ts`, `src/context/PlatformContext.tsx`, `src/components/PartyStatementModal.tsx`. Validation: `compile_applet` passed.
+
+## Settlement View Default Today & Customer Statement Date Presentation — 2026-10-11
+
+- Customer Dues Settlement (`CustomerRefundsView`): Defaulted date filter strictly to today (`dateFrom = today`, `dateTo = today`) as requested by the user, while keeping manual date range and "All" buttons available.
+- Detailed Customer Statement (`PartyStatementModal`):
+  - Removed the branch switching toggle and the extra "show receipts outside date" banner per user request.
+  - All collection receipts are recorded using the upload date as the transaction date, while any original receipt date (from Excel import or input) is embedded directly into the explanation/description (`[تاريخ الإيصال: ...]`) alongside any previous notes.
+- Files: `src/views/CustomerRefundsView.tsx`, `src/components/PartyStatementModal.tsx`, `src/views/CollectionReceiptsView.tsx`. Validation: `compile_applet` passed.
+
+## Detailed Customer Statement Balance Filters & Export Balances by Branch — 2026-10-11
+
+- Added advanced balance filtering to the Customer Statement (`PartyStatementModal`):
+  - Filters available: Greater than (`>`), Less than (`<`), Equals (`=`), Debit balances only, Credit balances only, Zero balances only.
+  - Interactive threshold amount input with clear button and real-time count of matching customers.
+  - Dropdown selector automatically updates to reflect only customers matching the balance criteria.
+- Added Excel export for customer balances with branch selection:
+  - Branch selection: Full Branch (specific branch) or All Branches (entire company).
+  - Two export actions:
+    1. **تصدير العملاء المفلترين (Export Filtered Customers)**: Exports customers matching the current search, type, and balance filters.
+    2. **تصدير أرصدة الفرع بالكامل (Export Full Branch Balances)**: Exports all customers in the chosen branch without balance restriction.
+  - Exported Excel columns include:
+    - `كود العميل` (Customer Code)
+    - `كود السيستم` (System Code)
+    - `الكود الورقي` (Paper / File Code)
+    - `اسم العميل` (Customer Name)
+    - `رقم التليفون` (Phone Number)
+    - `الرصيد` (Balance)
+    - `طبيعة الرصيد` (Balance Nature - مدين / دائن / متزن)
+    - `تاريخ التكويد` (Coding Date)
+    - `الفرع` (Branch Name)
+- Files: `src/components/PartyStatementModal.tsx`. Validation: `compile_applet` passed.
+
+## Customer Refunds Persistence & Comprehensive Statement Receipts Linking — 2026-10-11
+
+- Fixed Customer Dues Settlement (`CustomerRefundsView` / `allCustomerRefunds`) persistence: `erp_customer_refunds` was not loaded in `hydrateDatasets` and was mirrored only to IndexedDB without localStorage, causing imported movements to disappear upon refresh. Now fully hydrated from IndexedDB, mirrored safely to both localStorage and IndexedDB, with an automatic self-healing recovery from journal entries.
+- Fixed `CustomerRefundsView` filtering: previously defaulted strictly to `today` and active branch, hiding movements from earlier dates or other branches. Added branch toggle (All Branches vs Active Branch), default all-dates view, and a reactive recovery banner if transactions exist outside current filters.
+- Detailed Customer Statement (`PartyStatementModal`):
+  - Made collection receipts and refunds matching robust against auto-serial customer code (with or without leading zeros), system code, phone, and normalized Arabic name.
+  - Receipt line displays: posted date shows upload date, and receipt explanation/description prominently preserves `[تاريخ الإيصال: ...]` along with service description and notes.
+  - Linked quantity movements and package balances now match all receipts by customer code seamlessly.
+  - Added branch scope toggle (All Branches vs Active Branch) and proactive banner for any hidden receipts outside date/branch filters.
+- Files: `src/context/PlatformContext.tsx`, `src/views/CustomerRefundsView.tsx`, `src/views/CollectionReceiptsView.tsx`, `src/components/PartyStatementModal.tsx`. Validation: `compile_applet` passed.
 ## Receipt linking by auto-serial code + reconciliation guard — 2026-10-11
 
 - Receipt-to-customer matching now uses the auto-serial customer code only (removed systemCode/paperCode/name fallbacks) in the customer statement and the reconciliation.

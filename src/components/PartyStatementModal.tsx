@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { usePlatform } from '../context/PlatformContext';
 import { exportRowsToExcel } from '../utils/excelExport';
-import { Party, ClientOffer } from '../types';
+import { Party, ClientOffer, CashReceiptVoucher, CustomerRefundVoucher } from '../types';
 import {
   FileText,
   Printer,
@@ -33,6 +33,18 @@ import {
   Download,
   Undo2,
 } from 'lucide-react';
+
+import {
+  normalizeStatementDate,
+  normalizeArabicName,
+  getPartyLookupCodes,
+  isReceiptMatchingParty,
+  isRefundMatchingParty,
+} from '../utils/statementUtils';
+
+const isPartyReceiptMatch = isReceiptMatchingParty;
+const isPartyRefundMatch = isRefundMatchingParty;
+const normalizeArabic = normalizeArabicName;
 
 interface PartyStatementModalProps {
   initialPartyId?: string | null;
@@ -66,11 +78,13 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
     language,
     tenant,
     activeBranch,
+    branches,
     accounts,
     parties,
     invoices,
     receptionShifts,
     cashReceipts,
+    allCashReceipts,
     customerRefunds,
     journalEntries,
     deviceMaintenanceRecords,
@@ -84,6 +98,15 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
   const [selectedPartyId, setSelectedPartyId] = useState<string>(initialPartyId || '');
   const [partyTypeFilter, setPartyTypeFilter] = useState<'ALL' | 'Customer' | 'Supplier'>('ALL');
   const [partySearch, setPartySearch] = useState<string>('');
+
+  // Balance filters (All, Greater than, Less than, Equals, Debit only, Credit only, Zero only)
+  const [balanceFilterType, setBalanceFilterType] = useState<
+    'ALL' | 'GREATER_THAN' | 'LESS_THAN' | 'EQUALS' | 'DEBIT_ONLY' | 'CREDIT_ONLY' | 'ZERO_ONLY'
+  >('ALL');
+  const [balanceThreshold, setBalanceThreshold] = useState<string>('');
+
+  // Export scope options
+  const [exportScopeBranch, setExportScopeBranch] = useState<string>(branchId && branchId !== 'all' ? branchId : 'ALL');
 
   // Date range filters
   const [dateFilter, setDateFilter] = useState<'ALL' | 'THIS_MONTH' | 'LAST_MONTH' | 'THIS_YEAR' | 'CUSTOM'>('ALL');
@@ -100,17 +123,52 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
 
   const currentParty = parties.find((p) => p.id === selectedPartyId);
 
-  // Branch isolation (الفلترة حسب الفرع): when a specific branch is provided (e.g. the
-  // active branch when opened from Accounting), only that branch's documents are included.
+  // Branch isolation: supports showing all branches or restricting to selected branch
+  const [includeAllBranches, setIncludeAllBranches] = useState<boolean>(true);
   const branchScoped = branchId && branchId !== 'all' && branchId !== 'general' ? branchId : null;
-  const scopedInvoices = useMemo(() => (branchScoped ? invoices.filter((inv) => inv.branchId === branchScoped) : invoices), [invoices, branchScoped]);
-  const scopedShifts = useMemo(() => (branchScoped ? receptionShifts.filter((shift) => shift.branchId === branchScoped) : receptionShifts), [receptionShifts, branchScoped]);
-  const scopedReceipts = useMemo(() => (branchScoped ? cashReceipts.filter((rcpt) => rcpt.branchId === branchScoped) : cashReceipts), [cashReceipts, branchScoped]);
-  const scopedRefunds = useMemo(() => (branchScoped ? customerRefunds.filter((refund) => refund.branchId === branchScoped) : customerRefunds), [customerRefunds, branchScoped]);
-  const scopedJournals = useMemo(() => (branchScoped ? journalEntries.filter((entry) => entry.branchId === branchScoped) : journalEntries), [journalEntries, branchScoped]);
+  const effectiveBranchScoped = includeAllBranches ? null : branchScoped;
+  const scopedInvoices = useMemo(() => (effectiveBranchScoped ? invoices.filter((inv) => inv.branchId === effectiveBranchScoped) : invoices), [invoices, effectiveBranchScoped]);
+  const scopedShifts = useMemo(() => (effectiveBranchScoped ? receptionShifts.filter((shift) => shift.branchId === effectiveBranchScoped) : receptionShifts), [receptionShifts, effectiveBranchScoped]);
+  const allAvailableReceipts = useMemo(() => {
+    const map = new Map<string, CashReceiptVoucher>();
+    allCashReceipts.forEach((r) => {
+      if (!tenant?.id || !r.tenantId || r.tenantId === tenant.id) {
+        map.set(r.id, r);
+      }
+    });
+    cashReceipts.forEach((r) => map.set(r.id, r));
+    return Array.from(map.values());
+  }, [allCashReceipts, cashReceipts, tenant?.id]);
+  const scopedReceipts = useMemo(() => (effectiveBranchScoped ? allAvailableReceipts.filter((rcpt) => rcpt.branchId === effectiveBranchScoped) : allAvailableReceipts), [allAvailableReceipts, effectiveBranchScoped]);
+  const scopedRefunds = useMemo(() => (effectiveBranchScoped ? customerRefunds.filter((refund) => refund.branchId === effectiveBranchScoped) : customerRefunds), [customerRefunds, effectiveBranchScoped]);
+  const scopedJournals = useMemo(() => (effectiveBranchScoped ? journalEntries.filter((entry) => entry.branchId === effectiveBranchScoped) : journalEntries), [journalEntries, effectiveBranchScoped]);
 
-  // Available filtered parties for dropdown (search by name, phone, customer code,
-  // system code, paper code, file code, or file number)
+  // Filter parties by type, search query, branch, and balance criteria
+  const matchesPartyBalance = (partyBalance: number) => {
+    const thresholdNum = parseFloat(balanceThreshold);
+    const hasThreshold = !isNaN(thresholdNum);
+    const b = Number(partyBalance || 0);
+
+    switch (balanceFilterType) {
+      case 'GREATER_THAN':
+        return hasThreshold ? b > thresholdNum : true;
+      case 'LESS_THAN':
+        return hasThreshold ? b < thresholdNum : true;
+      case 'EQUALS':
+        return hasThreshold ? Math.abs(b - thresholdNum) < 0.005 : true;
+      case 'DEBIT_ONLY':
+        return b > 0.005; // رصيد مدين (عليه مستحقات للشركة)
+      case 'CREDIT_ONLY':
+        return b < -0.005; // رصيد دائن (له مبالغ أو دفعات مقدمة)
+      case 'ZERO_ONLY':
+        return Math.abs(b) <= 0.005; // رصيد مساوي للصفر
+      case 'ALL':
+      default:
+        return true;
+    }
+  };
+
+  // Available filtered parties for dropdown and statement selection
   const availableParties = useMemo(() => {
     return parties.filter((p) => {
       const matchesType = partyTypeFilter === 'ALL' || p.type === partyTypeFilter || p.type === 'Both';
@@ -127,9 +185,12 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
         (p.paperCode && p.paperCode.toLowerCase().includes(q)) ||
         (p.fileCode && p.fileCode.toLowerCase().includes(q)) ||
         (p.fileNumber && p.fileNumber.toLowerCase().includes(q));
-      return matchesType && matchesSearch;
+      
+      const matchesBalance = matchesPartyBalance(p.balance);
+
+      return matchesType && matchesSearch && matchesBalance;
     });
-  }, [parties, partyTypeFilter, partySearch]);
+  }, [parties, partyTypeFilter, partySearch, balanceFilterType, balanceThreshold]);
 
   // Compute date range boundary dates
   const { filterStart, filterEnd } = useMemo(() => {
@@ -178,8 +239,9 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
       paymentMethod?: string;
     }> = [];
 
-    const pName = currentParty.name.toLowerCase().trim();
-    const pPhone = currentParty.phone.trim();
+    const partyCodes = getPartyLookupCodes(currentParty);
+    const pNameNorm = normalizeArabicName(currentParty.name);
+    const pPhone = currentParty.phone?.replace(/\D/g, '') || '';
     const pCode = currentParty.systemCode?.toLowerCase().trim();
     const pCustomerCode = (currentParty.customerCode || currentParty.code)?.toLowerCase().trim();
 
@@ -187,12 +249,18 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
     if (currentParty.type === 'Customer' || currentParty.type === 'Both') {
       // Invoices
       scopedInvoices.forEach((inv) => {
+        const invCustomerNameNorm = normalizeArabicName(inv.customerName);
+        const invCustId = String(inv.customerId || '').trim().toLowerCase();
         const matchCustomer =
           inv.customerId === currentParty.id ||
-          (inv.customerName && inv.customerName.toLowerCase().trim() === pName);
+          partyCodes.has(invCustId) ||
+          partyCodes.has(invCustId.replace(/^0+/, '')) ||
+          partyCodes.has(String((inv as any).customerCode || '').trim().toLowerCase()) ||
+          partyCodes.has(String((inv as any).systemCode || '').trim().toLowerCase()) ||
+          (invCustomerNameNorm && pNameNorm && (invCustomerNameNorm === pNameNorm || invCustomerNameNorm.includes(pNameNorm) || pNameNorm.includes(invCustomerNameNorm)));
 
         if (matchCustomer) {
-          const invDate = inv.createdAt.slice(0, 10);
+          const invDate = normalizeStatementDate(inv.createdAt) || inv.createdAt.slice(0, 10);
           const totalCharged = inv.netAmount || 0;
           const paid = (inv.cashPaid || 0) + (inv.cardPaid || 0);
 
@@ -227,22 +295,25 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
       // Reception Shift Run Rows
       scopedShifts.forEach((shift) => {
         shift.runRows.forEach((row) => {
+          const rowPatientNorm = normalizeArabicName(row.patientName || row.customerName);
+          const rowCodes = [row.customerId, row.patientId, row.systemCode, row.customerCode, (row as any).patientCode]
+            .filter((c): c is string => Boolean(c))
+            .map((c) => String(c).trim().toLowerCase());
           const matchRow =
             row.customerId === currentParty.id ||
             row.patientId === currentParty.id ||
-            (row.patientName && row.patientName.toLowerCase().trim() === pName) ||
-            (row.customerName && row.customerName.toLowerCase().trim() === pName) ||
-            (row.patientPhone && row.patientPhone.trim() === pPhone) ||
-            (pCode && row.systemCode && row.systemCode.toLowerCase().trim() === pCode);
+            rowCodes.some((rc) => partyCodes.has(rc) || partyCodes.has(rc.replace(/^0+/, ''))) ||
+            (rowPatientNorm && pNameNorm && (rowPatientNorm === pNameNorm || rowPatientNorm.includes(pNameNorm) || pNameNorm.includes(rowPatientNorm)));
 
           if (matchRow) {
-            const rowDate = row.date || shift.shiftDate || shift.openedAt.slice(0, 10);
+            const rawRowDate = row.date || shift.shiftDate || shift.openedAt;
+            const rowDate = normalizeStatementDate(rawRowDate) || '1970-01-01';
             const revenue = row.totalRevenue || 0;
             const linkedReceipt = scopedReceipts.find((receipt) =>
-              receipt.status !== 'cancelled' && receipt.partyId === currentParty.id &&
+              receipt.status !== 'cancelled' && isReceiptMatchingParty(receipt, currentParty) &&
               (receipt.id === row.receiptVoucherId ||
                 (Boolean(receipt.journalEntryId) && receipt.journalEntryId === row.journalEntryId &&
-                  receipt.date === rowDate &&
+                  (normalizeStatementDate(receipt.date) === rowDate || receipt.date === rowDate) &&
                   Math.abs(Number(receipt.amount || 0) - Number(row.collectedAmount || 0)) < 0.01))
             );
             const collected = linkedReceipt ? 0 : row.collectedAmount || 0;
@@ -279,39 +350,48 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
       // Direct Collection Receipts / Cash Receipt Vouchers (سندات وإيصالات التحصيل المسجلة للعميل)
       scopedReceipts.forEach((rcpt) => {
         if (rcpt.status === 'cancelled') return;
-        const matchRcpt =
-          rcpt.partyId
-            ? rcpt.partyId === currentParty.id
-            : Boolean(pCustomerCode && rcpt.customerCode?.toLowerCase().trim() === pCustomerCode);
+        if (!isReceiptMatchingParty(rcpt, currentParty)) return;
 
-        if (matchRcpt) {
-          const amt = Number(rcpt.amount) || 0;
-          if (amt > 0) {
-            const bookedInfo = (rcpt.bookedQuantity || rcpt.quantity) ? ` [كمية محجوزة: ${rcpt.bookedQuantity || rcpt.quantity}]` : '';
-            const serviceDesc = rcpt.serviceName || rcpt.description || 'إيصال تحصيل نقدية';
-            rawMovements.push({
-              date: rcpt.date,
-              docNumber: rcpt.voucherNumber || rcpt.referenceInvoiceNo || `CR-${rcpt.id.slice(-5)}`,
-              docType: 'Invoice',
-              docTypeAr: 'إيصال تحصيل نقدية (دائن)',
-              description: `${serviceDesc}${bookedInfo}`,
-              debit: 0,
-              credit: amt,
-              paymentMethod: rcpt.paymentMethodLabel || (rcpt.paymentMethod === 'Cash' ? 'نقداً (كاش)' : rcpt.paymentMethod === 'Card' ? 'بطاقة' : 'تحويل'),
-            });
-          }
+        const amt = Number(rcpt.amount) || 0;
+        if (amt > 0) {
+          const rcptDate = normalizeStatementDate(rcpt.date) || rcpt.date || '1970-01-01';
+          let originalDateStr = '';
+          const sourceText = [rcpt.notes, rcpt.description].filter(Boolean).join(' ');
+          const m = sourceText.match(/(?:تاريخ الإيصال|التاريخ المسجل في الملف|تاريخ التحصيل)[\s:]*([0-9\-/T]+)/);
+          if (m) originalDateStr = m[1];
+
+          let serviceDesc = rcpt.serviceName || rcpt.productName || rcpt.description || 'إيصال تحصيل نقدية';
+          const hasDateInDesc = originalDateStr && serviceDesc.includes(originalDateStr);
+          const dateNote = originalDateStr && !hasDateInDesc ? ` [تاريخ الإيصال: ${originalDateStr}]` : '';
+          const bookedInfo = (rcpt.bookedQuantity || rcpt.quantity) ? ` [كمية محجوزة: ${rcpt.bookedQuantity || rcpt.quantity}]` : '';
+          const cleanNotes = rcpt.notes && originalDateStr && rcpt.notes.includes(originalDateStr)
+            ? rcpt.notes.replace(new RegExp(`(?:تاريخ الإيصال|التاريخ المسجل في الملف|تاريخ التحصيل)[\\s:]*${originalDateStr}`, 'g'), '').replace(/^[\s\-|]+|[\s\-|]+$/g, '').trim()
+            : rcpt.notes;
+          const notesText = cleanNotes ? ` - ${cleanNotes}` : '';
+
+          rawMovements.push({
+            date: rcptDate,
+            docNumber: rcpt.voucherNumber || rcpt.referenceInvoiceNo || `CR-${rcpt.id.slice(-5)}`,
+            docType: 'Invoice',
+            docTypeAr: 'إيصال تحصيل نقدية (دائن)',
+            description: `${serviceDesc}${bookedInfo}${dateNote}${notesText}`,
+            debit: 0,
+            credit: amt,
+            paymentMethod: rcpt.paymentMethodLabel || (rcpt.paymentMethod === 'Cash' ? 'نقداً (كاش)' : rcpt.paymentMethod === 'Card' ? 'بطاقة' : 'تحويل'),
+          });
         }
       });
 
       // Customer refunds (استردادات العملاء) — recorded as a DEBIT against the customer
       scopedRefunds.forEach((refund) => {
         if (refund.status === 'cancelled') return;
-        if (refund.partyId !== currentParty.id) return;
+        if (!isRefundMatchingParty(refund, currentParty)) return;
         const refundAmount = Number(refund.amount) || 0;
         if (refundAmount <= 0) return;
+        const refundDate = normalizeStatementDate(refund.date) || refund.date || '1970-01-01';
         const unitsInfo = refund.units ? ` [وحدات مستردة: ${refund.units}]` : '';
         rawMovements.push({
-          date: refund.date,
+          date: refundDate,
           docNumber: refund.voucherNumber,
           docType: 'ExpensePayment',
           docTypeAr: 'استرداد للعميل (مدين)',
@@ -329,10 +409,11 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
         shift.expenses.forEach((exp) => {
           const matchSupplier =
             exp.supplierId === currentParty.id ||
-            (exp.supplierName && exp.supplierName.toLowerCase().trim() === pName);
+            (exp.supplierName && normalizeArabicName(exp.supplierName) === pNameNorm);
 
           if (matchSupplier) {
-            const expDate = exp.date?.slice(0, 10) || shift.shiftDate || shift.openedAt.slice(0, 10);
+            const rawExpDate = exp.date?.slice(0, 10) || shift.shiftDate || shift.openedAt;
+            const expDate = normalizeStatementDate(rawExpDate) || '1970-01-01';
             rawMovements.push({
               date: expDate,
               docNumber: exp.receiptNumber ? `RCP-${exp.receiptNumber}` : `EXP-${exp.id.slice(-5)}`,
@@ -351,11 +432,12 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
       deviceMaintenanceRecords.forEach((maint) => {
         const matchSupplier =
           maint.supplierId === currentParty.id ||
-          (maint.supplierName && maint.supplierName.toLowerCase().trim() === pName);
+          (maint.supplierName && normalizeArabicName(maint.supplierName) === pNameNorm);
 
         if (matchSupplier) {
+          const maintDate = normalizeStatementDate(maint.maintenanceDate) || '1970-01-01';
           rawMovements.push({
-            date: maint.maintenanceDate,
+            date: maintDate,
             docNumber: maint.invoiceNumber ? `INV-${maint.invoiceNumber}` : `MNT-${maint.id.slice(-5)}`,
             docType: 'ExpensePayment',
             docTypeAr: 'فاتورة صيانة جهاز ليزر',
@@ -367,7 +449,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
 
           if (maint.paymentStatus !== 'OnCredit') {
             rawMovements.push({
-              date: maint.maintenanceDate,
+              date: maintDate,
               docNumber: `PAY-MNT-${maint.id.slice(-5)}`,
               docType: 'ExpensePayment',
               docTypeAr: 'سداد فوري لصيانة جهاز',
@@ -383,12 +465,15 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
 
     const receiptJournalIds = new Set(
       scopedReceipts
-        .filter((receipt) => receipt.partyId === currentParty.id && receipt.status !== 'cancelled')
+        .filter((receipt) => isReceiptMatchingParty(receipt, currentParty) && receipt.status !== 'cancelled')
         .map((receipt) => receipt.journalEntryId)
         .filter((journalId): journalId is string => Boolean(journalId))
     );
     const linkedPartyAccount = accounts.find((account) => account.id === currentParty.accountId);
-    const hasSharedCustomerControlAccount = linkedPartyAccount?.code === '2000';
+    const hasSharedCustomerControlAccount =
+      linkedPartyAccount?.code === '1120' ||
+      linkedPartyAccount?.code === '2000' ||
+      (linkedPartyAccount?.type === 'Asset' && !linkedPartyAccount?.code.includes('-'));
     const supplierAccountId = currentParty.type === 'Both'
       ? currentParty.supplierAccountId
       : currentParty.type === 'Supplier' ? currentParty.accountId : undefined;
@@ -404,12 +489,14 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
       const matchingLines = entry.lines.filter(
         (line) => (!hasSharedCustomerControlAccount && line.accountId === currentParty.accountId) ||
           (supplierAccountId && line.accountId === supplierAccountId) ||
-          partyJournalIdentifiers.some((identifier) => line.memo?.toLowerCase().includes(identifier))
+          partyJournalIdentifiers.some((identifier) => line.memo?.toLowerCase().includes(identifier)) ||
+          Array.from(partyCodes).some((code) => code.length >= 3 && line.memo?.toLowerCase().includes(code))
       );
 
+      const entryDate = normalizeStatementDate(entry.date) || '1970-01-01';
       matchingLines.forEach((line) => {
         rawMovements.push({
-          date: entry.date,
+          date: entryDate,
           docNumber: entry.entryNumber,
           docType: 'JournalEntry',
           docTypeAr: isCollectionPosting
@@ -424,8 +511,22 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
 
     rawMovements.sort((a, b) => a.date.localeCompare(b.date));
 
+    // Lifetime totals of all recorded movements
+    const totalLifetimeDebits = Number(rawMovements.reduce((sum, m) => sum + m.debit, 0).toFixed(2));
+    const totalLifetimeCredits = Number(rawMovements.reduce((sum, m) => sum + m.credit, 0).toFixed(2));
+    const netLifetimeMovement = Number((totalLifetimeDebits - totalLifetimeCredits).toFixed(2));
+
+    // Recorded ledger balance on the party card
+    const ledgerRecordedBalance = Number(currentParty.balance || 0);
+
+    // Initial base opening balance prior to recorded system movements
+    // If the customer has an initial balance from import/migration that is not explained by the movements,
+    // this residual is preserved as the true opening balance brought forward.
+    const initialBroughtForward = Math.abs(ledgerRecordedBalance - netLifetimeMovement) > 0.005
+      ? Number((ledgerRecordedBalance - netLifetimeMovement).toFixed(2))
+      : 0;
+
     // Calculate opening balance before filterStart
-    let openBal = 0;
     const totalPriorDebits = rawMovements
       .filter((m) => m.date < filterStart)
       .reduce((sum, m) => sum + m.debit, 0);
@@ -433,7 +534,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
       .filter((m) => m.date < filterStart)
       .reduce((sum, m) => sum + m.credit, 0);
 
-    openBal = totalPriorDebits - totalPriorCredits;
+    const openBal = Number((initialBroughtForward + totalPriorDebits - totalPriorCredits).toFixed(2));
 
     const inRangeMovements = rawMovements.filter(
       (m) => m.date >= filterStart && m.date <= filterEnd
@@ -441,7 +542,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
 
     let running = openBal;
     const finalMovements: StatementLine[] = inRangeMovements.map((m, idx) => {
-      running += m.debit - m.credit;
+      running = Number((running + m.debit - m.credit).toFixed(2));
       return {
         ...m,
         id: `stmt-${idx}-${m.docNumber}`,
@@ -449,9 +550,9 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
       };
     });
 
-    const sumDebits = inRangeMovements.reduce((s, m) => s + m.debit, 0);
-    const sumCredits = inRangeMovements.reduce((s, m) => s + m.credit, 0);
-    const closeBal = running;
+    const sumDebits = Number(inRangeMovements.reduce((s, m) => s + m.debit, 0).toFixed(2));
+    const sumCredits = Number(inRangeMovements.reduce((s, m) => s + m.credit, 0).toFixed(2));
+    const closeBal = Number(running.toFixed(2));
 
     return {
       openingBalance: openBal,
@@ -460,7 +561,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
       totalDebits: sumDebits,
       totalCredits: sumCredits,
     };
-  }, [currentParty, branchScoped, invoices, receptionShifts, cashReceipts, customerRefunds, journalEntries, deviceMaintenanceRecords, filterStart, filterEnd]);
+  }, [currentParty, branchScoped, invoices, receptionShifts, scopedReceipts, customerRefunds, journalEntries, deviceMaintenanceRecords, filterStart, filterEnd]);
 
   // QUANTITY & SERVICE MOVEMENTS FROM COLLECTION RECEIPTS
   // (حركات الكميات والخدمة المقيدة من إيصالات التحصيل)
@@ -469,31 +570,36 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
   // This belongs to the detailed customer account only; the chart of accounts is untouched.
   const receiptQuantityMovements = useMemo(() => {
     if (!currentParty) return [];
-    const pName = currentParty.name.toLowerCase().trim();
-    const pCode = currentParty.systemCode?.toLowerCase().trim();
-    const pCustomerCode = (currentParty.customerCode || currentParty.code)?.toLowerCase().trim();
 
     return scopedReceipts
       .filter((rcpt) => rcpt.status !== 'cancelled' && !rcpt.isArchived)
+      .filter((rcpt) => isPartyReceiptMatch(rcpt, currentParty))
       .filter((rcpt) => {
-        const matchRcpt = rcpt.partyId
-          ? rcpt.partyId === currentParty.id
-          : Boolean(pCustomerCode && rcpt.customerCode?.toLowerCase().trim() === pCustomerCode);
-        return matchRcpt;
+        const d = normalizeStatementDate(rcpt.date) || rcpt.date;
+        return d >= filterStart && d <= filterEnd;
       })
-      .filter((rcpt) => rcpt.date >= filterStart && rcpt.date <= filterEnd)
-      .map((rcpt) => ({
-        id: rcpt.id,
-        date: rcpt.date,
-        voucherNumber: rcpt.voucherNumber || rcpt.referenceInvoiceNo || `CR-${rcpt.id.slice(-5)}`,
-        service: rcpt.serviceName || rcpt.productName || rcpt.description || 'خدمة / جلسة',
-        quantity: Number(rcpt.bookedQuantity || rcpt.quantity || 0),
-        amount: Number(rcpt.amount) || 0,
-        paymentMethod: rcpt.paymentMethodLabel || (rcpt.paymentMethod === 'Cash' ? 'نقداً (كاش)' : rcpt.paymentMethod === 'Card' ? 'بطاقة' : 'تحويل'),
-      }))
+      .map((rcpt) => {
+        let originalDateStr = '';
+        const sourceText = [rcpt.notes, rcpt.description].filter(Boolean).join(' ');
+        const m = sourceText.match(/(?:تاريخ الإيصال|التاريخ المسجل في الملف|تاريخ التحصيل)[\s:]*([0-9\-/T]+)/);
+        if (m) originalDateStr = m[1];
+        const baseService = rcpt.serviceName || rcpt.productName || rcpt.description || 'خدمة / جلسة';
+        const displayService = originalDateStr && !baseService.includes(originalDateStr)
+          ? `${baseService} [تاريخ الإيصال: ${originalDateStr}]`
+          : baseService;
+        return {
+          id: rcpt.id,
+          date: normalizeStatementDate(rcpt.date) || rcpt.date,
+          voucherNumber: rcpt.voucherNumber || rcpt.referenceInvoiceNo || `CR-${rcpt.id.slice(-5)}`,
+          service: displayService,
+          quantity: Number(rcpt.bookedQuantity || rcpt.quantity || 0),
+          amount: Number(rcpt.amount) || 0,
+          paymentMethod: rcpt.paymentMethodLabel || (rcpt.paymentMethod === 'Cash' ? 'نقداً (كاش)' : rcpt.paymentMethod === 'Card' ? 'بطاقة' : 'تحويل'),
+        };
+      })
       .filter((movement) => movement.quantity > 0)
       .sort((a, b) => a.date.localeCompare(b.date));
-  }, [currentParty, branchScoped, cashReceipts, filterStart, filterEnd]);
+  }, [currentParty, scopedReceipts, filterStart, filterEnd]);
 
   const totalReceiptQuantity = useMemo(
     () => receiptQuantityMovements.reduce((sum, movement) => sum + movement.quantity, 0),
@@ -504,11 +610,14 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
   const refundQuantityMovements = useMemo(() => {
     if (!currentParty) return [];
     return scopedRefunds
-      .filter((refund) => refund.status !== 'cancelled' && refund.partyId === currentParty.id)
-      .filter((refund) => refund.date >= filterStart && refund.date <= filterEnd)
+      .filter((refund) => refund.status !== 'cancelled' && isPartyRefundMatch(refund, currentParty))
+      .filter((refund) => {
+        const d = normalizeStatementDate(refund.date) || refund.date;
+        return d >= filterStart && d <= filterEnd;
+      })
       .map((refund) => ({
         id: refund.id,
-        date: refund.date,
+        date: normalizeStatementDate(refund.date) || refund.date,
         voucherNumber: refund.voucherNumber,
         service: refund.serviceName || 'استرداد مستحقات',
         units: Number(refund.units || 0),
@@ -518,6 +627,19 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
       .filter((movement) => movement.units > 0)
       .sort((a, b) => a.date.localeCompare(b.date));
   }, [currentParty, scopedRefunds, filterStart, filterEnd]);
+
+  // Count receipts matching this party that are hidden by date filter or branch scoping
+  const hiddenReceiptsCount = useMemo(() => {
+    if (!currentParty) return 0;
+    if (dateFilter === 'ALL' && includeAllBranches) return 0;
+    const allMatching = cashReceipts.filter((rcpt) => rcpt.status !== 'cancelled' && isPartyReceiptMatch(rcpt, currentParty));
+    const currentlyShowingIds = new Set(
+      scopedReceipts
+        .filter((rcpt) => rcpt.status !== 'cancelled' && isPartyReceiptMatch(rcpt, currentParty) && rcpt.date >= filterStart && rcpt.date <= filterEnd)
+        .map((r) => r.id)
+    );
+    return allMatching.filter((r) => !currentlyShowingIds.has(r.id)).length;
+  }, [currentParty, dateFilter, includeAllBranches, cashReceipts, scopedReceipts, filterStart, filterEnd]);
 
   // QUANTITY & SESSIONS ANALYSIS (كشف حساب الكميات والباقات)
   // The quantity view keeps its existing mechanism (packages/offers). Collection
@@ -739,6 +861,84 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
       filename: `كشف_حساب_${safeCode}`,
       sheetName: 'Statement',
       headers: ['التاريخ', 'رقم المستند', 'نوع الحركة', 'البيان', 'مدين', 'دائن', 'الرصيد التراكمي'],
+      rows,
+    });
+  };
+
+  /**
+   * تصدير أرصدة العملاء حسب اختيار المستخدم:
+   * 1. الفرع بالكامل (أو كافة الفروع)
+   * 2. أو العملاء المطابقين للفلاتر النشطة (أكبر من، أصغر من، يساوي، إلخ)
+   * الأعمدة المصدرة:
+   * كود العميل | كود السيستم | الكود الورقي | اسم العميل | رقم التليفون | الرصيد | نوع الرصيد | تاريخ التكويد | اسم الفرع
+   */
+  const handleExportCustomersBalances = (scope: 'FILTERED' | 'FULL_BRANCH') => {
+    let targetList: Party[] = [];
+
+    if (scope === 'FILTERED') {
+      // تصدير العملاء الذين ينطبق عليهم الفلتر الحالي (البحث + الرصيد + نوع العميل)
+      targetList = availableParties.filter((p) => p.type === 'Customer' || p.type === 'Both');
+      // إذا كان المستخدم محدد فرع معين في نطاق التصدير
+      if (exportScopeBranch !== 'ALL') {
+        targetList = targetList.filter((p) => p.branchId === exportScopeBranch);
+      }
+    } else {
+      // تصدير الفرع بالكامل (أو كافة الفروع) دون تقييد بفلتر الرصيد
+      targetList = parties.filter((p) => p.type === 'Customer' || p.type === 'Both');
+      if (exportScopeBranch !== 'ALL') {
+        targetList = targetList.filter((p) => p.branchId === exportScopeBranch);
+      }
+    }
+
+    if (targetList.length === 0) {
+      alert(t('لا يوجد عملاء مطابقين لخيارات التصدير المحددة.', 'No customers match the export criteria.'));
+      return;
+    }
+
+    const branchName =
+      exportScopeBranch === 'ALL'
+        ? 'كافة_الفروع'
+        : branches.find((b) => b.id === exportScopeBranch)?.name || 'الفرع';
+
+    const safeBranchName = branchName.replace(/[\s/\\]+/g, '_');
+    const filenamePrefix = scope === 'FILTERED' ? 'أرصدة_العملاء_المفلترة' : 'أرصدة_عملاء_الفرع_بالكامل';
+
+    const headers = [
+      'كود العميل',
+      'كود السيستم',
+      'الكود الورقي',
+      'اسم العميل',
+      'رقم التليفون',
+      'الرصيد',
+      'طبيعة الرصيد',
+      'تاريخ التكويد',
+      'الفرع',
+    ];
+
+    const rows = targetList.map((p) => {
+      const b = Number(p.balance || 0);
+      const balanceNature =
+        b > 0.005 ? 'مدين (مستحق عليه)' : b < -0.005 ? 'دائن (رصيد له)' : 'متزن (صفر)';
+      const codingDate = p.createdAt ? p.createdAt.slice(0, 10) : '';
+      const matchedBranch = branches.find((b) => b.id === p.branchId);
+
+      return [
+        p.customerCode || p.code || '',
+        p.systemCode || '',
+        p.paperCode || p.fileCode || '',
+        p.name || '',
+        p.phone || p.altPhone || '',
+        b,
+        balanceNature,
+        codingDate,
+        matchedBranch?.nameAr || matchedBranch?.name || 'المركز الرئيسي',
+      ];
+    });
+
+    exportRowsToExcel({
+      filename: `${filenamePrefix}_${safeBranchName}`,
+      sheetName: 'CustomerBalances',
+      headers,
       rows,
     });
   };
@@ -976,6 +1176,117 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
               </div>
             </div>
           )}
+
+          {/* ADVANCED BALANCE FILTER & EXPORT BAR */}
+          <div className="md:col-span-12 flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-100 dark:border-slate-800 text-xs">
+            {/* Balance Filters */}
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[11px] font-black text-slate-500 flex items-center gap-1">
+                <Filter className="h-3.5 w-3.5 text-indigo-600" />
+                {t('فلتر رصيد العميل:', 'Balance Filter:')}
+              </span>
+
+              <select
+                value={balanceFilterType}
+                onChange={(e) => setBalanceFilterType(e.target.value as any)}
+                className="rounded-xl border border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800 px-2.5 py-1.5 text-xs font-bold text-slate-900 dark:text-white outline-none focus:border-indigo-600"
+              >
+                <option value="ALL">{t('كافة الأرصدة (بدون قيد)', 'All Balances')}</option>
+                <option value="GREATER_THAN">{t('الرصيد أكبر من >', 'Balance Greater Than >')}</option>
+                <option value="LESS_THAN">{t('الرصيد أصغر من <', 'Balance Less Than <')}</option>
+                <option value="EQUALS">{t('الرصيد يساوي =', 'Balance Equals =')}</option>
+                <option value="DEBIT_ONLY">{t('أرصدة مدينة فقط (عليه مستحقات)', 'Debit Balances Only')}</option>
+                <option value="CREDIT_ONLY">{t('أرصدة دائنة فقط (له رصيد)', 'Credit Balances Only')}</option>
+                <option value="ZERO_ONLY">{t('أرصدة صفرية (متزن)', 'Zero Balances Only')}</option>
+              </select>
+
+              {['GREATER_THAN', 'LESS_THAN', 'EQUALS'].includes(balanceFilterType) && (
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="number"
+                    step="any"
+                    value={balanceThreshold}
+                    onChange={(e) => setBalanceThreshold(e.target.value)}
+                    placeholder={t('أدخل قيمة الرصيد...', 'Enter amount...')}
+                    className="w-32 rounded-xl border border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800 px-2.5 py-1.5 text-xs font-bold font-mono text-slate-900 dark:text-white outline-none focus:border-indigo-600"
+                  />
+                  <span className="text-[11px] text-slate-400 font-bold">ج.م</span>
+                  {balanceThreshold && (
+                    <button
+                      type="button"
+                      onClick={() => setBalanceThreshold('')}
+                      className="p-1 rounded-lg text-slate-400 hover:text-rose-500 cursor-pointer"
+                      title={t('مسح القيمة', 'Clear value')}
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {balanceFilterType !== 'ALL' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setBalanceFilterType('ALL');
+                    setBalanceThreshold('');
+                  }}
+                  className="rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 px-2 py-1 text-[11px] font-bold text-slate-600 dark:text-slate-300 cursor-pointer transition-colors"
+                >
+                  {t('إلغاء فلتر الرصيد', 'Reset Filter')}
+                </button>
+              )}
+
+              <span className="text-[11px] font-bold text-slate-400">
+                ({availableParties.filter((p) => p.type === 'Customer' || p.type === 'Both').length} {t('عميل مطابق', 'matching customers')})
+              </span>
+            </div>
+
+            {/* Export Customer Balances (Full Branch OR Filtered) */}
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[11px] font-black text-slate-500 flex items-center gap-1">
+                <Building2 className="h-3.5 w-3.5 text-emerald-600" />
+                {t('فرع التصدير:', 'Export Branch:')}
+              </span>
+
+              <select
+                value={exportScopeBranch}
+                onChange={(e) => setExportScopeBranch(e.target.value)}
+                className="rounded-xl border border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800 px-2.5 py-1.5 text-xs font-bold text-slate-900 dark:text-white outline-none focus:border-emerald-600"
+              >
+                <option value="ALL">{t('كافة الفروع (الشركة بالكامل)', 'All Branches (Whole Company)')}</option>
+                {branches.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.nameAr || b.name}
+                  </option>
+                ))}
+              </select>
+
+              <button
+                type="button"
+                id="btn-export-filtered-balances"
+                onClick={() => handleExportCustomersBalances('FILTERED')}
+                title={t('تصدير إكسيل للعملاء المطابقين للفلاتر النشطة مع الكود والاسم والهاتف والرصيد وتاريخ التكويد', 'Export Excel for filtered customers with codes, name, phone, balance, and coding date')}
+                className="flex items-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 px-3 py-1.5 text-xs font-bold text-white shadow-xs cursor-pointer transition-all"
+              >
+                <Download className="h-3.5 w-3.5" />
+                <span>{t('تصدير العملاء المفلترين', 'Export Filtered Customers')}</span>
+              </button>
+
+              <button
+                type="button"
+                id="btn-export-full-branch-balances"
+                onClick={() => handleExportCustomersBalances('FULL_BRANCH')}
+                title={t('تصدير أرصدة الفرع المحدد بالكامل لجميع العملاء دون استثناء', 'Export all customer balances for the selected branch')}
+                className="flex items-center gap-1.5 rounded-xl bg-slate-700 hover:bg-slate-800 dark:bg-slate-750 dark:hover:bg-slate-650 px-3 py-1.5 text-xs font-bold text-white shadow-xs cursor-pointer transition-all"
+              >
+                <Download className="h-3.5 w-3.5" />
+                <span>{t('تصدير أرصدة الفرع بالكامل', 'Export Full Branch Balances')}</span>
+              </button>
+            </div>
+          </div>
+
+
         </div>
 
         {/* Scrollable Statement Body */}
