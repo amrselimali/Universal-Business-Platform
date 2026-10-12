@@ -36,6 +36,7 @@ export const NeonHubView: React.FC = () => {
     neonAutoSyncProgress,
     neonConnectionInfo,
     compareWithNeon,
+    neonLastRefresh,
     neonBootstrap,
     getNeonDatasetSummary,
     importAllFromNeon,
@@ -477,6 +478,11 @@ export const NeonHubView: React.FC = () => {
           </span>
         ) : (
           <span>{t('في انتظار أول تغيير لنقل البيانات إلى Neon.', 'Waiting for the first change to transfer data to Neon.')}</span>
+        )}
+        {neonLastRefresh && (
+          <span className="font-mono text-[10px]">
+            {t('آخر مزامنة تنزيل:', 'last pull:')} {neonLastRefresh}
+          </span>
         )}
         {neonBootstrap.tenantId && (
           <span className="font-mono text-[10px]">

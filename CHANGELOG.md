@@ -2,6 +2,14 @@
 
 # 2026-10-12
 
+## Fix: screens were empty although the data matched Neon + 1-minute pull
+
+- Root cause: the dataset records all carry `tenantId = tenant-eg-003`, but the app's tenant list (`erp_tenants`) only contained `tenant-eg-001` / `tenant-eg-002`, so every screen filtered the data out. The missing tenant was added to `erp_tenants` in the database, and the bootstrap now **recreates the tenant that owns the data** (identity read from the `tenants` table) when it is missing locally.
+- Re-enabled the local cache (`USE_LOCAL_CACHE = true`) and added an **incremental pull every minute**: only datasets whose Neon `updated_at` changed are re-downloaded, applied, and written to the cache, so the device cache always matches Neon. The last pull time is shown on the Neon screen.
+- Files: `src/utils/persistenceMode.ts`, `src/services/neonService.ts`, `src/context/PlatformContext.tsx`, `src/views/NeonHubView.tsx`.
+
+# 2026-10-12
+
 ## Verification panel: app data vs Neon data, dataset by dataset
 
 - Added `NeonService.fetchDatasetCounts` and a **"Compare app data with Neon"** panel on the Neon screen showing, for every dataset, the record count currently held by the app, the count stored in Neon, and whether they match (with "missing in Neon" when the dataset does not exist there).
