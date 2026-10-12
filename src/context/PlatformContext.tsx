@@ -662,6 +662,7 @@ interface PlatformContextType {
 
   // Neon PostgreSQL
   neonDb: NeonDbState;
+  neonAutoSync: { syncing: boolean; lastRun?: string; lastSavedCount: number; error?: string };
   updateNeonConnectionString: (conn: string) => void;
   testNeonConnection: (connOverride?: string) => Promise<boolean>;
   syncAllToNeon: () => Promise<{ success: boolean; message: string; count: number }>;
@@ -8628,6 +8629,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     });
   }, [allCustomerRefunds, isStorageHydrated]);
 
+
   // Auto-recover customer refund vouchers from journals if missing from the refund store.
   // Recovered vouchers are DERIVED data, so they are rebuilt on each run to keep the
   // customer attribution correct. The customer is matched by the AUTO-SERIAL customer code
@@ -10435,6 +10437,115 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   }, [allNotifications]);
 
+  // ==========================================================================
+  // Automatic Neon sync (مزامنة تلقائية لكل البيانات إلى Neon)
+  // --------------------------------------------------------------------------
+  // Every dataset below is stored as one JSONB document per tenant in the
+  // app_documents table, so receipts, refunds, shifts and everything else live in
+  // Neon as a single source of truth. Only datasets whose content actually changed
+  // are uploaded, and uploads are debounced so rapid edits produce one write.
+  // ==========================================================================
+  const neonSyncedPayloadsRef = useRef<{ [key: string]: string }>({});
+  const neonAutoSyncTimerRef = useRef<number | null>(null);
+  const [neonAutoSync, setNeonAutoSync] = useState<{
+    syncing: boolean;
+    lastRun?: string;
+    lastSavedCount: number;
+    error?: string;
+  }>({ syncing: false, lastSavedCount: 0 });
+
+  useEffect(() => {
+    if (!isStorageHydrated) return;
+    if (!neonDb.connected || !neonDb.connectionString) return;
+    const tenantIdForSync = tenant?.id;
+    if (!tenantIdForSync) return;
+    const connectionStringForSync = neonDb.connectionString;
+
+    if (neonAutoSyncTimerRef.current !== null) {
+      window.clearTimeout(neonAutoSyncTimerRef.current);
+    }
+
+    neonAutoSyncTimerRef.current = window.setTimeout(async () => {
+      const documents: { key: string; payload: unknown }[] = [
+        { key: 'erp_tenants', payload: allTenants },
+        { key: 'erp_users', payload: allUsers },
+        { key: 'erp_branches', payload: allBranches },
+        { key: 'erp_warehouses', payload: allWarehouses },
+        { key: 'erp_categories', payload: allCategories },
+        { key: 'erp_products', payload: allProducts },
+        { key: 'erp_stock_movements', payload: allStockMovements },
+        { key: 'erp_accounts', payload: allAccounts },
+        { key: 'erp_journals', payload: allJournals },
+        { key: 'erp_parties_backup', payload: allParties },
+        { key: 'erp_invoices', payload: allInvoices },
+        { key: 'erp_appointments', payload: allAppointments },
+        { key: 'erp_patient_followups', payload: allPatientFollowUps },
+        { key: 'erp_treatment_plans', payload: allTreatmentPlans },
+        { key: 'erp_cash_receipts', payload: allCashReceipts },
+        { key: 'erp_customer_refunds', payload: allCustomerRefunds },
+        { key: 'erp_cash_payments', payload: allCashPayments },
+        { key: 'erp_reception_shifts', payload: allReceptionShifts },
+        { key: 'erp_pos_shifts', payload: allPosShifts },
+        { key: 'erp_payment_methods', payload: allPaymentMethods },
+        { key: 'erp_tax_invoices', payload: allSpecializedTaxInvoices },
+        { key: 'erp_goods_receipts', payload: allGoodsReceipts },
+        { key: 'erp_goods_issues', payload: allGoodsIssues },
+        { key: 'erp_staff_members', payload: allStaffMembers },
+        { key: 'erp_payroll_runs', payload: allPayrollRuns },
+        { key: 'erp_attendance_records', payload: allAttendanceRecords },
+        { key: 'erp_inventory_audits', payload: allInventoryAudits },
+        { key: 'erp_device_maintenance', payload: allDeviceMaintenance },
+        { key: 'clinic_laser_devices', payload: allLaserDevices },
+        { key: 'erp_period_locks', payload: allPeriodLocks },
+        { key: 'erp_audit_records', payload: allAuditRecords },
+        { key: 'erp_activity_logs', payload: allUserActivityLogs },
+        { key: 'erp_notifications_history', payload: allNotifications },
+      ];
+
+      const changed = documents.filter((doc) => {
+        const serialized = JSON.stringify(doc.payload ?? []);
+        return neonSyncedPayloadsRef.current[doc.key] !== serialized;
+      });
+      if (changed.length === 0) return;
+
+      setNeonAutoSync((prev) => ({ ...prev, syncing: true, error: undefined }));
+      const result = await NeonService.saveDocuments(connectionStringForSync, tenantIdForSync, changed);
+      if (!result.success) {
+        console.error('Automatic Neon sync failed:', result.message);
+        setNeonAutoSync((prev) => ({ ...prev, syncing: false, error: result.message }));
+        return;
+      }
+      changed.forEach((doc) => {
+        neonSyncedPayloadsRef.current[doc.key] = JSON.stringify(doc.payload ?? []);
+      });
+      setNeonAutoSync({
+        syncing: false,
+        lastSavedCount: changed.length,
+        lastRun: new Date().toLocaleTimeString(language === 'ar' ? 'ar-EG' : 'en-US'),
+      });
+    }, 3000);
+
+    return () => {
+      if (neonAutoSyncTimerRef.current !== null) {
+        window.clearTimeout(neonAutoSyncTimerRef.current);
+        neonAutoSyncTimerRef.current = null;
+      }
+    };
+  }, [
+    isStorageHydrated,
+    neonDb.connected,
+    neonDb.connectionString,
+    tenant?.id,
+    language,
+    allTenants, allUsers, allBranches, allWarehouses, allCategories, allProducts,
+    allStockMovements, allAccounts, allJournals, allParties, allInvoices, allAppointments,
+    allPatientFollowUps, allTreatmentPlans, allCashReceipts, allCustomerRefunds,
+    allCashPayments, allReceptionShifts, allPosShifts, allPaymentMethods,
+    allSpecializedTaxInvoices, allGoodsReceipts, allGoodsIssues, allStaffMembers,
+    allPayrollRuns, allAttendanceRecords, allInventoryAudits, allDeviceMaintenance,
+    allLaserDevices, allPeriodLocks, allAuditRecords, allUserActivityLogs, allNotifications,
+  ]);
+
   const [activeToastNotification, setActiveToastNotification] = useState<AppNotification | null>(null);
 
   // Filter notifications relevant to current user: role, branch, user ID
@@ -10885,6 +10996,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         activeToastNotification,
         dismissToastNotification,
         neonDb,
+        neonAutoSync,
         updateNeonConnectionString,
         testNeonConnection,
         syncAllToNeon,

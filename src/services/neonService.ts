@@ -894,4 +894,79 @@ export class NeonService {
       return { success: false, message: 'فشل في تحديث هيكل الجداول: ' + (err.message || String(err)) };
     }
   }
+
+  // ==========================================================================
+  // Unified document store (مخزن البيانات الموحّد)
+  // --------------------------------------------------------------------------
+  // One JSONB row per dataset per tenant, so EVERY browser dataset (receipts,
+  // refunds, shifts, payroll, ...) can live in Neon without lossy column mapping.
+  // ==========================================================================
+  static async ensureDocumentsTable(connectionString: string): Promise<boolean> {
+    try {
+      const sql = this.getClient(connectionString);
+      await sql`
+        CREATE TABLE IF NOT EXISTS app_documents (
+          tenant_id  VARCHAR(100) NOT NULL,
+          doc_key    VARCHAR(100) NOT NULL,
+          payload    JSONB        NOT NULL,
+          updated_at TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (tenant_id, doc_key)
+        );
+      `;
+      return true;
+    } catch (err) {
+      console.warn('Neon app_documents creation failed:', err);
+      return false;
+    }
+  }
+
+  static async saveDocuments(
+    connectionString: string,
+    tenantId: string,
+    documents: { key: string; payload: unknown }[]
+  ): Promise<{ success: boolean; saved: number; message: string }> {
+    if (documents.length === 0) return { success: true, saved: 0, message: 'لا توجد تغييرات للرفع' };
+    try {
+      const sql = this.getClient(connectionString);
+      const ready = await this.ensureDocumentsTable(connectionString);
+      if (!ready) {
+        return { success: false, saved: 0, message: 'تعذر إنشاء جدول التخزين الموحّد app_documents' };
+      }
+      let saved = 0;
+      for (const doc of documents) {
+        await sql`
+          INSERT INTO app_documents (tenant_id, doc_key, payload, updated_at)
+          VALUES (${tenantId}, ${doc.key}, ${JSON.stringify(doc.payload)}::jsonb, NOW())
+          ON CONFLICT (tenant_id, doc_key) DO UPDATE SET
+            payload = EXCLUDED.payload,
+            updated_at = NOW();
+        `;
+        saved += 1;
+      }
+      return { success: true, saved, message: `تم رفع ${saved} مجموعة بيانات إلى Neon` };
+    } catch (err: any) {
+      return { success: false, saved: 0, message: 'فشل رفع البيانات إلى Neon: ' + (err?.message || String(err)) };
+    }
+  }
+
+  static async fetchDocuments(
+    connectionString: string,
+    tenantId: string,
+    keys?: string[]
+  ): Promise<{ success: boolean; documents: { [key: string]: unknown }; message: string }> {
+    try {
+      const sql = this.getClient(connectionString);
+      const rows = await sql`
+        SELECT doc_key, payload FROM app_documents WHERE tenant_id = ${tenantId}
+      `;
+      const documents: { [key: string]: unknown } = {};
+      (rows as any[]).forEach((row) => {
+        if (keys && keys.length > 0 && !keys.includes(row.doc_key)) return;
+        documents[row.doc_key] = row.payload;
+      });
+      return { success: true, documents, message: `تم تحميل ${Object.keys(documents).length} مجموعة بيانات من Neon` };
+    } catch (err: any) {
+      return { success: false, documents: {}, message: 'فشل تحميل البيانات من Neon: ' + (err?.message || String(err)) };
+    }
+  }
 }
