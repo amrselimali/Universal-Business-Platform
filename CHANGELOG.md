@@ -2,6 +2,16 @@
 
 # 2026-10-12
 
+## Security & performance applied to the live database
+
+- **Performance**: created a `(tenant_id)` index on all 39 tenant tables - the single most important index in a multi-tenant database.
+- **Tenant isolation (RLS)**: enabled Row-Level Security on all 39 tenant tables with a `tenant_isolation` policy based on `current_setting('app.tenant_id')`. The table owner (what the current app uses) bypasses RLS, so the running application is **unaffected** - verified: the owner still reads all 161,797 records while 39 policies are active.
+- **Limited application role**: created `app_api` (LOGIN, no DDL rights) with only SELECT/INSERT/UPDATE/DELETE + sequence usage, ready for the future backend. Without setting `app.tenant_id` it sees **zero rows** (secure by default).
+- Everything is versioned in `scripts/neon_security_rls.sql` (idempotent).
+- Files: `scripts/neon_security_rls.sql` (new).
+
+# 2026-10-12
+
 ## CRITICAL FIX: deletions still did not reach the database
 
 - Second root cause found: when the local cache considered a dataset fresh, the bootstrap skipped fetching it and therefore never seeded its **diff baseline**. The record-level push then compared against an empty baseline, which can detect upserts but **never deletions**, so deleted rows were never soft-deleted in `app_records` and came back on every reload.
