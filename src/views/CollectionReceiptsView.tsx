@@ -211,7 +211,6 @@ export const CollectionReceiptsView: React.FC = () => {
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string>('all');
   const [selectedShiftStatus, setSelectedShiftStatus] = useState<'all' | 'Open' | 'Closed'>('all');
   const [receiptArchiveView, setReceiptArchiveView] = useState<'active' | 'archived' | 'all'>('active');
-  const [includeHiddenReceipts, setIncludeHiddenReceipts] = useState<boolean>(false);
   const [showColumnFilters, setShowColumnFilters] = useState(false);
   const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
   const [selectedReceiptIds, setSelectedReceiptIds] = useState<Set<string>>(() => new Set());
@@ -354,19 +353,17 @@ export const CollectionReceiptsView: React.FC = () => {
     const shiftReceiptVoucherIds = new Set(branchShifts.flatMap((shift) => shift.runRows.map((row) => row.receiptVoucherId).filter(Boolean) as string[]));
     cashReceipts.forEach((receipt) => {
       if (!receipt.partyId) return;
-      if (!includeHiddenReceipts) {
-        // Hide branch-mismatched, shift-linked and legacy-row receipts, unless the user
-        // explicitly asks to see every stored receipt (so nothing is unreachable).
-        if (currentBranchId && receipt.branchId && receipt.branchId !== currentBranchId) return;
-        if (shiftReceiptVoucherIds.has(receipt.id)) return;
-        const matchingLegacyRunRow = branchShifts.some((shift) => shift.runRows.some((row) =>
-          (row.customerId === receipt.partyId || row.patientId === receipt.partyId) &&
-          (row.date || shift.shiftDate) === receipt.date &&
-          Math.abs(Number(row.collectedAmount || 0) - Number(receipt.amount || 0)) < 0.01 &&
-          (row.notes?.includes('استيراد تحصيل إكسيل') || receipt.description.startsWith(row.serviceName))
-        ));
-        if (matchingLegacyRunRow) return;
-      }
+      // Show receipts that belong to the current branch OR have no branch assigned
+      // (otherwise branch-less receipts would be invisible and impossible to review).
+      if (currentBranchId && receipt.branchId && receipt.branchId !== currentBranchId) return;
+      if (shiftReceiptVoucherIds.has(receipt.id)) return;
+      const matchingLegacyRunRow = branchShifts.some((shift) => shift.runRows.some((row) =>
+        (row.customerId === receipt.partyId || row.patientId === receipt.partyId) &&
+        (row.date || shift.shiftDate) === receipt.date &&
+        Math.abs(Number(row.collectedAmount || 0) - Number(receipt.amount || 0)) < 0.01 &&
+        (row.notes?.includes('استيراد تحصيل إكسيل') || receipt.description.startsWith(row.serviceName))
+      ));
+      if (matchingLegacyRunRow) return;
       const linkedParty = parties.find((party) => party.id === receipt.partyId);
       const receiptMethodLabel = receipt.paymentMethodLabel || (receipt.paymentMethod === 'Cash' ? t('نقداً (كاش)', 'Cash')
         : receipt.paymentMethod === 'Card' ? t('بطاقة', 'Card')
@@ -489,7 +486,6 @@ export const CollectionReceiptsView: React.FC = () => {
     searchTerm,
     columnFilters,
     receiptArchiveView,
-    includeHiddenReceipts,
   ]);
 
   const allVisibleSelected = filteredReceipts.length > 0 && filteredReceipts.every((receipt) => selectedReceiptIds.has(receipt.id));
@@ -1259,15 +1255,6 @@ export const CollectionReceiptsView: React.FC = () => {
             <option value="archived">{t('الإيصالات المؤرشفة', 'Archived receipts')}</option>
             <option value="all">{t('كل الإيصالات', 'All receipts')}</option>
           </select>
-          <label className="inline-flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={includeHiddenReceipts}
-              onChange={(event) => setIncludeHiddenReceipts(event.target.checked)}
-              className="h-4 w-4 rounded border-amber-300 text-amber-600"
-            />
-            {t('إظهار كل الإيصالات المخفية', 'Show hidden receipts')}
-          </label>
         </div>
         {showColumnFilters && (
           <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-2 rounded-2xl border border-slate-200 dark:border-slate-700 p-3">
