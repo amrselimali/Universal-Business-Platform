@@ -669,7 +669,7 @@ interface PlatformContextType {
   getNeonDatasetSummary: () => { key: string; count: number }[];
   importAllFromNeon: () => Promise<{ success: boolean; message: string; imported: number; backupFilename?: string }>;
   migrateNeonSchema: () => Promise<{ success: boolean; message: string; created: number; updated: number; total: number; failures: string[] }>;
-  neonBootstrap: { status: 'idle' | 'loading' | 'ready' | 'error' | 'no-config'; message?: string; usedCache?: boolean; updatedKeys?: number; lastRun?: string };
+  neonBootstrap: { status: 'idle' | 'loading' | 'ready' | 'error' | 'no-config'; message?: string; usedCache?: boolean; updatedKeys?: number; lastRun?: string; tenantId?: string; datasetCount?: number };
   retryNeonBootstrap: () => Promise<void>;
   neonConnectionInfo: { host: string; database: string } | null;
   updateNeonConnectionString: (conn: string) => void;
@@ -10680,6 +10680,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     usedCache?: boolean;
     updatedKeys?: number;
     lastRun?: string;
+    tenantId?: string;
+    datasetCount?: number;
   }>({ status: 'idle' });
   const neonBootstrapRanRef = useRef(false);
 
@@ -10822,6 +10824,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       status: 'ready',
       usedCache,
       updatedKeys: appliedNow,
+      tenantId,
+      datasetCount: baseKeys.length,
       lastRun: new Date().toLocaleTimeString(language === 'ar' ? 'ar-EG' : 'en-US'),
       message: `تم التحميل من Neon (${baseKeys.length} مجموعة${changedKeys.length ? ` · ${changedKeys.length} محدّثة` : ' · بدون تغييرات'})`,
     });
