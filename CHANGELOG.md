@@ -2,6 +2,17 @@
 
 # 2026-10-12
 
+## Phase 2 (part 1): accounting logic moved into the database
+
+- Added the accounting core tables `gl_journals` / `gl_journal_lines` and the atomic functions `fn_post_journal` (validates balance and line rules, writes the header and lines and updates account balances **in one transaction**), `fn_reverse_journal`, `fn_is_debit_normal` and `fn_customer_account_id`.
+- Added the atomic business operations `fn_post_customer_receipt` (debit payment account / credit customer account + receipt record) and `fn_post_customer_refund` (debit customer / credit payment + refund record).
+- Added `src/services/accountingApi.ts` so the app can call those functions instead of building journals in the browser, plus `fetchAccountBalances` to read balances straight from the database.
+- The full SQL is versioned in `scripts/neon_accounting_functions.sql` (idempotent, safe to run in the Neon SQL editor).
+- Remaining: route the existing UI flows (manual journal, receipt creation, cancellation, other vouchers) through this API and retire the client-side journal builder.
+- Files: `scripts/neon_accounting_functions.sql` (new), `src/services/accountingApi.ts` (new).
+
+# 2026-10-12
+
 ## Record-level sync (phases 0-4): concurrent users can no longer overwrite each other
 
 - **Database**: added `app_records` (one row per record with `version`, `created_by`, `updated_by`, `created_at`, `updated_at`, `deleted_at`), `app_sync_cursors`, and the functions `fn_upsert_records`, `fn_soft_delete_records`, `fn_changed_records`. The existing data was backfilled: **161,781 records**.
