@@ -2,6 +2,15 @@
 
 # 2026-10-12
 
+## app_documents removed: app_records is now the only data store
+
+- Tenant resolution (`resolveActiveTenantId`, `fetchFirstTenantId`), dataset counts and dataset loading now read `app_records` instead of the legacy `app_documents` snapshots.
+- The schema migration no longer creates `app_documents` and `ensureDocumentsTable` is a no-op, so the legacy table can never come back.
+- Live database: archived `app_documents` (304 rows) into `app_documents_legacy` and dropped the table. `app_records` holds **161,760 live rows** - one authoritative copy of the business data.
+- Files: `src/services/neonService.ts`.
+
+# 2026-10-12
+
 ## Single source of truth: Neon only (the duplicate browser copy removed)
 
 - Root cause of "commands come back": the offline-first switch had re-enabled the legacy per-dataset browser persistence, so the device kept a SECOND copy of the business data and could push stale rows back to Neon.
