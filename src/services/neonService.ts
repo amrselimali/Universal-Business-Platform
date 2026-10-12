@@ -285,7 +285,7 @@ export class NeonService {
         CREATE TABLE IF NOT EXISTS patients (
           id VARCHAR(100) PRIMARY KEY,
           tenant_id VARCHAR(100) NOT NULL,
-          file_number VARCHAR(50) NOT NULL,
+          file_number VARCHAR(50),
           full_name VARCHAR(255) NOT NULL,
           phone VARCHAR(50),
           date_of_birth DATE,
@@ -293,6 +293,15 @@ export class NeonService {
           created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         );
       `;
+
+      // Older databases created patients.file_number as NOT NULL; relax it so parties
+      // without a file number can still be mirrored (idempotent and safe).
+      try {
+        await sql`ALTER TABLE patients ALTER COLUMN file_number DROP NOT NULL`;
+      } catch {
+        // Column already nullable or the role cannot alter it; the inserts below
+        // still use fallback values.
+      }
 
       await sql`
         CREATE TABLE IF NOT EXISTS parties (
@@ -418,7 +427,7 @@ export class NeonService {
       for (const pat of data.patients) {
         await sql`
           INSERT INTO patients (id, tenant_id, file_number, full_name, phone, gender)
-          VALUES (${pat.id}, ${data.tenant.id}, ${pat.fileNumber}, ${pat.fullName}, ${pat.phone}, ${pat.gender})
+          VALUES (${pat.id}, ${data.tenant.id}, ${pat.fileNumber || ''}, ${pat.fullName || pat.name || ''}, ${pat.phone || ''}, ${pat.gender || ''})
           ON CONFLICT (id) DO NOTHING;
         `;
         totalSynced++;
@@ -560,7 +569,7 @@ export class NeonService {
       const sql = this.getClient(connectionString);
       await sql`
         INSERT INTO patients (id, tenant_id, file_number, full_name, phone, gender)
-        VALUES (${patient.id}, ${tenantId}, ${patient.fileNumber}, ${patient.fullName}, ${patient.phone}, ${patient.gender})
+        VALUES (${patient.id}, ${tenantId}, ${patient.fileNumber || ''}, ${patient.fullName || patient.name || ''}, ${patient.phone || ''}, ${patient.gender || ''})
         ON CONFLICT (id) DO UPDATE SET
           full_name = EXCLUDED.full_name,
           phone = EXCLUDED.phone;

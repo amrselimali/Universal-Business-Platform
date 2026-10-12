@@ -2,6 +2,15 @@
 
 # 2026-10-12
 
+## Fix Neon sync error: patients.file_number NOT NULL
+
+- The full transfer to Neon succeeded for all 34 document datasets, but the legacy relational mirror failed with `null value in column "file_number" of relation "patients" violates not-null constraint`.
+- `syncAllData` created `patients.file_number` as `NOT NULL` (older schema), while parties mirrored into `patients` have no file number.
+- Fixed by: declaring the column nullable, running an idempotent `ALTER TABLE patients ALTER COLUMN file_number DROP NOT NULL`, and inserting safe fallbacks (`fileNumber || ''`, `fullName || name`, `phone || ''`, `gender || ''`) in both the bulk sync and `insertPatientDirect`.
+- Files: `src/services/neonService.ts`.
+
+# 2026-10-12
+
 ## Full initial transfer to Neon + visible sync status
 
 - `syncAllToNeon` now pushes **every dataset** to `app_documents` (34 documents) in addition to the tagged relational tables, so existing data can be transferred once with the sync button.
