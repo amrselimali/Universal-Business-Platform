@@ -2,6 +2,15 @@
 
 # 2026-10-12
 
+## Database-first conversion: Companies & Branches screen (continued)
+
+- `updateBranch`, `archiveBranch` and `updateWarehouse` now store the change in the database through the command layer (`saveRecord`) and only then update the screen. The interface can no longer show a branch/warehouse that the database did not accept, and archiving is stored before it is displayed.
+- With the earlier `addBranch` / `addWarehouse`, the screen's create, edit and archive operations are now database-first.
+- Until an API session is configured the command layer still falls back to the local update, so the screen keeps working during the migration.
+- Files: `src/context/PlatformContext.tsx`.
+
+# 2026-10-12
+
 ## Database-first conversion started: Companies & Branches screen
 
 - `addBranch` and `addWarehouse` are now **database-first**: the new branch/warehouse is sent to the database through the command layer (`saveRecord`) and only appears on the screen after the database accepts it.

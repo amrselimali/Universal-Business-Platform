@@ -8119,34 +8119,54 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const updateBranch = (branchId: string, updatedData: Partial<Branch>) => {
     const nameEn = updatedData.nameEn || (updatedData.name ? autoTranslateArabic(updatedData.name) : undefined);
-    setAllBranches((prev) =>
-      prev.map((b) => {
-        if (b.id === branchId) {
-          const updated = { ...b, ...updatedData, nameEn: nameEn || b.nameEn };
-          if (activeBranch?.id === branchId) {
-            setActiveBranch(updated);
+    const applyBranchUpdate = () =>
+      setAllBranches((prev) =>
+        prev.map((b) => {
+          if (b.id === branchId) {
+            const updated = { ...b, ...updatedData, nameEn: nameEn || b.nameEn };
+            if (activeBranch?.id === branchId) {
+              setActiveBranch(updated);
+            }
+            return updated;
           }
-          return updated;
-        }
-        return b;
-      })
-    );
+          return b;
+        })
+      );
+    // DATABASE-FIRST: the edited branch is stored before the screen reflects it.
+    const existingBranch = allBranches.find((b) => b.id === branchId);
+    if (!existingBranch) {
+      applyBranchUpdate();
+      return;
+    }
+    void saveRecord({
+      docKey: 'erp_branches',
+      record: { ...existingBranch, ...updatedData, nameEn: nameEn || existingBranch.nameEn } as unknown as Record<string, unknown>,
+      applyLocal: applyBranchUpdate,
+    });
   };
 
   const archiveBranch = (branchId: string, reason?: string) => {
-    setAllBranches((prev) =>
-      prev.map((b) =>
-        b.id === branchId
-          ? {
-              ...b,
-              isArchived: true,
-              archivedAt: new Date().toISOString(),
-              archivedBy: currentUser?.name || 'Admin',
-              archiveReason: reason || 'أرشفة الفرع',
-            }
-          : b
-      )
-    );
+    const archivedBranch = (() => {
+      const current = allBranches.find((x) => x.id === branchId);
+      if (!current) return null;
+      return {
+        ...current,
+        isArchived: true,
+        archivedAt: new Date().toISOString(),
+        archivedBy: currentUser?.name || 'Admin',
+        archiveReason: reason || 'أرشفة الفرع',
+      } as Branch;
+    })();
+    // DATABASE-FIRST: archiving is stored before the screen reflects it, so a branch can
+    // never look archived in the interface while still active in the database.
+    if (archivedBranch) {
+      void saveRecord({
+        docKey: 'erp_branches',
+        record: archivedBranch as unknown as Record<string, unknown>,
+        applyLocal: () =>
+          setAllBranches((prev) => prev.map((b) => (b.id === branchId ? archivedBranch : b))),
+      });
+    }
 
     const b = allBranches.find((x) => x.id === branchId);
     const parentT = allTenants.find((x) => x.id === b?.tenantId) || tenant;
@@ -8252,18 +8272,30 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const updateWarehouse = (warehouseId: string, updatedData: Partial<Warehouse>) => {
     const nameEn = updatedData.nameEn || (updatedData.name ? autoTranslateArabic(updatedData.name) : undefined);
-    setAllWarehouses((prev) =>
-      prev.map((w) => {
-        if (w.id === warehouseId) {
-          const updated = { ...w, ...updatedData, nameEn: nameEn || w.nameEn };
-          if (activeWarehouse?.id === warehouseId) {
-            setActiveWarehouse(updated);
+    const applyWarehouseUpdate = () =>
+      setAllWarehouses((prev) =>
+        prev.map((w) => {
+          if (w.id === warehouseId) {
+            const updated = { ...w, ...updatedData, nameEn: nameEn || w.nameEn };
+            if (activeWarehouse?.id === warehouseId) {
+              setActiveWarehouse(updated);
+            }
+            return updated;
           }
-          return updated;
-        }
-        return w;
-      })
-    );
+          return w;
+        })
+      );
+    // DATABASE-FIRST: the edited warehouse is stored before the screen reflects it.
+    const existingWarehouse = allWarehouses.find((w) => w.id === warehouseId);
+    if (!existingWarehouse) {
+      applyWarehouseUpdate();
+      return;
+    }
+    void saveRecord({
+      docKey: 'erp_warehouses',
+      record: { ...existingWarehouse, ...updatedData, nameEn: nameEn || existingWarehouse.nameEn } as unknown as Record<string, unknown>,
+      applyLocal: applyWarehouseUpdate,
+    });
   };
 
   const archiveWarehouse = (warehouseId: string, reason?: string) => {
