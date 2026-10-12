@@ -121,6 +121,7 @@ import {
 import { NeonService } from '../services/neonService';
 import { autoTranslateArabic } from '../utils/translator';
 import { exportDatabaseToMultiSheetExcel } from '../utils/fullDatabaseExcelBackup';
+import { pushRecordChanges, pullChangedRecords, mergeRecords } from '../services/recordSync';
 import { normalizeStatementDate, isReceiptMatchingParty } from '../utils/statementUtils';
 
 const normalizeCustomerPartyCodes = (parties: Party[]): Party[] => {
@@ -10695,6 +10696,10 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   /** Last known Neon `updated_at` per dataset (used by the 1-minute refresh). */
   const neonDocumentVersionsRef = useRef<{ [key: string]: string }>({});
   const neonActiveTenantIdRef = useRef<string>('');
+  /** Last synced array per dataset (basis for record-level diffs). */
+  const neonLastSyncedArraysRef = useRef<Map<string, any[]>>(new Map());
+  /** Per-dataset cursor for incremental record pulls. */
+  const neonCursorsRef = useRef<Map<string, string>>(new Map());
   const [neonLastRefresh, setNeonLastRefresh] = useState<string>('');
 
   /** Applies a key -> payload map onto the app state (shared by bootstrap + import). */
@@ -10757,29 +10762,28 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const meta = await NeonService.fetchDocumentMetadata(rawConnection, tenantId);
     if (!meta.success) return { updated: 0, error: meta.message };
 
-    const baseKeys = Object.keys(meta.metadata).filter((key) => !key.includes('#'));
-    const changedKeys = baseKeys.filter((key) => {
-      const known = neonDocumentVersionsRef.current[key];
-      if (known === '') {
-        // Just uploaded locally: skip this pass and learn the real timestamp next time.
-        delete neonDocumentVersionsRef.current[key];
-        return false;
-      }
-      return known !== meta.metadata[key];
-    });
+    // RECORD-LEVEL PULL: fetch only the records changed since each dataset's cursor and
+    // merge them by id, so concurrent edits from other devices/users are never lost.
+    const datasets = buildAllDatasetDocuments();
+    const changedKeys: string[] = [];
+    const documents: { [key: string]: unknown } = {};
+    for (const dataset of datasets) {
+      const cursor = neonCursorsRef.current.get(dataset.key) || '1970-01-01T00:00:00.000Z';
+      const pulled = await pullChangedRecords(rawConnection, tenantId, dataset.key, cursor);
+      if (pulled.error) return { updated: 0, error: pulled.error };
+      if (pulled.records.length === 0 && pulled.deletedIds.length === 0) continue;
+      const currentArray = Array.isArray(dataset.payload) ? (dataset.payload as any[]) : [];
+      const merged = mergeRecords(currentArray, pulled.records, pulled.deletedIds);
+      documents[dataset.key] = merged;
+      changedKeys.push(dataset.key);
+      neonLastSyncedArraysRef.current.set(dataset.key, merged);
+      neonCursorsRef.current.set(dataset.key, pulled.nextCursor);
+    }
     if (changedKeys.length === 0) {
       setNeonLastRefresh(new Date().toLocaleTimeString(language === 'ar' ? 'ar-EG' : 'en-US'));
       return { updated: 0 };
     }
-
-    const documents: { [key: string]: unknown } = {};
-    for (const key of changedKeys) {
-      const result = await NeonService.fetchDocumentByKey(rawConnection, tenantId, key);
-      if (!result.success) return { updated: 0, error: result.message };
-      if (result.value !== undefined) documents[key] = result.value;
-    }
     const applied = applyDatasetDocuments(documents);
-    changedKeys.forEach((key) => { neonDocumentVersionsRef.current[key] = meta.metadata[key]; });
 
     // Keep the local cache aligned with Neon.
     if (USE_LOCAL_CACHE) {
@@ -10901,6 +10905,16 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const fetched = { success: true, documents: fetchedDocuments, message: '' };
     const appliedNow = applyDatasetDocuments(fetched.documents);
     neonActiveTenantIdRef.current = tenantId;
+    // Seed the record-level sync: the arrays we just loaded are the synced baseline and
+    // the cursors start now, so the background pull only fetches later changes.
+    const syncStartedAt = new Date().toISOString();
+    keysToFetch.forEach((key) => {
+      const value = fetchedDocuments[key];
+      if (Array.isArray(value)) {
+        neonLastSyncedArraysRef.current.set(key, value);
+        neonCursorsRef.current.set(key, syncStartedAt);
+      }
+    });
     keysToFetch.forEach((key) => {
       if (fetchedDocuments[key] !== undefined) neonDocumentVersionsRef.current[key] = meta.metadata[key];
     });
@@ -11043,20 +11057,37 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       });
       if (changed.length === 0) return;
 
+      // RECORD-LEVEL PUSH: upload only the records that actually changed, so two users
+      // editing different records in the same dataset can never overwrite each other.
       setNeonAutoSync((prev) => ({ ...prev, syncing: true, error: undefined }));
-      setNeonAutoSyncProgress(`0/${changed.length}`);
-      const result = await NeonService.saveDocuments(connectionStringForSync, tenantIdForSync, changed, (done, total) => {
-        setNeonAutoSyncProgress(`${done}/${total}`);
-      });
+      let pushedRecords = 0;
+      let deletedRecords = 0;
+      const pushErrors: string[] = [];
+      for (const doc of changed) {
+        const currentArray = Array.isArray(doc.payload) ? (doc.payload as any[]) : [];
+        const previousArray = neonLastSyncedArraysRef.current.get(doc.key) || [];
+        const outcome = await pushRecordChanges(
+          connectionStringForSync,
+          tenantIdForSync,
+          doc.key,
+          previousArray,
+          currentArray,
+          currentUser?.name
+        );
+        if (outcome.error) { pushErrors.push(`${doc.key}: ${outcome.error}`); continue; }
+        pushedRecords += outcome.pushed;
+        deletedRecords += outcome.deleted;
+        neonLastSyncedArraysRef.current.set(doc.key, currentArray);
+        neonSyncedPayloadsRef.current[doc.key] = JSON.stringify(currentArray);
+      }
+      const result = { success: pushErrors.length === 0, message: pushErrors[0] || '' };
       if (!result.success) {
-        console.error('Automatic Neon sync failed:', result.message);
+        console.error('Record sync failed:', result.message);
         setNeonAutoSync((prev) => ({ ...prev, syncing: false, error: result.message }));
         setNeonAutoSyncProgress('');
         return;
       }
-      changed.forEach((doc) => {
-        neonSyncedPayloadsRef.current[doc.key] = JSON.stringify(doc.payload ?? []);
-      });
+      console.info(`Record sync: pushed ${pushedRecords}, soft-deleted ${deletedRecords}`);
       // Mark the pushed datasets as fresh so the next background pull does not
       // download them again (the periodic refresh re-learns their timestamps).
       changed.forEach((doc) => { neonDocumentVersionsRef.current[doc.key] = ''; });

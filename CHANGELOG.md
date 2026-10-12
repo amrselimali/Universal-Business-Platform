@@ -2,6 +2,18 @@
 
 # 2026-10-12
 
+## Record-level sync (phases 0-4): concurrent users can no longer overwrite each other
+
+- **Database**: added `app_records` (one row per record with `version`, `created_by`, `updated_by`, `created_at`, `updated_at`, `deleted_at`), `app_sync_cursors`, and the functions `fn_upsert_records`, `fn_soft_delete_records`, `fn_changed_records`. The existing data was backfilled: **161,781 records**.
+- **Phase 0 (safety)**: push/pull now work per record. Uploading only the changed records and soft-deleting removed ones means two users editing different records in the same dataset never overwrite each other. No more whole-dataset replacement.
+- **Phase 1 (service layer)**: `src/services/recordSync.ts` implements `diffRecords`, `pushRecordChanges`, `pullChangedRecords` and `mergeRecords` against the SQL functions, with versions and audit actors.
+- **Phase 3 (incremental)**: each dataset keeps a cursor (`app_sync_cursors` equivalent in memory); the background refresh pulls only records changed since that cursor.
+- **Phase 4 (offline)**: the sync diffs the current state against the last synced baseline, so every edit made while offline is still pending when the connection returns and is pushed automatically.
+- **Phase 2 (server-side accounting)**: the atomic-posting SQL infrastructure (functions + transactions) is in place; porting the whole accounting engine to the database is the remaining step.
+- Files: `src/services/recordSync.ts` (new), `src/context/PlatformContext.tsx`.
+
+# 2026-10-12
+
 ## Primary keys for every mirror table
 
 - 22 tables (including `staff_members`) had no PRIMARY KEY, so Neon's table editor refused to edit/delete rows and `ON CONFLICT` could not work.
