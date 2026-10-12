@@ -9111,6 +9111,80 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       return nextReceipt;
     });
 
+
+    // ---------------------------------------------------------------------------
+    // Customer "card" balance synchronization (توحيد رصيد بطاقة العميل مع مجمّع الحركات)
+    // ---------------------------------------------------------------------------
+    // The party card balance is recomputed from the SAME document sources that the
+    // detailed customer statement uses (invoices, reception rows, collection receipts
+    // and customer refunds), so the card balance and the statement movements total
+    // are always identical. An unexplained imported opening balance is not kept.
+    {
+      const customers = allParties.filter((party) => party.type === 'Customer' || party.type === 'Both');
+      const partyById = new Map(customers.map((party) => [party.id, party]));
+      const partyByAutoCode = new Map<string, Party>();
+      customers.forEach((party) => {
+        const code = String(party.customerCode || '').trim();
+        if (!code) return;
+        partyByAutoCode.set(code, party);
+        const normalized = code.replace(/^0+/, '');
+        if (normalized) partyByAutoCode.set(normalized, party);
+      });
+      const resolveCustomer = (id?: string | null, code?: string | null): Party | undefined => {
+        if (id && partyById.has(id)) return partyById.get(id);
+        const candidate = String(code || '').trim();
+        if (!candidate) return undefined;
+        return partyByAutoCode.get(candidate) || partyByAutoCode.get(candidate.replace(/^0+/, ''));
+      };
+
+      const activeReceipts = allCashReceipts.filter((receipt) => receipt.status !== 'cancelled');
+      const receiptIds = new Set(activeReceipts.map((receipt) => receipt.id));
+      const receiptJournalAmounts = new Set(activeReceipts
+        .filter((receipt) => receipt.journalEntryId)
+        .map((receipt) => `${receipt.journalEntryId}|${Number(receipt.amount || 0).toFixed(2)}`));
+      const rowHasLinkedReceipt = (row: ShiftRunRow): boolean =>
+        Boolean(row.receiptVoucherId && receiptIds.has(row.receiptVoucherId)) ||
+        Boolean(row.journalEntryId &&
+          receiptJournalAmounts.has(`${row.journalEntryId}|${Number(row.collectedAmount || 0).toFixed(2)}`));
+
+      const netByParty = new Map<string, number>();
+      const addNet = (party: Party | undefined, delta: number) => {
+        if (!party) return;
+        netByParty.set(party.id, (netByParty.get(party.id) || 0) + delta);
+      };
+
+      allInvoices.forEach((invoice) => {
+        const paid = (Number(invoice.cashPaid || 0) || 0) + (Number(invoice.cardPaid || 0) || 0);
+        addNet(resolveCustomer(invoice.customerId, (invoice as any).customerCode), Number(invoice.netAmount || 0) - paid);
+      });
+
+      allReceptionShifts.forEach((shift) => {
+        shift.runRows?.forEach((row) => {
+          const collected = rowHasLinkedReceipt(row) ? 0 : Number(row.collectedAmount || 0);
+          addNet(resolveCustomer(row.customerId || row.patientId, row.customerCode), Number(row.totalRevenue || 0) - collected);
+        });
+      });
+
+      activeReceipts.forEach((receipt) => {
+        if (receipt.journalPostingSuppressed) return;
+        addNet(resolveCustomer(receipt.partyId, receipt.customerCode), -Number(receipt.amount || 0));
+      });
+
+      allCustomerRefunds.forEach((refund) => {
+        if (refund.status === 'cancelled') return;
+        addNet(resolveCustomer(refund.partyId, refund.customerCode), Number(refund.amount || 0));
+      });
+
+      customers.forEach((party) => {
+        if (!netByParty.has(party.id)) return;
+        const targetBalance = Number((netByParty.get(party.id) || 0).toFixed(2));
+        const current = updatedParties.get(party.id) || party;
+        if (Math.abs(Number(current.balance || 0) - targetBalance) > 0.01) {
+          updatedParties.set(party.id, { ...current, balance: targetBalance });
+        }
+      });
+    }
+
     const linkedPartyAccountIds = new Set(allParties.flatMap((party) => {
       const updatedParty = updatedParties.get(party.id) || party;
       return [updatedParty.accountId, updatedParty.supplierAccountId]

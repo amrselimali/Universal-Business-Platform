@@ -2,6 +2,14 @@
 
 # 2026-10-12
 
+## Customer card balance now derives from the same sources as the statement
+
+- The party card balance (`party.balance`) was updated by only a few operations plus the imported opening value, while the statement total was derived from all documents — so the two disagreed by exactly the old "opening balance".
+- The reconciliation now recomputes every customer's card balance from the SAME document sources the statement uses (invoices, reception rows with linked-receipt handling, collection receipts and customer refunds), so the card balance and the statement movements total are identical.
+- Files: `src/context/PlatformContext.tsx`.
+
+# 2026-10-12
+
 ## Customer statement — remove card balance from selector + clarify reference
 
 - Removed the recorded balance shown next to each customer name in the statement's customer selector.
