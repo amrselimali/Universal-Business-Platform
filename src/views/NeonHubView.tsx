@@ -34,6 +34,8 @@ export const NeonHubView: React.FC = () => {
     pullLatestFromNeon,
     neonAutoSync,
     neonAutoSyncProgress,
+    neonConnectionInfo,
+    neonBootstrap,
     getNeonDatasetSummary,
     importAllFromNeon,
     migrateNeonSchema,
@@ -398,6 +400,16 @@ export const NeonHubView: React.FC = () => {
         </div>
       )}
 
+      {/* Which database is actually connected */}
+      {neonConnectionInfo && (
+        <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-[11px] font-mono text-slate-700 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-200">
+          <Server className="h-3.5 w-3.5 text-cyan-600" />
+          <span>{t('قاعدة البيانات المتصلة:', 'Connected database:')}</span>
+          <span className="font-black text-cyan-700 dark:text-cyan-300">{neonConnectionInfo.host}</span>
+          <span>/ {neonConnectionInfo.database}</span>
+        </div>
+      )}
+
       {/* Automatic Neon sync status (مزامنة تلقائية لكل البيانات) */}
       <div className={`flex flex-wrap items-center gap-2 rounded-2xl border p-3.5 text-xs font-bold ${neonAutoSync.error ? 'border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-200' : 'border-cyan-200 bg-cyan-50 text-cyan-800 dark:border-cyan-900/50 dark:bg-cyan-950/30 dark:text-cyan-200'}`}>
         <Server className="h-4 w-4 shrink-0" />
@@ -412,6 +424,11 @@ export const NeonHubView: React.FC = () => {
           </span>
         ) : (
           <span>{t('في انتظار أول تغيير لنقل البيانات إلى Neon.', 'Waiting for the first change to transfer data to Neon.')}</span>
+        )}
+        {neonBootstrap.tenantId && (
+          <span className="font-mono text-[10px]">
+            {t('الكيان:', 'tenant:')} {neonBootstrap.tenantId} · {neonBootstrap.datasetCount ?? 0} {t('مجموعة', 'datasets')}
+          </span>
         )}
         <span className="ms-auto text-[10px] font-mono">
           {neonDb.connected ? t('متصل', 'connected') : t('غير متصل', 'not connected')}

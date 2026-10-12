@@ -46,7 +46,7 @@ import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 import { GlobalContextMenu } from './components/GlobalContextMenu';
 
 const MainLayout: React.FC = () => {
-  const { language, t, canAccessView, currentUser, activeBranch, neonBootstrap, retryNeonBootstrap, neonDb, updateNeonConnectionString } = usePlatform();
+  const { language, t, canAccessView, currentUser, activeBranch, neonBootstrap, retryNeonBootstrap, neonDb, updateNeonConnectionString, neonConnectionInfo } = usePlatform();
 
   // Load preferred landing view from URL query param, hash, or localStorage (Supports Open in New Tab)
   const [currentView, setCurrentView] = useState<string>(() => {
@@ -371,6 +371,13 @@ const MainLayout: React.FC = () => {
               {isError ? t('إعادة المحاولة', 'Retry') : t('اتصال وتحميل البيانات', 'Connect & load data')}
             </button>
           </div>
+
+          {neonConnectionInfo && (
+            <p className="rounded-xl border border-slate-700 bg-slate-800/60 p-2.5 font-mono text-[10px] text-cyan-300">
+              {t('قاعدة البيانات المتصلة:', 'Connected database:')}{' '}
+              {neonConnectionInfo.host} / {neonConnectionInfo.database}
+            </p>
+          )}
 
           <p className="text-[10px] text-slate-500">
             {t(

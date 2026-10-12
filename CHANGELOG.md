@@ -2,6 +2,14 @@
 
 # 2026-10-12
 
+## Show which database and tenant the app is really using
+
+- Added an always-visible **"Connected database: <host> / <database>"** line on the startup gate and on the Neon screen, plus the **resolved tenant id** and dataset count in the sync status card.
+- This makes it possible to compare the app's connection with the Neon console at a glance instead of guessing why different data appears.
+- Files: `src/context/PlatformContext.tsx`, `src/App.tsx`, `src/views/NeonHubView.tsx`.
+
+# 2026-10-12
+
 ## Fix: app showed the old data again (stale cross-tenant cache)
 
 - Root cause: the local cache was stored under a single tenant-agnostic key (`erp_documents_cache`), so a cache filled while the app was on the WRONG tenant was applied first on the next start - the app looked like it had reverted to the old data.
