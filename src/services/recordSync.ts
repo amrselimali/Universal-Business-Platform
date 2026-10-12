@@ -1,4 +1,5 @@
 import { neon } from '@neondatabase/serverless';
+import { isApiConfigured, getApiToken, apiFetchRecords, apiFetchChanges, apiUpsertRecords, apiDeleteRecords } from './apiClient';
 
 /**
  * Record-level synchronisation (مزامنة على مستوى السجل).
@@ -54,6 +55,30 @@ export async function pushRecordChanges(
 ): Promise<{ pushed: number; deleted: number; error?: string }> {
   const { upserts, deletes } = diffRecords(previous, current, docKey);
   if (upserts.length === 0 && deletes.length === 0) return { pushed: 0, deleted: 0 };
+
+  // Preferred path: the backend API (JWT + tenant from the token + RLS).
+  if (isApiConfigured() && getApiToken()) {
+    try {
+      let pushedRecords = 0;
+      const BATCH_API = 500;
+      for (let start = 0; start < upserts.length; start += BATCH_API) {
+        const slice = upserts.slice(start, start + BATCH_API);
+        const result = await apiUpsertRecords(docKey, slice);
+        if (!result.ok) return { pushed: pushedRecords, deleted: 0, error: result.error };
+        pushedRecords += Number(result.data?.upserted || slice.length);
+      }
+      let deletedRecords = 0;
+      if (deletes.length > 0) {
+        const result = await apiDeleteRecords(docKey, deletes);
+        if (!result.ok) return { pushed: pushedRecords, deleted: 0, error: result.error };
+        deletedRecords = Number(result.data?.deleted || deletes.length);
+      }
+      return { pushed: pushedRecords, deleted: deletedRecords };
+    } catch (apiError: any) {
+      return { pushed: 0, deleted: 0, error: apiError?.message || 'api_push_failed' };
+    }
+  }
+
   try {
     const sql = getClient(connectionString);
     let pushed = 0;
@@ -87,6 +112,16 @@ export async function pullChangedRecords(
   docKey: string,
   since: string
 ): Promise<{ records: SyncRecord[]; deletedIds: string[]; nextCursor: string; error?: string }> {
+  if (isApiConfigured() && getApiToken()) {
+    const result = await apiFetchChanges(docKey, since);
+    if (!result.ok) return { records: [], deletedIds: [], nextCursor: since, error: result.error };
+    return {
+      records: (result.data?.records || []) as SyncRecord[],
+      deletedIds: (result.data?.deletedIds || []) as string[],
+      nextCursor: String(result.data?.nextCursor || since),
+    };
+  }
+
   try {
     const sql = getClient(connectionString);
     const rows: any = await sql.query(
@@ -155,6 +190,26 @@ export async function fetchLiveRecords(
   const PAGE = 2000;
   const records: any[] = [];
   let lastId: string | null = null;
+
+  // Preferred path: read the live records through the backend API.
+  if (isApiConfigured() && getApiToken()) {
+    try {
+      let after: string | undefined;
+      for (;;) {
+        const page = await apiFetchRecords(docKey, after);
+        if (!page.ok) return { records, error: page.error };
+        const list = page.data?.records || [];
+        list.forEach((record: any) => records.push(record));
+        if (onProgress) onProgress(records.length);
+        if (!page.data?.nextAfter || list.length === 0) break;
+        after = page.data.nextAfter;
+      }
+      return { records };
+    } catch (apiError: any) {
+      return { records, error: apiError?.message || 'api_read_failed' };
+    }
+  }
+
   try {
     const sql = getClient(connectionString);
     for (;;) {

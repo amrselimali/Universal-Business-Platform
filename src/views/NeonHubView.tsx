@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { exportDatabaseToMultiSheetExcel } from '../utils/fullDatabaseExcelBackup';
 import { NeonService } from '../services/neonService';
+import { apiLogin, setApiUrl, getApiUrl, isApiConfigured, getApiUser, clearApiSession, apiHealth } from '../services/apiClient';
 
 export const NeonHubView: React.FC = () => {
   const {
@@ -101,6 +102,11 @@ export const NeonHubView: React.FC = () => {
   const [comparison, setComparison] = useState<{ key: string; appCount: number; neonCount: number | null }[] | null>(null);
   const [showSchemaFailures, setShowSchemaFailures] = useState<string[]>([]);
   const [comparing, setComparing] = useState(false);
+  const [apiUrlInput, setApiUrlInput] = useState<string>(getApiUrl());
+  const [apiUsername, setApiUsername] = useState<string>('');
+  const [apiPassword, setApiPassword] = useState<string>('');
+  const [apiStatus, setApiStatus] = useState<string | null>(null);
+  const [apiUser, setApiUser] = useState(getApiUser());
 
   const handleBackupToExcel = async () => {
     setIsExportingExcel(true);
@@ -461,6 +467,46 @@ export const NeonHubView: React.FC = () => {
               </tbody>
             </table>
           </div>
+        )}
+      </div>
+
+      {/* API connection: the browser should talk to the backend, not to Postgres */}
+      <div className="space-y-3 rounded-2xl border border-indigo-200 bg-indigo-50/60 p-4 dark:border-indigo-900/50 dark:bg-indigo-950/20">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="text-xs font-black text-indigo-900 dark:text-indigo-200">
+            {t('الاتصال عبر الـ API (الموصى به أمنيًا)', 'API connection (recommended)')}
+          </span>
+          <span className="font-mono text-[10px]">
+            {isApiConfigured()
+              ? (apiUser ? t(`مسجل الدخول: ${apiUser.id}`, `signed in: ${apiUser.id}`) : t('رابط مُدخل، غير مسجل', 'URL set, not signed in'))
+              : t('غير مُعد — يعمل التطبيق على الاتصال المباشر', 'Not configured - using the direct connection')}
+          </span>
+        </div>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+          <input value={apiUrlInput} onChange={(e) => setApiUrlInput(e.target.value)} placeholder="https://api.example.com" className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-900 dark:text-white sm:col-span-3" />
+          <input value={apiUsername} onChange={(e) => setApiUsername(e.target.value)} placeholder={t('اسم المستخدم', 'username')} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-900 dark:text-white" />
+          <input type="password" value={apiPassword} onChange={(e) => setApiPassword(e.target.value)} placeholder={t('كلمة المرور', 'password')} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-900 dark:text-white" />
+          <button
+            type="button"
+            onClick={async () => {
+              setApiUrl(apiUrlInput);
+              const health = await apiHealth();
+              if (!health.ok) { setApiStatus(t('تعذر الوصول للـ API — تحقق من الرابط.', 'Cannot reach the API - check the URL.')); return; }
+              const result = await apiLogin(apiUsername, apiPassword);
+              if (!result.success) { setApiStatus(t('فشل تسجيل الدخول: ', 'Login failed: ') + result.error); return; }
+              setApiUser(result.user || null);
+              setApiStatus(t('تم الاتصال بالـ API وتسجيل الدخول ✅ — أعد تحميل الصفحة ليعمل كل شيء عبر الـ API.', 'API connected and signed in - reload the page to run everything through the API.'));
+            }}
+            className="rounded-xl bg-indigo-600 px-3 py-2 text-xs font-bold text-white hover:bg-indigo-700"
+          >
+            {t('اتصال وتسجيل الدخول', 'Connect & sign in')}
+          </button>
+        </div>
+        {apiStatus && <p className="text-[11px] font-bold text-indigo-800 dark:text-indigo-200">{apiStatus}</p>}
+        {isApiConfigured() && apiUser && (
+          <button type="button" onClick={() => { clearApiSession(); setApiUser(null); setApiStatus(t('تم تسجيل الخروج من الـ API.', 'Signed out of the API.')); }} className="text-[11px] font-bold text-rose-600 underline">
+            {t('تسجيل الخروج من الـ API', 'Sign out of the API')}
+          </button>
         )}
       </div>
 
