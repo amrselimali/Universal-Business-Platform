@@ -2,6 +2,13 @@
 
 # 2026-10-12
 
+## Phase 2 verification: the atomic posting rules are enforced by the database
+
+- Ran live checks against Neon: `fn_post_journal` **rejected** an unbalanced journal (`debit 100 vs credit 90`) and **rejected** a line carrying both debit and credit, and **wrote nothing** in either case (0 rows in `gl_journals`).
+- This proves the accounting rules now live in the database and are applied atomically for every client, regardless of app version.
+
+# 2026-10-12
+
 ## Phase 2 (part 1): accounting logic moved into the database
 
 - Added the accounting core tables `gl_journals` / `gl_journal_lines` and the atomic functions `fn_post_journal` (validates balance and line rules, writes the header and lines and updates account balances **in one transaction**), `fn_reverse_journal`, `fn_is_debit_normal` and `fn_customer_account_id`.
