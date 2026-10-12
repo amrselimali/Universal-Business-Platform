@@ -774,6 +774,7 @@ export const CollectionReceiptsView: React.FC = () => {
       const rowNum = index + 2;
 
       const customerCode = String(row['كود العميل'] || row['Customer Code'] || '').trim();
+      const customerName = String(row['اسم العميل / المسدد'] || row['العميل'] || row['اسم العميل'] || row['Customer Name'] || '').trim();
       const normCustomerCode = customerCode.replace(/^0+/, '');
       const normCustomerName = normalizeArabicName(customerName);
       const matchedCustomer = parties.find((p) => {
