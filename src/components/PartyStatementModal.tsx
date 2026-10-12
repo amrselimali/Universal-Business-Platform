@@ -37,7 +37,6 @@ import {
 import {
   normalizeStatementDate,
   normalizeArabicName,
-  getPartyLookupCodes,
   isReceiptMatchingParty,
   isRefundMatchingParty,
 } from '../utils/statementUtils';
@@ -239,25 +238,25 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
       paymentMethod?: string;
     }> = [];
 
-    const partyCodes = getPartyLookupCodes(currentParty);
+    // Link movements to this customer by the exact record id or by the AUTO-SERIAL
+    // customer code only. Name / other-code substring matching is intentionally avoided
+    // because it pulled in unrelated movements and produced a misleading opening balance.
     const pNameNorm = normalizeArabicName(currentParty.name);
-    const pPhone = currentParty.phone?.replace(/\D/g, '') || '';
-    const pCode = currentParty.systemCode?.toLowerCase().trim();
-    const pCustomerCode = (currentParty.customerCode || currentParty.code)?.toLowerCase().trim();
+    const autoSerialCode = String(currentParty.customerCode || '').trim();
+    const normAutoSerial = autoSerialCode.replace(/^0+/, '');
+    const matchesAutoSerial = (candidate?: string | null): boolean => {
+      const c = String(candidate || '').trim();
+      if (!c || !autoSerialCode) return false;
+      return c === autoSerialCode || c.replace(/^0+/, '') === normAutoSerial;
+    };
 
     // 1. Gather Customer Movements
     if (currentParty.type === 'Customer' || currentParty.type === 'Both') {
       // Invoices
       scopedInvoices.forEach((inv) => {
-        const invCustomerNameNorm = normalizeArabicName(inv.customerName);
-        const invCustId = String(inv.customerId || '').trim().toLowerCase();
         const matchCustomer =
           inv.customerId === currentParty.id ||
-          partyCodes.has(invCustId) ||
-          partyCodes.has(invCustId.replace(/^0+/, '')) ||
-          partyCodes.has(String((inv as any).customerCode || '').trim().toLowerCase()) ||
-          partyCodes.has(String((inv as any).systemCode || '').trim().toLowerCase()) ||
-          (invCustomerNameNorm && pNameNorm && (invCustomerNameNorm === pNameNorm || invCustomerNameNorm.includes(pNameNorm) || pNameNorm.includes(invCustomerNameNorm)));
+          matchesAutoSerial((inv as any).customerCode);
 
         if (matchCustomer) {
           const invDate = normalizeStatementDate(inv.createdAt) || inv.createdAt.slice(0, 10);
@@ -295,15 +294,10 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
       // Reception Shift Run Rows
       scopedShifts.forEach((shift) => {
         shift.runRows.forEach((row) => {
-          const rowPatientNorm = normalizeArabicName(row.patientName || row.customerName);
-          const rowCodes = [row.customerId, row.patientId, row.systemCode, row.customerCode, (row as any).patientCode]
-            .filter((c): c is string => Boolean(c))
-            .map((c) => String(c).trim().toLowerCase());
           const matchRow =
             row.customerId === currentParty.id ||
             row.patientId === currentParty.id ||
-            rowCodes.some((rc) => partyCodes.has(rc) || partyCodes.has(rc.replace(/^0+/, ''))) ||
-            (rowPatientNorm && pNameNorm && (rowPatientNorm === pNameNorm || rowPatientNorm.includes(pNameNorm) || pNameNorm.includes(rowPatientNorm)));
+            matchesAutoSerial(row.customerCode);
 
           if (matchRow) {
             const rawRowDate = row.date || shift.shiftDate || shift.openedAt;
@@ -477,8 +471,11 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
     const supplierAccountId = currentParty.type === 'Both'
       ? currentParty.supplierAccountId
       : currentParty.type === 'Supplier' ? currentParty.accountId : undefined;
-    const partyJournalIdentifiers = [currentParty.name.toLowerCase().trim(), pNameNorm, pCode, pCustomerCode, pPhone]
-      .filter((identifier): identifier is string => Boolean(identifier));
+    // Journal lines are matched by the customer account (exact) or by the auto-serial
+    // customer code appearing as a bounded token in the memo.
+    const autoSerialJournalPattern = normAutoSerial
+      ? new RegExp(`(?:^|[^0-9A-Za-z])${normAutoSerial}(?:$|[^0-9A-Za-z])`)
+      : null;
 
     // 3. Journal Entries mentioning this party
     scopedJournals.forEach((entry) => {
@@ -489,8 +486,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
       const matchingLines = entry.lines.filter(
         (line) => (!hasSharedCustomerControlAccount && line.accountId === currentParty.accountId) ||
           (supplierAccountId && line.accountId === supplierAccountId) ||
-          partyJournalIdentifiers.some((identifier) => line.memo?.toLowerCase().includes(identifier)) ||
-          Array.from(partyCodes).some((code) => code.length >= 3 && line.memo?.toLowerCase().includes(code))
+          (autoSerialJournalPattern ? autoSerialJournalPattern.test(line.memo || '') : false)
       );
 
       const entryDate = normalizeStatementDate(entry.date) || '1970-01-01';

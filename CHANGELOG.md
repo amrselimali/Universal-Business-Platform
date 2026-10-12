@@ -2,6 +2,14 @@
 
 # 2026-10-12
 
+## Customer statement — accurate movements and opening balance
+
+- Fixed the detailed customer statement pulling in unrelated movements: invoices, reception rows and journal lines are now matched to the customer by the **exact record id** or by the **auto-serial customer code only**. Removed the broad Arabic-name / system-code / paper-code substring matching that produced large unexplained debit/credit movements.
+- Because the closing balance is derived as `party.balance`, the bogus movements were being absorbed into an unexplained opening balance. With accurate movements the opening balance is now meaningful.
+- Files: `src/components/PartyStatementModal.tsx`.
+
+# 2026-10-12
+
 ## Excel import now links customers by auto-serial code only
 
 - Collection-receipt and customer-refund Excel imports now match the customer by the **auto-serial customer code only** (with optional leading-zero tolerance). Removed system-code / paper-code / file-code / Arabic-name fallbacks so imports cannot be attached to the wrong customer.
