@@ -2,6 +2,14 @@
 
 # 2026-10-12
 
+## Accounting migration steps 4 & 5
+
+- **Step 4 - reversals**: `reverseJournalEntries` now mirrors each reversal into the database ledger through `fn_reverse_journal` (the original is kept and the opposite entry is posted atomically). Best-effort, non-blocking, offline-safe, and skipped for batches above 50 entries.
+- **Step 5 - retiring the client engine (start)**: a background check every 5 minutes compares the local account balances with the authoritative balances that `fn_post_journal` maintains in the database. Differences are only reported (never overwritten) and the count is exposed as `neonBalanceMismatches`, so the client engine can be retired safely once both sides agree.
+- Files: `src/context/PlatformContext.tsx`.
+
+# 2026-10-12
+
 ## Accounting migration steps 2 & 3: collection receipts and refunds mirror into the DB ledger
 
 - `addCollectionReceiptsBulk` now mirrors every created receipt into the atomic database ledger via `fn_post_customer_receipt` (debit payment-method account / credit customer account + receipt record). Batches above 100 receipts skip the mirror because the full record sync already carries them.

@@ -125,6 +125,7 @@ import { pushRecordChanges, pullChangedRecords, mergeRecords } from '../services
 import { postJournal } from '../services/accountingApi';
 import { postCustomerReceipt } from '../services/accountingApi';
 import { postCustomerRefund } from '../services/accountingApi';
+import { reverseJournal, fetchAccountBalances } from '../services/accountingApi';
 import { normalizeStatementDate, isReceiptMatchingParty } from '../utils/statementUtils';
 
 const normalizeCustomerPartyCodes = (parties: Party[]): Party[] => {
@@ -679,6 +680,7 @@ interface PlatformContextType {
   compareWithNeon: () => Promise<{ key: string; appCount: number; neonCount: number | null }[]>;
   neonLastRefresh: string;
   neonOnline: boolean;
+  neonBalanceMismatches: number;
   syncNow: () => Promise<{ updated: number; error?: string }>;
   updateNeonConnectionString: (conn: string) => void;
   testNeonConnection: (connOverride?: string) => Promise<boolean>;
@@ -1595,6 +1597,33 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     applyJournalLinesToAccounts(reversalLines);
     setAllJournals((previous) => [...reversals, ...previous]);
+
+    // STEP 4 of the accounting migration: mirror each reversal into the atomic database
+    // ledger (fn_reverse_journal keeps the original and posts the opposite entry).
+    // Best-effort and non-blocking; the local path above remains the offline fallback.
+    {
+      const step4Connection = String(neonDb.connectionString || '').trim();
+      const step4Tenant = tenant?.id;
+      const step4Enabled = neonBootstrap.status === 'ready'
+        && Boolean(step4Tenant)
+        && (step4Connection.startsWith('postgres://') || step4Connection.startsWith('postgresql://'));
+      if (step4Enabled && uniqueEntryIds.length <= 50) {
+        void (async () => {
+          for (const originalId of uniqueEntryIds) {
+            const outcome = await reverseJournal({
+              connectionString: step4Connection,
+              tenantId: step4Tenant as string,
+              journalId: originalId,
+              reason,
+              actor: currentUser?.name,
+            });
+            if (!outcome.success) {
+              console.warn('Server-side reversal skipped:', originalId, outcome.error);
+            }
+          }
+        })().catch((mirrorError) => console.warn('Server-side reversal mirror failed:', mirrorError));
+      }
+    }
     reversals.forEach((reversal, index) => {
       const originalEntry = journalById.get(uniqueEntryIds[index]);
       if (!originalEntry) return;
@@ -11110,6 +11139,36 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [neonBootstrap.status, neonDb.connectionString, tenant?.id, language]);
 
+  // STEP 5 of the accounting migration: keep watching the authoritative balances that the
+  // database computes (fn_post_journal updates them atomically). Differences are reported
+  // only - nothing is overwritten - so the client engine can be retired safely once the
+  // two sides agree over time.
+  const [neonBalanceMismatches, setNeonBalanceMismatches] = useState<number>(0);
+  useEffect(() => {
+    if (neonBootstrap.status !== 'ready') return;
+    const rawConnection = String(neonDb.connectionString || '').trim();
+    const tenantId = neonActiveTenantIdRef.current;
+    if (!tenantId || (!rawConnection.startsWith('postgres://') && !rawConnection.startsWith('postgresql://'))) return;
+    const interval = window.setInterval(async () => {
+      const authoritative = await fetchAccountBalances({ connectionString: rawConnection, tenantId });
+      if (authoritative.length === 0) return;
+      let mismatches = 0;
+      authoritative.forEach((remote) => {
+        const local = accounts.find((account) => account.code === remote.code);
+        if (!local) return;
+        if (Math.abs(Number(local.balance || 0) - remote.balance) > 0.01) {
+          mismatches += 1;
+          console.info(
+            `Balance check: account ${remote.code} (${remote.name}) local ${local.balance} vs database ${remote.balance}`
+          );
+        }
+      });
+      setNeonBalanceMismatches(mismatches);
+    }, 300_000);
+    return () => window.clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [neonBootstrap.status, neonDb.connectionString, accounts.length]);
+
   // Run once on startup, after storage hydration.
   useEffect(() => {
     if (!isStorageHydrated || neonBootstrapRanRef.current) return;
@@ -11686,6 +11745,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         compareWithNeon,
         neonLastRefresh,
         neonOnline,
+        neonBalanceMismatches,
         syncNow: refreshFromNeon,
         // Backwards-compatible alias: patients are the parties of type Customer/Both.
         patients: parties,
