@@ -2,6 +2,16 @@
 
 # 2026-10-12
 
+## All data now syncs automatically to Neon (unified document store)
+
+- Added the `app_documents` table (one JSONB row per dataset per tenant) plus `NeonService.saveDocuments` / `NeonService.fetchDocuments` / `NeonService.ensureDocumentsTable`.
+- Added an **automatic Neon sync**: every dataset the app keeps (collection receipts, customer refunds, reception shifts, POS shifts, cash vouchers, tax invoices, goods vouchers, parties, journals, accounts, products, payroll, attendance, staff, laser devices, maintenance, inventory audits, period locks, notifications, audit/activity logs, ...) is uploaded to Neon as a JSONB document. Uploads are debounced (3s after the last change) and only datasets whose content changed are sent.
+- Exposed `neonAutoSync` status (syncing / last run / last saved count / error).
+- Documented the new table in `scripts/neon_schema_migrations.sql`.
+- Files: `src/services/neonService.ts`, `src/context/PlatformContext.tsx`, `scripts/neon_schema_migrations.sql`.
+
+# 2026-10-12
+
 ## Statement no longer shows archived receipts (root cause of the "phantom" receipts)
 
 - The detailed customer statement included **archived** collection receipts, while the collection receipts screen (active view) hides them — so receipts like `CR-2026-0007/0008/0009` appeared in the statement but were impossible to see or cancel in the screen.

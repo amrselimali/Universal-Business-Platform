@@ -151,3 +151,16 @@ ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS payment_method_id VARCHAR(10
 -- =========================================================================
 -- تم بنجاح! هذا الكود آمن تماماً ولا يمس أو يحذف أي بيانات مسجلة.
 -- =========================================================================
+
+-- =========================================================================
+-- Unified document store: one JSONB row per dataset per tenant.
+-- This is what the app's automatic Neon sync writes to, so EVERY dataset
+-- (collection receipts, customer refunds, shifts, payroll, ...) is stored in Neon.
+-- =========================================================================
+CREATE TABLE IF NOT EXISTS app_documents (
+  tenant_id  VARCHAR(100) NOT NULL,
+  doc_key    VARCHAR(100) NOT NULL,
+  payload    JSONB        NOT NULL,
+  updated_at TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (tenant_id, doc_key)
+);
