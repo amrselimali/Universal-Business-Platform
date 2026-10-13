@@ -1,5 +1,35 @@
 # CHANGELOG
 
+# 2026-10-13
+
+## Database-First Architecture Conversion — Phase 1 (Commands Layer & Financial Screens)
+
+- Upgraded Command Layer (`src/services/commands.ts`):
+  - Supported universal Database-First execution using either the Fastify API client (`server/`) or direct Neon PostgreSQL connection (`@neondatabase/serverless`) executing atomic PL/pgSQL functions.
+  - Implemented `saveRecord`, `deleteRecord`, `createCollectionReceipt`, `createCustomerRefund`, `createJournalEntry`, `reverseJournalEntry`, and `reloadDataset`.
+  - Guaranteed transactional integrity: database write executes FIRST. If the database rejects, local UI state is untouched and error is displayed.
+- Converted Collection Receipts View (`src/views/CollectionReceiptsView.tsx`):
+  - Replaced client-state first write in `handleSaveNewReceipt` with `createCollectionReceipt` (Database-First).
+  - Added button loading state and disabled state during transaction processing.
+- Converted Customer Dues Settlement / Refunds View (`src/views/CustomerRefundsView.tsx`):
+  - Replaced client-state first write in `handleSubmit` with `createCustomerRefund` (Database-First).
+  - Replaced client-state first cancellation in `handleCancel` with `reverseJournalEntry` (Database-First).
+  - Added spinners and disabled button states during transactions.
+- Files: `src/services/commands.ts`, `src/views/CollectionReceiptsView.tsx`, `src/views/CustomerRefundsView.tsx`, `PROJECT_STATE.md`, `CHANGELOG.md`.
+
+## Enterprise Relational Architecture & Strict Auto-Serialized Customer Code Linking
+
+- Enforced strict customer linking rule:
+  - Updated `isReceiptMatchingParty` and `isRefundMatchingParty` in `src/utils/statementUtils.ts` and Excel import validation in `CollectionReceiptsView.tsx` to match receipts exclusively on `partyId` or the auto-serialized customer code (`party.customerCode` or `party.code`).
+  - Removed fuzzy heuristics (Arabic name tokens, phone matching, text searching) to guarantee zero cross-customer balance leaks.
+- Fixed browser runtime crash:
+  - Resolved `ReferenceError: journalIndex is not defined` in `PlatformContext.tsx` by declaring `journalIndex` prior to conditional block.
+- Established Enterprise Relational Database Blueprint:
+  - Created `src/db/schema.sql`: Full PostgreSQL schema with multi-tenancy, branches, chart of accounts, parties with unique serialized codes, general ledger journal entries, journal lines, cash receipts, and customer refunds with foreign key constraints (`ON DELETE RESTRICT`) and indexes.
+  - Added real-time window function SQL view `v_customer_detailed_statement` for server-side instantaneous statement generation.
+  - Created `src/db/schema.ts` and `src/services/databaseBridge.ts` providing the repository pattern, sequential code generator, and running statement engine.
+- Files: `src/utils/statementUtils.ts`, `src/views/CollectionReceiptsView.tsx`, `src/context/PlatformContext.tsx`, `src/db/schema.sql`, `src/db/schema.ts`, `src/services/databaseBridge.ts`.
+
 # 2026-10-12
 
 ## CRITICAL: startup failed after app_documents was dropped

@@ -34,6 +34,7 @@ import {
   ExcelValidationResult,
 } from '../components/ExcelDataTransferModal';
 import { normalizeArabicName, normalizeStatementDate } from '../utils/statementUtils';
+import { createCollectionReceipt } from '../services/commands';
 
 const collectionExcelColumns: ExcelColumnConfig[] = [
   {
@@ -231,6 +232,7 @@ export const CollectionReceiptsView: React.FC = () => {
   const [newReceiptNumber, setNewReceiptNumber] = useState<string>('');
   const [newReceiptNotes, setNewReceiptNotes] = useState<string>('');
   const [newReceiptError, setNewReceiptError] = useState<string | null>(null);
+  const [isSubmittingNewReceipt, setIsSubmittingNewReceipt] = useState<boolean>(false);
 
   const [selectedReceiptForEdit, setSelectedReceiptForEdit] = useState<ReceiptDisplayItem | null>(null);
   const [editAmount, setEditAmount] = useState<number>(0);
@@ -588,8 +590,10 @@ export const CollectionReceiptsView: React.FC = () => {
     setShowAddReceiptModal(true);
   };
 
-  const handleSaveNewReceipt = (e: React.FormEvent) => {
+  const handleSaveNewReceipt = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmittingNewReceipt) return;
+
     const amountNum = parseFloat(newReceiptAmount);
     if (isNaN(amountNum) || amountNum <= 0) {
       setNewReceiptError(t('يرجى إدخال مبلغ صحيح وموجب أكبر من الصفر للإيصال.', 'Please enter a valid positive collected amount.'));
@@ -613,41 +617,59 @@ export const CollectionReceiptsView: React.FC = () => {
     const branchToUse = activeBranch?.id || (branches[0]?.id || 'branch-cairo');
     const paymentType = matchedMethod?.type === 'Cash' ? 'Cash' : matchedMethod?.type === 'Card' ? 'Card' : 'Transfer';
 
-    const result = addCollectionReceiptsBulk([
-      {
-        tenantId: tenant?.id || 'tenant-eg-001',
-        branchId: branchToUse,
-        partyId: matchedCustomer.id,
-        receivedFrom: matchedCustomer.name,
-        amount: amountNum,
-        date: newReceiptDate,
-        paymentMethod: paymentType,
-        paymentMethodLabel: matchedMethod?.nameAr || matchedMethod?.nameEn || 'نقداً (كاش)',
-        paymentAccountId: matchedMethod?.linkedAccountId,
-        serviceId: matchedProduct?.id,
-        serviceName: serviceTitle,
-        productId: matchedProduct?.id,
-        productName: productTitle,
-        bookedQuantity: qty,
-        quantity: qty,
-        receiptNumber: newReceiptNumber.trim() || undefined,
-        notes: newReceiptNotes.trim() || undefined,
-        patientPhone: matchedCustomer.phone,
-        customerCode: matchedCustomer.customerCode || matchedCustomer.code,
-        systemCode: matchedCustomer.systemCode,
-      },
-    ]);
+    setIsSubmittingNewReceipt(true);
+    setNewReceiptError(null);
 
-    if (!result.success) {
-      setNewReceiptError(result.error || t('تعذر تسجيل إيصال التحصيل.', 'Could not record collection receipt.'));
+    const receiptItem = {
+      tenantId: tenant?.id || 'tenant-eg-001',
+      branchId: branchToUse,
+      partyId: matchedCustomer.id,
+      receivedFrom: matchedCustomer.name,
+      amount: amountNum,
+      date: newReceiptDate,
+      paymentMethod: paymentType,
+      paymentMethodLabel: matchedMethod?.nameAr || matchedMethod?.nameEn || 'نقداً (كاش)',
+      paymentAccountId: matchedMethod?.linkedAccountId,
+      serviceId: matchedProduct?.id,
+      serviceName: serviceTitle,
+      productId: matchedProduct?.id,
+      productName: productTitle,
+      bookedQuantity: qty,
+      quantity: qty,
+      receiptNumber: newReceiptNumber.trim() || undefined,
+      notes: newReceiptNotes.trim() || undefined,
+      patientPhone: matchedCustomer.phone,
+      customerCode: matchedCustomer.customerCode || matchedCustomer.code,
+      systemCode: matchedCustomer.systemCode,
+    };
+
+    // DATABASE-FIRST: Write atomic transaction to database FIRST before touching screen state
+    const cmdResult = await createCollectionReceipt({
+      receipt: receiptItem as unknown as Record<string, unknown>,
+      customerCode: String(matchedCustomer.customerCode || matchedCustomer.code || '').trim(),
+      paymentAccountId: String(matchedMethod?.linkedAccountId || '').trim(),
+      branchId: branchToUse,
+      amount: amountNum,
+      units: qty,
+      date: newReceiptDate,
+      service: serviceTitle,
+      applyLocal: () => {
+        addCollectionReceiptsBulk([receiptItem]);
+      },
+    });
+
+    setIsSubmittingNewReceipt(false);
+
+    if (!cmdResult.success) {
+      setNewReceiptError(cmdResult.error || t('تعذر ترحيل الإيصال إلى قاعدة البيانات. تم إلغاء العملية بأمان.', 'Could not post receipt to database. Transaction safely cancelled.'));
       return;
     }
 
     setShowAddReceiptModal(false);
     alert(
       t(
-        `تم تسجيل إيصال التحصيل وترحيله مباشرة للحسابات العامة بدائنية العميل (${matchedCustomer.name}) بقيمة ${formatMoney(amountNum)} وكمية محجوزة دائنة (${qty}) بنجاح.`,
-        `Collection receipt posted directly to general ledger and credited ${matchedCustomer.name} with ${formatMoney(amountNum)} and booked quantity (${qty}).`
+        `تم تسجيل إيصال التحصيل وترحيله مباشرة لقاعدة البيانات والحسابات العامة بدائنية العميل (${matchedCustomer.name}) بقيمة ${formatMoney(amountNum)} وكمية محجوزة (${qty}) بنجاح.`,
+        `Collection receipt posted directly to database and general ledger crediting ${matchedCustomer.name} with ${formatMoney(amountNum)} and booked quantity (${qty}).`
       )
     );
   };
@@ -2026,9 +2048,13 @@ export const CollectionReceiptsView: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition cursor-pointer shadow-xs"
+                  disabled={isSubmittingNewReceipt}
+                  className="px-5 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl transition cursor-pointer shadow-xs flex items-center gap-1.5"
                 >
-                  {t('حفظ وترحيل الإيصال للحسابات', 'Save & Post Collection Receipt')}
+                  {isSubmittingNewReceipt && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                  {isSubmittingNewReceipt
+                    ? t('جاري الترحيل لقاعدة البيانات...', 'Posting to database...')
+                    : t('حفظ وترحيل الإيصال للحسابات', 'Save & Post Collection Receipt')}
                 </button>
               </div>
             </form>

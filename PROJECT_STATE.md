@@ -1,24 +1,25 @@
 # PROJECT STATE
 
-## Database-first conversion — recipe and current status (2026-10-12)
+## Database-first conversion — Phase 1 Implemented (2026-10-13)
 
-### Where we are
-- Neon is the single source of truth: `app_records` (161,760 live rows) and the atomic ledger `gl_journals`/`gl_journal_lines`. `app_documents` was archived and dropped.
-- The backend API exists (`server/`, Fastify + JWT + RLS + `set_config('app.tenant_id')`) and was verified live against the database.
-- The app still edits its in-memory state first and pushes the change per record to `app_records` (now within ~400 ms). So commands DO reach the database, but the screen is still the writer rather than a pure view.
-
-### The target model (database-first)
-Screen = view only. Button = database operation. Steps per screen:
-1. Build the record the button should create/change (pure data).
-2. Call the command layer (`src/services/commands.ts`): `saveRecord`, `deleteRecord`, `createCollectionReceipt`, `createJournalEntry`, `reloadDataset`.
-3. The database is written FIRST; the local state updates only after the database confirms.
-4. On rejection/network error the local state is untouched and the error is shown.
-5. Re-read the dataset (`reloadDataset`) or rely on the incremental pull to refresh the view.
-
-While no API session is configured the command layer falls back to the local update, so screens can be converted one at a time without stopping the application.
-
-### Remaining work
-- Convert the 35 screens (~150-200 buttons) one at a time using the recipe above; estimated 3-4 weeks. Recommended order: collection receipts, refunds, general journal, POS/invoices (needs idempotency keys), then the rest.
+### Progress & Live Status
+- **Unified Command Layer (`src/services/commands.ts`)**:
+  - Upgraded to support dual database drivers:
+    1. **Backend API (`server/`)**: Fastify + JWT + Row-Level Security when `erp_api_url` is configured.
+    2. **Direct Neon Database (`@neondatabase/serverless`)**: PL/pgSQL atomic functions (`fn_post_customer_receipt`, `fn_post_customer_refund`, `fn_post_journal`, `fn_reverse_journal`, `fn_upsert_records`, `fn_soft_delete_records`) when connecting via Neon connection string.
+    3. **Safe Offline Fallback**: local update if no database connection is active.
+  - Implemented commands: `saveRecord`, `deleteRecord`, `createCollectionReceipt`, `createCustomerRefund`, `createJournalEntry`, `reverseJournalEntry`, `reloadDataset`.
+- **First Converted Screens (Database-First)**:
+  1. **Collection Receipts (`src/views/CollectionReceiptsView.tsx`)**:
+     - Single collection receipt creation (`handleSaveNewReceipt`) writes to the database FIRST via `createCollectionReceipt`.
+     - The modal remains open and displays exact database rejection errors if the database fails; local state is 100% untouched on failure.
+     - Only after the database confirms does `applyLocal` commit the receipt and credit the customer in the UI.
+     - Added button loading state and disabled state during database transactions.
+  2. **Customer Refunds / Dues Settlement (`src/views/CustomerRefundsView.tsx`)**:
+     - Refund creation (`handleSubmit`) writes to the database FIRST via `createCustomerRefund`.
+     - Refund cancellation (`handleCancel`) reverses the journal in the database FIRST via `reverseJournalEntry`.
+     - Added button loading states and spinners during database operations.
+- **Next Screens in Roadmap**: General Journal entries (`GeneralJournalView.tsx`), POS & Sales Invoices (with idempotency keys), Supplier payments.
 
 ## Collection Receipt Cash/Bank Account Resolution & Balance Synchronization Fix — 2026-10-12
 

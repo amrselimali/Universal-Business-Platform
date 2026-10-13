@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { usePlatform } from '../context/PlatformContext';
 import { Party, ClientOffer } from '../types';
 import { exportRowsToExcel } from '../utils/excelExport';
+import { createCustomerRefund, reverseJournalEntry } from '../services/commands';
 import {
   Undo2,
   Plus,
@@ -12,6 +13,7 @@ import {
   Download,
   Upload,
   Trash2,
+  RefreshCw,
 } from 'lucide-react';
 
 import {
@@ -77,6 +79,8 @@ export const CustomerRefundsView: React.FC = () => {
   const [cancelTarget, setCancelTarget] = useState<string | null>(null);
   const [cancelReason, setCancelReason] = useState('');
   const [cancelError, setCancelError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
 
   const activeBranchId = activeBranch?.id;
 
@@ -167,8 +171,10 @@ export const CustomerRefundsView: React.FC = () => {
     setFormError(null);
     setShowModal(true);
   };
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
+
     setFormError(null);
     if (!selectedParty) {
       setFormError(t('يرجى اختيار العميل.', 'Please select the customer.'));
@@ -190,10 +196,16 @@ export const CustomerRefundsView: React.FC = () => {
       return;
     }
     const matchedMethod = paymentMethods.find((m) => m.id === paymentMethodId) || paymentMethods[0];
-    const result = addCustomerRefund({
+    const targetBranchId = activeBranchId || branches[0]?.id || '';
+
+    setIsSubmitting(true);
+
+    const refundPayload: Record<string, unknown> = {
       tenantId: tenant?.id || 'tenant-eg-001',
-      branchId: activeBranchId || branches[0]?.id || '',
+      branchId: targetBranchId,
       partyId: selectedParty.id,
+      customerName: selectedParty.name,
+      customerCode: selectedParty.customerCode || selectedParty.code,
       units: unitsNum,
       unitPrice: unitPriceNum,
       amount: amountNum,
@@ -203,29 +215,77 @@ export const CustomerRefundsView: React.FC = () => {
       paymentAccountId: matchedMethod?.linkedAccountId,
       serviceName: serviceName.trim() || undefined,
       notes: notes.trim() || undefined,
+    };
+
+    let localResult: any = null;
+    const cmdResult = await createCustomerRefund({
+      refund: refundPayload,
+      customerCode: String(selectedParty.customerCode || selectedParty.code || '').trim(),
+      paymentAccountId: String(matchedMethod?.linkedAccountId || '').trim(),
+      branchId: targetBranchId,
+      amount: amountNum,
+      units: unitsNum,
+      date: refundDate,
+      service: serviceName.trim() || undefined,
+      applyLocal: () => {
+        localResult = addCustomerRefund({
+          tenantId: tenant?.id || 'tenant-eg-001',
+          branchId: targetBranchId,
+          partyId: selectedParty.id,
+          units: unitsNum,
+          unitPrice: unitPriceNum,
+          amount: amountNum,
+          date: refundDate,
+          paymentMethodId: matchedMethod?.id,
+          paymentMethodLabel: matchedMethod?.nameAr || matchedMethod?.nameEn || t('نقداً (كاش)', 'Cash'),
+          paymentAccountId: matchedMethod?.linkedAccountId,
+          serviceName: serviceName.trim() || undefined,
+          notes: notes.trim() || undefined,
+        });
+      },
     });
-    if (!result.success) {
-      setFormError(result.error || t('تعذر تسجيل الاسترداد.', 'Could not record the refund.'));
+
+    setIsSubmitting(false);
+
+    if (!cmdResult.success) {
+      setFormError(cmdResult.error || t('تعذر ترحيل الاسترداد إلى قاعدة البيانات. تم إلغاء العملية بأمان.', 'Could not record refund in database. Transaction safely cancelled.'));
       return;
     }
+
     setShowModal(false);
+    const voucherNo = localResult?.refund?.voucherNumber ? `(${localResult.refund.voucherNumber})` : '';
     setNotice(t(
-      `تم تسجيل سند الاسترداد ${result.refund?.voucherNumber} بقيمة ${formatMoney(amountNum)} و${unitsNum} وحدة، وترحيله في كشف حساب العميل والحسابات.`,
-      `Refund ${result.refund?.voucherNumber} recorded for ${formatMoney(amountNum)} and ${unitsNum} units, posted to the customer account and ledgers.`
+      `تم تسجيل سند الاسترداد ${voucherNo} بقيمة ${formatMoney(amountNum)} و${unitsNum} وحدة، وترحيله في قاعدة البيانات وكشف الحساب بنجاح.`,
+      `Refund recorded ${voucherNo} for ${formatMoney(amountNum)} and ${unitsNum} units, posted to database and customer account successfully.`
     ));
   };
 
-  const handleCancel = () => {
-    if (!cancelTarget) return;
+  const handleCancel = async () => {
+    if (!cancelTarget || isCancelling) return;
     setCancelError(null);
-    const result = cancelCustomerRefund(cancelTarget, cancelReason);
-    if (!result.success) {
-      setCancelError(result.error || t('تعذر إلغاء الاسترداد.', 'Could not cancel the refund.'));
+    setIsCancelling(true);
+
+    const targetRefund = customerRefunds.find((r) => r.id === cancelTarget);
+    const journalId = targetRefund?.journalEntryId || targetRefund?.id || '';
+
+    const cmdResult = await reverseJournalEntry({
+      journalId,
+      reason: cancelReason.trim(),
+      applyLocal: () => {
+        cancelCustomerRefund(cancelTarget, cancelReason);
+      },
+    });
+
+    setIsCancelling(false);
+
+    if (!cmdResult.success) {
+      setCancelError(cmdResult.error || t('تعذر عكس السند في قاعدة البيانات. تم إلغاء العملية بأمان.', 'Could not reverse refund in database. Transaction safely cancelled.'));
       return;
     }
+
     setCancelTarget(null);
     setCancelReason('');
-    setNotice(t('تم إلغاء سند الاسترداد وعكس أثره المحاسبي.', 'Refund voucher cancelled and its accounting effect reversed.'));
+    setNotice(t('تم إلغاء سند الاسترداد وعكس أثره المحاسبي في قاعدة البيانات والحسابات بنجاح.', 'Refund voucher cancelled and its accounting effect reversed in database successfully.'));
   };
 
   const exportRefunds = () => {
@@ -709,8 +769,13 @@ export const CustomerRefundsView: React.FC = () => {
                 <button type="button" onClick={() => setShowModal(false)} className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300">
                   {t('إلغاء', 'Cancel')}
                 </button>
-                <button type="submit" className="rounded-xl bg-rose-600 px-4 py-2 text-xs font-bold text-white hover:bg-rose-700">
-                  {t('حفظ وترحيل', 'Save & Post')}
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="rounded-xl bg-rose-600 px-4 py-2 text-xs font-bold text-white hover:bg-rose-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+                >
+                  {isSubmitting && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                  {isSubmitting ? t('جاري الترحيل لقاعدة البيانات...', 'Posting to database...') : t('حفظ وترحيل', 'Save & Post')}
                 </button>
               </div>
             </form>
@@ -737,8 +802,14 @@ export const CustomerRefundsView: React.FC = () => {
               <button type="button" onClick={() => setCancelTarget(null)} className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300">
                 {t('رجوع', 'Back')}
               </button>
-              <button type="button" onClick={handleCancel} className="rounded-xl bg-rose-600 px-4 py-2 text-xs font-bold text-white hover:bg-rose-700">
-                {t('تأكيد الإلغاء', 'Confirm cancel')}
+              <button
+                type="button"
+                disabled={isCancelling}
+                onClick={handleCancel}
+                className="rounded-xl bg-rose-600 px-4 py-2 text-xs font-bold text-white hover:bg-rose-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+              >
+                {isCancelling && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                {isCancelling ? t('جاري العكس في قاعدة البيانات...', 'Reversing in database...') : t('تأكيد الإلغاء', 'Confirm cancel')}
               </button>
             </div>
           </div>
