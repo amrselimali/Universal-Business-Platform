@@ -874,11 +874,15 @@ export class NeonService {
     connectionString: string,
     tenantId: string
   ): Promise<{ success: boolean; metadata: { [key: string]: string }; message: string }> {
+    // Reads the dataset list and their last change time from app_records (the single
+    // source of truth). app_documents no longer exists.
     try {
       const sql = this.getClient(connectionString);
-      const rows = await sql`
-        SELECT doc_key, updated_at FROM app_documents WHERE tenant_id = ${tenantId}
-      `;
+      const rows: any = await sql.query(
+        `SELECT doc_key, MAX(updated_at) AS updated_at FROM app_records
+          WHERE tenant_id = $1 AND deleted_at IS NULL GROUP BY doc_key`,
+        [tenantId]
+      );
       const metadata: { [key: string]: string } = {};
       (rows as any[]).forEach((row) => {
         const raw = row.updated_at;

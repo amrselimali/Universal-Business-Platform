@@ -2,6 +2,15 @@
 
 # 2026-10-12
 
+## CRITICAL: startup failed after app_documents was dropped
+
+- `fetchDocumentMetadata` still queried the dropped `app_documents` table, so the startup load failed and the app fell back to the "cannot reach the database" banner.
+- It now reads the dataset list and their last change time from `app_records` (the single source of truth): `SELECT doc_key, MAX(updated_at) ... GROUP BY doc_key`.
+- Verified that no remaining caller uses the legacy snapshot helpers (`fetchDocumentByKey`, `fetchDocumentsByKeys`, `saveDocuments`).
+- Files: `src/services/neonService.ts`.
+
+# 2026-10-12
+
 ## Database-first conversion: Companies & Branches screen (continued)
 
 - `updateBranch`, `archiveBranch` and `updateWarehouse` now store the change in the database through the command layer (`saveRecord`) and only then update the screen. The interface can no longer show a branch/warehouse that the database did not accept, and archiving is stored before it is displayed.
