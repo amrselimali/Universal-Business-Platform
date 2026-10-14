@@ -156,6 +156,7 @@ import {
   rulePlaysSound,
   ruleShowsToast,
 } from './platform/notifications';
+import { buildDatasetDocuments } from './platform/datasetDocuments';
 
 // منطق أكواد العملاء انتقل إلى src/context/platform/customerCodes.ts
 // (أول خطوة في تقسيم هذا الملف العملاق).
@@ -10970,43 +10971,20 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   // Single list of every dataset that lives in Neon (used by the automatic sync,
   // the full transfer and the backup export).
-  const buildAllDatasetDocuments = (): { key: string; payload: unknown }[] => [
-    { key: 'erp_tenants', payload: allTenants },
-    { key: 'erp_users', payload: allUsers },
-    { key: 'erp_branches', payload: allBranches },
-    { key: 'erp_warehouses', payload: allWarehouses },
-    { key: 'erp_categories', payload: allCategories },
-    { key: 'erp_products', payload: allProducts },
-    { key: 'erp_stock_movements', payload: allStockMovements },
-    { key: 'erp_stock_levels', payload: stockLevels },
-    { key: 'erp_accounts', payload: allAccounts },
-    { key: 'erp_journals', payload: allJournals },
-    { key: 'erp_parties_backup', payload: allParties },
-    { key: 'erp_invoices', payload: allInvoices },
-    { key: 'erp_appointments', payload: allAppointments },
-    { key: 'erp_patient_followups', payload: allPatientFollowUps },
-    { key: 'erp_treatment_plans', payload: allTreatmentPlans },
-    { key: 'erp_cash_receipts', payload: allCashReceipts },
-    { key: 'erp_customer_refunds', payload: allCustomerRefunds },
-    { key: 'erp_cash_payments', payload: allCashPayments },
-    { key: 'erp_reception_shifts', payload: allReceptionShifts },
-    { key: 'erp_pos_shifts', payload: allPosShifts },
-    { key: 'erp_payment_methods', payload: allPaymentMethods },
-    { key: 'erp_tax_invoices', payload: allSpecializedTaxInvoices },
-    { key: 'erp_goods_receipts', payload: allGoodsReceipts },
-    { key: 'erp_goods_issues', payload: allGoodsIssues },
-    { key: 'erp_staff_members', payload: allStaffMembers },
-    { key: 'erp_payroll_runs', payload: allPayrollRuns },
-    { key: 'erp_attendance_records', payload: allAttendanceRecords },
-    { key: 'erp_inventory_audits', payload: allInventoryAudits },
-    { key: 'erp_device_maintenance', payload: allDeviceMaintenance },
-    { key: 'clinic_laser_devices', payload: allLaserDevices },
-    { key: 'erp_period_locks', payload: allPeriodLocks },
-    { key: 'erp_audit_records', payload: allAuditRecords },
-    { key: 'erp_activity_logs', payload: allUserActivityLogs },
-    { key: 'erp_notifications_history', payload: allNotifications },
-
-  ];
+  // قائمة كل مجموعات البيانات انتقلت إلى
+  // src/context/platform/datasetDocuments.ts — عقد التخزين النقي (مُختبر).
+  const buildAllDatasetDocuments = (): { key: string; payload: unknown }[] =>
+    buildDatasetDocuments({
+      allTenants, allUsers, allBranches, allWarehouses,
+      allCategories, allProducts, allStockMovements, stockLevels,
+      allAccounts, allJournals, allParties, allInvoices,
+      allAppointments, allPatientFollowUps, allTreatmentPlans, allCashReceipts,
+      allCustomerRefunds, allCashPayments, allReceptionShifts, allPosShifts,
+      allPaymentMethods, allSpecializedTaxInvoices, allGoodsReceipts, allGoodsIssues,
+      allStaffMembers, allPayrollRuns, allAttendanceRecords, allInventoryAudits,
+      allDeviceMaintenance, allLaserDevices, allPeriodLocks, allAuditRecords,
+      allUserActivityLogs, allNotifications,
+    });
 
 
   // ==========================================================================
