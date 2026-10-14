@@ -1,5 +1,21 @@
 # PROJECT STATE
 
+## Dual-Store Synchronization & Conflict Resolution (معالجة تضارب تعديلات الكيانات واستقرار الواجهة) — 2026-10-14
+
+### Problem Identified & Solved
+- **The Issue**: When the user edited a tenant/company name, the update wrote immediately to the relational `tenants` table and the UI displayed the new name. However, a moment later the UI reverted back to the old name, before eventually flipping back to the new name.
+- **Root Cause**:
+  1. `saveRecord` wrote to the relational PostgreSQL table (`tenants`), but relied on a stored procedure `fn_upsert_records` for the document store (`app_records`). If that procedure was delayed or missing, `app_records` retained the old record with an older timestamp.
+  2. The local entity update object lacked an explicit `updated_at` ISO timestamp. When the periodic background sync (`refreshFromNeon`) pulled `app_records`, `mergeRecords` evaluated `incoming.updated_at >= ""` as true, inadvertently clobbering the freshly edited local record with the stale document store record.
+  3. Once the background auto-sync subsequently pushed the local state to `app_records`, the timestamp in `app_records` caught up and the new name returned to the UI.
+  4. In `applyDatasetDocuments`, updating `allTenants` did not synchronize the active `tenant` pointer in React state.
+- **Permanent Solution**:
+  1. **Direct Synchronous UPSERT to `app_records`**: In `saveRecord` and `deleteRecord`, directly execute standard SQL `INSERT INTO app_records ... ON CONFLICT (tenant_id, doc_key, record_id) DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()` synchronously with relational table writes, ensuring both tables update in the exact same call.
+  2. **Timestamp Stamping & Sync Baseline Alignment**: In `updateTenant`, `updateBranch`, and `updateWarehouse`, stamped `updated_at: new Date().toISOString()` and updated `neonLastSyncedArraysRef.current` immediately, protecting local edits from being overwritten by older server records.
+  3. **Protected `mergeRecords`**: Hardened `mergeRecords` in `src/services/recordSync.ts` to strictly prevent older server records from overwriting newer local edits.
+  4. **Active Entity Pointer Synchronization**: In `applyDatasetDocuments`, synchronized active `tenant`, `activeBranch`, and `activeWarehouse` whenever their collections are updated.
+- **Files**: `src/services/commands.ts`, `src/services/recordSync.ts`, `src/context/PlatformContext.tsx`.
+
 ## Enterprise Fast Hydration & Zero-Wait Refresh Architecture (معمارية المؤسسات للتحميل الفوري وبدون انتظار) — 2026-10-14
 
 ### Problem Solved

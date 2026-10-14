@@ -2,6 +2,17 @@
 
 # 2026-10-14
 
+## Dual-Store Synchronization & Conflict Resolution (معالجة تضارب تعديلات الكيانات واستقرار الواجهة)
+
+- **Eliminated UI Name Rollback & Store Conflict**:
+  - Investigated issue where editing a tenant/company name was reflected in the UI and PostgreSQL `tenants` table, but the UI temporarily reverted to the old name before flipping back to the new name.
+  - Resolved root causes:
+    1. **Direct Synchronous `app_records` UPSERT (`src/services/commands.ts`)**: In `saveRecord` and `deleteRecord`, replaced custom stored procedure calls with direct standard SQL parameterized `INSERT ... ON CONFLICT (tenant_id, doc_key, record_id) DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()`, keeping relational tables and `app_records` in 100% lockstep without delays.
+    2. **Timestamp Stamping & Sync Baseline Alignment (`src/context/PlatformContext.tsx`)**: In `updateTenant`, `updateBranch`, and `updateWarehouse`, stamped `updated_at: new Date().toISOString()` on records and updated `neonLastSyncedArraysRef.current` immediately, preventing background auto-sync from perceiving them as outdated.
+    3. **Protected `mergeRecords` (`src/services/recordSync.ts`)**: Hardened record merging logic to strictly guard fresh local edits against being clobbered by older background pull timestamps.
+    4. **Active Entity Pointer Synchronization**: In `applyDatasetDocuments`, synchronized active `tenant`, `activeBranch`, and `activeWarehouse` whenever collections are refreshed.
+- **Files**: `src/services/commands.ts`, `src/services/recordSync.ts`, `src/context/PlatformContext.tsx`, `PROJECT_STATE.md`, `CHANGELOG.md`.
+
 ## Enterprise Fast Hydration & Zero-Wait Refresh Architecture (معمارية المؤسسات للتحميل الفوري وبدون انتظار)
 
 - **Eliminated 20-Second Refresh Delay**:

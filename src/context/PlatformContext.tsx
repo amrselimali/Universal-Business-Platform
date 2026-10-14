@@ -7833,21 +7833,26 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const updateTenant = (tenantId: string, updatedData: Partial<Tenant>) => {
     const nameEn = updatedData.nameEn || (updatedData.name ? autoTranslateArabic(updatedData.name) : undefined);
     const existing = allTenants.find((t) => t.id === tenantId);
-    const updated = existing ? { ...existing, ...updatedData, nameEn: nameEn || existing.nameEn } : null;
+    const nowIso = new Date().toISOString();
+    const updated = existing
+      ? { ...existing, ...updatedData, nameEn: nameEn || existing.nameEn, updated_at: nowIso }
+      : null;
 
     const applyLocal = () => {
       setAllTenants((prev) =>
-        prev.map((t) => {
-          if (t.id === tenantId) {
-            const up = { ...t, ...updatedData, nameEn: nameEn || t.nameEn };
-            if (tenant?.id === tenantId) {
-              setTenant(up);
-            }
-            return up;
-          }
-          return t;
-        })
+        prev.map((t) => (t.id === tenantId ? { ...t, ...updatedData, nameEn: nameEn || t.nameEn, updated_at: nowIso } : t))
       );
+      if (tenant?.id === tenantId) {
+        setTenant((prev) => (prev.id === tenantId ? { ...prev, ...updatedData, nameEn: nameEn || prev.nameEn, updated_at: nowIso } : prev));
+      }
+      // Update in-memory sync baseline so diffRecords / autoSync won't revert
+      const baseline = neonLastSyncedArraysRef.current.get('erp_tenants');
+      if (baseline && updated) {
+        neonLastSyncedArraysRef.current.set(
+          'erp_tenants',
+          baseline.map((b: any) => (b.id === tenantId ? updated : b))
+        );
+      }
     };
 
     if (updated) {
@@ -8319,28 +8324,32 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const updateBranch = (branchId: string, updatedData: Partial<Branch>) => {
     const nameEn = updatedData.nameEn || (updatedData.name ? autoTranslateArabic(updatedData.name) : undefined);
-    const applyBranchUpdate = () =>
+    const nowIso = new Date().toISOString();
+    const applyBranchUpdate = () => {
       setAllBranches((prev) =>
-        prev.map((b) => {
-          if (b.id === branchId) {
-            const updated = { ...b, ...updatedData, nameEn: nameEn || b.nameEn };
-            if (activeBranch?.id === branchId) {
-              setActiveBranch(updated);
-            }
-            return updated;
-          }
-          return b;
-        })
+        prev.map((b) => (b.id === branchId ? { ...b, ...updatedData, nameEn: nameEn || b.nameEn, updated_at: nowIso } : b))
       );
+      if (activeBranch?.id === branchId) {
+        setActiveBranch((prev) => (prev ? { ...prev, ...updatedData, nameEn: nameEn || prev.nameEn, updated_at: nowIso } : prev));
+      }
+      const baseline = neonLastSyncedArraysRef.current.get('erp_branches');
+      if (baseline) {
+        neonLastSyncedArraysRef.current.set(
+          'erp_branches',
+          baseline.map((b: any) => (b.id === branchId ? { ...b, ...updatedData, nameEn: nameEn || b.nameEn, updated_at: nowIso } : b))
+        );
+      }
+    };
     // DATABASE-FIRST: the edited branch is stored before the screen reflects it.
     const existingBranch = allBranches.find((b) => b.id === branchId);
     if (!existingBranch) {
       applyBranchUpdate();
       return;
     }
+    const updatedRecord = { ...existingBranch, ...updatedData, nameEn: nameEn || existingBranch.nameEn, updated_at: nowIso };
     void saveRecord({
       docKey: 'erp_branches',
-      record: { ...existingBranch, ...updatedData, nameEn: nameEn || existingBranch.nameEn } as unknown as Record<string, unknown>,
+      record: updatedRecord as unknown as Record<string, unknown>,
       applyLocal: applyBranchUpdate,
     });
   };
@@ -8477,28 +8486,32 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const updateWarehouse = (warehouseId: string, updatedData: Partial<Warehouse>) => {
     const nameEn = updatedData.nameEn || (updatedData.name ? autoTranslateArabic(updatedData.name) : undefined);
-    const applyWarehouseUpdate = () =>
+    const nowIso = new Date().toISOString();
+    const applyWarehouseUpdate = () => {
       setAllWarehouses((prev) =>
-        prev.map((w) => {
-          if (w.id === warehouseId) {
-            const updated = { ...w, ...updatedData, nameEn: nameEn || w.nameEn };
-            if (activeWarehouse?.id === warehouseId) {
-              setActiveWarehouse(updated);
-            }
-            return updated;
-          }
-          return w;
-        })
+        prev.map((w) => (w.id === warehouseId ? { ...w, ...updatedData, nameEn: nameEn || w.nameEn, updated_at: nowIso } : w))
       );
+      if (activeWarehouse?.id === warehouseId) {
+        setActiveWarehouse((prev) => (prev ? { ...prev, ...updatedData, nameEn: nameEn || prev.nameEn, updated_at: nowIso } : prev));
+      }
+      const baseline = neonLastSyncedArraysRef.current.get('erp_warehouses');
+      if (baseline) {
+        neonLastSyncedArraysRef.current.set(
+          'erp_warehouses',
+          baseline.map((w: any) => (w.id === warehouseId ? { ...w, ...updatedData, nameEn: nameEn || w.nameEn, updated_at: nowIso } : w))
+        );
+      }
+    };
     // DATABASE-FIRST: the edited warehouse is stored before the screen reflects it.
     const existingWarehouse = allWarehouses.find((w) => w.id === warehouseId);
     if (!existingWarehouse) {
       applyWarehouseUpdate();
       return;
     }
+    const updatedRecord = { ...existingWarehouse, ...updatedData, nameEn: nameEn || existingWarehouse.nameEn, updated_at: nowIso };
     void saveRecord({
       docKey: 'erp_warehouses',
-      record: { ...existingWarehouse, ...updatedData, nameEn: nameEn || existingWarehouse.nameEn } as unknown as Record<string, unknown>,
+      record: updatedRecord as unknown as Record<string, unknown>,
       applyLocal: applyWarehouseUpdate,
     });
   };
@@ -11164,10 +11177,40 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       neonSyncedPayloadsRef.current[key] = JSON.stringify(value);
       applied += 1;
     };
-    apply('erp_tenants', setAllTenants);
+    if (Array.isArray(docs['erp_tenants'])) {
+      const tenantList = docs['erp_tenants'] as Tenant[];
+      setAllTenants(tenantList);
+      neonSyncedPayloadsRef.current['erp_tenants'] = JSON.stringify(tenantList);
+      applied += 1;
+      setTenant((current) => {
+        if (!current?.id) return current;
+        const matching = tenantList.find((t) => t.id === current.id);
+        return matching ? { ...current, ...matching } : current;
+      });
+    }
     apply('erp_users', setAllUsers);
-    apply('erp_branches', setAllBranches);
-    apply('erp_warehouses', setAllWarehouses);
+    if (Array.isArray(docs['erp_branches'])) {
+      const branchList = docs['erp_branches'] as Branch[];
+      setAllBranches(branchList);
+      neonSyncedPayloadsRef.current['erp_branches'] = JSON.stringify(branchList);
+      applied += 1;
+      setActiveBranch((current) => {
+        if (!current?.id) return current;
+        const matching = branchList.find((b) => b.id === current.id);
+        return matching ? { ...current, ...matching } : current;
+      });
+    }
+    if (Array.isArray(docs['erp_warehouses'])) {
+      const warehouseList = docs['erp_warehouses'] as Warehouse[];
+      setAllWarehouses(warehouseList);
+      neonSyncedPayloadsRef.current['erp_warehouses'] = JSON.stringify(warehouseList);
+      applied += 1;
+      setActiveWarehouse((current) => {
+        if (!current?.id) return current;
+        const matching = warehouseList.find((w) => w.id === current.id);
+        return matching ? { ...current, ...matching } : current;
+      });
+    }
     apply('erp_categories', setAllCategories);
     apply('erp_products', setAllProducts);
     apply('erp_stock_movements', setAllStockMovements);

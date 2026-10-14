@@ -156,8 +156,15 @@ export function mergeRecords(local: any[], incoming: SyncRecord[], deletedIds: s
   deletedIds.forEach((id) => byId.delete(id));
   incoming.forEach((record) => {
     const existing = byId.get(record.id);
-    if (!existing || String(record.updated_at || '') >= String(existing.updated_at || '')) {
+    if (!existing) {
       byId.set(record.id, record);
+    } else {
+      const incomingTime = String(record.updated_at || '');
+      const existingTime = String(existing.updated_at || '');
+      // If existing has a newer timestamp than incoming, retain the newer local version!
+      if (!existingTime || (incomingTime && incomingTime >= existingTime)) {
+        byId.set(record.id, record);
+      }
     }
   });
   return [...byId.values()];
