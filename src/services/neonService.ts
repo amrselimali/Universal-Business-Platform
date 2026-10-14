@@ -13,6 +13,9 @@ import {
   Appointment,
   PatientFollowUp,
   JournalEntry,
+  ItemCategory,
+  AppUser,
+  PaymentMethod,
 } from '../types';
 
 export class NeonService {
@@ -911,24 +914,367 @@ export class NeonService {
     }
     return { success: true, documents, message: `تم تحميل ${Object.keys(documents).length} مجموعة محدّثة` };
   }
-  // --- Realtime Direct Insertion Methods ---
+  // --- Realtime Direct Table Operations (Database-First) ---
 
-  static async insertProductDirect(connectionString: string, tenantId: string, product: Product): Promise<boolean> {
+  static async upsertTenantDirect(connectionString: string, tenant: Tenant): Promise<boolean> {
     try {
       const sql = this.getClient(connectionString);
+      const taxRate = typeof tenant.taxRate === 'number' ? tenant.taxRate : 0.14;
+      const code = tenant.code || ('CO-' + (tenant.id || '001').slice(-6));
       await sql`
-        INSERT INTO products (id, tenant_id, sku, barcode, name_ar, name_en, category, purchase_price, selling_price, min_stock_level, is_service)
+        INSERT INTO tenants (id, code, name_ar, name_en, plan, currency, tax_rate, default_pos_collection_only)
         VALUES (
-          ${product.id}, ${tenantId}, ${product.sku}, ${product.barcode || ''}, ${product.nameAr}, ${product.nameEn},
-          ${product.category}, ${product.purchasePrice}, ${product.sellingPrice}, ${product.minStockLevel}, ${product.isService}
+          ${tenant.id},
+          ${code},
+          ${tenant.name || ''},
+          ${tenant.nameEn || tenant.name || ''},
+          ${tenant.plan || 'Enterprise'},
+          ${tenant.currency || 'EGP'},
+          ${taxRate},
+          ${Boolean(tenant.defaultPosCollectionOnly)}
         )
         ON CONFLICT (id) DO UPDATE SET
           name_ar = EXCLUDED.name_ar,
-          selling_price = EXCLUDED.selling_price;
+          name_en = EXCLUDED.name_en,
+          plan = EXCLUDED.plan,
+          currency = EXCLUDED.currency,
+          tax_rate = EXCLUDED.tax_rate,
+          default_pos_collection_only = EXCLUDED.default_pos_collection_only;
       `;
       return true;
     } catch (err) {
-      console.warn('Neon product insert failed:', err);
+      console.warn('Neon tenant direct upsert failed:', err);
+      return false;
+    }
+  }
+
+  static async deleteTenantDirect(connectionString: string, tenantId: string): Promise<boolean> {
+    try {
+      const sql = this.getClient(connectionString);
+      await sql`DELETE FROM tenants WHERE id = ${tenantId};`;
+      return true;
+    } catch (err) {
+      console.warn('Neon tenant direct delete failed:', err);
+      return false;
+    }
+  }
+
+  static async upsertBranchDirect(connectionString: string, tenantId: string, branch: Branch): Promise<boolean> {
+    try {
+      const sql = this.getClient(connectionString);
+      await sql`
+        INSERT INTO branches (id, tenant_id, code, name_ar, name_en, city, phone, is_main, default_pos_collection_only)
+        VALUES (
+          ${branch.id},
+          ${branch.tenantId || tenantId},
+          ${branch.code || 'BR'},
+          ${branch.name || ''},
+          ${branch.nameEn || branch.name || ''},
+          ${branch.city || 'القاهرة'},
+          ${branch.phone || ''},
+          ${Boolean(branch.isMain)},
+          ${Boolean(branch.defaultPosCollectionOnly)}
+        )
+        ON CONFLICT (id) DO UPDATE SET
+          code = EXCLUDED.code,
+          name_ar = EXCLUDED.name_ar,
+          name_en = EXCLUDED.name_en,
+          city = EXCLUDED.city,
+          phone = EXCLUDED.phone,
+          is_main = EXCLUDED.is_main,
+          default_pos_collection_only = EXCLUDED.default_pos_collection_only;
+      `;
+      return true;
+    } catch (err) {
+      console.warn('Neon branch direct upsert failed:', err);
+      return false;
+    }
+  }
+
+  static async deleteBranchDirect(connectionString: string, branchId: string): Promise<boolean> {
+    try {
+      const sql = this.getClient(connectionString);
+      await sql`DELETE FROM branches WHERE id = ${branchId};`;
+      return true;
+    } catch (err) {
+      console.warn('Neon branch direct delete failed:', err);
+      return false;
+    }
+  }
+
+  static async upsertWarehouseDirect(connectionString: string, tenantId: string, wh: Warehouse): Promise<boolean> {
+    try {
+      const sql = this.getClient(connectionString);
+      await sql`
+        INSERT INTO warehouses (id, tenant_id, branch_id, code, name_ar, name_en, location)
+        VALUES (
+          ${wh.id},
+          ${wh.tenantId || tenantId},
+          ${wh.branchId || ''},
+          ${wh.code || 'WH'},
+          ${wh.name || ''},
+          ${wh.nameEn || wh.name || ''},
+          ${wh.location || ''}
+        )
+        ON CONFLICT (id) DO UPDATE SET
+          branch_id = EXCLUDED.branch_id,
+          code = EXCLUDED.code,
+          name_ar = EXCLUDED.name_ar,
+          name_en = EXCLUDED.name_en,
+          location = EXCLUDED.location;
+      `;
+      return true;
+    } catch (err) {
+      console.warn('Neon warehouse direct upsert failed:', err);
+      return false;
+    }
+  }
+
+  static async deleteWarehouseDirect(connectionString: string, warehouseId: string): Promise<boolean> {
+    try {
+      const sql = this.getClient(connectionString);
+      await sql`DELETE FROM warehouses WHERE id = ${warehouseId};`;
+      return true;
+    } catch (err) {
+      console.warn('Neon warehouse direct delete failed:', err);
+      return false;
+    }
+  }
+
+  static async upsertCategoryDirect(connectionString: string, tenantId: string, cat: ItemCategory): Promise<boolean> {
+    try {
+      const sql = this.getClient(connectionString);
+      await sql`
+        INSERT INTO categories (id, tenant_id, name)
+        VALUES (
+          ${cat.id},
+          ${cat.tenantId || tenantId},
+          ${cat.name || ''}
+        )
+        ON CONFLICT (id) DO UPDATE SET
+          name = EXCLUDED.name;
+      `;
+      return true;
+    } catch (err) {
+      console.warn('Neon category direct upsert failed:', err);
+      return false;
+    }
+  }
+
+  static async deleteCategoryDirect(connectionString: string, categoryId: string): Promise<boolean> {
+    try {
+      const sql = this.getClient(connectionString);
+      await sql`DELETE FROM categories WHERE id = ${categoryId};`;
+      return true;
+    } catch (err) {
+      console.warn('Neon category direct delete failed:', err);
+      return false;
+    }
+  }
+
+  static async upsertProductDirect(connectionString: string, tenantId: string, product: Product): Promise<boolean> {
+    try {
+      const sql = this.getClient(connectionString);
+      await sql`
+        INSERT INTO products (
+          id, tenant_id, sku, barcode, name_ar, name_en, category,
+          purchase_price, selling_price, min_stock_level, is_service, default_collection_only
+        )
+        VALUES (
+          ${product.id},
+          ${product.tenantId || tenantId},
+          ${product.sku || ''},
+          ${product.barcode || ''},
+          ${product.nameAr || ''},
+          ${product.nameEn || product.nameAr || ''},
+          ${product.category || 'عام'},
+          ${product.purchasePrice || 0},
+          ${product.sellingPrice || 0},
+          ${product.minStockLevel || 5},
+          ${Boolean(product.isService)},
+          ${Boolean(product.defaultCollectionOnly)}
+        )
+        ON CONFLICT (id) DO UPDATE SET
+          sku = EXCLUDED.sku,
+          barcode = EXCLUDED.barcode,
+          name_ar = EXCLUDED.name_ar,
+          name_en = EXCLUDED.name_en,
+          category = EXCLUDED.category,
+          purchase_price = EXCLUDED.purchase_price,
+          selling_price = EXCLUDED.selling_price,
+          min_stock_level = EXCLUDED.min_stock_level,
+          is_service = EXCLUDED.is_service,
+          default_collection_only = EXCLUDED.default_collection_only;
+      `;
+      return true;
+    } catch (err) {
+      console.warn('Neon product direct upsert failed:', err);
+      return false;
+    }
+  }
+
+  static async insertProductDirect(connectionString: string, tenantId: string, product: Product): Promise<boolean> {
+    return this.upsertProductDirect(connectionString, tenantId, product);
+  }
+
+  static async upsertAccountDirect(connectionString: string, tenantId: string, acc: Account): Promise<boolean> {
+    try {
+      const sql = this.getClient(connectionString);
+      await sql`
+        INSERT INTO accounts (id, tenant_id, code, name_ar, name_en, account_type, parent_id, balance, level)
+        VALUES (
+          ${acc.id},
+          ${acc.tenantId || tenantId},
+          ${acc.code || ''},
+          ${acc.nameAr || ''},
+          ${acc.nameEn || acc.nameAr || ''},
+          ${acc.type || 'Asset'},
+          ${acc.parentId || null},
+          ${acc.balance || 0},
+          ${acc.level || 1}
+        )
+        ON CONFLICT (id) DO UPDATE SET
+          code = EXCLUDED.code,
+          name_ar = EXCLUDED.name_ar,
+          name_en = EXCLUDED.name_en,
+          account_type = EXCLUDED.account_type,
+          parent_id = EXCLUDED.parent_id,
+          balance = EXCLUDED.balance,
+          level = EXCLUDED.level;
+      `;
+      return true;
+    } catch (err) {
+      console.warn('Neon account direct upsert failed:', err);
+      return false;
+    }
+  }
+
+  static async deleteAccountDirect(connectionString: string, accountId: string): Promise<boolean> {
+    try {
+      const sql = this.getClient(connectionString);
+      await sql`DELETE FROM accounts WHERE id = ${accountId};`;
+      return true;
+    } catch (err) {
+      console.warn('Neon account direct delete failed:', err);
+      return false;
+    }
+  }
+
+  static async upsertPartyDirect(connectionString: string, tenantId: string, party: Party): Promise<boolean> {
+    try {
+      const sql = this.getClient(connectionString);
+      await sql`
+        INSERT INTO parties (id, tenant_id, name, name_en, type, phone, email, balance)
+        VALUES (
+          ${party.id},
+          ${party.tenantId || tenantId},
+          ${party.name || ''},
+          ${party.nameEn || party.name || ''},
+          ${party.type || 'Customer'},
+          ${party.phone || ''},
+          ${party.email || ''},
+          ${party.balance || 0}
+        )
+        ON CONFLICT (id) DO UPDATE SET
+          name = EXCLUDED.name,
+          name_en = EXCLUDED.name_en,
+          type = EXCLUDED.type,
+          phone = EXCLUDED.phone,
+          email = EXCLUDED.email,
+          balance = EXCLUDED.balance;
+      `;
+      return true;
+    } catch (err) {
+      console.warn('Neon party direct upsert failed:', err);
+      return false;
+    }
+  }
+
+  static async insertPartyDirect(connectionString: string, tenantId: string, party: Party): Promise<boolean> {
+    return this.upsertPartyDirect(connectionString, tenantId, party);
+  }
+
+  static async deletePartyDirect(connectionString: string, partyId: string): Promise<boolean> {
+    try {
+      const sql = this.getClient(connectionString);
+      await sql`DELETE FROM parties WHERE id = ${partyId};`;
+      return true;
+    } catch (err) {
+      console.warn('Neon party direct delete failed:', err);
+      return false;
+    }
+  }
+
+  static async upsertUserDirect(connectionString: string, tenantId: string, user: AppUser): Promise<boolean> {
+    try {
+      const sql = this.getClient(connectionString);
+      await sql`
+        INSERT INTO users (id, tenant_id, name, username, user_role, is_active)
+        VALUES (
+          ${user.id},
+          ${user.tenantId || tenantId},
+          ${user.name || ''},
+          ${user.username || ''},
+          ${user.role || 'Custom'},
+          ${user.isActive !== false}
+        )
+        ON CONFLICT (id) DO UPDATE SET
+          name = EXCLUDED.name,
+          username = EXCLUDED.username,
+          user_role = EXCLUDED.user_role,
+          is_active = EXCLUDED.is_active;
+      `;
+      return true;
+    } catch (err) {
+      console.warn('Neon user direct upsert failed:', err);
+      return false;
+    }
+  }
+
+  static async deleteUserDirect(connectionString: string, userId: string): Promise<boolean> {
+    try {
+      const sql = this.getClient(connectionString);
+      await sql`DELETE FROM users WHERE id = ${userId};`;
+      return true;
+    } catch (err) {
+      console.warn('Neon user direct delete failed:', err);
+      return false;
+    }
+  }
+
+  static async upsertPaymentMethodDirect(connectionString: string, tenantId: string, pm: PaymentMethod): Promise<boolean> {
+    try {
+      const sql = this.getClient(connectionString);
+      await sql`
+        INSERT INTO payment_methods (id, tenant_id, code, name_ar, method_type, linked_account_id)
+        VALUES (
+          ${pm.id},
+          ${pm.tenantId || tenantId},
+          ${pm.code || ''},
+          ${pm.nameAr || ''},
+          ${pm.type || 'cash'},
+          ${pm.linkedAccountId || ''}
+        )
+        ON CONFLICT (id) DO UPDATE SET
+          code = EXCLUDED.code,
+          name_ar = EXCLUDED.name_ar,
+          method_type = EXCLUDED.method_type,
+          linked_account_id = EXCLUDED.linked_account_id;
+      `;
+      return true;
+    } catch (err) {
+      console.warn('Neon payment method direct upsert failed:', err);
+      return false;
+    }
+  }
+
+  static async deletePaymentMethodDirect(connectionString: string, pmId: string): Promise<boolean> {
+    try {
+      const sql = this.getClient(connectionString);
+      await sql`DELETE FROM payment_methods WHERE id = ${pmId};`;
+      return true;
+    } catch (err) {
+      console.warn('Neon payment method direct delete failed:', err);
       return false;
     }
   }
@@ -1001,23 +1347,6 @@ export class NeonService {
     }
   }
 
-  static async insertPartyDirect(connectionString: string, tenantId: string, party: Party): Promise<boolean> {
-    try {
-      const sql = this.getClient(connectionString);
-      await sql`
-        INSERT INTO parties (id, tenant_id, name, name_en, type, phone, email, balance)
-        VALUES (${party.id}, ${tenantId}, ${party.name}, ${party.nameEn}, ${party.type}, ${party.phone}, ${party.email || ''}, ${party.balance})
-        ON CONFLICT (id) DO UPDATE SET
-          name = EXCLUDED.name,
-          balance = EXCLUDED.balance;
-      `;
-      return true;
-    } catch (err) {
-      console.warn('Neon party insert failed:', err);
-      return false;
-    }
-  }
-
   static async insertJournalEntryDirect(connectionString: string, tenantId: string, entry: JournalEntry): Promise<boolean> {
     try {
       const sql = this.getClient(connectionString);
@@ -1045,6 +1374,45 @@ export class NeonService {
       return true;
     } catch (err) {
       console.warn('Neon stock update failed:', err);
+      return false;
+    }
+  }
+
+  static async upsertRecordDirect(connectionString: string, tenantId: string, tableName: string, record: any): Promise<boolean> {
+    try {
+      const schema = NEON_SCHEMA_TABLES.find((s) => s.table === tableName);
+      if (!schema) return false;
+      const sql = this.getClient(connectionString);
+      const cols = schema.columns.map((c) => c.name);
+      const vals = schema.columns.map((c) => this.resolveColumnValue(record, c.name, tenantId));
+      const id = String(record?.id || vals[0] || '');
+      if (!id) return false;
+
+      const nonIdCols = cols.filter((c) => c !== 'id');
+      const setClauses = nonIdCols.length > 0
+        ? nonIdCols.map((c) => `${c} = EXCLUDED.${c}`).join(', ')
+        : 'id = EXCLUDED.id';
+      const placeholders = cols.map((_, i) => `$${i + 1}`).join(', ');
+      const query = `
+        INSERT INTO ${tableName} (${cols.join(', ')})
+        VALUES (${placeholders})
+        ON CONFLICT (id) DO UPDATE SET ${setClauses};
+      `;
+      await sql.query(query, vals);
+      return true;
+    } catch (err) {
+      console.warn(`Neon upsertRecordDirect failed for ${tableName}:`, err);
+      return false;
+    }
+  }
+
+  static async deleteRecordDirect(connectionString: string, _tenantId: string, tableName: string, id: string): Promise<boolean> {
+    try {
+      const sql = this.getClient(connectionString);
+      await sql.query(`DELETE FROM ${tableName} WHERE id = $1`, [id]);
+      return true;
+    } catch (err) {
+      console.warn(`Neon deleteRecordDirect failed for ${tableName}:`, err);
       return false;
     }
   }

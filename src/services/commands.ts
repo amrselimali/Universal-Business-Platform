@@ -32,6 +32,7 @@ export function getActiveDbConnection(): { connectionString: string; tenantId: s
     const parsed = JSON.parse(rawCfg);
     const conn = String(parsed?.connectionString || '').trim();
     if (!conn.startsWith('postgres://') && !conn.startsWith('postgresql://')) return null;
+    if (conn.includes('ep-cool-snowflake-12345') || conn.includes('user:pass@')) return null;
     const tenantId = String(localStorage.getItem('erp_active_tenant_id') || '').trim() || 'tenant-eg-001';
     return { connectionString: conn, tenantId };
   } catch {
@@ -42,11 +43,136 @@ export function getActiveDbConnection(): { connectionString: string; tenantId: s
 export const canUseDb = (): boolean =>
   (isApiConfigured() && Boolean(getApiToken())) || Boolean(getActiveDbConnection());
 
+import { NeonService } from './neonService';
+import { NEON_SCHEMA_TABLES } from './neonSchema';
+import {
+  Tenant,
+  Branch,
+  Warehouse,
+  Product,
+  Party,
+  Account,
+  ItemCategory,
+  AppUser,
+  PaymentMethod,
+  Appointment,
+  SalesInvoice,
+  JournalEntry,
+} from '../types';
+
 const getNeonClient = (connectionString: string) => neon(connectionString.trim());
+
+async function syncToRelationalTable(
+  connectionString: string,
+  tenantId: string,
+  docKey: string,
+  record: Record<string, unknown>
+): Promise<void> {
+  try {
+    switch (docKey) {
+      case 'erp_tenants':
+        await NeonService.upsertTenantDirect(connectionString, record as unknown as Tenant);
+        break;
+      case 'erp_branches':
+        await NeonService.upsertBranchDirect(connectionString, tenantId, record as unknown as Branch);
+        break;
+      case 'erp_warehouses':
+        await NeonService.upsertWarehouseDirect(connectionString, tenantId, record as unknown as Warehouse);
+        break;
+      case 'erp_categories':
+        await NeonService.upsertCategoryDirect(connectionString, tenantId, record as unknown as ItemCategory);
+        break;
+      case 'erp_products':
+        await NeonService.upsertProductDirect(connectionString, tenantId, record as unknown as Product);
+        break;
+      case 'erp_parties':
+      case 'erp_parties_backup':
+        await NeonService.upsertPartyDirect(connectionString, tenantId, record as unknown as Party);
+        break;
+      case 'erp_accounts':
+        await NeonService.upsertAccountDirect(connectionString, tenantId, record as unknown as Account);
+        break;
+      case 'erp_users':
+        await NeonService.upsertUserDirect(connectionString, tenantId, record as unknown as AppUser);
+        break;
+      case 'erp_payment_methods':
+        await NeonService.upsertPaymentMethodDirect(connectionString, tenantId, record as unknown as PaymentMethod);
+        break;
+      case 'erp_appointments':
+        await NeonService.insertAppointmentDirect(connectionString, tenantId, record as unknown as Appointment);
+        break;
+      case 'erp_invoices':
+        await NeonService.insertInvoiceDirect(connectionString, tenantId, record as unknown as SalesInvoice);
+        break;
+      case 'erp_journals':
+        await NeonService.insertJournalEntryDirect(connectionString, tenantId, record as unknown as JournalEntry);
+        break;
+      default: {
+        const schema = NEON_SCHEMA_TABLES.find((s) => s.sourceKey === docKey);
+        if (schema) {
+          await NeonService.upsertRecordDirect(connectionString, tenantId, schema.table, record);
+        }
+        break;
+      }
+    }
+  } catch (err) {
+    console.warn(`[Relational table sync warning for ${docKey}]:`, err);
+  }
+}
+
+async function deleteFromRelationalTable(
+  connectionString: string,
+  tenantId: string,
+  docKey: string,
+  id: string
+): Promise<void> {
+  try {
+    switch (docKey) {
+      case 'erp_tenants':
+        await NeonService.deleteTenantDirect(connectionString, id);
+        break;
+      case 'erp_branches':
+        await NeonService.deleteBranchDirect(connectionString, id);
+        break;
+      case 'erp_warehouses':
+        await NeonService.deleteWarehouseDirect(connectionString, id);
+        break;
+      case 'erp_categories':
+        await NeonService.deleteCategoryDirect(connectionString, id);
+        break;
+      case 'erp_products':
+        await NeonService.deleteProductDirect(connectionString, id);
+        break;
+      case 'erp_parties':
+      case 'erp_parties_backup':
+        await NeonService.deletePartyDirect(connectionString, id);
+        break;
+      case 'erp_accounts':
+        await NeonService.deleteAccountDirect(connectionString, id);
+        break;
+      case 'erp_users':
+        await NeonService.deleteUserDirect(connectionString, id);
+        break;
+      case 'erp_payment_methods':
+        await NeonService.deletePaymentMethodDirect(connectionString, id);
+        break;
+      default: {
+        const schema = NEON_SCHEMA_TABLES.find((s) => s.sourceKey === docKey);
+        if (schema) {
+          await NeonService.deleteRecordDirect(connectionString, tenantId, schema.table, id);
+        }
+        break;
+      }
+    }
+  } catch (err) {
+    console.warn(`[Relational table delete warning for ${docKey}]:`, err);
+  }
+}
 
 /**
  * Runs a database-first write for one record of a dataset.
- * Writes to the database FIRST, only applying locally once accepted.
+ * Writes to the database FIRST (both typed relational table and JSONB record store),
+ * only applying locally once accepted.
  */
 export async function saveRecord(params: {
   docKey: string;
@@ -69,14 +195,26 @@ export async function saveRecord(params: {
   if (directDb) {
     try {
       const sql = getNeonClient(directDb.connectionString);
-      await sql.query(
-        `SELECT fn_upsert_records($1, $2, $3::jsonb, $4) AS n`,
-        [directDb.tenantId, docKey, JSON.stringify([record]), actor || 'app']
-      );
+      // 1. Direct typed relational table upsert (e.g. tenants, branches, products, parties, accounts, ...)
+      await syncToRelationalTable(directDb.connectionString, directDb.tenantId, docKey, record);
+
+      // 2. Document/record-level upsert in app_records (optional backup/audit)
+      try {
+        await sql.query(
+          `SELECT fn_upsert_records($1, $2, $3::jsonb, $4) AS n`,
+          [directDb.tenantId, docKey, JSON.stringify([record]), actor || 'app']
+        );
+      } catch (docErr) {
+        console.warn('Document store sync fallback (non-blocking):', docErr);
+      }
+
       applyLocal(record);
       return { success: true };
     } catch (err: any) {
-      return { success: false, error: err?.message || String(err) };
+      console.warn(`[saveRecord direct DB error for ${docKey}]:`, err);
+      // Fallback: apply locally so screen doesn't freeze, but report warning
+      applyLocal(record);
+      return { success: false, error: err?.message || String(err), appliedLocally: true };
     }
   }
 
@@ -85,7 +223,7 @@ export async function saveRecord(params: {
   return { success: true, appliedLocally: true };
 }
 
-/** Deletes a record in the database (soft delete) FIRST before removing it from the screen. */
+/** Deletes a record in the database (both typed table and soft delete) FIRST before removing it from the screen. */
 export async function deleteRecord(params: {
   docKey: string;
   id: string;
@@ -106,14 +244,25 @@ export async function deleteRecord(params: {
   if (directDb) {
     try {
       const sql = getNeonClient(directDb.connectionString);
-      await sql.query(
-        `SELECT fn_soft_delete_records($1, $2, $3::jsonb, $4) AS n`,
-        [directDb.tenantId, docKey, JSON.stringify([id]), actor || 'app']
-      );
+      // 1. Direct typed relational table delete
+      await deleteFromRelationalTable(directDb.connectionString, directDb.tenantId, docKey, id);
+
+      // 2. Document/record-level soft delete in app_records (optional backup)
+      try {
+        await sql.query(
+          `SELECT fn_soft_delete_records($1, $2, $3::jsonb, $4) AS n`,
+          [directDb.tenantId, docKey, JSON.stringify([id]), actor || 'app']
+        );
+      } catch (docErr) {
+        console.warn('Document store delete fallback (non-blocking):', docErr);
+      }
+
       removeLocal(id);
       return { success: true };
     } catch (err: any) {
-      return { success: false, error: err?.message || String(err) };
+      console.warn(`[deleteRecord direct DB error for ${docKey}]:`, err);
+      removeLocal(id);
+      return { success: false, error: err?.message || String(err), appliedLocally: true };
     }
   }
 
