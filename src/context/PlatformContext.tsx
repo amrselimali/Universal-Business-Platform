@@ -130,6 +130,7 @@ import { reverseJournal, fetchAccountBalances } from '../services/accountingApi'
 import { normalizeStatementDate, isReceiptMatchingParty } from '../utils/statementUtils';
 import { normalizeCustomerPartyCodes as normalizeCustomerPartyCodesPure } from './platform/customerCodes';
 import { getEntity } from '../services/metadataRegistry';
+import { applyJournalLinesToAccounts as applyJournalLinesToAccountsPure } from './platform/journalBalances';
 
 // منطق أكواد العملاء انتقل إلى src/context/platform/customerCodes.ts
 // (أول خطوة في تقسيم هذا الملف العملاق).
@@ -1205,30 +1206,12 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     };
   };
 
-  // Synchronization of Journal Lines with Chart of Accounts Balances
+  // مزامنة أسطر القيود مع أرصدة شجرة الحسابات.
+  // المنطق الحسابي نفسه انتقل إلى src/context/platform/journalBalances.ts
+  // (منطق نقي قابل للاختبار) — وهنا تبقى فقط وصلة تحديث حالة React.
   const applyJournalLinesToAccounts = (lines: JournalLine[], reverse: boolean = false) => {
     if (!lines || lines.length === 0) return;
-    setAllAccounts((prev) =>
-      prev.map((acc) => {
-        const matchingLines = lines.filter((line) => line.accountId === acc.id);
-        if (matchingLines.length === 0) return acc;
-        let delta = 0;
-        matchingLines.forEach((l) => {
-          const debit = Number(l.debit) || 0;
-          const credit = Number(l.credit) || 0;
-          if (acc.isDebitNormal) {
-            delta += (debit - credit);
-          } else {
-            delta += (credit - debit);
-          }
-        });
-        if (reverse) delta = -delta;
-        return {
-          ...acc,
-          balance: Number(((acc.balance || 0) + delta).toFixed(2)),
-        };
-      })
-    );
+    setAllAccounts((prev) => applyJournalLinesToAccountsPure(prev, lines, reverse));
   };
 
   const deleteJournalEntry = (entryId: string) => {
