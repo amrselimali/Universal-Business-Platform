@@ -14,6 +14,9 @@ import { GlobalContextMenu } from './components/GlobalContextMenu';
 const LoginView = lazy(() =>
   import('./views/LoginView').then((m) => ({ default: m.LoginView }))
 );
+const DynamicScreenView = lazy(() =>
+  import('./views/DynamicScreenView').then((m) => ({ default: m.DynamicScreenView }))
+);
 const DashboardView = lazy(() =>
   import('./views/DashboardView').then((m) => ({ default: m.DashboardView }))
 );
@@ -296,6 +299,12 @@ const MainLayout: React.FC = () => {
           </button>
         </div>
       );
+    }
+
+    // شاشات مولّدة من محرك الشاشات (Metadata): meta_parties، meta_products، ...
+    // تُبنى من تعريف الكيان في قاعدة البيانات بلا كود مكتوب لكل حقل.
+    if (currentView.startsWith('meta_')) {
+      return <DynamicScreenView entityCode={currentView.slice('meta_'.length)} />;
     }
 
     switch (currentView) {

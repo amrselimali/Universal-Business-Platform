@@ -129,6 +129,7 @@ import { saveRecord, deleteRecord } from '../services/commands';
 import { reverseJournal, fetchAccountBalances } from '../services/accountingApi';
 import { normalizeStatementDate, isReceiptMatchingParty } from '../utils/statementUtils';
 import { normalizeCustomerPartyCodes as normalizeCustomerPartyCodesPure } from './platform/customerCodes';
+import { getEntity } from '../services/metadataRegistry';
 
 // منطق أكواد العملاء انتقل إلى src/context/platform/customerCodes.ts
 // (أول خطوة في تقسيم هذا الملف العملاق).
@@ -8631,6 +8632,11 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if ((viewId === 'cash_receipts' || viewId === 'cash_payments' || viewId === 'tax_invoices' || viewId === 'fiscal_documents') && (currentUser?.allowedViews?.includes('accounting') || currentUser?.allowedViews?.includes('fiscal_documents') || currentUser?.allowedViews?.includes('pos_sales'))) return true;
     if ((viewId === 'goods_receipts' || viewId === 'goods_issues' || viewId === 'goods_vouchers') && (currentUser?.allowedViews?.includes('inventory') || currentUser?.allowedViews?.includes('goods_vouchers') || currentUser?.allowedViews?.includes('inventory_mgmt'))) return true;
     if (viewId === 'employee_dossier' && (currentUser?.allowedViews?.includes('staff') || currentUser?.allowedViews?.includes('payroll') || currentUser?.allowedViews?.includes('attendance'))) return true;
+    // الشاشات المولّدة من محرك الشاشات (meta_*) ترث صلاحية الشاشة التي ينتمي إليها الكيان.
+    if (viewId.startsWith('meta_')) {
+      const entityViewId = getEntity(viewId.slice('meta_'.length))?.viewId;
+      if (entityViewId && currentUser?.allowedViews?.includes(entityViewId)) return true;
+    }
     return currentUser?.allowedViews?.includes('*') || currentUser?.allowedViews?.includes(viewId);
   };
 
