@@ -128,57 +128,43 @@ import { postCustomerRefund } from '../services/accountingApi';
 import { saveRecord, deleteRecord } from '../services/commands';
 import { reverseJournal, fetchAccountBalances } from '../services/accountingApi';
 import { normalizeStatementDate, isReceiptMatchingParty } from '../utils/statementUtils';
+import { normalizeCustomerPartyCodes as normalizeCustomerPartyCodesPure } from './platform/customerCodes';
+import { getEntity } from '../services/metadataRegistry';
+import { applyJournalLinesToAccounts as applyJournalLinesToAccountsPure } from './platform/journalBalances';
+import {
+  buildActivityLog,
+  buildAuditRecord,
+  scopeActivityLogs,
+  scopeAuditRecords,
+  type AuditContext,
+  type AuditInput,
+} from './platform/auditLog';
+import {
+  buildPeriodLock,
+  findLatestClosedPeriodDate,
+  unlockPeriod,
+  validatePeriodDate as validatePeriodDateAgainstLocks,
+} from './platform/accountingPeriods';
+import {
+  buildNotificationFromRule,
+  countUnread,
+  filterNotificationsForUser,
+  markAllRead,
+  markOneRead,
+  prependNotification,
+  removeNotification,
+  rulePlaysSound,
+  ruleShowsToast,
+} from './platform/notifications';
+import { buildDatasetDocuments } from './platform/datasetDocuments';
 
-const normalizeCustomerPartyCodes = (parties: Party[]): Party[] => {
-  const hasCashSupplier = parties.some((party) =>
-    party.id === 'party-s-cash' ||
-    party.nameEn?.includes('Cash Supplier') ||
-    party.name.includes('\u0645\u0648\u0631\u062f \u0643\u0627\u0634') ||
-    party.name.includes('\u0645\u0648\u0631\u062f \u0646\u0642\u062f\u064a')
-  );
-  const cashSupplier = INITIAL_PARTIES.find((party) => party.id === 'party-s-cash');
-  const partiesToNormalize = hasCashSupplier || !cashSupplier ? parties : [cashSupplier, ...parties];
-  const isCustomer = (party: Party) => party.type === 'Customer' || party.type === 'Both';
-  const differsFromSystemCode = (party: Party, candidate: string) =>
-    ![party.systemCode, party.paperCode].some((systemCode) =>
-      Boolean(systemCode) &&
-      (candidate === systemCode || (/^\d+$/.test(systemCode!) && Number(candidate) === Number(systemCode)))
-    );
-  const hasValidIndependentSerial = (party: Party, candidate?: string) =>
-    typeof candidate === 'string' &&
-    /^\d+$/.test(candidate) &&
-    Number.isSafeInteger(Number(candidate)) &&
-    Number(candidate) > 0 &&
-    differsFromSystemCode(party, candidate);
-  const validStoredCodes = new Set(
-    partiesToNormalize
-      .filter(isCustomer)
-      .map((party) => [party.customerCode, party.code].find((code) => hasValidIndependentSerial(party, code)))
-      .filter((code): code is string => Boolean(code))
-      .map((code) => String(Number(code)))
-  );
-  const claimedCodes = new Set<string>();
-  let nextCustomerSerial = Array.from(validStoredCodes).reduce((highest, code) => Math.max(highest, Number(code)), 0) + 1;
-
-  return partiesToNormalize.map((party) => {
-    const candidate = [party.customerCode, party.code].find((code) => hasValidIndependentSerial(party, code));
-    let customerCode = isCustomer(party) && candidate ? String(Number(candidate)) : undefined;
-    if (isCustomer(party)) {
-      if (!customerCode || claimedCodes.has(customerCode)) {
-        while (claimedCodes.has(String(nextCustomerSerial))) nextCustomerSerial++;
-        customerCode = String(nextCustomerSerial++);
-      }
-      claimedCodes.add(customerCode);
-    }
-
-    return {
-      ...party,
-      branchId: party.branchId || 'branch-cairo',
-      customerCode: customerCode || party.customerCode,
-      code: customerCode || party.code || party.customerCode,
-    };
+// منطق أكواد العملاء انتقل إلى src/context/platform/customerCodes.ts
+// (أول خطوة في تقسيم هذا الملف العملاق).
+const normalizeCustomerPartyCodes = (parties: Party[]): Party[] =>
+  normalizeCustomerPartyCodesPure(parties, {
+    cashSupplier: INITIAL_PARTIES.find((party) => party.id === 'party-s-cash'),
+    defaultBranchId: 'branch-cairo',
   });
-};
 
 interface CheckoutPayload {
   customerId: string;
@@ -206,6 +192,27 @@ interface PlatformContextType {
   setLanguage: (lang: Language) => void;
   t: (ar: string, en: string) => string;
   formatMoney: (amount: number) => string;
+  /** التنقل بين الشاشات — المصدر الوحيد للحالة الحالية. */
+  currentView: string;
+  setCurrentView: (view: string) => void;
+  /** كل الحسابات (بما فيها غير التابعة للشركة الحالية) — تُستخدم في أدوات قواعد البيانات. */
+  allAccounts: Account[];
+  /** كل قيود اليومية (بما فيها غير التابعة للشركة الحالية). */
+  allJournals: JournalEntry[];
+  /** كل باقات وعروض العملاء مجمّعة من كل الملفات. */
+  clientOffers: ClientOffer[];
+  /** إنشاء ملف مريض/عميل جديد من بيانات سريعة (شاشة العيادات). */
+  addPatient: (data: {
+    fullName: string;
+    phone: string;
+    dateOfBirth?: string;
+    gender?: 'Male' | 'Female';
+    chronicDiseases?: string[];
+    allergies?: string[];
+    branchId?: string;
+  }) => Party;
+  /** تغيير حالة موعد (تأكيد / اكتمال / إلغاء). */
+  updateAppointmentStatus: (id: string, status: Appointment['status'], reason?: string) => void;
   tenant: Tenant;
   setTenant: React.Dispatch<React.SetStateAction<Tenant>>;
   tenants: Tenant[];
@@ -709,6 +716,30 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     document.documentElement.lang = lang;
   };
 
+  // ---------------------------------------------------------------------
+  // التنقل بين الشاشات (Navigation)
+  // ---------------------------------------------------------------------
+  // كان `currentView` محبوساً داخل App.tsx فلا تستطيع أي شاشة التنقل بنفسها.
+  // رفعناه إلى الـ PlatformContext ليكون مصدراً واحداً لكل الشاشات.
+  const [currentView, setCurrentView] = useState<string>(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const urlView = params.get('view');
+      if (urlView) return urlView;
+
+      if (window.location.hash) {
+        const hash = window.location.hash.replace('#', '');
+        if (hash) return hash;
+      }
+
+      const saved = localStorage.getItem('erp_default_view');
+      if (saved) return saved;
+    } catch {
+      /* تجاهل — سيتم استخدام الشاشة الافتراضية */
+    }
+    return 'dashboard';
+  });
+
   useEffect(() => {
     document.documentElement.dir = language === 'ar' ? 'rtl' : 'ltr';
     document.documentElement.lang = language;
@@ -992,20 +1023,21 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     persistLocal('erp_user_activity_logs', JSON.stringify(allUserActivityLogs));
   }, [allUserActivityLogs]);
 
-  const auditRecords = allAuditRecords.filter((a) => a.tenantId === tenant?.id);
-  const userActivityLogs = allUserActivityLogs.filter((u) => u.tenantId === tenant?.id);
+  const auditRecords = scopeAuditRecords(allAuditRecords, tenant?.id);
+  const userActivityLogs = scopeActivityLogs(allUserActivityLogs, tenant?.id);
 
-  const recordAudit = (audit: Omit<AuditRecord, 'id' | 'tenantId' | 'performedById' | 'performedByName' | 'timestamp'>) => {
-    const newRecord: AuditRecord = {
-      ...audit,
-      id: `audit-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-      tenantId: tenant?.id || INITIAL_TENANT.id,
-      branchId: activeBranch?.id,
-      performedById: currentUser?.id || 'admin',
-      performedByName: currentUser?.name || 'System Administrator',
-      timestamp: new Date().toISOString(),
-    };
-    setAllAuditRecords((prev) => [newRecord, ...prev]);
+  /** سياق التسجيل: من نفّذ، وأي منشأة، وأي فرع. */
+  const auditContext = (): AuditContext => ({
+    tenantId: tenant?.id || INITIAL_TENANT.id,
+    branchId: activeBranch?.id,
+    userId: currentUser?.id || 'admin',
+    userName: currentUser?.name || 'System Administrator',
+    userRole: currentUser?.role || 'SuperAdmin',
+  });
+
+  // منطق بناء السجل انتقل إلى src/context/platform/auditLog.ts (منطق نقي مُختبر).
+  const recordAudit = (audit: AuditInput) => {
+    setAllAuditRecords((prev) => [buildAuditRecord(audit, auditContext()), ...prev]);
   };
 
   const logUserActivity = (
@@ -1016,22 +1048,13 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     actionNameEn: string,
     details: string
   ) => {
-    const newLog: UserActivityLog = {
-      id: `log-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-      tenantId: tenant?.id || INITIAL_TENANT.id,
-      branchId: activeBranch?.id,
-      userId: currentUser?.id || 'admin',
-      userName: currentUser?.name || 'System Admin',
-      userRole: currentUser?.role || 'SuperAdmin',
-      screenId,
-      screenNameAr,
-      screenNameEn,
-      actionNameAr,
-      actionNameEn,
-      details,
-      timestamp: new Date().toISOString(),
-    };
-    setAllUserActivityLogs((prev) => [newLog, ...prev]);
+    setAllUserActivityLogs((prev) => [
+      buildActivityLog(
+        { screenId, screenNameAr, screenNameEn, actionNameAr, actionNameEn, details },
+        auditContext()
+      ),
+      ...prev,
+    ]);
   };
 
   // 6. Payment Methods (طرق السداد)
@@ -1130,26 +1153,16 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const periodLocks = allPeriodLocks.filter((l) => l.tenantId === tenant?.id);
 
-  const closedPeriodDate = useMemo(() => {
-    const active = periodLocks.filter((l) => l.status === 'locked');
-    if (active.length === 0) return null;
-    const sorted = [...active].sort((a, b) => b.lockDate.localeCompare(a.lockDate));
-    return sorted[0]?.lockDate || null;
-  }, [periodLocks]);
+  // منطق الأقفال انتقل إلى src/context/platform/accountingPeriods.ts
+  const closedPeriodDate = useMemo(() => findLatestClosedPeriodDate(periodLocks), [periodLocks]);
 
   const lockAccountingPeriod = (lockDate: string, reason?: string) => {
-    const newLock: AccountingPeriodLock = {
-      id: `lock-${Date.now()}`,
+    const newLock = buildPeriodLock(lockDate, reason, {
       tenantId: tenant?.id || INITIAL_TENANT.id,
-      branchId: activeBranch?.id || 'all',
-      lockDate,
-      lockedAt: new Date().toISOString(),
+      branchId: activeBranch?.id,
       lockedBy: currentUser?.name || 'مدير النظام',
-      reason: reason || 'إقفال دوري معتمد للحسابات',
-      status: 'locked',
-    };
-    const updated = [newLock, ...allPeriodLocks];
-    setAllPeriodLocks(updated);
+    });
+    setAllPeriodLocks([newLock, ...allPeriodLocks]);
     recordAudit({
       branchId: activeBranch?.id,
       entityType: 'PeriodLock' as any,
@@ -1171,8 +1184,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const unlockAccountingPeriod = (lockId: string) => {
-    const updated = allPeriodLocks.map((l) => (l.id === lockId ? { ...l, status: 'unlocked' as const } : l));
-    setAllPeriodLocks(updated);
+    setAllPeriodLocks((prev) => unlockPeriod(prev, lockId));
     logUserActivity(
       'accounting',
       'الحسابات العامة',
@@ -1190,41 +1202,16 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const validatePeriodDate = (date: string, branchId?: string, overrideAsAdmin?: boolean) => {
     const lockCheck = isDateInClosedPeriod(date, branchId);
-    if (!lockCheck.isLocked) return { allowed: true };
     const isAdminUser = !!currentUser?.isAdmin || currentUser?.role === 'SuperAdmin';
-    if (isAdminUser || overrideAsAdmin) {
-      return { allowed: true, message: 'تم التجاوز بصلاحية المدير العام' };
-    }
-    return {
-      allowed: false,
-      message: `الفترة المحاسبية مقفلة حتى تاريخ (${lockCheck.lockInfo?.lockDate}). لا يمكن إجراء أي تعديل أو مسح أو إضافة بتاريخ يقع في الفترة المقفلة بدون موافقة وصلاحية الأدمن.`,
-    };
+    return validatePeriodDateAgainstLocks(lockCheck, isAdminUser, overrideAsAdmin);
   };
 
-  // Synchronization of Journal Lines with Chart of Accounts Balances
+  // مزامنة أسطر القيود مع أرصدة شجرة الحسابات.
+  // المنطق الحسابي نفسه انتقل إلى src/context/platform/journalBalances.ts
+  // (منطق نقي قابل للاختبار) — وهنا تبقى فقط وصلة تحديث حالة React.
   const applyJournalLinesToAccounts = (lines: JournalLine[], reverse: boolean = false) => {
     if (!lines || lines.length === 0) return;
-    setAllAccounts((prev) =>
-      prev.map((acc) => {
-        const matchingLines = lines.filter((line) => line.accountId === acc.id);
-        if (matchingLines.length === 0) return acc;
-        let delta = 0;
-        matchingLines.forEach((l) => {
-          const debit = Number(l.debit) || 0;
-          const credit = Number(l.credit) || 0;
-          if (acc.isDebitNormal) {
-            delta += (debit - credit);
-          } else {
-            delta += (credit - debit);
-          }
-        });
-        if (reverse) delta = -delta;
-        return {
-          ...acc,
-          balance: Number(((acc.balance || 0) + delta).toFixed(2)),
-        };
-      })
-    );
+    setAllAccounts((prev) => applyJournalLinesToAccountsPure(prev, lines, reverse));
   };
 
   const deleteJournalEntry = (entryId: string) => {
@@ -6235,7 +6222,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         roleType: staff.roleType,
         jobTitleAr: staff.jobTitleAr,
         branchId: staff.branchId,
-        branchName: staffBranch?.nameAr,
+        branchName: staffBranch?.name,
         month,
         basicSalary: baseSalary,
         allowances,
@@ -8628,6 +8615,11 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if ((viewId === 'cash_receipts' || viewId === 'cash_payments' || viewId === 'tax_invoices' || viewId === 'fiscal_documents') && (currentUser?.allowedViews?.includes('accounting') || currentUser?.allowedViews?.includes('fiscal_documents') || currentUser?.allowedViews?.includes('pos_sales'))) return true;
     if ((viewId === 'goods_receipts' || viewId === 'goods_issues' || viewId === 'goods_vouchers') && (currentUser?.allowedViews?.includes('inventory') || currentUser?.allowedViews?.includes('goods_vouchers') || currentUser?.allowedViews?.includes('inventory_mgmt'))) return true;
     if (viewId === 'employee_dossier' && (currentUser?.allowedViews?.includes('staff') || currentUser?.allowedViews?.includes('payroll') || currentUser?.allowedViews?.includes('attendance'))) return true;
+    // الشاشات المولّدة من محرك الشاشات (meta_*) ترث صلاحية الشاشة التي ينتمي إليها الكيان.
+    if (viewId.startsWith('meta_')) {
+      const entityViewId = getEntity(viewId.slice('meta_'.length))?.viewId;
+      if (entityViewId && currentUser?.allowedViews?.includes(entityViewId)) return true;
+    }
     return currentUser?.allowedViews?.includes('*') || currentUser?.allowedViews?.includes(viewId);
   };
 
@@ -10614,7 +10606,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     // Generate ZATCA Base64 TLV
     const zatcaTlv = generateZatcaTlvBase64(
-      data.sellerVatNumber ? tenant.nameAr : 'عيادات ومجمع طبي',
+      data.sellerVatNumber ? tenant.name : 'عيادات ومجمع طبي',
       data.sellerVatNumber || '300000000000003',
       `${data.date}T${data.time || '12:00:00'}Z`,
       data.grandTotal,
@@ -10979,43 +10971,20 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   // Single list of every dataset that lives in Neon (used by the automatic sync,
   // the full transfer and the backup export).
-  const buildAllDatasetDocuments = (): { key: string; payload: unknown }[] => [
-    { key: 'erp_tenants', payload: allTenants },
-    { key: 'erp_users', payload: allUsers },
-    { key: 'erp_branches', payload: allBranches },
-    { key: 'erp_warehouses', payload: allWarehouses },
-    { key: 'erp_categories', payload: allCategories },
-    { key: 'erp_products', payload: allProducts },
-    { key: 'erp_stock_movements', payload: allStockMovements },
-    { key: 'erp_stock_levels', payload: stockLevels },
-    { key: 'erp_accounts', payload: allAccounts },
-    { key: 'erp_journals', payload: allJournals },
-    { key: 'erp_parties_backup', payload: allParties },
-    { key: 'erp_invoices', payload: allInvoices },
-    { key: 'erp_appointments', payload: allAppointments },
-    { key: 'erp_patient_followups', payload: allPatientFollowUps },
-    { key: 'erp_treatment_plans', payload: allTreatmentPlans },
-    { key: 'erp_cash_receipts', payload: allCashReceipts },
-    { key: 'erp_customer_refunds', payload: allCustomerRefunds },
-    { key: 'erp_cash_payments', payload: allCashPayments },
-    { key: 'erp_reception_shifts', payload: allReceptionShifts },
-    { key: 'erp_pos_shifts', payload: allPosShifts },
-    { key: 'erp_payment_methods', payload: allPaymentMethods },
-    { key: 'erp_tax_invoices', payload: allSpecializedTaxInvoices },
-    { key: 'erp_goods_receipts', payload: allGoodsReceipts },
-    { key: 'erp_goods_issues', payload: allGoodsIssues },
-    { key: 'erp_staff_members', payload: allStaffMembers },
-    { key: 'erp_payroll_runs', payload: allPayrollRuns },
-    { key: 'erp_attendance_records', payload: allAttendanceRecords },
-    { key: 'erp_inventory_audits', payload: allInventoryAudits },
-    { key: 'erp_device_maintenance', payload: allDeviceMaintenance },
-    { key: 'clinic_laser_devices', payload: allLaserDevices },
-    { key: 'erp_period_locks', payload: allPeriodLocks },
-    { key: 'erp_audit_records', payload: allAuditRecords },
-    { key: 'erp_activity_logs', payload: allUserActivityLogs },
-    { key: 'erp_notifications_history', payload: allNotifications },
-
-  ];
+  // قائمة كل مجموعات البيانات انتقلت إلى
+  // src/context/platform/datasetDocuments.ts — عقد التخزين النقي (مُختبر).
+  const buildAllDatasetDocuments = (): { key: string; payload: unknown }[] =>
+    buildDatasetDocuments({
+      allTenants, allUsers, allBranches, allWarehouses,
+      allCategories, allProducts, allStockMovements, stockLevels,
+      allAccounts, allJournals, allParties, allInvoices,
+      allAppointments, allPatientFollowUps, allTreatmentPlans, allCashReceipts,
+      allCustomerRefunds, allCashPayments, allReceptionShifts, allPosShifts,
+      allPaymentMethods, allSpecializedTaxInvoices, allGoodsReceipts, allGoodsIssues,
+      allStaffMembers, allPayrollRuns, allAttendanceRecords, allInventoryAudits,
+      allDeviceMaintenance, allLaserDevices, allPeriodLocks, allAuditRecords,
+      allUserActivityLogs, allNotifications,
+    });
 
 
   // ==========================================================================
@@ -11156,6 +11125,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     tenantId?: string;
     datasetCount?: number;
     progress?: string;
+    syncing?: boolean;
   }>({ status: 'idle' });
   const neonBootstrapRanRef = useRef(false);
   /** Last known Neon `updated_at` per dataset (used by the 1-minute refresh). */
@@ -11744,37 +11714,14 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const [activeToastNotification, setActiveToastNotification] = useState<AppNotification | null>(null);
 
-  // Filter notifications relevant to current user: role, branch, user ID
-  const notifications = useMemo(() => {
-    if (!currentUser) return allNotifications;
-    return allNotifications.filter((n) => {
-      // SuperAdmin & Admin see everything
-      if (currentUser.isAdmin || currentUser.role === 'SuperAdmin') return true;
-      // Branch check
-      if (
-        n.branchId &&
-        n.branchId !== 'all' &&
-        currentUser.allowedBranchIds &&
-        !currentUser.allowedBranchIds.includes('*') &&
-        !currentUser.allowedBranchIds.includes(n.branchId)
-      ) {
-        return false;
-      }
-      // Target User check
-      if (n.targetUserIds && n.targetUserIds.length > 0 && n.targetUserIds.includes(currentUser.id)) {
-        return true;
-      }
-      // Role check
-      if (n.targetRoles && n.targetRoles.length > 0) {
-        return n.targetRoles.includes(currentUser.role) || n.targetRoles.includes('*');
-      }
-      return true;
-    });
-  }, [allNotifications, currentUser]);
+  // فلترة الإشعارات حسب الفرع والدور والمستخدم — المنطق في
+  // src/context/platform/notifications.ts (منطق نقي مُختبر لمنع تسريب البيانات).
+  const notifications = useMemo(
+    () => filterNotificationsForUser(allNotifications, currentUser),
+    [allNotifications, currentUser]
+  );
 
-  const unreadNotificationsCount = useMemo(() => {
-    return notifications.filter((n) => !n.isRead).length;
-  }, [notifications]);
+  const unreadNotificationsCount = useMemo(() => countUnread(notifications), [notifications]);
 
   const toggleNotificationRule = (ruleId: string, isEnabled?: boolean) => {
     setNotificationRules((prev) =>
@@ -11862,44 +11809,24 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const rule = notificationRules.find((r) => r.code === ruleCode);
     if (!rule || !rule.isEnabled) return;
 
-    // Interpolate message tokens
-    let msgAr = rule.templateMessageAr;
-    let msgEn = rule.templateMessageEn;
-    Object.keys(payload).forEach((key) => {
-      const val = String(payload[key] ?? '');
-      msgAr = msgAr.split(`{${key}}`).join(val);
-      msgEn = msgEn.split(`{${key}}`).join(val);
+    // بناء الإشعار (مع تعبئة الرموز) انتقل إلى
+    // src/context/platform/notifications.ts — منطق نقي مُختبر.
+    const newNotif = buildNotificationFromRule(rule, payload, {
+      tenantId: tenant?.id || INITIAL_TENANT.id,
+      branchId: activeBranch?.id,
     });
 
-    const newNotif: AppNotification = {
-      id: `notif-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-      ruleCode: rule.code,
-      category: rule.category,
-      severity: rule.severity,
-      titleAr: rule.nameAr,
-      titleEn: rule.nameEn,
-      messageAr: msgAr,
-      messageEn: msgEn,
-      timestamp: new Date().toISOString(),
-      isRead: false,
-      targetRoles: rule.targetRoles,
-      targetUserIds: rule.targetUserIds,
-      branchId: payload.branchId || rule.targetBranchId || activeBranch?.id,
-      actionUrl: rule.actionUrl,
-      metadata: payload,
-    };
-
-    setAllNotifications((prev) => [newNotif, ...prev]);
+    setAllNotifications((prev) => prependNotification(prev, newNotif));
 
     // Sound alert
-    if (rule.soundAlert || rule.channels.includes('sound')) {
+    if (rulePlaysSound(rule)) {
       playNotificationSound(
         rule.severity === 'critical' ? 'critical' : rule.severity === 'warning' ? 'warning' : 'info'
       );
     }
 
     // Popup Toast alert
-    if (rule.channels.includes('popup')) {
+    if (ruleShowsToast(rule)) {
       setActiveToastNotification(newNotif);
       setTimeout(() => {
         setActiveToastNotification((current) => (current?.id === newNotif.id ? null : current));
@@ -11908,18 +11835,15 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const markNotificationAsRead = (notificationId: string) => {
-    setAllNotifications((prev) =>
-      prev.map((n) => (n.id === notificationId ? { ...n, isRead: true, readAt: new Date().toISOString() } : n))
-    );
+    setAllNotifications((prev) => markOneRead(prev, notificationId));
   };
 
   const markAllNotificationsAsRead = () => {
-    const now = new Date().toISOString();
-    setAllNotifications((prev) => prev.map((n) => ({ ...n, isRead: true, readAt: now })));
+    setAllNotifications((prev) => markAllRead(prev));
   };
 
   const deleteNotification = (notificationId: string) => {
-    setAllNotifications((prev) => prev.filter((n) => n.id !== notificationId));
+    setAllNotifications((prev) => removeNotification(prev, notificationId));
   };
 
   const clearAllNotifications = () => {
@@ -11935,13 +11859,74 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     window.location.reload();
   };
 
+  // ---------------------------------------------------------------------
+  // قيم وإجراءات مشتقة (Derived values & actions)
+  // ---------------------------------------------------------------------
+
+  /** كل باقات وعروض العملاء مجمّعة من ملفات جميع العملاء. */
+  const clientOffers: ClientOffer[] = useMemo(
+    () =>
+      allParties.flatMap((party) =>
+        (party.offers || []).map((offer) => ({
+          ...offer,
+          clientId: party.id,
+          clientName: party.name,
+        }))
+      ),
+    [allParties]
+  );
+
+  /** إنشاء ملف مريض/عميل جديد من شاشة العيادات ببيانات سريعة. */
+  const addPatient = (data: {
+    fullName: string;
+    phone: string;
+    dateOfBirth?: string;
+    gender?: 'Male' | 'Female';
+    chronicDiseases?: string[];
+    allergies?: string[];
+    branchId?: string;
+  }): Party =>
+    addParty({
+      name: data.fullName,
+      nameEn: data.fullName,
+      fullName: data.fullName,
+      type: 'Customer',
+      phone: data.phone,
+      branchId: data.branchId,
+      dateOfBirth: data.dateOfBirth,
+      gender: data.gender,
+      chronicDiseases: data.chronicDiseases || [],
+      allergies: data.allergies || [],
+      balance: 0,
+    });
+
+  /** تغيير حالة موعد مع تسجيل السبب عند الإلغاء أو عدم الحضور. */
+  const updateAppointmentStatus = (
+    id: string,
+    status: Appointment['status'],
+    reason?: string
+  ) => {
+    const patch: Partial<Appointment> = { status };
+    if (status === 'Cancelled') patch.cancellationReason = reason;
+    if (status === 'NotAttended') patch.notAttendedReason = reason;
+    updateAppointment(id, patch);
+  };
+
   return (
+
     <PlatformContext.Provider
       value={{
         language,
         setLanguage,
         t,
         formatMoney,
+        currentView,
+        setCurrentView,
+        allAccounts,
+        allJournals,
+        clientOffers,
+        addPatient,
+        updateAppointmentStatus,
         tenant,
         setTenant,
         tenants,

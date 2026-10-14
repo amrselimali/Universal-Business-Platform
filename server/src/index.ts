@@ -39,6 +39,11 @@ interface TokenPayload {
   allowedTenantIds: string[];
   allowedBranchIds: string[];
   allowedViews: string[];
+  /**
+   * الأفعال المسموحة للمستخدم (Action Registry) — صلاحيات على مستوى الزر لا الشاشة.
+   * غياب الفعل = ممنوع (Default-Deny). القيمة '*' تعني كل الأفعال.
+   */
+  allowedActions?: string[];
 }
 
 declare module 'fastify' {
@@ -113,6 +118,7 @@ app.post('/auth/login', async (request, reply) => {
     allowedTenantIds: Array.isArray(account.payload?.allowedTenantIds) ? account.payload.allowedTenantIds : [String(account.tenant_id)],
     allowedBranchIds: Array.isArray(account.payload?.allowedBranchIds) ? account.payload.allowedBranchIds : [],
     allowedViews: Array.isArray(account.payload?.allowedViews) ? account.payload.allowedViews : [],
+    allowedActions: Array.isArray(account.payload?.allowedActions) ? account.payload.allowedActions : [],
   };
   const token = jwt.sign(payload, JWT_SECRET as string, { expiresIn: JWT_EXPIRES_IN } as any);
   if (!account.payload?.passwordHash && account.payload?.password) {
@@ -123,6 +129,97 @@ app.post('/auth/login', async (request, reply) => {
 
 app.get('/me', async (request) => ({ auth: request.auth }));
 
+// ---------------------------------------------------------------------------
+// محرك الشاشات (Metadata Registry)
+// ---------------------------------------------------------------------------
+/**
+ * يُرجع تعريف الشاشات والأفعال والكيانات وحقولها.
+ *
+ * هذا هو ما يجعل إضافة حقل أو شاشة **بيانات** لا كوداً: الواجهة تقرأ من هنا
+ * ولا تحتاج إعادة بناء. البيانات تُدار في جداول erp_* (انظر
+ * scripts/neon_metadata_engine.sql).
+ *
+ * الجداول غير تابعة لمنشأة (configuration عام)، لذلك لا تخضع للـ RLS،
+ * لكن الوصول يظل محمياً بالتوكن (preHandler).
+ */
+app.get('/metadata/registry', async () => {
+  const [views, actions, entities, fields, screens] = await Promise.all([
+    rawQuery<any[]>(`SELECT id, name_ar, name_en, description_ar, description_en,
+                            icon_name, category, sort_order
+                       FROM erp_views WHERE is_active = TRUE
+                      ORDER BY sort_order, id`),
+    rawQuery<any[]>(`SELECT key, name_ar, name_en, view_id, description_ar, description_en, sort_order
+                       FROM erp_actions ORDER BY sort_order, key`),
+    rawQuery<any[]>(`SELECT code, table_name, display_name_ar, display_name_en, view_id, soft_delete
+                       FROM erp_entities WHERE is_active = TRUE ORDER BY code`),
+    rawQuery<any[]>(`SELECT id, entity_code, column_name, label_ar, label_en, data_type,
+                            is_required, is_readonly, grid_visible, form_order, width
+                       FROM erp_entity_fields ORDER BY entity_code, form_order`),
+    rawQuery<any[]>(`SELECT code, view_id, entity_code, kind, route, menu_group, sort_order, icon
+                       FROM erp_screens ORDER BY sort_order, code`),
+  ]);
+
+  const fieldsByEntity = new Map<string, any[]>();
+  for (const row of fields || []) {
+    const key = String(row.entity_code);
+    const list = fieldsByEntity.get(key) || [];
+    list.push({
+      id: Number(row.id),
+      columnName: row.column_name,
+      labelAr: row.label_ar,
+      labelEn: row.label_en,
+      dataType: row.data_type,
+      isRequired: Boolean(row.is_required),
+      isReadonly: Boolean(row.is_readonly),
+      gridVisible: Boolean(row.grid_visible),
+      formOrder: Number(row.form_order),
+      width: Number(row.width),
+    });
+    fieldsByEntity.set(key, list);
+  }
+
+  return {
+    views: (views || []).map((v: any) => ({
+      id: v.id,
+      nameAr: v.name_ar,
+      nameEn: v.name_en,
+      descriptionAr: v.description_ar || '',
+      descriptionEn: v.description_en || '',
+      iconName: v.icon_name || 'Layers',
+      category: v.category,
+      sortOrder: Number(v.sort_order),
+    })),
+    actions: (actions || []).map((a: any) => ({
+      key: a.key,
+      nameAr: a.name_ar,
+      nameEn: a.name_en,
+      viewId: a.view_id,
+      descriptionAr: a.description_ar || undefined,
+      descriptionEn: a.description_en || undefined,
+      sortOrder: Number(a.sort_order),
+    })),
+    entities: (entities || []).map((e: any) => ({
+      code: e.code,
+      tableName: e.table_name,
+      displayNameAr: e.display_name_ar,
+      displayNameEn: e.display_name_en,
+      viewId: e.view_id,
+      softDelete: Boolean(e.soft_delete),
+      fields: fieldsByEntity.get(String(e.code)) || [],
+    })),
+    screens: (screens || []).map((s: any) => ({
+      code: s.code,
+      viewId: s.view_id,
+      entityCode: s.entity_code,
+      kind: s.kind,
+      route: s.route,
+      menuGroup: s.menu_group,
+      sortOrder: Number(s.sort_order),
+      icon: s.icon,
+    })),
+  };
+});
+
 /** Guarantees the caller may operate on the requested tenant. */
 function assertTenant(request: any, requestedTenantId?: string): string {
   const auth = request.auth as TokenPayload;
@@ -132,6 +229,173 @@ function assertTenant(request: any, requestedTenantId?: string): string {
   }
   return target;
 }
+
+/**
+ * فحص صلاحية على مستوى الزر (Action Registry) بقاعدة Default-Deny.
+ *
+ * هذا هو الفرق بين «المستخدم يشوف الشاشة» و«المستخدم يملك حق تنفيذ الفعل»:
+ *   - allowedViews تسمح بفتح الشاشة.
+ *   - allowedActions تسمح بالضغط على زر معيّن داخلها.
+ *
+ * غياب الفعل من القائمة = 403 فوري، حتى لو كان المستخدم يرى الشاشة.
+ * القيمة '*' (أو دور SuperAdmin) تعني كل الأفعال.
+ */
+function assertAction(request: any, actionCode: string): void {
+  const auth = request.auth as TokenPayload;
+  const actions = auth.allowedActions || [];
+  const isSuper = auth.role === 'SuperAdmin' || actions.includes('*');
+  if (isSuper || actions.includes(actionCode)) return;
+
+  throw Object.assign(new Error('action_not_allowed'), {
+    statusCode: 403,
+    actionCode,
+    detail: `ليس لديك الصلاحية المسجّلة [${actionCode}] لتنفيذ هذه العملية.`,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// معالج الأخطاء الموحّد: يحوّل الأخطاء المرفوعة إلى ردود JSON واضحة
+// ---------------------------------------------------------------------------
+app.setErrorHandler((error: any, request, reply) => {
+  const statusCode = Number(error?.statusCode) || 500;
+
+  if (statusCode === 403) {
+    return reply.code(403).send({
+      error: error?.message || 'forbidden',
+      actionCode: error?.actionCode,
+      message: error?.detail || 'مرفوض أمنياً: لا تملك الصلاحية لتنفيذ هذه العملية.',
+    });
+  }
+
+  if (statusCode >= 400 && statusCode < 500) {
+    return reply.code(statusCode).send({ error: error?.message || 'bad_request' });
+  }
+
+  request.log.error(error);
+  return reply.code(500).send({ error: 'internal_error' });
+});
+
+// ---------------------------------------------------------------------------
+// إدارة الـ Metadata (Metadata Studio)
+// ---------------------------------------------------------------------------
+/**
+ * تعديل حقول الكيانات من الواجهة مباشرة — بلا نشر ولا إعادة بناء.
+ *
+ * ⚠️ ملاحظة أمنية: هذه الجداول إعدادات عامة (لا تخص منشأة بعينها)، لذلك
+ * تقتصر الكتابة على دور SuperAdmin. غياب الفحص يعني أن أي مستخدم يستطيع
+ * تغيير واجهة كل الشركات.
+ */
+function assertSuperAdmin(request: any): void {
+  const auth = request.auth as TokenPayload;
+  const isSuper =
+    auth.role === 'SuperAdmin' ||
+    (auth.allowedActions || []).includes('*') ||
+    (auth.allowedViews || []).includes('*');
+
+  if (!isSuper) {
+    throw Object.assign(new Error('metadata_forbidden'), {
+      statusCode: 403,
+      detail: 'تعديل تعريفات الشاشات متاح للمدير العام فقط.',
+    });
+  }
+}
+
+const metadataFieldSchema = z.object({
+  entityCode: z.string().min(1).max(150),
+  columnName: z.string().min(1).max(150),
+  labelAr: z.string().min(1).max(255),
+  labelEn: z.string().min(1).max(255),
+  dataType: z.enum(['string', 'number', 'currency', 'badge', 'date', 'select', 'boolean', 'json']),
+  isRequired: z.boolean().optional(),
+  isReadonly: z.boolean().optional(),
+  gridVisible: z.boolean().optional(),
+  formOrder: z.number().int().min(0).max(9999).optional(),
+  width: z.number().int().min(40).max(1200).optional(),
+});
+
+/** إضافة حقل جديد لكيان. */
+app.post('/metadata/fields', async (request, reply) => {
+  assertSuperAdmin(request);
+  const parsed = metadataFieldSchema.safeParse(request.body);
+  if (!parsed.success) {
+    return reply.code(400).send({ error: 'invalid_payload', details: parsed.error.issues });
+  }
+  const f = parsed.data;
+
+  const rows = await rawQuery<any[]>(
+    `INSERT INTO erp_entity_fields
+       (entity_code, column_name, label_ar, label_en, data_type,
+        is_required, is_readonly, grid_visible, form_order, width)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+     ON CONFLICT (entity_code, column_name) DO UPDATE SET
+       label_ar = EXCLUDED.label_ar,
+       label_en = EXCLUDED.label_en,
+       data_type = EXCLUDED.data_type,
+       is_required = EXCLUDED.is_required,
+       is_readonly = EXCLUDED.is_readonly,
+       grid_visible = EXCLUDED.grid_visible,
+       form_order = EXCLUDED.form_order,
+       width = EXCLUDED.width
+     RETURNING id`,
+    [
+      f.entityCode, f.columnName, f.labelAr, f.labelEn, f.dataType,
+      f.isRequired ?? false, f.isReadonly ?? false, f.gridVisible ?? true,
+      f.formOrder ?? 10, f.width ?? 150,
+    ]
+  );
+
+  return { id: rows?.[0]?.id ?? null, saved: true };
+});
+
+/** تعديل حقل موجود (بالمعرّف). */
+app.put('/metadata/fields/:id', async (request, reply) => {
+  assertSuperAdmin(request);
+  const { id } = request.params as { id: string };
+  const parsed = metadataFieldSchema.partial().safeParse(request.body);
+  if (!parsed.success) {
+    return reply.code(400).send({ error: 'invalid_payload', details: parsed.error.issues });
+  }
+
+  const f = parsed.data;
+  const rows = await rawQuery<any[]>(
+    `UPDATE erp_entity_fields SET
+       label_ar     = COALESCE($2, label_ar),
+       label_en     = COALESCE($3, label_en),
+       data_type    = COALESCE($4, data_type),
+       is_required  = COALESCE($5, is_required),
+       is_readonly  = COALESCE($6, is_readonly),
+       grid_visible = COALESCE($7, grid_visible),
+       form_order   = COALESCE($8, form_order),
+       width        = COALESCE($9, width)
+     WHERE id = $1
+     RETURNING id`,
+    [
+      Number(id),
+      f.labelAr ?? null, f.labelEn ?? null, f.dataType ?? null,
+      f.isRequired ?? null, f.isReadonly ?? null, f.gridVisible ?? null,
+      f.formOrder ?? null, f.width ?? null,
+    ]
+  );
+
+  if (!rows || rows.length === 0) {
+    return reply.code(404).send({ error: 'field_not_found' });
+  }
+  return { id: rows[0].id, saved: true };
+});
+
+/** حذف حقل من الكيان. */
+app.delete('/metadata/fields/:id', async (request, reply) => {
+  assertSuperAdmin(request);
+  const { id } = request.params as { id: string };
+  const rows = await rawQuery<any[]>(
+    `DELETE FROM erp_entity_fields WHERE id = $1 RETURNING id`,
+    [Number(id)]
+  );
+  if (!rows || rows.length === 0) {
+    return reply.code(404).send({ error: 'field_not_found' });
+  }
+  return { id: rows[0].id, deleted: true };
+});
 
 // ---------------------------------------------------------------------------
 // Records (the data layer the app uses)
@@ -179,15 +443,75 @@ app.get('/records/:docKey/changes', async (request) => {
   return { records, deletedIds, nextCursor };
 });
 
-const upsertSchema = z.object({ records: z.array(z.record(z.any())).min(1).max(1000) });
+const upsertSchema = z.object({
+  records: z.array(z.record(z.any())).min(1).max(1000),
+  /** عند تفعيله، يرفض الخادم أي كتابة تُلغي تعديلاً أحدث موجود على الخادم. */
+  enforceVersion: z.boolean().optional(),
+});
 
-/** Upserts records (one transaction, tenant-scoped). */
+/**
+ * فحص التزامن المتفائل (Optimistic Concurrency).
+ *
+ * يقارن إصدار كل سجل قادم بالإصدار المخزَّن، ويرجع قائمة التعارضات.
+ * الاعتماد على `version` الرقمي (لا على الطوابع الزمنية) يمنع الكتابة فوق
+ * تعديلات مستخدم آخر حتى لو كانت ساعات الأجهزة مختلفة.
+ */
+async function findVersionConflicts(
+  tenantId: string,
+  docKey: string,
+  incoming: Record<string, any>[]
+): Promise<{ id: string; serverVersion: number; clientVersion: number }[]> {
+  const ids = incoming.map((r) => String(r?.id ?? '')).filter(Boolean);
+  if (ids.length === 0) return [];
+
+  const rows = await one<any[]>(
+    tenantId,
+    `SELECT record_id, payload->>'version' AS version
+       FROM app_records
+      WHERE tenant_id = $1
+        AND doc_key = $2
+        AND record_id = ANY($3)
+        AND deleted_at IS NULL`,
+    [tenantId, docKey, ids]
+  );
+
+  const conflicts: { id: string; serverVersion: number; clientVersion: number }[] = [];
+  for (const row of rows || []) {
+    const recordId = String(row.record_id);
+    const serverVersion = Number(row.version);
+    const clientRecord = incoming.find((r) => String(r?.id ?? '') === recordId);
+    const clientVersion = Number(clientRecord?.version);
+
+    if (!Number.isFinite(serverVersion) || !Number.isFinite(clientVersion)) continue;
+
+    // تعارض حقيقي: الخادم أحدث من النسخة التي عدّلها العميل.
+    if (serverVersion > clientVersion) {
+      conflicts.push({ id: recordId, serverVersion, clientVersion });
+    }
+  }
+  return conflicts;
+}
+
+/** Upserts records (one transaction, tenant-scoped) with optional version enforcement. */
 app.post('/records/:docKey', async (request, reply) => {
   const { docKey } = request.params as { docKey: string };
   const parsed = upsertSchema.safeParse(request.body);
   if (!parsed.success) return reply.code(400).send({ error: 'invalid_payload' });
   const tenantId = assertTenant(request);
+  assertAction(request, 'record.save');
   const actor = String(request.auth?.sub || 'api');
+
+  if (parsed.data.enforceVersion === true) {
+    const conflicts = await findVersionConflicts(tenantId, docKey, parsed.data.records);
+    if (conflicts.length > 0) {
+      return reply.code(409).send({
+        error: 'version_conflict',
+        message: 'تم تعديل بعض السجلات من مستخدم آخر. حدّث الشاشة ثم أعد المحاولة.',
+        conflicts,
+      });
+    }
+  }
+
   const rows = await one<any[]>(
     tenantId,
     `SELECT fn_upsert_records($1, $2, $3::jsonb, $4) AS n`,
@@ -204,6 +528,7 @@ app.post('/records/:docKey/delete', async (request, reply) => {
   const parsed = deleteSchema.safeParse(request.body);
   if (!parsed.success) return reply.code(400).send({ error: 'invalid_payload' });
   const tenantId = assertTenant(request);
+  assertAction(request, 'record.delete');
   const actor = String(request.auth?.sub || 'api');
   const rows = await one<any[]>(
     tenantId,
@@ -236,6 +561,7 @@ app.post('/accounting/journal', async (request, reply) => {
   const parsed = journalSchema.safeParse(request.body);
   if (!parsed.success) return reply.code(400).send({ error: 'invalid_payload', details: parsed.error.issues });
   const tenantId = assertTenant(request);
+  assertAction(request, 'journal.post');
   const body = parsed.data;
   try {
     const rows = await one<any[]>(
@@ -265,6 +591,7 @@ app.post('/accounting/receipt', async (request, reply) => {
   const parsed = receiptSchema.safeParse(request.body);
   if (!parsed.success) return reply.code(400).send({ error: 'invalid_payload' });
   const tenantId = assertTenant(request);
+  assertAction(request, 'receipt.create');
   const b = parsed.data;
   try {
     const rows = await one<any[]>(
@@ -285,6 +612,7 @@ app.post('/accounting/journal/:id/reverse', async (request, reply) => {
   const parsed = z.object({ reason: z.string().min(3) }).safeParse(request.body);
   if (!parsed.success) return reply.code(400).send({ error: 'invalid_payload' });
   const tenantId = assertTenant(request);
+  assertAction(request, 'journal.reverse');
   try {
     const rows = await one<any[]>(
       tenantId,
@@ -306,12 +634,6 @@ app.get('/accounting/balances', async (request) => {
     []
   );
   return { balances: rows || [] };
-});
-
-app.setErrorHandler((error, request, reply) => {
-  const status = (error as any).statusCode || 500;
-  if (status >= 500) request.log.error(error);
-  reply.code(status).send({ error: (error as any)?.message || 'internal_error' });
 });
 
 await app.listen({ port: PORT, host: '0.0.0.0' });

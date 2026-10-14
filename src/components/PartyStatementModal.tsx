@@ -928,7 +928,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
         b,
         balanceNature,
         codingDate,
-        matchedBranch?.nameAr || matchedBranch?.name || 'المركز الرئيسي',
+        matchedBranch?.name || 'المركز الرئيسي',
       ];
     });
 
@@ -969,7 +969,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
                 </span>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                {tenant?.name} • {activeBranch?.nameAr} • {new Date().toLocaleDateString('ar-EG')}
+                {tenant?.name} • {activeBranch?.name} • {new Date().toLocaleDateString('ar-EG')}
               </p>
             </div>
           </div>
@@ -1254,7 +1254,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
                 <option value="ALL">{t('كافة الفروع (الشركة بالكامل)', 'All Branches (Whole Company)')}</option>
                 {branches.map((b) => (
                   <option key={b.id} value={b.id}>
-                    {b.nameAr || b.name}
+                    {b.name || b.name}
                   </option>
                 ))}
               </select>

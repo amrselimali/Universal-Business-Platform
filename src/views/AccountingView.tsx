@@ -3099,7 +3099,7 @@ export const AccountingView: React.FC = () => {
                   {t('كشف حساب الأستاذ العام المعتمد', 'Official General Ledger Statement')}
                 </h3>
                 <p className="text-xs text-slate-400">
-                  {tenant?.name} • {activeBranch?.nameAr}
+                  {tenant?.name} • {activeBranch?.name}
                 </p>
               </div>
               <div className="flex items-center gap-2">

@@ -184,8 +184,8 @@ export async function loadPersistedDataset<T = any>(key: string, fallback: T): P
     if (raw) {
       const parsed = JSON.parse(raw);
       if (parsed !== null && parsed !== undefined) {
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-        if (!Array.isArray(parsed)) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed as T;
+        if (!Array.isArray(parsed)) return parsed as T;
       }
     }
   } catch {

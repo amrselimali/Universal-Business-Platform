@@ -1,5 +1,80 @@
 # CHANGELOG
 
+## 2026-10-14 — خطة تطوير Universal (تنفيذ المراحل 0 و1 و2)
+
+### القرار المعماري
+- **الستاك:** المسار (أ) — البقاء على TypeScript / Fastify. لم يُعتمد التحول إلى .NET.
+  السبب: المعمارية الجوهرية (RLS + API + Keyset) **مطبّقة بالفعل**، والمشكلة الحقيقية
+  هي دَين تقني واكتمال، لا معمارية خاطئة. راجع `UPGRADE_PLAN.md`.
+
+### المرحلة 0 — تثبيت الأساس
+- **صفر أخطاء TypeScript** (كانت 144):
+  - `tsconfig.json`: استُثني `server/` من فحص الجذر (له `tsconfig` ومكتباته الخاصة).
+  - تصحيح أسماء حقول خاطئة كانت تُنتج قيماً فارغة فعلياً في الواجهة:
+    `Branch.nameAr` / `Tenant.nameAr` / `Warehouse.nameAr` → `name` (البيانات تحمل `name`).
+  - `ItemCategory.name` → `nameAr` في `neonService.ts`.
+  - `Invoice.lines` → `items`، `ShiftRunRow.totalPulses` → `pulsesCount`،
+    `PosShift.startingCash` → `openingFloat`، `ModuleDefinition.descAr` → `descriptionAr`.
+  - `InventoryView`: نوع الفئة كان `'services' | 'goods'` والبيانات تستخدم
+    `'service' | 'product'` — فلم تكن أيقونة أو شارة أي مجموعة تظهر صحيحة.
+  - **تعارض تعريفين باسم `PaymentSplit`** في `types.ts` كان TypeScript يدمجهما
+    فيجبر كل مستخدم على تمرير خصائص الاثنين — حُذف التعريف الزائد.
+  - `StaffManagementView`: مستندات التعيين كانت تستخدم `documentName` بدل
+    `documentNameAr` / `documentNameEn`.
+  - `PartiesView`: استدعاءات `addClientOffer` / `consumeClientOfferSession` كانت
+    لا تطابق التوقيع الفعلي (خطأ وقت تشغيل سابق).
+- **الاختبارات:** إضافة `vitest` + **38 اختباراً** في `src/utils/__tests__/`
+  و `src/services/__tests__/` (وقت الحجز، تفقيط المبالغ، TLV الضريبي، أكواد العملاء،
+  منطق الدمج والتزامن).
+- **CI:** `.github/workflows/ci.yml` — لكن **تعذّر دفعه**: تطبيق GitHub المربوط
+  لا يملك صلاحية `workflows`. القالب محفوظ في `docs/ci/ci.yml` مع دليل النسخ.
+- **بوابة حجم الملفات:** `scripts/check-file-size.mjs` + `.github/file-size-baseline.json`.
+  تمنع أي ملف جديد يتجاوز 300 سطر، وأي ملف قائم يكبر أكثر (Ratchet).
+  القائمة الأساسية: 63 ملفاً.
+
+### المرحلة 1 — التزامن المتفائل بعمود `version`
+- `scripts/neon_optimistic_concurrency.sql`: يضيف `version` و `updated_at` لكل جدول
+  تابع لمنشأة، ويُنشئ `touch_row()` الذي يزيد الإصدار تلقائياً، ويربط الـ Trigger
+  بكل جدول. **متكرر بأمان (Idempotent)** ومُختبر فعلياً على PostgreSQL.
+- `src/services/recordMerge.ts` (جديد): منطق الدمج النقي. قاعدة الحسم:
+  `version` الرقمي أولاً، ثم `updated_at` كاحتياطي للبيانات القديمة.
+  أُضيفت `hasVersionConflict()` لكشف التعارض الحقيقي.
+- `src/services/recordSync.ts`: يستورد المنطق من `recordMerge.ts` ويعيد تصديره
+  (توافق خلفي كامل) — وأصبح أصغر بـ 80 سطراً.
+- `server/src/index.ts`: `POST /records/:docKey` يقبل `enforceVersion: true`
+  ويرجع **409 Conflict** مع قائمة التعارضات بدل الكتابة فوق عمل مستخدم آخر.
+
+### المرحلة 2 — صلاحيات على مستوى الزر (Action Registry)
+- **الفجوة الحقيقية:** التطبيق كان يملك 21 فعلاً على العميل (`SYSTEM_ACTIONS`)
+  و `canPerformAction`، لكن **السيرفر لم يكن يفحص أي فعل إطلاقاً** — أي مستخدم
+  يرى الشاشة يستطيع الكتابة مباشرة عبر الـ API.
+- `server/src/index.ts`:
+  - `allowedActions` أُضيف إلى `TokenPayload` ويُستخرج من التوكن عند الدخول.
+  - `assertAction(request, actionCode)` بقاعدة **Default-Deny**: غياب الفعل = 403.
+  - مفروض على: `record.save`، `record.delete`، `journal.post`، `journal.reverse`،
+    `receipt.create`.
+  - معالج أخطاء موحّد يُرجع 403 مع `actionCode` ورسالة عربية واضحة.
+- **مُختبر فعلياً:** توكن بلا صلاحيات ⇒ 403 مع `actionCode: record.save`؛
+  توكن بـ `record.read` فقط ⇒ 403؛ توكن بـ `*` ⇒ يمرّ.
+
+### الاختبارات المنفّذة
+| الفحص | النتيجة |
+|---|---|
+| `tsc --noEmit` (الجذر) | 0 خطأ |
+| `tsc --noEmit` (server) | 0 خطأ |
+| `vitest run` | 38/38 ناجح |
+| `vite build` | ناجح |
+| بوابة حجم الملفات | ناجحة |
+| migration التزامن على PostgreSQL حقيقي | 1 → 2 → 3 ✅ ومتكرر بأمان |
+| فرض الصلاحيات على السيرفر (403/500) | مطابق للمتوقع ✅ |
+
+### العمل المتبقي
+- المرحلة 2 (تكملة): ربط أفعال العميل الـ 21 بأكواد السيرفر، وتوسيعها لتغطية كل الأزرار.
+- المرحلة 3: محرك الشاشات بالـ Metadata + تقسيم `PlatformContext.tsx` + code-splitting.
+- المرحلة 4: Outbox + تسلسل بلا فجوات للـ ETA + بارتشنات سجل التدقيق + جداول ناقصة.
+- **مطلوب من المالك:** نسخ `docs/ci/ci.yml` إلى `.github/workflows/` يدوياً،
+  أو منح تطبيق GitHub صلاحية `workflows`.
+
 # 2026-10-14
 
 ## Dual-Store Synchronization & Conflict Resolution (معالجة تضارب تعديلات الكيانات واستقرار الواجهة)

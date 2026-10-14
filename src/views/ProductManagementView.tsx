@@ -134,6 +134,7 @@ export const ProductManagementView: React.FC = () => {
     linkedServiceId: string;
     linkedServiceNameAr: string;
     isActive: boolean;
+    defaultCollectionOnly: boolean;
     notes: string;
     itemCodingType: 'EGS' | 'GS1';
     egsCode: string;
@@ -161,6 +162,7 @@ export const ProductManagementView: React.FC = () => {
     linkedServiceId: '',
     linkedServiceNameAr: '',
     isActive: true,
+    defaultCollectionOnly: false,
     notes: '',
     itemCodingType: 'EGS',
     egsCode: '',

@@ -362,7 +362,7 @@ export const BookingsFollowUpView: React.FC = () => {
   const isRtl = language === 'ar';
 
   // Navigation Tabs (أجندة الحجوزات، حجوزات اليوم التالي، جدول المتابعات، وجدول مواعيد دوام الموظفين)
-  const [activeTab, setActiveTab] = useState<'agenda' | 'next_day' | 'followup' | 'staff_schedule'>('agenda');
+  const [activeTab, setActiveTab] = useState<'agenda' | 'next_day' | 'followup' | 'staff_schedule' | 'treatment_plans'>('agenda');
 
   // Search & Filters
   const [searchQuery, setSearchQuery] = useState('');

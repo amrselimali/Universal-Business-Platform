@@ -1049,7 +1049,7 @@ export class NeonService {
         VALUES (
           ${cat.id},
           ${cat.tenantId || tenantId},
-          ${cat.name || ''}
+          ${cat.nameAr || ''}
         )
         ON CONFLICT (id) DO UPDATE SET
           name = EXCLUDED.name;

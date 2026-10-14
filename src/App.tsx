@@ -1,71 +1,30 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { PlatformProvider, usePlatform } from './context/PlatformContext';
 import { setRecoveryMode } from './utils/persistenceMode';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
-import { LoginView } from './views/LoginView';
-import { DashboardView } from './views/DashboardView';
-import { PosView } from './views/PosView';
-import { AccountingView } from './views/AccountingView';
-import { InventoryView } from './views/InventoryView';
-import { ClinicsView } from './views/ClinicsView';
-import { InvoicesView } from './views/InvoicesView';
-import { PartiesView } from './views/PartiesView';
-import { SuppliersView } from './views/SuppliersView';
-import { ModulesConfigView } from './views/ModulesConfigView';
-import { NeonHubView } from './views/NeonHubView';
-import { CompaniesBranchesView } from './views/CompaniesBranchesView';
-import { UsersRolesView } from './views/UsersRolesView';
-import { ReceptionOpsView } from './views/ReceptionOpsView';
-import { BookingsFollowUpView } from './views/BookingsFollowUpView';
-import { StaffManagementView } from './views/StaffManagementView';
-import { ProductManagementView } from './views/ProductManagementView';
-import { InventoryManagementView } from './views/InventoryManagementView';
-import { PaymentMethodsView } from './views/PaymentMethodsView';
-import { AuditTrailView } from './views/AuditTrailView';
-import { ActivityLogsView } from './views/ActivityLogsView';
-import { ShiftReportsView } from './views/ShiftReportsView';
-import { PayrollView } from './views/PayrollView';
-import { LaserDevicesView } from './views/LaserDevicesView';
-import { FiscalDocumentsView } from './views/FiscalDocumentsView';
-import { CashReceiptsView } from './views/CashReceiptsView';
-import { CollectionReceiptsView } from './views/CollectionReceiptsView';
-import { CustomerRefundsView } from './views/CustomerRefundsView';
-import { CashPaymentsView } from './views/CashPaymentsView';
-import { SpecializedTaxInvoicesView } from './views/SpecializedTaxInvoicesView';
-import { GoodsReceiptsView } from './views/GoodsReceiptsView';
-import { GoodsIssuesView } from './views/GoodsIssuesView';
-import { AttendanceManagementView } from './views/AttendanceManagementView';
-import { EmployeeDossierView } from './views/EmployeeDossierView';
-import { SmartNotificationsView } from './views/SmartNotificationsView';
-import { SystemManualView } from './views/SystemManualView';
+
 import { ShieldAlert, ArrowRight, ArrowLeft, Database, RefreshCw } from 'lucide-react';
 import { QuickActionsBar } from './components/QuickActionsBar';
 import { CommandPaletteModal } from './components/CommandPaletteModal';
 import { CustomizeQuickButtonsModal } from './components/CustomizeQuickButtonsModal';
 import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 import { GlobalContextMenu } from './components/GlobalContextMenu';
+import { LoginView, DynamicScreenView, DashboardView, PosView, AccountingView, InventoryView, ClinicsView, InvoicesView, PartiesView, SuppliersView, ModulesConfigView, NeonHubView, CompaniesBranchesView, UsersRolesView, ReceptionOpsView, BookingsFollowUpView, StaffManagementView, ProductManagementView, InventoryManagementView, PaymentMethodsView, AuditTrailView, ActivityLogsView, ShiftReportsView, PayrollView, LaserDevicesView, FiscalDocumentsView, CashReceiptsView, CollectionReceiptsView, CustomerRefundsView, CashPaymentsView, SpecializedTaxInvoicesView, GoodsReceiptsView, GoodsIssuesView, AttendanceManagementView, EmployeeDossierView, SmartNotificationsView, SystemManualView, MetadataStudioView } from './views/lazyViews';
+
+/** شاشة انتظار خفيفة تظهر أثناء تحميل شاشة عند الطلب. */
+const ViewLoadingFallback: React.FC<{ label: string }> = ({ label }) => (
+  <div className="flex min-h-[40vh] flex-col items-center justify-center gap-3 text-slate-400">
+    <RefreshCw className="h-6 w-6 animate-spin" />
+    <span className="text-xs font-bold">{label}</span>
+  </div>
+);
 
 const MainLayout: React.FC = () => {
-  const { language, t, canAccessView, currentUser, activeBranch, neonBootstrap, retryNeonBootstrap, neonDb, updateNeonConnectionString, neonConnectionInfo, neonOnline, syncNow, neonLastRefresh, isStorageHydrated } = usePlatform();
+  const { language, t, canAccessView, currentUser, activeBranch, neonBootstrap, retryNeonBootstrap, neonDb, updateNeonConnectionString, neonConnectionInfo, neonOnline, syncNow, neonLastRefresh, isStorageHydrated, currentView, setCurrentView } = usePlatform();
 
-  // Load preferred landing view from URL query param, hash, or localStorage (Supports Open in New Tab)
-  const [currentView, setCurrentView] = useState<string>(() => {
-    try {
-      const params = new URLSearchParams(window.location.search);
-      const urlView = params.get('view');
-      if (urlView) return urlView;
-
-      if (window.location.hash) {
-        const hash = window.location.hash.replace('#', '');
-        if (hash) return hash;
-      }
-
-      const saved = localStorage.getItem('erp_default_view');
-      if (saved) return saved;
-    } catch {}
-    return 'dashboard';
-  });
+  // الشاشة الحالية تأتي الآن من الـ PlatformContext (مصدر واحد لكل الشاشات)
+  // حتى تستطيع أي شاشة التنقل بنفسها بدل حصر التنقل في App.tsx.
 
   // Keep URL query param in sync so "Open in New Tab" and bookmarking work seamlessly
   useEffect(() => {
@@ -228,6 +187,21 @@ const MainLayout: React.FC = () => {
             {language === 'ar' ? <ArrowLeft className="h-4 w-4" /> : <ArrowRight className="h-4 w-4" />}
           </button>
         </div>
+      );
+    }
+
+    // شاشات مولّدة من محرك الشاشات (Metadata): meta_parties، meta_products، ...
+    // تُبنى من تعريف الكيان في قاعدة البيانات بلا كود مكتوب لكل حقل.
+    if (currentView.startsWith('meta_')) {
+      return <DynamicScreenView entityCode={currentView.slice('meta_'.length)} />;
+    }
+
+    // استوديو الـ Metadata: إدارة الشاشات والحقول بلا كود.
+    if (currentView === 'metadata_studio') {
+      return (
+        <MetadataStudioView
+          onPreview={(entityCode) => setCurrentView(`meta_${entityCode}`)}
+        />
       );
     }
 
@@ -434,7 +408,13 @@ const MainLayout: React.FC = () => {
         {/* Dynamic Content Main Stage */}
         <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
           <div key={`${currentView}-${activeBranch?.id || 'none'}`} className="mx-auto max-w-7xl">
-            {renderActiveView()}
+            {/*
+              Suspense: الشاشات تُحمَّل عند الطلب (Lazy). كل شاشة تصبح ملفاً
+              مستقلاً لا يُنزَّل إلا عند فتحها، بدل تحميل 36 شاشة معاً.
+            */}
+            <Suspense fallback={<ViewLoadingFallback label={t('جارٍ تحميل الشاشة…', 'Loading screen…')} />}>
+              {renderActiveView()}
+            </Suspense>
           </div>
         </main>
       </div>

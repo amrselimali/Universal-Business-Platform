@@ -30,6 +30,10 @@ export interface Tenant {
   supplierNumberingMode?: 'per_company' | 'per_branch';
   supplierStartNumber?: number;
   defaultPosCollectionOnly?: boolean; // الوضع الافتراضي لخيار تحصيل فقط في نقطة البيع
+  phone?: string; // هاتف المنشأة (يُستخدم في التقارير والإيصالات)
+  taxNumber?: string; // الرقم الضريبي للمنشأة (يُطبع على الفواتير الرسمية)
+  commercialRegNumber?: string; // رقم السجل التجاري (يُطبع على الفواتير الرسمية)
+  address?: string; // عنوان المنشأة الرسمي
   isArchived?: boolean;
   archivedAt?: string;
   archivedBy?: string;
@@ -46,6 +50,8 @@ export interface Branch {
   phone: string;
   isMain: boolean;
   isHeadquarters?: boolean;
+  /** الوضع الافتراضي لخيار «تحصيل فقط» في نقطة البيع لهذا الفرع (يتجاوز إعداد الشركة). */
+  defaultPosCollectionOnly?: boolean;
   isArchived?: boolean;
   archivedAt?: string;
   archivedBy?: string;
@@ -109,6 +115,8 @@ export interface Product {
   category: string;
   categoryId?: string;
   purchasePrice: number;
+  /** تكلفة الوحدة (اسم بديل مستخدم في بعض التقارير القديمة). */
+  costPrice?: number;
   sellingPrice: number;
   minSellingPrice?: number; // الحد الأدنى لسعر البيع
   taxRate?: number; // نسبة الضريبة المضافة
@@ -141,7 +149,7 @@ export interface Product {
 
   // ربط الصنف المخزني بالمنتجات البيعية ومقاييس الاستهلاك وتكلفة البيع
   linkedSalesProductIds?: string[]; // ربطه بالمنتجات أو الخدمات البيعية
-  consumptionBasis?: 'revenue_ratio' | 'units_sold' | 'clients_served' | 'fixed_monthly'; // أساس الربط
+  consumptionBasis?: 'revenue_ratio' | 'units_sold' | 'clients_served' | 'fixed_monthly' | 'client_count' | 'monthly_period'; // أساس الربط
   consumptionRate?: number; // معدل الاستهلاك لكل وحدة مبيعة أو 1000 ج.م إيراد
   monthlyQuota?: number; // الحصة الاستهلاكية الشهرية المحددة
   etaCode?: string; // كود الفاتورة الإلكترونية الموحد (EGS أو GS1) المعتمد من مصلحة الضرائب المصرية
@@ -188,17 +196,21 @@ export interface InventoryAudit {
   id: string;
   tenantId: string;
   branchId: string;
+  branchName?: string; // اسم الفرع (يُخزَّن مع الجرد للعرض والتقارير)
   warehouseId: string;
   warehouseName: string;
   auditNumber: string; // كود الجرد مثلا INV-COUNT-001
   auditDate: string;
-  status: 'Draft' | 'Settled' | 'Cancelled';
+  status: 'Draft' | 'Pending_Review' | 'Settled' | 'Cancelled';
   totalBookQty: number;
   totalActualQty: number;
   totalShortageQty: number; // إجمالي العجز بالكمية
   totalSurplusQty: number; // إجمالي الزيادة بالكمية
   totalShortageValue: number; // إجمالي قيمة العجز المالية
   totalSurplusValue: number; // إجمالي قيمة الزيادة المالية
+  totalExpectedValue?: number; // القيمة الدفترية المتوقعة قبل التسوية
+  totalActualValue?: number; // القيمة الفعلية بعد العد
+  journalNumber?: string; // رقم قيد التسوية المرتبط بالجرد
   netDifferenceValue: number; // صافي الفرق
   notes?: string;
   items: InventoryAuditItem[];
@@ -256,6 +268,8 @@ export interface JournalLine {
   accountCode: string;
   accountNameAr: string;
   accountNameEn: string;
+  /** العميل/المورد المرتبط بالسطر — يُستخدم في كشف الحساب التفصيلي (Party Statement). */
+  partyId?: string;
   debit: number;
   credit: number;
   memo?: string;
@@ -272,6 +286,8 @@ export interface JournalEntry {
   sourceDocument?: string;
   lines: JournalLine[];
   createdAt: string;
+  /** منشئ القيد — يُستخدم عند استعادة القيود وإعادة توليد السندات. */
+  createdBy?: string;
   voidedAt?: string;
   voidedBy?: string;
   voidReason?: string;
@@ -303,6 +319,9 @@ export interface PaymentMethod {
 // Client Offers / Packages (عروض وباقات العميل)
 export interface ClientOffer {
   id: string;
+  /** العميل المالك للباقة — يُضاف عند تجميع العروض من ملفات العملاء. */
+  clientId?: string;
+  clientName?: string;
   packageProductId?: string; // معرّف الصنف البيعي للباقة
   offerNameAr: string;
   offerNameEn: string;
@@ -338,6 +357,8 @@ export interface Party {
   altPhone?: string;
   email?: string;
   taxNumber?: string;
+  /** رقم السجل التجاري للعميل (مطلوب في الفاتورة الضريبية الرسمية). */
+  commercialReg?: string;
   nationalId?: string;
   address?: string;
   leadSource?: string; // عرفنا منين (فيسبوك، انستجرام، ترشيح صديق، الخ)
@@ -385,6 +406,12 @@ export interface StaffMember {
   id: string;
   tenantId: string;
   branchId?: string; // الفرع المربوط به
+  /** فروع متعددة لنفس الموظف — إذا كانت فارغة يُستخدم branchId فقط. */
+  branchIds?: string[];
+  /** كود الموظف (رقم الملف الوظيفي). */
+  code?: string;
+  /** الدور الوظيفي القديم — للتوافق مع البيانات القديمة. */
+  role?: string;
   nameAr: string;
   nameEn: string;
   staffType: StaffRoleType;
@@ -434,7 +461,9 @@ export interface StaffPayrollItem {
   commissions: number; // عمولات جلسات
   deductions: number; // استقطاعات وخصومات وسلف
   netSalary: number; // basic + allowances + commissions - deductions
-  paymentStatus: 'Pending' | 'Paid';
+  paymentStatus: 'Pending' | 'Partial' | 'Paid';
+  paidAmount?: number; // المبلغ المسدَّد فعلياً (يدعم السداد الجزئي)
+  disbursementMethod?: string; // طريقة الصرف الفعلية (خزينة / بنك / محفظة)
   paymentMethod?: string; // e.g. "الخزينة الرئيسية" | "تحويل بنكي"
   paidAt?: string;
   paidBy?: string;
@@ -494,6 +523,8 @@ export interface SalesInvoice {
   totalWithFee?: number;
   cashPaid?: number;
   cardPaid?: number;
+  /** إجمالي المبلغ المسدَّد فعلياً (يُستخدم لحساب المتبقي في التقارير). */
+  paidAmount?: number;
   splitPayments?: PaymentSplit[];
   isCollectionOnly?: boolean; // تحصيل دفعة/مقدم فقط
   isRefunded?: boolean;
@@ -641,7 +672,7 @@ export interface TreatmentPlan {
   totalSessions: number;
   completedSessions: number;
   totalCost?: number;
-  notes: string;
+  notes?: string;
   status: 'Active' | 'Completed' | 'Suspended';
   startDate?: string;
   date?: string;
@@ -670,6 +701,8 @@ export interface ShiftRunRow {
   serviceName: string; // اسم الخدمة
   serviceId?: string;
   pulsesCount?: number; // عدد النبضات (قبل الكمية)
+  /** الاسم البديل لعدد النبضات المستخدم في كشوف الحسابات. */
+  totalPulses?: number;
   consumedQuantity: number; // الكمية المستهلكة
   unitPrice: number; // سعر الوحدة
   totalRevenue: number; // الإيراد = الكمية * سعر الوحدة (محسوب آلياً)
@@ -870,6 +903,8 @@ export interface PosShift {
   branchId?: string;
   cashierName: string;
   openingFloat: number;
+  /** الاسم البديل للنقدية الافتتاحية المستخدم في بعض التقارير. */
+  startingCash?: number;
   openedAt: string;
   closedAt?: string;
   status: 'Open' | 'Closed';
@@ -882,17 +917,15 @@ export interface PosShift {
 }
 
 // Audit Trail & Logs (سجل التعديلات، المحذوفات، ونشاطات المستخدمين)
-export interface PaymentSplit {
-  method: string;
-  amount: number;
-  reference?: string;
-}
+// ملاحظة: كان هناك تعريفان متعارضان باسم PaymentSplit (methodId/methodName و method/amount)
+// ودمج TypeScript بينهما كان يجبر كل مستخدم على تمرير خصائص الاثنين معاً.
+// حُذف التعريف الزائد واكتُفي بتعريف واحد في الأعلى.
 
 export interface AuditRecord {
   id: string;
   tenantId: string;
   branchId?: string;
-  entityType: 'Party' | 'Appointment' | 'TreatmentPlan' | 'Staff' | 'PaymentMethod' | 'Product' | 'Invoice' | 'Shift' | 'Tenant' | 'Branch' | 'Warehouse' | 'User' | 'Account' | 'JournalEntry' | 'CustomerRefund';
+  entityType: 'Party' | 'Appointment' | 'TreatmentPlan' | 'Staff' | 'StaffMember' | 'PaymentMethod' | 'Product' | 'Invoice' | 'Shift' | 'Tenant' | 'Branch' | 'Warehouse' | 'User' | 'Account' | 'JournalEntry' | 'CustomerRefund';
   entityId: string;
   entityName: string;
   actionType: 'CREATE' | 'UPDATE' | 'DELETE' | 'ARCHIVE' | 'RESTORE' | 'CANCEL';
@@ -918,6 +951,11 @@ export interface UserActivityLog {
   screenNameEn: string;
   actionNameAr: string;
   actionNameEn: string;
+  /** الموديول التابع له الشاشة (يُستخدم في تجميع النشاط حسب الموديول). */
+  moduleId?: string;
+  moduleNameAr?: string;
+  /** اسم بديل للفعل — للتوافق مع السجلات القديمة. */
+  action?: string;
   details: string;
   timestamp: string;
   ipAddress?: string;
@@ -929,6 +967,9 @@ export interface ModuleDefinition {
   nameEn: string;
   descriptionAr: string;
   descriptionEn: string;
+  /** اسم بديل للوصف — للتوافق مع المكونات التي تستخدم descAr/descEn. */
+  descAr?: string;
+  descEn?: string;
   category: 'Core' | 'Operations' | 'Specialized' | 'Intelligence';
   icon: string;
   required?: boolean;

@@ -53,7 +53,7 @@ export const ClinicsView: React.FC = () => {
     fullName: '',
     phone: '',
     dateOfBirth: '1990-01-01',
-    gender: 'Male' as const,
+    gender: 'Male' as 'Male' | 'Female',
     chronicDiseases: '',
     allergies: '',
   });
@@ -71,6 +71,7 @@ export const ClinicsView: React.FC = () => {
       date: newApt.date,
       time: newApt.time,
       notes: newApt.notes,
+      status: 'Scheduled',
     });
     setShowBookModal(false);
   };
