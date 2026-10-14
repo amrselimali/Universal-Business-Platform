@@ -145,6 +145,17 @@ import {
   unlockPeriod,
   validatePeriodDate as validatePeriodDateAgainstLocks,
 } from './platform/accountingPeriods';
+import {
+  buildNotificationFromRule,
+  countUnread,
+  filterNotificationsForUser,
+  markAllRead,
+  markOneRead,
+  prependNotification,
+  removeNotification,
+  rulePlaysSound,
+  ruleShowsToast,
+} from './platform/notifications';
 
 // منطق أكواد العملاء انتقل إلى src/context/platform/customerCodes.ts
 // (أول خطوة في تقسيم هذا الملف العملاق).
@@ -11725,37 +11736,14 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const [activeToastNotification, setActiveToastNotification] = useState<AppNotification | null>(null);
 
-  // Filter notifications relevant to current user: role, branch, user ID
-  const notifications = useMemo(() => {
-    if (!currentUser) return allNotifications;
-    return allNotifications.filter((n) => {
-      // SuperAdmin & Admin see everything
-      if (currentUser.isAdmin || currentUser.role === 'SuperAdmin') return true;
-      // Branch check
-      if (
-        n.branchId &&
-        n.branchId !== 'all' &&
-        currentUser.allowedBranchIds &&
-        !currentUser.allowedBranchIds.includes('*') &&
-        !currentUser.allowedBranchIds.includes(n.branchId)
-      ) {
-        return false;
-      }
-      // Target User check
-      if (n.targetUserIds && n.targetUserIds.length > 0 && n.targetUserIds.includes(currentUser.id)) {
-        return true;
-      }
-      // Role check
-      if (n.targetRoles && n.targetRoles.length > 0) {
-        return n.targetRoles.includes(currentUser.role) || n.targetRoles.includes('*');
-      }
-      return true;
-    });
-  }, [allNotifications, currentUser]);
+  // فلترة الإشعارات حسب الفرع والدور والمستخدم — المنطق في
+  // src/context/platform/notifications.ts (منطق نقي مُختبر لمنع تسريب البيانات).
+  const notifications = useMemo(
+    () => filterNotificationsForUser(allNotifications, currentUser),
+    [allNotifications, currentUser]
+  );
 
-  const unreadNotificationsCount = useMemo(() => {
-    return notifications.filter((n) => !n.isRead).length;
-  }, [notifications]);
+  const unreadNotificationsCount = useMemo(() => countUnread(notifications), [notifications]);
 
   const toggleNotificationRule = (ruleId: string, isEnabled?: boolean) => {
     setNotificationRules((prev) =>
@@ -11843,44 +11831,24 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const rule = notificationRules.find((r) => r.code === ruleCode);
     if (!rule || !rule.isEnabled) return;
 
-    // Interpolate message tokens
-    let msgAr = rule.templateMessageAr;
-    let msgEn = rule.templateMessageEn;
-    Object.keys(payload).forEach((key) => {
-      const val = String(payload[key] ?? '');
-      msgAr = msgAr.split(`{${key}}`).join(val);
-      msgEn = msgEn.split(`{${key}}`).join(val);
+    // بناء الإشعار (مع تعبئة الرموز) انتقل إلى
+    // src/context/platform/notifications.ts — منطق نقي مُختبر.
+    const newNotif = buildNotificationFromRule(rule, payload, {
+      tenantId: tenant?.id || INITIAL_TENANT.id,
+      branchId: activeBranch?.id,
     });
 
-    const newNotif: AppNotification = {
-      id: `notif-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-      ruleCode: rule.code,
-      category: rule.category,
-      severity: rule.severity,
-      titleAr: rule.nameAr,
-      titleEn: rule.nameEn,
-      messageAr: msgAr,
-      messageEn: msgEn,
-      timestamp: new Date().toISOString(),
-      isRead: false,
-      targetRoles: rule.targetRoles,
-      targetUserIds: rule.targetUserIds,
-      branchId: payload.branchId || rule.targetBranchId || activeBranch?.id,
-      actionUrl: rule.actionUrl,
-      metadata: payload,
-    };
-
-    setAllNotifications((prev) => [newNotif, ...prev]);
+    setAllNotifications((prev) => prependNotification(prev, newNotif));
 
     // Sound alert
-    if (rule.soundAlert || rule.channels.includes('sound')) {
+    if (rulePlaysSound(rule)) {
       playNotificationSound(
         rule.severity === 'critical' ? 'critical' : rule.severity === 'warning' ? 'warning' : 'info'
       );
     }
 
     // Popup Toast alert
-    if (rule.channels.includes('popup')) {
+    if (ruleShowsToast(rule)) {
       setActiveToastNotification(newNotif);
       setTimeout(() => {
         setActiveToastNotification((current) => (current?.id === newNotif.id ? null : current));
@@ -11889,18 +11857,15 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const markNotificationAsRead = (notificationId: string) => {
-    setAllNotifications((prev) =>
-      prev.map((n) => (n.id === notificationId ? { ...n, isRead: true, readAt: new Date().toISOString() } : n))
-    );
+    setAllNotifications((prev) => markOneRead(prev, notificationId));
   };
 
   const markAllNotificationsAsRead = () => {
-    const now = new Date().toISOString();
-    setAllNotifications((prev) => prev.map((n) => ({ ...n, isRead: true, readAt: now })));
+    setAllNotifications((prev) => markAllRead(prev));
   };
 
   const deleteNotification = (notificationId: string) => {
-    setAllNotifications((prev) => prev.filter((n) => n.id !== notificationId));
+    setAllNotifications((prev) => removeNotification(prev, notificationId));
   };
 
   const clearAllNotifications = () => {
