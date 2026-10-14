@@ -1,5 +1,6 @@
 import { neon } from '@neondatabase/serverless';
 import { isApiConfigured, getApiToken, apiFetchRecords, apiFetchChanges, apiUpsertRecords, apiDeleteRecords } from './apiClient';
+import { tableForKey, readTableRecords, upsertTableRecords, softDeleteTableRecords, tableChangesSince } from './tableStore';
 
 /**
  * Record-level synchronisation (مزامنة على مستوى السجل).
@@ -79,6 +80,23 @@ export async function pushRecordChanges(
     }
   }
 
+  // REAL-TABLE PATH: the typed table is the source of truth when one exists.
+  if (tableForKey(docKey)) {
+    let pushedCount = 0;
+    let deletedCount = 0;
+    if (upserts.length > 0) {
+      const outcome = await upsertTableRecords({ connectionString, tenantId, docKey, records: upserts as Record<string, unknown>[], actor });
+      if (outcome.error) return { pushed: 0, deleted: 0, error: outcome.error };
+      pushedCount = outcome.upserted;
+    }
+    if (deletes.length > 0) {
+      const outcome = await softDeleteTableRecords({ connectionString, tenantId, docKey, ids: deletes, actor });
+      if (outcome.error) return { pushed: pushedCount, deleted: 0, error: outcome.error };
+      deletedCount = outcome.deleted;
+    }
+    return { pushed: pushedCount, deleted: deletedCount };
+  }
+
   try {
     const sql = getClient(connectionString);
     let pushed = 0;
@@ -120,6 +138,13 @@ export async function pullChangedRecords(
       deletedIds: (result.data?.deletedIds || []) as string[],
       nextCursor: String(result.data?.nextCursor || since),
     };
+  }
+
+  // REAL-TABLE PATH: read the changes from the typed table.
+  if (tableForKey(docKey)) {
+    const changed = await tableChangesSince({ connectionString, tenantId, docKey, since });
+    if (changed.error) return { records: [], deletedIds: [], nextCursor: since, error: changed.error };
+    return { records: changed.records as SyncRecord[], deletedIds: changed.deletedIds, nextCursor: changed.nextCursor };
   }
 
   try {
@@ -215,6 +240,12 @@ export async function fetchLiveRecords(
     } catch (apiError: any) {
       return { records, error: apiError?.message || 'api_read_failed' };
     }
+  }
+
+  // REAL-TABLE PATH: load the live rows from the typed table.
+  if (tableForKey(docKey)) {
+    const loaded = await readTableRecords({ connectionString, tenantId, docKey, onProgress });
+    return { records: loaded.records, error: loaded.error };
   }
 
   try {
