@@ -39,6 +39,11 @@ interface TokenPayload {
   allowedTenantIds: string[];
   allowedBranchIds: string[];
   allowedViews: string[];
+  /**
+   * الأفعال المسموحة للمستخدم (Action Registry) — صلاحيات على مستوى الزر لا الشاشة.
+   * غياب الفعل = ممنوع (Default-Deny). القيمة '*' تعني كل الأفعال.
+   */
+  allowedActions?: string[];
 }
 
 declare module 'fastify' {
@@ -113,6 +118,7 @@ app.post('/auth/login', async (request, reply) => {
     allowedTenantIds: Array.isArray(account.payload?.allowedTenantIds) ? account.payload.allowedTenantIds : [String(account.tenant_id)],
     allowedBranchIds: Array.isArray(account.payload?.allowedBranchIds) ? account.payload.allowedBranchIds : [],
     allowedViews: Array.isArray(account.payload?.allowedViews) ? account.payload.allowedViews : [],
+    allowedActions: Array.isArray(account.payload?.allowedActions) ? account.payload.allowedActions : [],
   };
   const token = jwt.sign(payload, JWT_SECRET as string, { expiresIn: JWT_EXPIRES_IN } as any);
   if (!account.payload?.passwordHash && account.payload?.password) {
@@ -132,6 +138,51 @@ function assertTenant(request: any, requestedTenantId?: string): string {
   }
   return target;
 }
+
+/**
+ * فحص صلاحية على مستوى الزر (Action Registry) بقاعدة Default-Deny.
+ *
+ * هذا هو الفرق بين «المستخدم يشوف الشاشة» و«المستخدم يملك حق تنفيذ الفعل»:
+ *   - allowedViews تسمح بفتح الشاشة.
+ *   - allowedActions تسمح بالضغط على زر معيّن داخلها.
+ *
+ * غياب الفعل من القائمة = 403 فوري، حتى لو كان المستخدم يرى الشاشة.
+ * القيمة '*' (أو دور SuperAdmin) تعني كل الأفعال.
+ */
+function assertAction(request: any, actionCode: string): void {
+  const auth = request.auth as TokenPayload;
+  const actions = auth.allowedActions || [];
+  const isSuper = auth.role === 'SuperAdmin' || actions.includes('*');
+  if (isSuper || actions.includes(actionCode)) return;
+
+  throw Object.assign(new Error('action_not_allowed'), {
+    statusCode: 403,
+    actionCode,
+    detail: `ليس لديك الصلاحية المسجّلة [${actionCode}] لتنفيذ هذه العملية.`,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// معالج الأخطاء الموحّد: يحوّل الأخطاء المرفوعة إلى ردود JSON واضحة
+// ---------------------------------------------------------------------------
+app.setErrorHandler((error: any, request, reply) => {
+  const statusCode = Number(error?.statusCode) || 500;
+
+  if (statusCode === 403) {
+    return reply.code(403).send({
+      error: error?.message || 'forbidden',
+      actionCode: error?.actionCode,
+      message: error?.detail || 'مرفوض أمنياً: لا تملك الصلاحية لتنفيذ هذه العملية.',
+    });
+  }
+
+  if (statusCode >= 400 && statusCode < 500) {
+    return reply.code(statusCode).send({ error: error?.message || 'bad_request' });
+  }
+
+  request.log.error(error);
+  return reply.code(500).send({ error: 'internal_error' });
+});
 
 // ---------------------------------------------------------------------------
 // Records (the data layer the app uses)
@@ -234,6 +285,7 @@ app.post('/records/:docKey', async (request, reply) => {
   const parsed = upsertSchema.safeParse(request.body);
   if (!parsed.success) return reply.code(400).send({ error: 'invalid_payload' });
   const tenantId = assertTenant(request);
+  assertAction(request, 'record.save');
   const actor = String(request.auth?.sub || 'api');
 
   if (parsed.data.enforceVersion === true) {
@@ -263,6 +315,7 @@ app.post('/records/:docKey/delete', async (request, reply) => {
   const parsed = deleteSchema.safeParse(request.body);
   if (!parsed.success) return reply.code(400).send({ error: 'invalid_payload' });
   const tenantId = assertTenant(request);
+  assertAction(request, 'record.delete');
   const actor = String(request.auth?.sub || 'api');
   const rows = await one<any[]>(
     tenantId,
@@ -295,6 +348,7 @@ app.post('/accounting/journal', async (request, reply) => {
   const parsed = journalSchema.safeParse(request.body);
   if (!parsed.success) return reply.code(400).send({ error: 'invalid_payload', details: parsed.error.issues });
   const tenantId = assertTenant(request);
+  assertAction(request, 'journal.post');
   const body = parsed.data;
   try {
     const rows = await one<any[]>(
@@ -324,6 +378,7 @@ app.post('/accounting/receipt', async (request, reply) => {
   const parsed = receiptSchema.safeParse(request.body);
   if (!parsed.success) return reply.code(400).send({ error: 'invalid_payload' });
   const tenantId = assertTenant(request);
+  assertAction(request, 'receipt.create');
   const b = parsed.data;
   try {
     const rows = await one<any[]>(
@@ -344,6 +399,7 @@ app.post('/accounting/journal/:id/reverse', async (request, reply) => {
   const parsed = z.object({ reason: z.string().min(3) }).safeParse(request.body);
   if (!parsed.success) return reply.code(400).send({ error: 'invalid_payload' });
   const tenantId = assertTenant(request);
+  assertAction(request, 'journal.reverse');
   try {
     const rows = await one<any[]>(
       tenantId,
@@ -365,12 +421,6 @@ app.get('/accounting/balances', async (request) => {
     []
   );
   return { balances: rows || [] };
-});
-
-app.setErrorHandler((error, request, reply) => {
-  const status = (error as any).statusCode || 500;
-  if (status >= 500) request.log.error(error);
-  reply.code(status).send({ error: (error as any)?.message || 'internal_error' });
 });
 
 await app.listen({ port: PORT, host: '0.0.0.0' });
