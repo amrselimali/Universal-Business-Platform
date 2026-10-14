@@ -18,6 +18,10 @@ import {
   PaymentMethod,
 } from '../types';
 
+// مكتبة Neon تُعيد `any`؛ نضبط الحدود هنا بدل نشر `as any` في كل موضع.
+type NeonRow = Record<string, unknown>;
+const asRows = <T = NeonRow>(r: unknown): T[] => (Array.isArray(r) ? (r as T[]) : []);
+
 export class NeonService {
   private static getClient(connectionString: string) {
     const cleanUrl = connectionString.trim();
@@ -492,11 +496,8 @@ export class NeonService {
     }
   }
 
-  /**
-   * Inserts many rows using ONE request per batch instead of one request per row.
-   * Row-by-row inserts made large datasets (tens of thousands of appointments) take
-   * hours and appear stuck, because every row was a separate HTTP round-trip.
-   */
+  /** Inserts many rows in ONE request per batch (row-by-row made large datasets
+   * take hours: every row was a separate HTTP round-trip). */
   private static async insertRowsInBatches(
     sql: any,
     table: string,
@@ -522,11 +523,8 @@ export class NeonService {
   }
 
 
-  /**
-   * Creates (or updates) every dataset table in Neon from the shared schema definition.
-   * Idempotent: safe to run repeatedly; existing tables/columns are preserved and only
-   * missing ones are added. Returns a per-table report.
-   */
+  /** Creates/updates every dataset table from the shared schema definition.
+   * Idempotent: existing tables/columns are preserved; missing ones are added. */
   static async runFullSchemaMigration(connectionString: string): Promise<{
     success: boolean;
     created: number;
@@ -737,7 +735,7 @@ export class NeonService {
     try {
       const sql = this.getClient(connectionString);
       const rows = await sql`SELECT code, name_ar, currency, tax_rate FROM tenants WHERE id = ${tenantId} LIMIT 1`;
-      const row = (rows as any[])[0];
+      const row = asRows(rows)[0];
       if (!row) return null;
       return {
         code: String(row.code || tenantId),
@@ -764,7 +762,7 @@ export class NeonService {
         [tenantId]
       );
       const counts: { [key: string]: number } = {};
-      (rows as any[]).forEach((row) => { counts[row.doc_key] = Number(row.items); });
+      asRows<{ doc_key: string; items: unknown }>(rows).forEach((r) => { counts[r.doc_key] = Number(r.items); });
       return { success: true, counts, message: `تم قراءة ${Object.keys(counts).length} مجموعة من Neon` };
     } catch (err: any) {
       return { success: false, counts: {}, message: 'فشل قراءة الأعداد: ' + (err?.message || String(err)) };
@@ -782,7 +780,7 @@ export class NeonService {
       let tenantsTableId = '';
       try {
         const rows = await sql`SELECT id FROM tenants ORDER BY created_at ASC NULLS LAST LIMIT 1`;
-        tenantsTableId = String((rows as any[])[0]?.id ?? '');
+        tenantsTableId = String(asRows(rows)[0]?.id ?? '');
       } catch (error) {
         console.warn('resolveActiveTenantId (tenants) failed:', error);
       }
@@ -807,7 +805,7 @@ export class NeonService {
     try {
       const sql = this.getClient(connectionString);
       const rows = await sql`SELECT tenant_id FROM app_records WHERE deleted_at IS NULL LIMIT 1`;
-      const first = (rows as any[])[0];
+      const first = asRows(rows)[0];
       if (first?.tenant_id) return String(first.tenant_id);
     } catch (error) {
       console.warn('fetchFirstTenantId failed:', error);
@@ -815,7 +813,7 @@ export class NeonService {
     try {
       const sql = this.getClient(connectionString);
       const rows = await sql`SELECT id FROM tenants LIMIT 1`;
-      const first = (rows as any[])[0];
+      const first = asRows(rows)[0];
       if (first?.id) return String(first.id);
     } catch (error) {
       console.warn('fetchFirstTenantId (tenants) failed:', error);
@@ -838,7 +836,7 @@ export class NeonService {
       const rows = await sql`
         SELECT payload FROM app_documents WHERE tenant_id = ${tenantId} AND doc_key = ${key}
       `;
-      const payload: any = (rows as any[])[0]?.payload;
+      const payload: any = asRows(rows)[0]?.payload;
       if (payload === undefined) return { success: true, value: undefined, message: 'غير موجود' };
 
       if (payload && typeof payload === 'object' && (payload as any).__chunked) {
@@ -860,7 +858,7 @@ export class NeonService {
             params
           );
           names.forEach((name) => {
-            const found = (chunkRows as any[]).find((row) => row.doc_key === name);
+            const found = asRows(chunkRows).find((row) => row.doc_key === name);
             if (Array.isArray(found?.payload)) merged.push(...found.payload);
           });
         }
@@ -887,9 +885,9 @@ export class NeonService {
         [tenantId]
       );
       const metadata: { [key: string]: string } = {};
-      (rows as any[]).forEach((row) => {
+      asRows(rows).forEach((row) => {
         const raw = row.updated_at;
-        metadata[row.doc_key] = raw instanceof Date ? raw.toISOString() : String(raw ?? '');
+        metadata[String(row.doc_key)] = raw instanceof Date ? raw.toISOString() : String(raw ?? '');
       });
       return { success: true, metadata, message: `تم قراءة ${Object.keys(metadata).length} مفتاح` };
     } catch (err: any) {
@@ -1800,7 +1798,7 @@ export class NeonService {
         `SELECT DISTINCT doc_key FROM app_records WHERE tenant_id = $1 AND deleted_at IS NULL ORDER BY doc_key`,
         [tenantId]
       );
-      const available = (rows as any[]).map((row) => String(row.doc_key));
+      const available = asRows(rows).map((row) => String(row.doc_key));
       const targetKeys = keys && keys.length > 0 ? available.filter((key) => keys.includes(key)) : available;
       const documents: { [key: string]: unknown } = {};
       const PAGE = 2000;

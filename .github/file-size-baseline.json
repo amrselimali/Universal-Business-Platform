@@ -1,8 +1,8 @@
 {
   "limit": 300,
   "files": {
-    "src/context/PlatformContext.tsx": 12306,
-    "src/views/BookingsFollowUpView.tsx": 6841,
+    "src/context/PlatformContext.tsx": 12220,
+    "src/views/BookingsFollowUpView.tsx": 6495,
     "src/views/AccountingView.tsx": 3320,
     "src/views/ReceptionOpsView.tsx": 3156,
     "src/views/InventoryManagementView.tsx": 2990,
@@ -14,12 +14,11 @@
     "src/views/CollectionReceiptsView.tsx": 2110,
     "src/components/PartyStatementModal.tsx": 2076,
     "src/views/InvoicesView.tsx": 1872,
-    "src/services/neonService.ts": 1834,
+    "src/services/neonService.ts": 1832,
     "src/views/UsersRolesView.tsx": 1605,
     "src/views/InventoryView.tsx": 1509,
     "src/views/LaserDevicesView.tsx": 1486,
     "src/views/SmartNotificationsView.tsx": 1443,
-    "src/types.ts": 1332,
     "src/views/StaffManagementView.tsx": 1278,
     "src/views/PosView.tsx": 1181,
     "src/views/PaymentMethodsView.tsx": 1142,
@@ -63,5 +62,6 @@
     "src/components/GlobalContextMenu.tsx": 314,
     "src/services/recordSync.ts": 304
   },
-  "dataLimit": 800
+  "dataLimit": 800,
+  "declarationLimit": 1500
 }

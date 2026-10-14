@@ -38,6 +38,7 @@ const MIGRATIONS = [
   { file: 'scripts/neon_metadata_seed.sql', title: 'محرك الشاشات: البيانات المولَّدة' },
   { file: 'scripts/neon_phase4_infrastructure.sql', title: 'المرحلة 4: Outbox + التسلسل بلا فجوات' },
   { file: 'scripts/neon_phase4_missing_tables.sql', title: 'المرحلة 4: المرفقات والعملات و ETA' },
+  { file: 'scripts/neon_retention_policy.sql', title: 'سياسة تنظيف السجلات المحذوفة ناعماً' },
 ];
 
 /** استعلامات التحقق — تُشغَّل بعد التطبيق. */
@@ -60,6 +61,8 @@ const CHECKS = [
   ['عدد حقول الكيانات', `SELECT count(*)::int AS value FROM erp_entity_fields`],
   ['عدد الجداول المقفلة بـ RLS', `SELECT count(*)::int AS value FROM pg_tables WHERE schemaname='public' AND rowsecurity = true`],
   ['مستخدم قاعدة البيانات المحدود', `SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='app_api') AS ok`],
+  ['سياسة تنظيف السجلات', `SELECT to_regclass('public.retention_policies') IS NOT NULL AS ok`],
+  ['دالة purge_all_soft_deleted', `SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname='purge_all_soft_deleted') AS ok`],
 ];
 
 // ---------------------------------------------------------------------------
