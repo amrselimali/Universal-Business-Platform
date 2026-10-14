@@ -50,17 +50,17 @@ export const DocumentPrintModal: React.FC<DocumentPrintModalProps> = ({ document
                   const text = generateInvoiceWhatsAppText({
                     invoiceNumber: doc.data.invoiceNumber,
                     customerName: doc.data.customerName,
-                    netTotal: doc.data.netTotal,
-                    vatAmount: doc.data.vatAmount,
-                    date: doc.data.issueDate,
-                    clinicName: tenant.nameAr || tenant.name || 'المركز الطبي',
+                    netTotal: doc.data.totalTaxable,
+                    vatAmount: doc.data.totalVat,
+                    date: doc.data.date,
+                    clinicName: tenant.name || 'المركز الطبي',
                   });
                   shareViaWhatsApp(doc.data.customerPhone || '', text);
                 } else if (doc.type === 'cash_receipt') {
-                  const text = `مرحباً ${doc.data.receivedFrom}، تم استلام مبلغ ${formatMoney(doc.data.amount)} بموجب سند قبض رقم ${doc.data.voucherNumber} بتاريخ ${doc.data.date} لصالح ${tenant.nameAr || tenant.name}. شكراً لتعاملكم معنا.`;
+                  const text = `مرحباً ${doc.data.receivedFrom}، تم استلام مبلغ ${formatMoney(doc.data.amount)} بموجب سند قبض رقم ${doc.data.voucherNumber} بتاريخ ${doc.data.date} لصالح ${tenant.name}. شكراً لتعاملكم معنا.`;
                   shareViaWhatsApp('', text);
                 } else {
-                  const text = `مستند مالي: رقم المستند ${doc.data.id} الصادر من ${tenant.nameAr || tenant.name}`;
+                  const text = `مستند مالي: رقم المستند ${doc.data.id} الصادر من ${tenant.name}`;
                   shareViaWhatsApp('', text);
                 }
               }}
@@ -91,12 +91,12 @@ export const DocumentPrintModal: React.FC<DocumentPrintModalProps> = ({ document
           {/* Header */}
           <div className="flex justify-between items-start border-b-2 border-slate-800 pb-4">
             <div>
-              <h1 className="text-xl font-black text-slate-900 mb-1">{tenant.nameAr}</h1>
+              <h1 className="text-xl font-black text-slate-900 mb-1">{tenant.name}</h1>
               <p className="text-xs text-slate-500">{tenant.nameEn}</p>
               <div className="text-xs text-slate-600 mt-2 space-y-0.5">
                 <div>السجل التجاري: <span className="font-mono font-bold">{tenant.commercialRegNumber || '1010123456'}</span></div>
                 <div>الرقم الضريبي: <span className="font-mono font-bold">{tenant.taxNumber || '300000000000003'}</span></div>
-                <div>الفرع: {activeBranch?.nameAr || 'الفرع الرئيسي'}</div>
+                <div>الفرع: {activeBranch?.name || 'الفرع الرئيسي'}</div>
               </div>
             </div>
 
@@ -297,7 +297,7 @@ export const DocumentPrintModal: React.FC<DocumentPrintModalProps> = ({ document
               <div className="grid grid-cols-2 gap-4 text-xs border border-slate-200 rounded-xl p-4 bg-slate-50">
                 <div className="space-y-1">
                   <span className="font-bold text-slate-500 block mb-1">بيانات المورد (البائع):</span>
-                  <div className="font-black text-sm text-slate-900">{tenant.nameAr}</div>
+                  <div className="font-black text-sm text-slate-900">{tenant.name}</div>
                   <div>الرقم الضريبي: <strong className="font-mono">{doc.data.sellerVatNumber || tenant.taxNumber}</strong></div>
                   <div>السجل التجاري: <strong className="font-mono">{doc.data.sellerCrNumber || tenant.commercialRegNumber}</strong></div>
                   <div>العنوان: {doc.data.sellerAddress}</div>

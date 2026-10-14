@@ -206,6 +206,27 @@ interface PlatformContextType {
   setLanguage: (lang: Language) => void;
   t: (ar: string, en: string) => string;
   formatMoney: (amount: number) => string;
+  /** التنقل بين الشاشات — المصدر الوحيد للحالة الحالية. */
+  currentView: string;
+  setCurrentView: (view: string) => void;
+  /** كل الحسابات (بما فيها غير التابعة للشركة الحالية) — تُستخدم في أدوات قواعد البيانات. */
+  allAccounts: Account[];
+  /** كل قيود اليومية (بما فيها غير التابعة للشركة الحالية). */
+  allJournals: JournalEntry[];
+  /** كل باقات وعروض العملاء مجمّعة من كل الملفات. */
+  clientOffers: ClientOffer[];
+  /** إنشاء ملف مريض/عميل جديد من بيانات سريعة (شاشة العيادات). */
+  addPatient: (data: {
+    fullName: string;
+    phone: string;
+    dateOfBirth?: string;
+    gender?: 'Male' | 'Female';
+    chronicDiseases?: string[];
+    allergies?: string[];
+    branchId?: string;
+  }) => Party;
+  /** تغيير حالة موعد (تأكيد / اكتمال / إلغاء). */
+  updateAppointmentStatus: (id: string, status: Appointment['status'], reason?: string) => void;
   tenant: Tenant;
   setTenant: React.Dispatch<React.SetStateAction<Tenant>>;
   tenants: Tenant[];
@@ -708,6 +729,30 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
     document.documentElement.lang = lang;
   };
+
+  // ---------------------------------------------------------------------
+  // التنقل بين الشاشات (Navigation)
+  // ---------------------------------------------------------------------
+  // كان `currentView` محبوساً داخل App.tsx فلا تستطيع أي شاشة التنقل بنفسها.
+  // رفعناه إلى الـ PlatformContext ليكون مصدراً واحداً لكل الشاشات.
+  const [currentView, setCurrentView] = useState<string>(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const urlView = params.get('view');
+      if (urlView) return urlView;
+
+      if (window.location.hash) {
+        const hash = window.location.hash.replace('#', '');
+        if (hash) return hash;
+      }
+
+      const saved = localStorage.getItem('erp_default_view');
+      if (saved) return saved;
+    } catch {
+      /* تجاهل — سيتم استخدام الشاشة الافتراضية */
+    }
+    return 'dashboard';
+  });
 
   useEffect(() => {
     document.documentElement.dir = language === 'ar' ? 'rtl' : 'ltr';
@@ -6235,7 +6280,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         roleType: staff.roleType,
         jobTitleAr: staff.jobTitleAr,
         branchId: staff.branchId,
-        branchName: staffBranch?.nameAr,
+        branchName: staffBranch?.name,
         month,
         basicSalary: baseSalary,
         allowances,
@@ -10614,7 +10659,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     // Generate ZATCA Base64 TLV
     const zatcaTlv = generateZatcaTlvBase64(
-      data.sellerVatNumber ? tenant.nameAr : 'عيادات ومجمع طبي',
+      data.sellerVatNumber ? tenant.name : 'عيادات ومجمع طبي',
       data.sellerVatNumber || '300000000000003',
       `${data.date}T${data.time || '12:00:00'}Z`,
       data.grandTotal,
@@ -11156,6 +11201,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     tenantId?: string;
     datasetCount?: number;
     progress?: string;
+    syncing?: boolean;
   }>({ status: 'idle' });
   const neonBootstrapRanRef = useRef(false);
   /** Last known Neon `updated_at` per dataset (used by the 1-minute refresh). */
@@ -11935,13 +11981,74 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     window.location.reload();
   };
 
+  // ---------------------------------------------------------------------
+  // قيم وإجراءات مشتقة (Derived values & actions)
+  // ---------------------------------------------------------------------
+
+  /** كل باقات وعروض العملاء مجمّعة من ملفات جميع العملاء. */
+  const clientOffers: ClientOffer[] = useMemo(
+    () =>
+      allParties.flatMap((party) =>
+        (party.offers || []).map((offer) => ({
+          ...offer,
+          clientId: party.id,
+          clientName: party.name,
+        }))
+      ),
+    [allParties]
+  );
+
+  /** إنشاء ملف مريض/عميل جديد من شاشة العيادات ببيانات سريعة. */
+  const addPatient = (data: {
+    fullName: string;
+    phone: string;
+    dateOfBirth?: string;
+    gender?: 'Male' | 'Female';
+    chronicDiseases?: string[];
+    allergies?: string[];
+    branchId?: string;
+  }): Party =>
+    addParty({
+      name: data.fullName,
+      nameEn: data.fullName,
+      fullName: data.fullName,
+      type: 'Customer',
+      phone: data.phone,
+      branchId: data.branchId,
+      dateOfBirth: data.dateOfBirth,
+      gender: data.gender,
+      chronicDiseases: data.chronicDiseases || [],
+      allergies: data.allergies || [],
+      balance: 0,
+    });
+
+  /** تغيير حالة موعد مع تسجيل السبب عند الإلغاء أو عدم الحضور. */
+  const updateAppointmentStatus = (
+    id: string,
+    status: Appointment['status'],
+    reason?: string
+  ) => {
+    const patch: Partial<Appointment> = { status };
+    if (status === 'Cancelled') patch.cancellationReason = reason;
+    if (status === 'NotAttended') patch.notAttendedReason = reason;
+    updateAppointment(id, patch);
+  };
+
   return (
+
     <PlatformContext.Provider
       value={{
         language,
         setLanguage,
         t,
         formatMoney,
+        currentView,
+        setCurrentView,
+        allAccounts,
+        allJournals,
+        clientOffers,
+        addPatient,
+        updateAppointmentStatus,
         tenant,
         setTenant,
         tenants,

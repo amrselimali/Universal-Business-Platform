@@ -47,25 +47,10 @@ import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 import { GlobalContextMenu } from './components/GlobalContextMenu';
 
 const MainLayout: React.FC = () => {
-  const { language, t, canAccessView, currentUser, activeBranch, neonBootstrap, retryNeonBootstrap, neonDb, updateNeonConnectionString, neonConnectionInfo, neonOnline, syncNow, neonLastRefresh, isStorageHydrated } = usePlatform();
+  const { language, t, canAccessView, currentUser, activeBranch, neonBootstrap, retryNeonBootstrap, neonDb, updateNeonConnectionString, neonConnectionInfo, neonOnline, syncNow, neonLastRefresh, isStorageHydrated, currentView, setCurrentView } = usePlatform();
 
-  // Load preferred landing view from URL query param, hash, or localStorage (Supports Open in New Tab)
-  const [currentView, setCurrentView] = useState<string>(() => {
-    try {
-      const params = new URLSearchParams(window.location.search);
-      const urlView = params.get('view');
-      if (urlView) return urlView;
-
-      if (window.location.hash) {
-        const hash = window.location.hash.replace('#', '');
-        if (hash) return hash;
-      }
-
-      const saved = localStorage.getItem('erp_default_view');
-      if (saved) return saved;
-    } catch {}
-    return 'dashboard';
-  });
+  // الشاشة الحالية تأتي الآن من الـ PlatformContext (مصدر واحد لكل الشاشات)
+  // حتى تستطيع أي شاشة التنقل بنفسها بدل حصر التنقل في App.tsx.
 
   // Keep URL query param in sync so "Open in New Tab" and bookmarking work seamlessly
   useEffect(() => {

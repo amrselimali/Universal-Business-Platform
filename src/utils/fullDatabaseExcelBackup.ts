@@ -19,6 +19,7 @@ import {
   AttendanceRecord,
   StaffMember,
   Appointment,
+  PatientFollowUp,
   PaymentMethod,
   LaserDevice,
 } from '../types';

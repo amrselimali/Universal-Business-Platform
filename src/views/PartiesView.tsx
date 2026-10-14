@@ -1883,8 +1883,10 @@ export const PartiesView: React.FC = () => {
                 return (
                   <div className="space-y-2">
                     {partyOffers.map((offer) => {
-                      const percent = Math.round(((offer.totalSessions - offer.remainingSessions) / offer.totalSessions) * 100);
-                      const isFinished = offer.remainingSessions <= 0;
+                      const percent = offer.totalQuantity > 0
+                        ? Math.round(((offer.totalQuantity - offer.remainingQuantity) / offer.totalQuantity) * 100)
+                        : 0;
+                      const isFinished = offer.remainingQuantity <= 0;
 
                       return (
                         <div
@@ -1894,10 +1896,10 @@ export const PartiesView: React.FC = () => {
                           <div className="flex items-start justify-between">
                             <div>
                               <h5 className="text-xs font-black text-slate-900 dark:text-white">
-                                {offer.offerName}
+                                {offer.offerNameAr}
                               </h5>
                               <p className="text-[11px] text-slate-400 mt-0.5">
-                                القيمة: {formatMoney(offer.totalPrice)} • صالح حتى: {offer.expiresAt}
+                                القيمة: {formatMoney(offer.totalPrice)} • صالح حتى: {offer.expiryDate}
                               </p>
                             </div>
                             <span
@@ -1915,7 +1917,7 @@ export const PartiesView: React.FC = () => {
                           <div>
                             <div className="flex justify-between text-[11px] font-bold mb-1">
                               <span className="text-purple-600 dark:text-purple-400">
-                                المتبقي: {offer.remainingSessions} من {offer.totalSessions} جلسة
+                                المتبقي: {offer.remainingQuantity} من {offer.totalQuantity} جلسة
                               </span>
                               <span className="text-slate-400">{percent}% مستهلك</span>
                             </div>
@@ -1931,7 +1933,7 @@ export const PartiesView: React.FC = () => {
                           {!isFinished && (
                             <div className="flex justify-end pt-1">
                               <button
-                                onClick={() => consumeClientOfferSession(offer.id)}
+                                onClick={() => consumeClientOfferSession(selectedPackageParty.id, offer.id)}
                                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold shadow-xs cursor-pointer transition-colors"
                               >
                                 <CheckCircle2 className="h-3.5 w-3.5" />
@@ -2015,14 +2017,14 @@ export const PartiesView: React.FC = () => {
                       alert('يرجى كتابة اسم الباقة أولاً');
                       return;
                     }
-                    addClientOffer({
-                      clientId: selectedPackageParty.id,
-                      clientName: selectedPackageParty.name,
-                      offerName: newOfferName.trim(),
-                      totalSessions: newOfferSessions,
-                      remainingSessions: newOfferSessions,
+                    addClientOffer(selectedPackageParty.id, {
+                      offerNameAr: newOfferName.trim(),
+                      offerNameEn: newOfferName.trim(),
+                      totalQuantity: newOfferSessions,
+                      consumedQuantity: 0,
+                      remainingQuantity: newOfferSessions,
                       totalPrice: newOfferPrice,
-                      expiresAt: newOfferExpiry,
+                      expiryDate: newOfferExpiry,
                     });
                     setNewOfferName('');
                   }}

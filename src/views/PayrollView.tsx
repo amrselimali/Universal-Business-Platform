@@ -717,7 +717,7 @@ export const PayrollView: React.FC = () => {
                     ? t('قسيمة صرف راتب موظف معتمدة', 'Official Staff Payslip')
                     : t(`مسير رواتب الكوادر لشهر ${selectedMonth}`, `Staff Payroll Sheet - ${selectedMonth}`)}
                 </h3>
-                <p className="text-xs text-slate-400">{tenant?.name} • {activeBranch?.nameAr}</p>
+                <p className="text-xs text-slate-400">{tenant?.name} • {activeBranch?.name}</p>
               </div>
               <div className="flex items-center gap-2">
                 <button

@@ -79,12 +79,12 @@ export const InventoryView: React.FC = () => {
   const [categoryForm, setCategoryForm] = useState<{
     nameAr: string;
     nameEn: string;
-    type: 'services' | 'goods' | 'both';
+    type: 'service' | 'product' | 'both';
     description?: string;
   }>({
     nameAr: '',
     nameEn: '',
-    type: 'services',
+    type: 'service',
     description: '',
   });
 
@@ -220,7 +220,7 @@ export const InventoryView: React.FC = () => {
     setCategoryForm({
       nameAr: '',
       nameEn: '',
-      type: 'services',
+      type: 'service',
       description: '',
     });
     setShowAddCategoryModal(true);
@@ -231,7 +231,7 @@ export const InventoryView: React.FC = () => {
     setCategoryForm({
       nameAr: cat.nameAr,
       nameEn: cat.nameEn || '',
-      type: cat.type || 'services',
+      type: cat.type || 'service',
       description: cat.description || '',
     });
     setShowEditCategoryModal(true);
@@ -699,9 +699,9 @@ export const InventoryView: React.FC = () => {
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex items-center gap-2.5">
                         <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-400">
-                          {cat.type === 'services' ? (
+                          {cat.type === 'service' ? (
                             <Stethoscope className="h-5 w-5" />
-                          ) : cat.type === 'goods' ? (
+                          ) : cat.type === 'product' ? (
                             <Package className="h-5 w-5" />
                           ) : (
                             <Layers className="h-5 w-5" />
@@ -719,16 +719,16 @@ export const InventoryView: React.FC = () => {
 
                       <span
                         className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold ${
-                          cat.type === 'services'
+                          cat.type === 'service'
                             ? 'bg-teal-50 text-teal-700 dark:bg-teal-950/40 dark:text-teal-300'
-                            : cat.type === 'goods'
+                            : cat.type === 'product'
                             ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300'
                             : 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300'
                         }`}
                       >
-                        {cat.type === 'services'
+                        {cat.type === 'service'
                           ? t('مجموعة خدمات', 'Services Group')
-                          : cat.type === 'goods'
+                          : cat.type === 'product'
                           ? t('مجموعة بضائع', 'Goods Group')
                           : t('شاملة (خدمات وبضائع)', 'Both')}
                       </span>
@@ -1201,13 +1201,13 @@ export const InventoryView: React.FC = () => {
                   onChange={(e) =>
                     setCategoryForm({
                       ...categoryForm,
-                      type: e.target.value as 'services' | 'goods' | 'both',
+                      type: e.target.value as 'service' | 'product' | 'both',
                     })
                   }
                   className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 font-bold text-slate-800 outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                 >
-                  <option value="services">{t('خدمات طبية واستشارية (Non-stock)', 'Services Only')}</option>
-                  <option value="goods">{t('سلع ومستلزمات مخزنية (Physical Stock)', 'Goods / Stock Only')}</option>
+                  <option value="service">{t('خدمات طبية واستشارية (Non-stock)', 'Services Only')}</option>
+                  <option value="product">{t('سلع ومستلزمات مخزنية (Physical Stock)', 'Goods / Stock Only')}</option>
                   <option value="both">{t('شاملة (خدمات وبضائع معاً)', 'Both Services & Goods')}</option>
                 </select>
               </div>
@@ -1299,7 +1299,7 @@ export const InventoryView: React.FC = () => {
                   onChange={(e) =>
                     setCategoryForm({
                       ...categoryForm,
-                      type: e.target.value as 'services' | 'goods' | 'both',
+                      type: e.target.value as 'service' | 'product' | 'both',
                     })
                   }
                   className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 font-bold text-slate-800 outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"

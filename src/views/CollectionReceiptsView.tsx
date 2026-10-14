@@ -627,7 +627,7 @@ export const CollectionReceiptsView: React.FC = () => {
       receivedFrom: matchedCustomer.name,
       amount: amountNum,
       date: newReceiptDate,
-      paymentMethod: paymentType,
+      paymentMethod: paymentType as 'Cash' | 'Card' | 'Transfer' | 'Check',
       paymentMethodLabel: matchedMethod?.nameAr || matchedMethod?.nameEn || 'نقداً (كاش)',
       paymentAccountId: matchedMethod?.linkedAccountId,
       serviceId: matchedProduct?.id,

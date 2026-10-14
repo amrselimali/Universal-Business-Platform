@@ -382,7 +382,7 @@ export const SpecializedTaxInvoicesTab: React.FC<SpecializedTaxInvoicesTabProps>
             <option value="all">جميع الفروع</option>
             {branches.map((b) => (
               <option key={b.id} value={b.id}>
-                {b.nameAr}
+                {b.name}
               </option>
             ))}
           </select>

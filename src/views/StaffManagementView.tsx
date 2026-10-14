@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { usePlatform } from '../context/PlatformContext';
-import { StaffMember } from '../types';
+import { StaffMember, StaffHiringDoc, StaffRoleType } from '../types';
 import { autoTranslateArabic } from '../utils/translator';
 import {
   UserCheck,
@@ -67,7 +67,7 @@ export const StaffManagementView: React.FC<StaffManagementViewProps> = ({ onNavi
   // Form State
   const [nameAr, setNameAr] = useState('');
   const [nameEn, setNameEn] = useState('');
-  const [roleType, setRoleType] = useState<'Doctor' | 'Technician' | 'Employee'>('Doctor');
+  const [roleType, setRoleType] = useState<StaffRoleType>('Doctor');
   const [jobTitleAr, setJobTitleAr] = useState('طبيب استشاري جلدية وليزر');
   const [jobTitleEn, setJobTitleEn] = useState('');
   const [specialtyAr, setSpecialtyAr] = useState('');
@@ -212,35 +212,41 @@ export const StaffManagementView: React.FC<StaffManagementViewProps> = ({ onNavi
     e.preventDefault();
     if (!nameAr.trim()) return;
 
-    const hiringDocs = [
+    const hiringDocs: StaffHiringDoc[] = [
       {
         documentType: 'NationalID' as const,
-        documentName: 'بطاقة الرقم القومي',
+        documentNameAr: 'بطاقة الرقم القومي',
+        documentNameEn: 'National ID Card',
         isSubmitted: nationalIdSubmitted,
       },
       {
         documentType: 'SyndicateCard' as const,
-        documentName: 'كارنيه النقابة ومزاولة المهنة',
+        documentNameAr: 'كارنيه النقابة ومزاولة المهنة',
+        documentNameEn: 'Syndicate Card / Practice License',
         isSubmitted: syndicateCardSubmitted,
       },
       {
         documentType: 'DegreeCertificate' as const,
-        documentName: 'شهادة المؤهل والتخصص',
+        documentNameAr: 'شهادة المؤهل والتخصص',
+        documentNameEn: 'Degree / Specialization Certificate',
         isSubmitted: degreeCertSubmitted,
       },
       {
         documentType: 'Contract' as const,
-        documentName: 'عقد العمل المبرم',
+        documentNameAr: 'عقد العمل المبرم',
+        documentNameEn: 'Signed Employment Contract',
         isSubmitted: contractSubmitted,
       },
       {
         documentType: 'MedicalLicense' as const,
-        documentName: 'ترخيص مزاولة المهنة / المنشأة',
+        documentNameAr: 'ترخيص مزاولة المهنة / المنشأة',
+        documentNameEn: 'Practice / Facility License',
         isSubmitted: licenseSubmitted,
       },
       {
         documentType: 'CriminalRecord' as const,
-        documentName: 'فيش وتشبيه (صحيفة الحالة الجنائية)',
+        documentNameAr: 'فيش وتشبيه (صحيفة الحالة الجنائية)',
+        documentNameEn: 'Criminal Record Certificate',
         isSubmitted: criminalRecordSubmitted,
       },
     ];

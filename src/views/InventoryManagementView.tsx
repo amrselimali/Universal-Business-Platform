@@ -102,7 +102,8 @@ export const InventoryManagementView: React.FC = () => {
     initialWarehouseId: string;
     notes: string;
     linkedSalesProductIds: string[];
-    consumptionBasis: 'units_sold' | 'revenue_ratio' | 'monthly_period' | 'client_count';
+    linkToAllSales: boolean;
+    consumptionBasis: 'units_sold' | 'revenue_ratio' | 'fixed_monthly' | 'clients_served' | 'client_count' | 'monthly_period';
     consumptionRate: number;
     expenseAccountId: string;
     expenseAccountNameAr: string;
@@ -121,6 +122,7 @@ export const InventoryManagementView: React.FC = () => {
     initialWarehouseId: warehouses[0]?.id || '',
     notes: '',
     linkedSalesProductIds: [],
+    linkToAllSales: false,
     consumptionBasis: 'units_sold',
     consumptionRate: 1,
     expenseAccountId: 'acc-5100',
@@ -154,7 +156,7 @@ export const InventoryManagementView: React.FC = () => {
   const [selectedStockItemForLink, setSelectedStockItemForLink] = useState<Product | null>(null);
   const [linkForm, setLinkForm] = useState<{
     linkedSalesProductIds: string[];
-    consumptionBasis: 'units_sold' | 'revenue_ratio' | 'monthly_period' | 'client_count';
+    consumptionBasis: 'units_sold' | 'revenue_ratio' | 'fixed_monthly' | 'clients_served' | 'client_count' | 'monthly_period';
     consumptionRate: number;
   }>({
     linkedSalesProductIds: [],
@@ -380,8 +382,8 @@ export const InventoryManagementView: React.FC = () => {
 
     // Also from invoices lines
     branchInvoices.forEach((inv) => {
-      if (inv.lines && Array.isArray(inv.lines)) {
-        inv.lines.forEach((line) => {
+      if (inv.items && Array.isArray(inv.items)) {
+        inv.items.forEach((line) => {
           salesVolumeMap[line.productId] = (salesVolumeMap[line.productId] || 0) + (line.quantity || 1);
         });
       }
@@ -707,9 +709,9 @@ export const InventoryManagementView: React.FC = () => {
       return {
         productId: p.id,
         productNameAr: p.nameAr,
-        sku: p.sku,
+        productSku: p.sku,
         unit: p.unit || 'قطعة',
-        systemQty,
+        bookQty: systemQty,
         actualQty,
         differenceQty,
         unitCost,
@@ -722,13 +724,17 @@ export const InventoryManagementView: React.FC = () => {
 
     createInventoryAudit({
       branchId: wh.branchId || branches[0]?.id || 'branch-1',
-      branchName: branch?.nameAr || 'الفرع الرئيسي',
+      branchName: branch?.name || 'الفرع الرئيسي',
       warehouseId: wh.id,
-      warehouseName: wh.nameAr,
+      warehouseName: wh.name,
       auditDate: new Date().toISOString().split('T')[0],
       status: 'Pending_Review',
       notes: newAuditNotes,
       items: auditItems,
+      totalBookQty: auditItems.reduce((sum, item) => sum + item.bookQty, 0),
+      totalActualQty: auditItems.reduce((sum, item) => sum + item.actualQty, 0),
+      totalShortageQty: auditItems.reduce((sum, item) => sum + Math.max(0, -item.differenceQty), 0),
+      totalSurplusQty: auditItems.reduce((sum, item) => sum + Math.max(0, item.differenceQty), 0),
       totalExpectedValue: totalExpectedVal,
       totalActualValue: totalActualVal,
       totalShortageValue: totalShortageVal,
@@ -1318,7 +1324,7 @@ export const InventoryManagementView: React.FC = () => {
                     <option value="all">{t('جميع المخازن (الإجمالي)', 'All Stores')}</option>
                     {warehouses.map((wh) => (
                       <option key={wh.id} value={wh.id}>
-                        {wh.nameAr}
+                        {wh.name}
                       </option>
                     ))}
                   </select>
@@ -2106,7 +2112,7 @@ export const InventoryManagementView: React.FC = () => {
                 >
                   {warehouses.map((wh) => (
                     <option key={wh.id} value={wh.id}>
-                      {wh.nameAr}
+                      {wh.name}
                     </option>
                   ))}
                 </select>
@@ -2571,7 +2577,7 @@ export const InventoryManagementView: React.FC = () => {
                   >
                     {warehouses.map((wh) => (
                       <option key={wh.id} value={wh.id}>
-                        {wh.nameAr}
+                        {wh.name}
                       </option>
                     ))}
                   </select>
@@ -2588,7 +2594,7 @@ export const InventoryManagementView: React.FC = () => {
                   >
                     {warehouses.map((wh) => (
                       <option key={wh.id} value={wh.id}>
-                        {wh.nameAr}
+                        {wh.name}
                       </option>
                     ))}
                   </select>
@@ -2675,7 +2681,7 @@ export const InventoryManagementView: React.FC = () => {
                   >
                     {warehouses.map((wh) => (
                       <option key={wh.id} value={wh.id}>
-                        {wh.nameAr}
+                        {wh.name}
                       </option>
                     ))}
                   </select>
