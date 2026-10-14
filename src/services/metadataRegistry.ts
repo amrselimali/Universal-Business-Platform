@@ -18,6 +18,7 @@
 import { SYSTEM_ACTIONS, SYSTEM_VIEWS } from '../data/permissionsData';
 import type { ActionPermissionDef } from '../types';
 import { getApiToken, getApiUrl, isApiConfigured } from './apiClient';
+import { loadMetadataFromDirectDb } from './metadataDirectLoader';
 
 // ---------------------------------------------------------------------------
 // الأنواع
@@ -157,6 +158,17 @@ const writeCache = (value: MetadataRegistry): void => {
 const cached = readCache();
 if (cached) registry = cached;
 
+// تحميل تلقائي عند بدء التطبيق عبر الاتصال المباشر (الوضع الافتراضي).
+// بدون هذا السطر لا يُحمَّل محرك الشاشات أبداً لمن لا يستخدم الـ API.
+if (!isApiConfigured() && typeof window !== 'undefined') {
+  void loadMetadataFromDirectDb().then((loaded) => {
+    if (loaded) {
+      registry = loaded;
+      writeCache(loaded);
+    }
+  });
+}
+
 // ---------------------------------------------------------------------------
 // التحميل
 // ---------------------------------------------------------------------------
@@ -172,7 +184,17 @@ export async function loadMetadataRegistry(force = false): Promise<MetadataRegis
   if (loadPromise && !force) return loadPromise;
 
   loadPromise = (async (): Promise<MetadataRegistry> => {
-    if (!isApiConfigured() || !getApiToken()) return registry;
+    // المسار (1): الـ API — إن كان مفعّلاً.
+    // المسار (2): الاتصال المباشر بقاعدة البيانات — الوضع الافتراضي.
+    // بدون المسار الثاني لا يُحمَّل محرك الشاشات أبداً لمن يستخدم الاتصال المباشر.
+    if (!isApiConfigured() || !getApiToken()) {
+      const direct = await loadMetadataFromDirectDb();
+      if (direct) {
+        registry = direct;
+        writeCache(direct);
+      }
+      return registry;
+    }
 
     try {
       const response = await fetch(`${getApiUrl()}/metadata/registry`, {

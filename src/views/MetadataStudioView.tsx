@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Save,
   Trash2,
@@ -39,8 +39,15 @@ export const MetadataStudioView: React.FC<{ onPreview?: (entityCode: string) => 
   const { t, language, currentUser } = usePlatform();
   const isArabic = language === 'ar';
 
-  const registry = getMetadataRegistry();
+  // تُحمَّل غير متزامن، فنخزّنها في حالة لتُعاد الواجهة بعد التحميل.
+  const [registry, setRegistry] = useState(() => getMetadataRegistry());
   const entities = registry.entities;
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadMetadataRegistry().then((loaded) => !cancelled && setRegistry(loaded));
+    return () => void (cancelled = true);
+  }, []);
 
   const [selectedCode, setSelectedCode] = useState<string>(entities[0]?.code ?? '');
   const [drafts, setDrafts] = useState<Record<number, FieldDraft>>({});
@@ -87,10 +94,7 @@ export const MetadataStudioView: React.FC<{ onPreview?: (entityCode: string) => 
         delete next[field.id ?? -1];
         return next;
       });
-      setFeedback({
-        type: 'ok',
-        text: t('تم الحفظ — الشاشة محدَّثة فوراً.', 'Saved — the screen is updated instantly.'),
-      });
+      setFeedback({ type: 'ok', text: t('تم الحفظ — الشاشة محدَّثة فوراً.', 'Saved — the screen is updated instantly.') });
     } else {
       setFeedback({
         type: 'err',
@@ -104,17 +108,17 @@ export const MetadataStudioView: React.FC<{ onPreview?: (entityCode: string) => 
 
   const handleDelete = async (field: MetadataField) => {
     if (field.id === undefined) return;
-    if (!window.confirm(t('حذف هذا الحقل من تعريف الكيان؟', 'Remove this field from the entity?'))) {
-      return;
-    }
+    const confirmed = window.confirm(
+      t('حذف هذا الحقل من تعريف الكيان؟', 'Remove this field from the entity?')
+    );
+    if (!confirmed) return;
     setBusy(true);
     const result = await deleteMetadataField(field.id);
     setBusy(false);
-    setFeedback(
-      result.ok
-        ? { type: 'ok', text: t('تم حذف الحقل.', 'Field removed.') }
-        : { type: 'err', text: result.error ?? 'delete_failed' }
-    );
+    setFeedback({
+      type: result.ok ? 'ok' : 'err',
+      text: result.ok ? t('تم حذف الحقل.', 'Field removed.') : (result.error ?? 'delete_failed'),
+    });
   };
 
   const handleAddField = async () => {
@@ -139,11 +143,10 @@ export const MetadataStudioView: React.FC<{ onPreview?: (entityCode: string) => 
       width: 150,
     });
     setBusy(false);
-    setFeedback(
-      result.ok
-        ? { type: 'ok', text: t('تمت إضافة الحقل.', 'Field added.') }
-        : { type: 'err', text: result.error ?? 'save_failed' }
-    );
+    setFeedback({
+      type: result.ok ? 'ok' : 'err',
+      text: result.ok ? t('تمت إضافة الحقل.', 'Field added.') : (result.error ?? 'save_failed'),
+    });
   };
 
   // لا توجد كيانات مسجّلة (قاعدة البيانات غير مهيأة بعد)
@@ -186,7 +189,7 @@ export const MetadataStudioView: React.FC<{ onPreview?: (entityCode: string) => 
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => void loadMetadataRegistry(true)}
+            onClick={() => void loadMetadataRegistry(true).then(setRegistry)}
             disabled={busy}
             className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
           >
