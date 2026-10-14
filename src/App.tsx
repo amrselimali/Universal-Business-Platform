@@ -1,50 +1,132 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { PlatformProvider, usePlatform } from './context/PlatformContext';
 import { setRecoveryMode } from './utils/persistenceMode';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
-import { LoginView } from './views/LoginView';
-import { DashboardView } from './views/DashboardView';
-import { PosView } from './views/PosView';
-import { AccountingView } from './views/AccountingView';
-import { InventoryView } from './views/InventoryView';
-import { ClinicsView } from './views/ClinicsView';
-import { InvoicesView } from './views/InvoicesView';
-import { PartiesView } from './views/PartiesView';
-import { SuppliersView } from './views/SuppliersView';
-import { ModulesConfigView } from './views/ModulesConfigView';
-import { NeonHubView } from './views/NeonHubView';
-import { CompaniesBranchesView } from './views/CompaniesBranchesView';
-import { UsersRolesView } from './views/UsersRolesView';
-import { ReceptionOpsView } from './views/ReceptionOpsView';
-import { BookingsFollowUpView } from './views/BookingsFollowUpView';
-import { StaffManagementView } from './views/StaffManagementView';
-import { ProductManagementView } from './views/ProductManagementView';
-import { InventoryManagementView } from './views/InventoryManagementView';
-import { PaymentMethodsView } from './views/PaymentMethodsView';
-import { AuditTrailView } from './views/AuditTrailView';
-import { ActivityLogsView } from './views/ActivityLogsView';
-import { ShiftReportsView } from './views/ShiftReportsView';
-import { PayrollView } from './views/PayrollView';
-import { LaserDevicesView } from './views/LaserDevicesView';
-import { FiscalDocumentsView } from './views/FiscalDocumentsView';
-import { CashReceiptsView } from './views/CashReceiptsView';
-import { CollectionReceiptsView } from './views/CollectionReceiptsView';
-import { CustomerRefundsView } from './views/CustomerRefundsView';
-import { CashPaymentsView } from './views/CashPaymentsView';
-import { SpecializedTaxInvoicesView } from './views/SpecializedTaxInvoicesView';
-import { GoodsReceiptsView } from './views/GoodsReceiptsView';
-import { GoodsIssuesView } from './views/GoodsIssuesView';
-import { AttendanceManagementView } from './views/AttendanceManagementView';
-import { EmployeeDossierView } from './views/EmployeeDossierView';
-import { SmartNotificationsView } from './views/SmartNotificationsView';
-import { SystemManualView } from './views/SystemManualView';
+
 import { ShieldAlert, ArrowRight, ArrowLeft, Database, RefreshCw } from 'lucide-react';
 import { QuickActionsBar } from './components/QuickActionsBar';
 import { CommandPaletteModal } from './components/CommandPaletteModal';
 import { CustomizeQuickButtonsModal } from './components/CustomizeQuickButtonsModal';
 import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 import { GlobalContextMenu } from './components/GlobalContextMenu';
+
+const LoginView = lazy(() =>
+  import('./views/LoginView').then((m) => ({ default: m.LoginView }))
+);
+const DashboardView = lazy(() =>
+  import('./views/DashboardView').then((m) => ({ default: m.DashboardView }))
+);
+const PosView = lazy(() =>
+  import('./views/PosView').then((m) => ({ default: m.PosView }))
+);
+const AccountingView = lazy(() =>
+  import('./views/AccountingView').then((m) => ({ default: m.AccountingView }))
+);
+const InventoryView = lazy(() =>
+  import('./views/InventoryView').then((m) => ({ default: m.InventoryView }))
+);
+const ClinicsView = lazy(() =>
+  import('./views/ClinicsView').then((m) => ({ default: m.ClinicsView }))
+);
+const InvoicesView = lazy(() =>
+  import('./views/InvoicesView').then((m) => ({ default: m.InvoicesView }))
+);
+const PartiesView = lazy(() =>
+  import('./views/PartiesView').then((m) => ({ default: m.PartiesView }))
+);
+const SuppliersView = lazy(() =>
+  import('./views/SuppliersView').then((m) => ({ default: m.SuppliersView }))
+);
+const ModulesConfigView = lazy(() =>
+  import('./views/ModulesConfigView').then((m) => ({ default: m.ModulesConfigView }))
+);
+const NeonHubView = lazy(() =>
+  import('./views/NeonHubView').then((m) => ({ default: m.NeonHubView }))
+);
+const CompaniesBranchesView = lazy(() =>
+  import('./views/CompaniesBranchesView').then((m) => ({ default: m.CompaniesBranchesView }))
+);
+const UsersRolesView = lazy(() =>
+  import('./views/UsersRolesView').then((m) => ({ default: m.UsersRolesView }))
+);
+const ReceptionOpsView = lazy(() =>
+  import('./views/ReceptionOpsView').then((m) => ({ default: m.ReceptionOpsView }))
+);
+const BookingsFollowUpView = lazy(() =>
+  import('./views/BookingsFollowUpView').then((m) => ({ default: m.BookingsFollowUpView }))
+);
+const StaffManagementView = lazy(() =>
+  import('./views/StaffManagementView').then((m) => ({ default: m.StaffManagementView }))
+);
+const ProductManagementView = lazy(() =>
+  import('./views/ProductManagementView').then((m) => ({ default: m.ProductManagementView }))
+);
+const InventoryManagementView = lazy(() =>
+  import('./views/InventoryManagementView').then((m) => ({ default: m.InventoryManagementView }))
+);
+const PaymentMethodsView = lazy(() =>
+  import('./views/PaymentMethodsView').then((m) => ({ default: m.PaymentMethodsView }))
+);
+const AuditTrailView = lazy(() =>
+  import('./views/AuditTrailView').then((m) => ({ default: m.AuditTrailView }))
+);
+const ActivityLogsView = lazy(() =>
+  import('./views/ActivityLogsView').then((m) => ({ default: m.ActivityLogsView }))
+);
+const ShiftReportsView = lazy(() =>
+  import('./views/ShiftReportsView').then((m) => ({ default: m.ShiftReportsView }))
+);
+const PayrollView = lazy(() =>
+  import('./views/PayrollView').then((m) => ({ default: m.PayrollView }))
+);
+const LaserDevicesView = lazy(() =>
+  import('./views/LaserDevicesView').then((m) => ({ default: m.LaserDevicesView }))
+);
+const FiscalDocumentsView = lazy(() =>
+  import('./views/FiscalDocumentsView').then((m) => ({ default: m.FiscalDocumentsView }))
+);
+const CashReceiptsView = lazy(() =>
+  import('./views/CashReceiptsView').then((m) => ({ default: m.CashReceiptsView }))
+);
+const CollectionReceiptsView = lazy(() =>
+  import('./views/CollectionReceiptsView').then((m) => ({ default: m.CollectionReceiptsView }))
+);
+const CustomerRefundsView = lazy(() =>
+  import('./views/CustomerRefundsView').then((m) => ({ default: m.CustomerRefundsView }))
+);
+const CashPaymentsView = lazy(() =>
+  import('./views/CashPaymentsView').then((m) => ({ default: m.CashPaymentsView }))
+);
+const SpecializedTaxInvoicesView = lazy(() =>
+  import('./views/SpecializedTaxInvoicesView').then((m) => ({ default: m.SpecializedTaxInvoicesView }))
+);
+const GoodsReceiptsView = lazy(() =>
+  import('./views/GoodsReceiptsView').then((m) => ({ default: m.GoodsReceiptsView }))
+);
+const GoodsIssuesView = lazy(() =>
+  import('./views/GoodsIssuesView').then((m) => ({ default: m.GoodsIssuesView }))
+);
+const AttendanceManagementView = lazy(() =>
+  import('./views/AttendanceManagementView').then((m) => ({ default: m.AttendanceManagementView }))
+);
+const EmployeeDossierView = lazy(() =>
+  import('./views/EmployeeDossierView').then((m) => ({ default: m.EmployeeDossierView }))
+);
+const SmartNotificationsView = lazy(() =>
+  import('./views/SmartNotificationsView').then((m) => ({ default: m.SmartNotificationsView }))
+);
+const SystemManualView = lazy(() =>
+  import('./views/SystemManualView').then((m) => ({ default: m.SystemManualView }))
+);
+
+/** شاشة انتظار خفيفة تظهر أثناء تحميل شاشة عند الطلب. */
+const ViewLoadingFallback: React.FC<{ label: string }> = ({ label }) => (
+  <div className="flex min-h-[40vh] flex-col items-center justify-center gap-3 text-slate-400">
+    <RefreshCw className="h-6 w-6 animate-spin" />
+    <span className="text-xs font-bold">{label}</span>
+  </div>
+);
 
 const MainLayout: React.FC = () => {
   const { language, t, canAccessView, currentUser, activeBranch, neonBootstrap, retryNeonBootstrap, neonDb, updateNeonConnectionString, neonConnectionInfo, neonOnline, syncNow, neonLastRefresh, isStorageHydrated, currentView, setCurrentView } = usePlatform();
@@ -419,7 +501,13 @@ const MainLayout: React.FC = () => {
         {/* Dynamic Content Main Stage */}
         <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
           <div key={`${currentView}-${activeBranch?.id || 'none'}`} className="mx-auto max-w-7xl">
-            {renderActiveView()}
+            {/*
+              Suspense: الشاشات تُحمَّل عند الطلب (Lazy). كل شاشة تصبح ملفاً
+              مستقلاً لا يُنزَّل إلا عند فتحها، بدل تحميل 36 شاشة معاً.
+            */}
+            <Suspense fallback={<ViewLoadingFallback label={t('جارٍ تحميل الشاشة…', 'Loading screen…')} />}>
+              {renderActiveView()}
+            </Suspense>
           </div>
         </main>
       </div>
