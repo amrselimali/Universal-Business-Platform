@@ -152,7 +152,7 @@ app.get('/metadata/registry', async () => {
                        FROM erp_actions ORDER BY sort_order, key`),
     rawQuery<any[]>(`SELECT code, table_name, display_name_ar, display_name_en, view_id, soft_delete
                        FROM erp_entities WHERE is_active = TRUE ORDER BY code`),
-    rawQuery<any[]>(`SELECT entity_code, column_name, label_ar, label_en, data_type,
+    rawQuery<any[]>(`SELECT id, entity_code, column_name, label_ar, label_en, data_type,
                             is_required, is_readonly, grid_visible, form_order, width
                        FROM erp_entity_fields ORDER BY entity_code, form_order`),
     rawQuery<any[]>(`SELECT code, view_id, entity_code, kind, route, menu_group, sort_order, icon
@@ -164,6 +164,7 @@ app.get('/metadata/registry', async () => {
     const key = String(row.entity_code);
     const list = fieldsByEntity.get(key) || [];
     list.push({
+      id: Number(row.id),
       columnName: row.column_name,
       labelAr: row.label_ar,
       labelEn: row.label_en,
@@ -272,6 +273,128 @@ app.setErrorHandler((error: any, request, reply) => {
 
   request.log.error(error);
   return reply.code(500).send({ error: 'internal_error' });
+});
+
+// ---------------------------------------------------------------------------
+// إدارة الـ Metadata (Metadata Studio)
+// ---------------------------------------------------------------------------
+/**
+ * تعديل حقول الكيانات من الواجهة مباشرة — بلا نشر ولا إعادة بناء.
+ *
+ * ⚠️ ملاحظة أمنية: هذه الجداول إعدادات عامة (لا تخص منشأة بعينها)، لذلك
+ * تقتصر الكتابة على دور SuperAdmin. غياب الفحص يعني أن أي مستخدم يستطيع
+ * تغيير واجهة كل الشركات.
+ */
+function assertSuperAdmin(request: any): void {
+  const auth = request.auth as TokenPayload;
+  const isSuper =
+    auth.role === 'SuperAdmin' ||
+    (auth.allowedActions || []).includes('*') ||
+    (auth.allowedViews || []).includes('*');
+
+  if (!isSuper) {
+    throw Object.assign(new Error('metadata_forbidden'), {
+      statusCode: 403,
+      detail: 'تعديل تعريفات الشاشات متاح للمدير العام فقط.',
+    });
+  }
+}
+
+const metadataFieldSchema = z.object({
+  entityCode: z.string().min(1).max(150),
+  columnName: z.string().min(1).max(150),
+  labelAr: z.string().min(1).max(255),
+  labelEn: z.string().min(1).max(255),
+  dataType: z.enum(['string', 'number', 'currency', 'badge', 'date', 'select', 'boolean', 'json']),
+  isRequired: z.boolean().optional(),
+  isReadonly: z.boolean().optional(),
+  gridVisible: z.boolean().optional(),
+  formOrder: z.number().int().min(0).max(9999).optional(),
+  width: z.number().int().min(40).max(1200).optional(),
+});
+
+/** إضافة حقل جديد لكيان. */
+app.post('/metadata/fields', async (request, reply) => {
+  assertSuperAdmin(request);
+  const parsed = metadataFieldSchema.safeParse(request.body);
+  if (!parsed.success) {
+    return reply.code(400).send({ error: 'invalid_payload', details: parsed.error.issues });
+  }
+  const f = parsed.data;
+
+  const rows = await rawQuery<any[]>(
+    `INSERT INTO erp_entity_fields
+       (entity_code, column_name, label_ar, label_en, data_type,
+        is_required, is_readonly, grid_visible, form_order, width)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+     ON CONFLICT (entity_code, column_name) DO UPDATE SET
+       label_ar = EXCLUDED.label_ar,
+       label_en = EXCLUDED.label_en,
+       data_type = EXCLUDED.data_type,
+       is_required = EXCLUDED.is_required,
+       is_readonly = EXCLUDED.is_readonly,
+       grid_visible = EXCLUDED.grid_visible,
+       form_order = EXCLUDED.form_order,
+       width = EXCLUDED.width
+     RETURNING id`,
+    [
+      f.entityCode, f.columnName, f.labelAr, f.labelEn, f.dataType,
+      f.isRequired ?? false, f.isReadonly ?? false, f.gridVisible ?? true,
+      f.formOrder ?? 10, f.width ?? 150,
+    ]
+  );
+
+  return { id: rows?.[0]?.id ?? null, saved: true };
+});
+
+/** تعديل حقل موجود (بالمعرّف). */
+app.put('/metadata/fields/:id', async (request, reply) => {
+  assertSuperAdmin(request);
+  const { id } = request.params as { id: string };
+  const parsed = metadataFieldSchema.partial().safeParse(request.body);
+  if (!parsed.success) {
+    return reply.code(400).send({ error: 'invalid_payload', details: parsed.error.issues });
+  }
+
+  const f = parsed.data;
+  const rows = await rawQuery<any[]>(
+    `UPDATE erp_entity_fields SET
+       label_ar     = COALESCE($2, label_ar),
+       label_en     = COALESCE($3, label_en),
+       data_type    = COALESCE($4, data_type),
+       is_required  = COALESCE($5, is_required),
+       is_readonly  = COALESCE($6, is_readonly),
+       grid_visible = COALESCE($7, grid_visible),
+       form_order   = COALESCE($8, form_order),
+       width        = COALESCE($9, width)
+     WHERE id = $1
+     RETURNING id`,
+    [
+      Number(id),
+      f.labelAr ?? null, f.labelEn ?? null, f.dataType ?? null,
+      f.isRequired ?? null, f.isReadonly ?? null, f.gridVisible ?? null,
+      f.formOrder ?? null, f.width ?? null,
+    ]
+  );
+
+  if (!rows || rows.length === 0) {
+    return reply.code(404).send({ error: 'field_not_found' });
+  }
+  return { id: rows[0].id, saved: true };
+});
+
+/** حذف حقل من الكيان. */
+app.delete('/metadata/fields/:id', async (request, reply) => {
+  assertSuperAdmin(request);
+  const { id } = request.params as { id: string };
+  const rows = await rawQuery<any[]>(
+    `DELETE FROM erp_entity_fields WHERE id = $1 RETURNING id`,
+    [Number(id)]
+  );
+  if (!rows || rows.length === 0) {
+    return reply.code(404).send({ error: 'field_not_found' });
+  }
+  return { id: rows[0].id, deleted: true };
 });
 
 // ---------------------------------------------------------------------------

@@ -45,6 +45,8 @@ export interface MetadataAction {
 }
 
 export interface MetadataField {
+  /** معرّف الصف في erp_entity_fields — مطلوب للتعديل والحذف. */
+  id?: number;
   columnName: string;
   labelAr: string;
   labelEn: string;
@@ -252,3 +254,5 @@ export const resetMetadataRegistry = (): void => {
     /* تجاهل */
   }
 };
+
+// ---------------------------------------------------------------------------

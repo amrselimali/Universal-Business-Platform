@@ -121,3 +121,6 @@ export const SmartNotificationsView = lazy(() =>
 export const SystemManualView = lazy(() =>
   import('./SystemManualView').then((m) => ({ default: m.SystemManualView }))
 );
+export const MetadataStudioView = lazy(() =>
+  import('./MetadataStudioView').then((m) => ({ default: m.MetadataStudioView }))
+);

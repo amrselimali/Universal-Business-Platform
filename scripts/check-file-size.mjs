@@ -20,6 +20,20 @@ const ROOT = process.cwd();
 const SCAN_DIR = join(ROOT, 'src');
 const BASELINE_PATH = join(ROOT, '.github', 'file-size-baseline.json');
 const LINE_LIMIT = 300;
+
+/**
+ * حد أعلى منفصل لملفات البيانات التعريفية (src/data/**).
+ *
+ * السبب: ملف يحتوي قائمة من 44 فعلاً أو 30 عنصر قائمة تنقّل ليس بنفس خطر ملف
+ * منطق بحجم 12,000 سطر. البيانات التعريفية تُقرأ ولا تُنفَّذ، وتقسيمها تعسّفياً
+ * يُصعّب مراجعتها. لذلك نمنحها حداً أعلى صريحاً بدل تجاوز البوابة.
+ */
+const DATA_LINE_LIMIT = 800;
+const DATA_DIR_PREFIX = 'src/data/';
+
+const limitFor = (path) =>
+  path.startsWith(DATA_DIR_PREFIX) ? DATA_LINE_LIMIT : LINE_LIMIT;
+
 const EXTENSIONS = ['.ts', '.tsx'];
 
 const isUpdateMode = process.argv.includes('--update');
@@ -40,7 +54,7 @@ function collectFiles(dir) {
 }
 
 const files = collectFiles(SCAN_DIR).sort((a, b) => b.lines - a.lines);
-const oversized = files.filter((f) => f.lines > LINE_LIMIT);
+const oversized = files.filter((f) => f.lines > limitFor(f.path));
 
 const baseline = existsSync(BASELINE_PATH)
   ? JSON.parse(readFileSync(BASELINE_PATH, 'utf8'))
@@ -48,6 +62,7 @@ const baseline = existsSync(BASELINE_PATH)
 
 if (isUpdateMode) {
   baseline.limit = LINE_LIMIT;
+  baseline.dataLimit = DATA_LINE_LIMIT;
   baseline.files = Object.fromEntries(oversized.map((f) => [f.path, f.lines]));
   writeFileSync(BASELINE_PATH, JSON.stringify(baseline, null, 2) + '\n', 'utf8');
   console.log(`تم تحديث القائمة الأساسية: ${oversized.length} ملف.`);
@@ -76,7 +91,7 @@ for (const [path, recorded] of Object.entries(baseline.files)) {
   const current = files.find((f) => f.path === path);
   if (!current) {
     improved.push(`${path}: حُذف أو نُقل — أزلْه من القائمة الأساسية.`);
-  } else if (current.lines <= LINE_LIMIT) {
+  } else if (current.lines <= limitFor(path)) {
     improved.push(`${path}: أصبح ${current.lines} سطراً (${recorded} سابقاً) — أزلْه من القائمة.`);
   }
 }
@@ -84,7 +99,8 @@ for (const [path, recorded] of Object.entries(baseline.files)) {
 console.log('=== بوابة حجم الملفات ===');
 console.log(`  الملفات المفحوصة      : ${files.length}`);
 console.log(`  ملفات تتجاوز الحد     : ${oversized.length}`);
-console.log(`  الحد المسموح          : ${LINE_LIMIT} سطر`);
+console.log(`  الحد المسموح (منطق)   : ${LINE_LIMIT} سطر`);
+console.log(`  الحد المسموح (بيانات) : ${DATA_LINE_LIMIT} سطر — src/data/**`);
 console.log(`  في القائمة الأساسية   : ${Object.keys(baseline.files).length}`);
 
 if (improved.length > 0) {

@@ -8,7 +8,7 @@
 -- شغّله بعد neon_metadata_engine.sql
 -- =========================================================================
 
--- 1) الشاشات (21 شاشة) ----------------------------------
+-- 1) الشاشات (22 شاشة) ----------------------------------
 INSERT INTO erp_views (id, name_ar, name_en, description_ar, description_en, icon_name, category, sort_order) VALUES
   ('dashboard', 'لوحة التحكم والتحليلات', 'Dashboard & Analytics', 'مؤشرات الأداء الرئيسية والملخصات المالية والرسوم البيانية', 'KPI metrics, financial snapshots, and real-time overview', 'LayoutDashboard', 'core', 10),
   ('reception_ops', 'شاشة التشغيل (الريسيبشن)', 'Reception Operations', 'تسجيل حركات التشغيل اليومية، النبضات، المصروفات، وتسوية الشيفت وطباعة التقرير', 'Daily shift run-sheet, pulses counter, expenses, and shift balancing', 'Activity', 'operations', 20),
@@ -29,8 +29,9 @@ INSERT INTO erp_views (id, name_ar, name_en, description_ar, description_en, ico
   ('companies', 'إدارة الشركات والفروع والمخازن', 'Companies, Branches & Warehouses', 'هيكلة المؤسسة، إضافة الفروع والمخازن والتحكم بموديولات كل شركة', 'Multi-tenant hierarchy, branch/warehouse routing and module toggles', 'Building2', 'admin', 170),
   ('users', 'المستخدمين والصلاحيات (RBAC)', 'Users & Permissions', 'تحديد صلاحيات الشاشات، الفروع والمخازن المسموحة، وأزرار التحكم لكل مستخدم', 'Configure user logins, scoped branches, warehouses & in-screen buttons', 'ShieldCheck', 'admin', 180),
   ('modules', 'تخصيص وتفعيل الموديولات', 'Modules Switcher', 'تفعيل أو تعطيل الـ 15 موديول للنظام بحسب نشاط الشركة', 'Enable or disable platform business modules per tenant', 'SlidersHorizontal', 'admin', 190),
-  ('neon', 'قاعدة بيانات Neon PostgreSQL', 'Neon PostgreSQL Database Hub', 'لوحة التحكم والاتصال بالسيرفر السحابي ومزامنة الجداول', 'Cloud database connectivity, sync logs, and schema engine', 'Database', 'admin', 200),
-  ('system_manual', 'دليل المستخدم والتوثيق التقني', 'User Manual & Tech Specs', 'الدليل الإرشادي والتوثيق المعماري ومخطط النظام ومسارات العمل', 'Comprehensive user guide, architecture specs, and system blueprints', 'BookOpen', 'admin', 210)
+  ('metadata_studio', 'استوديو الشاشات والحقول', 'Metadata Studio', 'إدارة تعريف الشاشات والحقول من الواجهة بلا كود: تسميات، ترتيب، أنواع، وإظهار في الشبكة', 'Manage screen and field definitions without code: labels, order, types, grid visibility', 'Boxes', 'admin', 200),
+  ('neon', 'قاعدة بيانات Neon PostgreSQL', 'Neon PostgreSQL Database Hub', 'لوحة التحكم والاتصال بالسيرفر السحابي ومزامنة الجداول', 'Cloud database connectivity, sync logs, and schema engine', 'Database', 'admin', 210),
+  ('system_manual', 'دليل المستخدم والتوثيق التقني', 'User Manual & Tech Specs', 'الدليل الإرشادي والتوثيق المعماري ومخطط النظام ومسارات العمل', 'Comprehensive user guide, architecture specs, and system blueprints', 'BookOpen', 'admin', 220)
 ON CONFLICT (id) DO UPDATE SET
   name_ar = EXCLUDED.name_ar,
   name_en = EXCLUDED.name_en,

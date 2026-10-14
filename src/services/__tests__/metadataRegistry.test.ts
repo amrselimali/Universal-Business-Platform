@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { SYSTEM_ACTIONS, SYSTEM_VIEWS } from '../../data/permissionsData';
 import {
   getActionsForView,
   getEntity,
@@ -21,9 +22,16 @@ describe('metadataRegistry — الكتالوج الاحتياطي المدمج'
     expect(registry.actions.length).toBeGreaterThan(0);
   });
 
-  it('يحمّل الشاشات الـ 21 المعرّفة في التطبيق', () => {
+  it('يحمّل كل الشاشات المعرّفة في التطبيق', () => {
+    // نستورد المصدر مباشرة حتى لا يكسر الاختبار عند إضافة شاشة جديدة.
     const registry = getMetadataRegistry();
-    expect(registry.views).toHaveLength(21);
+    expect(registry.views.length).toBe(SYSTEM_VIEWS.length);
+    expect(registry.views.length).toBeGreaterThanOrEqual(21);
+  });
+
+  it('يحمّل كل الأفعال المعرّفة في التطبيق', () => {
+    const registry = getMetadataRegistry();
+    expect(registry.actions.length).toBe(SYSTEM_ACTIONS.length);
   });
 
   it('يرجع الشاشات مرتّبة ومُعرّفة بالعربية والإنجليزية', () => {
