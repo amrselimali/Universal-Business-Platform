@@ -578,7 +578,7 @@ export const InventoryManagementView: React.FC = () => {
   interface RecipeDraftItem {
     isLinked: boolean;
     rate: number;
-    basis: string;
+    basis: NonNullable<Product['consumptionBasis']>;
   }
 
   const [recipeSearch, setRecipeSearch] = useState<string>('');
@@ -626,7 +626,7 @@ export const InventoryManagementView: React.FC = () => {
       updateProduct(stockId, {
         linkedSalesProductIds: updatedLinks,
         consumptionRate: itemDraft.rate,
-        consumptionBasis: itemDraft.basis as any,
+        consumptionBasis: itemDraft.basis,
       });
     });
 
@@ -2016,7 +2016,7 @@ export const InventoryManagementView: React.FC = () => {
                         </label>
                         <select
                           value={stockItemForm.consumptionBasis}
-                          onChange={(e) => setStockItemForm({ ...stockItemForm, consumptionBasis: e.target.value as any })}
+                          onChange={(e) => setStockItemForm({ ...stockItemForm, consumptionBasis: e.target.value as NonNullable<Product['consumptionBasis']> })}
                           className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
                         >
                           <option value="units_sold">{t('بعد الوحدات / الجلسات المباعة', 'Per Unit / Session Sold')}</option>
@@ -2281,7 +2281,7 @@ export const InventoryManagementView: React.FC = () => {
                   </label>
                   <select
                     value={linkForm.consumptionBasis}
-                    onChange={(e) => setLinkForm({ ...linkForm, consumptionBasis: e.target.value as any })}
+                    onChange={(e) => setLinkForm({ ...linkForm, consumptionBasis: e.target.value as NonNullable<Product['consumptionBasis']> })}
                     className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
                     <option value="units_sold">{t('بعدد الوحدات / الجلسات المباعة', 'Per Unit / Session')}</option>
@@ -2836,7 +2836,7 @@ export const InventoryManagementView: React.FC = () => {
                 </label>
                 <select
                   value={settlementType}
-                  onChange={(e) => setSettlementType(e.target.value as any)}
+                  onChange={(e) => setSettlementType(e.target.value as typeof settlementType)}
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 >
                   <option value="staff_liability">{t('تحميل العجز على الموظف / الموظفين (استقطاع من المرتب)', 'Deduct Shortage from Staff Payroll')}</option>

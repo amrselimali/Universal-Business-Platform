@@ -73,10 +73,10 @@ export const GoodsIssuesTab: React.FC<GoodsIssuesTabProps> = ({ onPrintIssue }) 
 
   const createIssueItemFromProduct = (prod?: Product, qty: number = 2): GoodsIssueItem => {
     const target = prod || warehouseRegisteredProducts[0];
-    const cost = target?.purchasePrice ?? (target as any)?.costPrice ?? 50;
+    const cost = target?.purchasePrice ?? target?.costPrice ?? 50;
     return {
       productId: target?.id || '',
-      productName: target?.nameAr || (target as any)?.name || 'صنف مخزني',
+      productName: target?.nameAr || 'صنف مخزني',
       sku: target?.sku || '',
       unit: target?.unit || 'قطعة',
       quantityIssued: qty,
@@ -96,11 +96,11 @@ export const GoodsIssuesTab: React.FC<GoodsIssuesTabProps> = ({ onPrintIssue }) 
     if (!prod) return;
     const updated = [...items];
     const qty = updated[index]?.quantityIssued || 1;
-    const cost = prod.purchasePrice ?? (prod as any).costPrice ?? 50;
+    const cost = prod.purchasePrice ?? prod.costPrice ?? 50;
     updated[index] = {
       ...updated[index],
       productId: prod.id,
-      productName: prod.nameAr || (prod as any).name || '',
+      productName: prod.nameAr || '',
       sku: prod.sku,
       unit: prod.unit || 'قطعة',
       unitCost: cost,
@@ -490,7 +490,7 @@ export const GoodsIssuesTab: React.FC<GoodsIssuesTabProps> = ({ onPrintIssue }) 
                                 >
                                   {warehouseRegisteredProducts.map((p) => (
                                     <option key={p.id} value={p.id}>
-                                      {p.nameAr || (p as any).name}
+                                      {p.nameAr}
                                     </option>
                                   ))}
                                 </select>

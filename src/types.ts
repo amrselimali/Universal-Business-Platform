@@ -721,6 +721,8 @@ export interface ShiftRunRow {
   receiptArchivedAt?: string;
   receiptArchivedBy?: string;
   receiptVoucherId?: string;
+  /** رقم الإيصال المرتبط بحركة التشغيل — يُستخدم في كشوف التحصيل والتصدير. */
+  receiptNumber?: string;
 
   // الربط المحاسبي وعكس القيود
   journalEntryId?: string; // قيد الإيراد
