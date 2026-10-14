@@ -2,6 +2,18 @@
 
 # 2026-10-12
 
+## Phase 3: the REAL tables are now the source of truth
+
+- Added : , , , . Each dataset maps to its typed table (NEON_SCHEMA_TABLES) and every row keeps the full record in  while the queryable columns stay indexed, so the database can filter, sort and paginate without loading everything.
+-  now prefers the REAL TABLE for the startup load, the incremental pull and the record push/soft delete (the API path still takes precedence when an API session is configured, and the legacy composite store remains only as a fallback for datasets without a table).
+- Soft delete () and  keep the incremental sync and the "deleted rows never come back" guarantee.
+- Data already moved into the real tables: **161,769 records**.
+- Known gap: warehouses, categories, stock levels, payment methods and users appear empty until the full sync from the app completes, because the composite store itself was missing those datasets.
+- Files:  (new), .
+
+
+# 2026-10-12
+
 ## CRITICAL: startup failed after app_documents was dropped
 
 - `fetchDocumentMetadata` still queried the dropped `app_documents` table, so the startup load failed and the app fell back to the "cannot reach the database" banner.
