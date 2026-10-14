@@ -1,4 +1,4 @@
-import React, { useState, useEffect, lazy, Suspense } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { PlatformProvider, usePlatform } from './context/PlatformContext';
 import { setRecoveryMode } from './utils/persistenceMode';
 import { Header } from './components/Header';
@@ -10,118 +10,7 @@ import { CommandPaletteModal } from './components/CommandPaletteModal';
 import { CustomizeQuickButtonsModal } from './components/CustomizeQuickButtonsModal';
 import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 import { GlobalContextMenu } from './components/GlobalContextMenu';
-
-const LoginView = lazy(() =>
-  import('./views/LoginView').then((m) => ({ default: m.LoginView }))
-);
-const DynamicScreenView = lazy(() =>
-  import('./views/DynamicScreenView').then((m) => ({ default: m.DynamicScreenView }))
-);
-const DashboardView = lazy(() =>
-  import('./views/DashboardView').then((m) => ({ default: m.DashboardView }))
-);
-const PosView = lazy(() =>
-  import('./views/PosView').then((m) => ({ default: m.PosView }))
-);
-const AccountingView = lazy(() =>
-  import('./views/AccountingView').then((m) => ({ default: m.AccountingView }))
-);
-const InventoryView = lazy(() =>
-  import('./views/InventoryView').then((m) => ({ default: m.InventoryView }))
-);
-const ClinicsView = lazy(() =>
-  import('./views/ClinicsView').then((m) => ({ default: m.ClinicsView }))
-);
-const InvoicesView = lazy(() =>
-  import('./views/InvoicesView').then((m) => ({ default: m.InvoicesView }))
-);
-const PartiesView = lazy(() =>
-  import('./views/PartiesView').then((m) => ({ default: m.PartiesView }))
-);
-const SuppliersView = lazy(() =>
-  import('./views/SuppliersView').then((m) => ({ default: m.SuppliersView }))
-);
-const ModulesConfigView = lazy(() =>
-  import('./views/ModulesConfigView').then((m) => ({ default: m.ModulesConfigView }))
-);
-const NeonHubView = lazy(() =>
-  import('./views/NeonHubView').then((m) => ({ default: m.NeonHubView }))
-);
-const CompaniesBranchesView = lazy(() =>
-  import('./views/CompaniesBranchesView').then((m) => ({ default: m.CompaniesBranchesView }))
-);
-const UsersRolesView = lazy(() =>
-  import('./views/UsersRolesView').then((m) => ({ default: m.UsersRolesView }))
-);
-const ReceptionOpsView = lazy(() =>
-  import('./views/ReceptionOpsView').then((m) => ({ default: m.ReceptionOpsView }))
-);
-const BookingsFollowUpView = lazy(() =>
-  import('./views/BookingsFollowUpView').then((m) => ({ default: m.BookingsFollowUpView }))
-);
-const StaffManagementView = lazy(() =>
-  import('./views/StaffManagementView').then((m) => ({ default: m.StaffManagementView }))
-);
-const ProductManagementView = lazy(() =>
-  import('./views/ProductManagementView').then((m) => ({ default: m.ProductManagementView }))
-);
-const InventoryManagementView = lazy(() =>
-  import('./views/InventoryManagementView').then((m) => ({ default: m.InventoryManagementView }))
-);
-const PaymentMethodsView = lazy(() =>
-  import('./views/PaymentMethodsView').then((m) => ({ default: m.PaymentMethodsView }))
-);
-const AuditTrailView = lazy(() =>
-  import('./views/AuditTrailView').then((m) => ({ default: m.AuditTrailView }))
-);
-const ActivityLogsView = lazy(() =>
-  import('./views/ActivityLogsView').then((m) => ({ default: m.ActivityLogsView }))
-);
-const ShiftReportsView = lazy(() =>
-  import('./views/ShiftReportsView').then((m) => ({ default: m.ShiftReportsView }))
-);
-const PayrollView = lazy(() =>
-  import('./views/PayrollView').then((m) => ({ default: m.PayrollView }))
-);
-const LaserDevicesView = lazy(() =>
-  import('./views/LaserDevicesView').then((m) => ({ default: m.LaserDevicesView }))
-);
-const FiscalDocumentsView = lazy(() =>
-  import('./views/FiscalDocumentsView').then((m) => ({ default: m.FiscalDocumentsView }))
-);
-const CashReceiptsView = lazy(() =>
-  import('./views/CashReceiptsView').then((m) => ({ default: m.CashReceiptsView }))
-);
-const CollectionReceiptsView = lazy(() =>
-  import('./views/CollectionReceiptsView').then((m) => ({ default: m.CollectionReceiptsView }))
-);
-const CustomerRefundsView = lazy(() =>
-  import('./views/CustomerRefundsView').then((m) => ({ default: m.CustomerRefundsView }))
-);
-const CashPaymentsView = lazy(() =>
-  import('./views/CashPaymentsView').then((m) => ({ default: m.CashPaymentsView }))
-);
-const SpecializedTaxInvoicesView = lazy(() =>
-  import('./views/SpecializedTaxInvoicesView').then((m) => ({ default: m.SpecializedTaxInvoicesView }))
-);
-const GoodsReceiptsView = lazy(() =>
-  import('./views/GoodsReceiptsView').then((m) => ({ default: m.GoodsReceiptsView }))
-);
-const GoodsIssuesView = lazy(() =>
-  import('./views/GoodsIssuesView').then((m) => ({ default: m.GoodsIssuesView }))
-);
-const AttendanceManagementView = lazy(() =>
-  import('./views/AttendanceManagementView').then((m) => ({ default: m.AttendanceManagementView }))
-);
-const EmployeeDossierView = lazy(() =>
-  import('./views/EmployeeDossierView').then((m) => ({ default: m.EmployeeDossierView }))
-);
-const SmartNotificationsView = lazy(() =>
-  import('./views/SmartNotificationsView').then((m) => ({ default: m.SmartNotificationsView }))
-);
-const SystemManualView = lazy(() =>
-  import('./views/SystemManualView').then((m) => ({ default: m.SystemManualView }))
-);
+import { LoginView, DynamicScreenView, DashboardView, PosView, AccountingView, InventoryView, ClinicsView, InvoicesView, PartiesView, SuppliersView, ModulesConfigView, NeonHubView, CompaniesBranchesView, UsersRolesView, ReceptionOpsView, BookingsFollowUpView, StaffManagementView, ProductManagementView, InventoryManagementView, PaymentMethodsView, AuditTrailView, ActivityLogsView, ShiftReportsView, PayrollView, LaserDevicesView, FiscalDocumentsView, CashReceiptsView, CollectionReceiptsView, CustomerRefundsView, CashPaymentsView, SpecializedTaxInvoicesView, GoodsReceiptsView, GoodsIssuesView, AttendanceManagementView, EmployeeDossierView, SmartNotificationsView, SystemManualView } from './views/lazyViews';
 
 /** شاشة انتظار خفيفة تظهر أثناء تحميل شاشة عند الطلب. */
 const ViewLoadingFallback: React.FC<{ label: string }> = ({ label }) => (
