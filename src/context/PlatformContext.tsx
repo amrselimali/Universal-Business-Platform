@@ -131,6 +131,20 @@ import { normalizeStatementDate, isReceiptMatchingParty } from '../utils/stateme
 import { normalizeCustomerPartyCodes as normalizeCustomerPartyCodesPure } from './platform/customerCodes';
 import { getEntity } from '../services/metadataRegistry';
 import { applyJournalLinesToAccounts as applyJournalLinesToAccountsPure } from './platform/journalBalances';
+import {
+  buildActivityLog,
+  buildAuditRecord,
+  scopeActivityLogs,
+  scopeAuditRecords,
+  type AuditContext,
+  type AuditInput,
+} from './platform/auditLog';
+import {
+  buildPeriodLock,
+  findLatestClosedPeriodDate,
+  unlockPeriod,
+  validatePeriodDate as validatePeriodDateAgainstLocks,
+} from './platform/accountingPeriods';
 
 // منطق أكواد العملاء انتقل إلى src/context/platform/customerCodes.ts
 // (أول خطوة في تقسيم هذا الملف العملاق).
@@ -997,20 +1011,21 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     persistLocal('erp_user_activity_logs', JSON.stringify(allUserActivityLogs));
   }, [allUserActivityLogs]);
 
-  const auditRecords = allAuditRecords.filter((a) => a.tenantId === tenant?.id);
-  const userActivityLogs = allUserActivityLogs.filter((u) => u.tenantId === tenant?.id);
+  const auditRecords = scopeAuditRecords(allAuditRecords, tenant?.id);
+  const userActivityLogs = scopeActivityLogs(allUserActivityLogs, tenant?.id);
 
-  const recordAudit = (audit: Omit<AuditRecord, 'id' | 'tenantId' | 'performedById' | 'performedByName' | 'timestamp'>) => {
-    const newRecord: AuditRecord = {
-      ...audit,
-      id: `audit-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-      tenantId: tenant?.id || INITIAL_TENANT.id,
-      branchId: activeBranch?.id,
-      performedById: currentUser?.id || 'admin',
-      performedByName: currentUser?.name || 'System Administrator',
-      timestamp: new Date().toISOString(),
-    };
-    setAllAuditRecords((prev) => [newRecord, ...prev]);
+  /** سياق التسجيل: من نفّذ، وأي منشأة، وأي فرع. */
+  const auditContext = (): AuditContext => ({
+    tenantId: tenant?.id || INITIAL_TENANT.id,
+    branchId: activeBranch?.id,
+    userId: currentUser?.id || 'admin',
+    userName: currentUser?.name || 'System Administrator',
+    userRole: currentUser?.role || 'SuperAdmin',
+  });
+
+  // منطق بناء السجل انتقل إلى src/context/platform/auditLog.ts (منطق نقي مُختبر).
+  const recordAudit = (audit: AuditInput) => {
+    setAllAuditRecords((prev) => [buildAuditRecord(audit, auditContext()), ...prev]);
   };
 
   const logUserActivity = (
@@ -1021,22 +1036,13 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     actionNameEn: string,
     details: string
   ) => {
-    const newLog: UserActivityLog = {
-      id: `log-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-      tenantId: tenant?.id || INITIAL_TENANT.id,
-      branchId: activeBranch?.id,
-      userId: currentUser?.id || 'admin',
-      userName: currentUser?.name || 'System Admin',
-      userRole: currentUser?.role || 'SuperAdmin',
-      screenId,
-      screenNameAr,
-      screenNameEn,
-      actionNameAr,
-      actionNameEn,
-      details,
-      timestamp: new Date().toISOString(),
-    };
-    setAllUserActivityLogs((prev) => [newLog, ...prev]);
+    setAllUserActivityLogs((prev) => [
+      buildActivityLog(
+        { screenId, screenNameAr, screenNameEn, actionNameAr, actionNameEn, details },
+        auditContext()
+      ),
+      ...prev,
+    ]);
   };
 
   // 6. Payment Methods (طرق السداد)
@@ -1135,26 +1141,16 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const periodLocks = allPeriodLocks.filter((l) => l.tenantId === tenant?.id);
 
-  const closedPeriodDate = useMemo(() => {
-    const active = periodLocks.filter((l) => l.status === 'locked');
-    if (active.length === 0) return null;
-    const sorted = [...active].sort((a, b) => b.lockDate.localeCompare(a.lockDate));
-    return sorted[0]?.lockDate || null;
-  }, [periodLocks]);
+  // منطق الأقفال انتقل إلى src/context/platform/accountingPeriods.ts
+  const closedPeriodDate = useMemo(() => findLatestClosedPeriodDate(periodLocks), [periodLocks]);
 
   const lockAccountingPeriod = (lockDate: string, reason?: string) => {
-    const newLock: AccountingPeriodLock = {
-      id: `lock-${Date.now()}`,
+    const newLock = buildPeriodLock(lockDate, reason, {
       tenantId: tenant?.id || INITIAL_TENANT.id,
-      branchId: activeBranch?.id || 'all',
-      lockDate,
-      lockedAt: new Date().toISOString(),
+      branchId: activeBranch?.id,
       lockedBy: currentUser?.name || 'مدير النظام',
-      reason: reason || 'إقفال دوري معتمد للحسابات',
-      status: 'locked',
-    };
-    const updated = [newLock, ...allPeriodLocks];
-    setAllPeriodLocks(updated);
+    });
+    setAllPeriodLocks([newLock, ...allPeriodLocks]);
     recordAudit({
       branchId: activeBranch?.id,
       entityType: 'PeriodLock' as any,
@@ -1176,8 +1172,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const unlockAccountingPeriod = (lockId: string) => {
-    const updated = allPeriodLocks.map((l) => (l.id === lockId ? { ...l, status: 'unlocked' as const } : l));
-    setAllPeriodLocks(updated);
+    setAllPeriodLocks((prev) => unlockPeriod(prev, lockId));
     logUserActivity(
       'accounting',
       'الحسابات العامة',
@@ -1195,15 +1190,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const validatePeriodDate = (date: string, branchId?: string, overrideAsAdmin?: boolean) => {
     const lockCheck = isDateInClosedPeriod(date, branchId);
-    if (!lockCheck.isLocked) return { allowed: true };
     const isAdminUser = !!currentUser?.isAdmin || currentUser?.role === 'SuperAdmin';
-    if (isAdminUser || overrideAsAdmin) {
-      return { allowed: true, message: 'تم التجاوز بصلاحية المدير العام' };
-    }
-    return {
-      allowed: false,
-      message: `الفترة المحاسبية مقفلة حتى تاريخ (${lockCheck.lockInfo?.lockDate}). لا يمكن إجراء أي تعديل أو مسح أو إضافة بتاريخ يقع في الفترة المقفلة بدون موافقة وصلاحية الأدمن.`,
-    };
+    return validatePeriodDateAgainstLocks(lockCheck, isAdminUser, overrideAsAdmin);
   };
 
   // مزامنة أسطر القيود مع أرصدة شجرة الحسابات.
