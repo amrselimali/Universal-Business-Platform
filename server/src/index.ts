@@ -129,6 +129,96 @@ app.post('/auth/login', async (request, reply) => {
 
 app.get('/me', async (request) => ({ auth: request.auth }));
 
+// ---------------------------------------------------------------------------
+// محرك الشاشات (Metadata Registry)
+// ---------------------------------------------------------------------------
+/**
+ * يُرجع تعريف الشاشات والأفعال والكيانات وحقولها.
+ *
+ * هذا هو ما يجعل إضافة حقل أو شاشة **بيانات** لا كوداً: الواجهة تقرأ من هنا
+ * ولا تحتاج إعادة بناء. البيانات تُدار في جداول erp_* (انظر
+ * scripts/neon_metadata_engine.sql).
+ *
+ * الجداول غير تابعة لمنشأة (configuration عام)، لذلك لا تخضع للـ RLS،
+ * لكن الوصول يظل محمياً بالتوكن (preHandler).
+ */
+app.get('/metadata/registry', async () => {
+  const [views, actions, entities, fields, screens] = await Promise.all([
+    rawQuery<any[]>(`SELECT id, name_ar, name_en, description_ar, description_en,
+                            icon_name, category, sort_order
+                       FROM erp_views WHERE is_active = TRUE
+                      ORDER BY sort_order, id`),
+    rawQuery<any[]>(`SELECT key, name_ar, name_en, view_id, description_ar, description_en, sort_order
+                       FROM erp_actions ORDER BY sort_order, key`),
+    rawQuery<any[]>(`SELECT code, table_name, display_name_ar, display_name_en, view_id, soft_delete
+                       FROM erp_entities WHERE is_active = TRUE ORDER BY code`),
+    rawQuery<any[]>(`SELECT entity_code, column_name, label_ar, label_en, data_type,
+                            is_required, is_readonly, grid_visible, form_order, width
+                       FROM erp_entity_fields ORDER BY entity_code, form_order`),
+    rawQuery<any[]>(`SELECT code, view_id, entity_code, kind, route, menu_group, sort_order, icon
+                       FROM erp_screens ORDER BY sort_order, code`),
+  ]);
+
+  const fieldsByEntity = new Map<string, any[]>();
+  for (const row of fields || []) {
+    const key = String(row.entity_code);
+    const list = fieldsByEntity.get(key) || [];
+    list.push({
+      columnName: row.column_name,
+      labelAr: row.label_ar,
+      labelEn: row.label_en,
+      dataType: row.data_type,
+      isRequired: Boolean(row.is_required),
+      isReadonly: Boolean(row.is_readonly),
+      gridVisible: Boolean(row.grid_visible),
+      formOrder: Number(row.form_order),
+      width: Number(row.width),
+    });
+    fieldsByEntity.set(key, list);
+  }
+
+  return {
+    views: (views || []).map((v: any) => ({
+      id: v.id,
+      nameAr: v.name_ar,
+      nameEn: v.name_en,
+      descriptionAr: v.description_ar || '',
+      descriptionEn: v.description_en || '',
+      iconName: v.icon_name || 'Layers',
+      category: v.category,
+      sortOrder: Number(v.sort_order),
+    })),
+    actions: (actions || []).map((a: any) => ({
+      key: a.key,
+      nameAr: a.name_ar,
+      nameEn: a.name_en,
+      viewId: a.view_id,
+      descriptionAr: a.description_ar || undefined,
+      descriptionEn: a.description_en || undefined,
+      sortOrder: Number(a.sort_order),
+    })),
+    entities: (entities || []).map((e: any) => ({
+      code: e.code,
+      tableName: e.table_name,
+      displayNameAr: e.display_name_ar,
+      displayNameEn: e.display_name_en,
+      viewId: e.view_id,
+      softDelete: Boolean(e.soft_delete),
+      fields: fieldsByEntity.get(String(e.code)) || [],
+    })),
+    screens: (screens || []).map((s: any) => ({
+      code: s.code,
+      viewId: s.view_id,
+      entityCode: s.entity_code,
+      kind: s.kind,
+      route: s.route,
+      menuGroup: s.menu_group,
+      sortOrder: Number(s.sort_order),
+      icon: s.icon,
+    })),
+  };
+});
+
 /** Guarantees the caller may operate on the requested tenant. */
 function assertTenant(request: any, requestedTenantId?: string): string {
   const auth = request.auth as TokenPayload;

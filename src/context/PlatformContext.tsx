@@ -128,57 +128,15 @@ import { postCustomerRefund } from '../services/accountingApi';
 import { saveRecord, deleteRecord } from '../services/commands';
 import { reverseJournal, fetchAccountBalances } from '../services/accountingApi';
 import { normalizeStatementDate, isReceiptMatchingParty } from '../utils/statementUtils';
+import { normalizeCustomerPartyCodes as normalizeCustomerPartyCodesPure } from './platform/customerCodes';
 
-const normalizeCustomerPartyCodes = (parties: Party[]): Party[] => {
-  const hasCashSupplier = parties.some((party) =>
-    party.id === 'party-s-cash' ||
-    party.nameEn?.includes('Cash Supplier') ||
-    party.name.includes('\u0645\u0648\u0631\u062f \u0643\u0627\u0634') ||
-    party.name.includes('\u0645\u0648\u0631\u062f \u0646\u0642\u062f\u064a')
-  );
-  const cashSupplier = INITIAL_PARTIES.find((party) => party.id === 'party-s-cash');
-  const partiesToNormalize = hasCashSupplier || !cashSupplier ? parties : [cashSupplier, ...parties];
-  const isCustomer = (party: Party) => party.type === 'Customer' || party.type === 'Both';
-  const differsFromSystemCode = (party: Party, candidate: string) =>
-    ![party.systemCode, party.paperCode].some((systemCode) =>
-      Boolean(systemCode) &&
-      (candidate === systemCode || (/^\d+$/.test(systemCode!) && Number(candidate) === Number(systemCode)))
-    );
-  const hasValidIndependentSerial = (party: Party, candidate?: string) =>
-    typeof candidate === 'string' &&
-    /^\d+$/.test(candidate) &&
-    Number.isSafeInteger(Number(candidate)) &&
-    Number(candidate) > 0 &&
-    differsFromSystemCode(party, candidate);
-  const validStoredCodes = new Set(
-    partiesToNormalize
-      .filter(isCustomer)
-      .map((party) => [party.customerCode, party.code].find((code) => hasValidIndependentSerial(party, code)))
-      .filter((code): code is string => Boolean(code))
-      .map((code) => String(Number(code)))
-  );
-  const claimedCodes = new Set<string>();
-  let nextCustomerSerial = Array.from(validStoredCodes).reduce((highest, code) => Math.max(highest, Number(code)), 0) + 1;
-
-  return partiesToNormalize.map((party) => {
-    const candidate = [party.customerCode, party.code].find((code) => hasValidIndependentSerial(party, code));
-    let customerCode = isCustomer(party) && candidate ? String(Number(candidate)) : undefined;
-    if (isCustomer(party)) {
-      if (!customerCode || claimedCodes.has(customerCode)) {
-        while (claimedCodes.has(String(nextCustomerSerial))) nextCustomerSerial++;
-        customerCode = String(nextCustomerSerial++);
-      }
-      claimedCodes.add(customerCode);
-    }
-
-    return {
-      ...party,
-      branchId: party.branchId || 'branch-cairo',
-      customerCode: customerCode || party.customerCode,
-      code: customerCode || party.code || party.customerCode,
-    };
+// منطق أكواد العملاء انتقل إلى src/context/platform/customerCodes.ts
+// (أول خطوة في تقسيم هذا الملف العملاق).
+const normalizeCustomerPartyCodes = (parties: Party[]): Party[] =>
+  normalizeCustomerPartyCodesPure(parties, {
+    cashSupplier: INITIAL_PARTIES.find((party) => party.id === 'party-s-cash'),
+    defaultBranchId: 'branch-cairo',
   });
-};
 
 interface CheckoutPayload {
   customerId: string;
