@@ -37,18 +37,18 @@ Content-Type: application/json
 
 ### 6) قراءة الفروع عبر الـ Generic Data API
 GET {{host}}/api/v1/generic/core.branch?limit=50
-Authorization: Bearer {{login.response.body.token}}
+Authorization: Bearer {{login.response.body.$.token}}
 Accept: application/json
 
 ### 7) قراءة المستخدمين
 GET {{host}}/api/v1/generic/core.user?limit=50
-Authorization: Bearer {{login.response.body.token}}
+Authorization: Bearer {{login.response.body.$.token}}
 Accept: application/json
 
 ### 8) تحديث فرع (Optimistic Concurrency)
 # غيّر version إلى القيمة الحالية من الطلب رقم 6، ثم أعد الإرسال.
 PUT {{host}}/api/v1/generic/core.branch
-Authorization: Bearer {{login.response.body.token}}
+Authorization: Bearer {{login.response.body.$.token}}
 Content-Type: application/json
 
 {
