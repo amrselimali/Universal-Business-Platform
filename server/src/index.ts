@@ -179,15 +179,74 @@ app.get('/records/:docKey/changes', async (request) => {
   return { records, deletedIds, nextCursor };
 });
 
-const upsertSchema = z.object({ records: z.array(z.record(z.any())).min(1).max(1000) });
+const upsertSchema = z.object({
+  records: z.array(z.record(z.any())).min(1).max(1000),
+  /** عند تفعيله، يرفض الخادم أي كتابة تُلغي تعديلاً أحدث موجود على الخادم. */
+  enforceVersion: z.boolean().optional(),
+});
 
-/** Upserts records (one transaction, tenant-scoped). */
+/**
+ * فحص التزامن المتفائل (Optimistic Concurrency).
+ *
+ * يقارن إصدار كل سجل قادم بالإصدار المخزَّن، ويرجع قائمة التعارضات.
+ * الاعتماد على `version` الرقمي (لا على الطوابع الزمنية) يمنع الكتابة فوق
+ * تعديلات مستخدم آخر حتى لو كانت ساعات الأجهزة مختلفة.
+ */
+async function findVersionConflicts(
+  tenantId: string,
+  docKey: string,
+  incoming: Record<string, any>[]
+): Promise<{ id: string; serverVersion: number; clientVersion: number }[]> {
+  const ids = incoming.map((r) => String(r?.id ?? '')).filter(Boolean);
+  if (ids.length === 0) return [];
+
+  const rows = await one<any[]>(
+    tenantId,
+    `SELECT record_id, payload->>'version' AS version
+       FROM app_records
+      WHERE tenant_id = $1
+        AND doc_key = $2
+        AND record_id = ANY($3)
+        AND deleted_at IS NULL`,
+    [tenantId, docKey, ids]
+  );
+
+  const conflicts: { id: string; serverVersion: number; clientVersion: number }[] = [];
+  for (const row of rows || []) {
+    const recordId = String(row.record_id);
+    const serverVersion = Number(row.version);
+    const clientRecord = incoming.find((r) => String(r?.id ?? '') === recordId);
+    const clientVersion = Number(clientRecord?.version);
+
+    if (!Number.isFinite(serverVersion) || !Number.isFinite(clientVersion)) continue;
+
+    // تعارض حقيقي: الخادم أحدث من النسخة التي عدّلها العميل.
+    if (serverVersion > clientVersion) {
+      conflicts.push({ id: recordId, serverVersion, clientVersion });
+    }
+  }
+  return conflicts;
+}
+
+/** Upserts records (one transaction, tenant-scoped) with optional version enforcement. */
 app.post('/records/:docKey', async (request, reply) => {
   const { docKey } = request.params as { docKey: string };
   const parsed = upsertSchema.safeParse(request.body);
   if (!parsed.success) return reply.code(400).send({ error: 'invalid_payload' });
   const tenantId = assertTenant(request);
   const actor = String(request.auth?.sub || 'api');
+
+  if (parsed.data.enforceVersion === true) {
+    const conflicts = await findVersionConflicts(tenantId, docKey, parsed.data.records);
+    if (conflicts.length > 0) {
+      return reply.code(409).send({
+        error: 'version_conflict',
+        message: 'تم تعديل بعض السجلات من مستخدم آخر. حدّث الشاشة ثم أعد المحاولة.',
+        conflicts,
+      });
+    }
+  }
+
   const rows = await one<any[]>(
     tenantId,
     `SELECT fn_upsert_records($1, $2, $3::jsonb, $4) AS n`,

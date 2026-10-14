@@ -1,6 +1,11 @@
 import { neon } from '@neondatabase/serverless';
 import { isApiConfigured, getApiToken, apiFetchRecords, apiFetchChanges, apiUpsertRecords, apiDeleteRecords } from './apiClient';
 import { tableForKey, readTableRecords, upsertTableRecords, softDeleteTableRecords, tableChangesSince } from './tableStore';
+// منطق الدمج والتزامن المتفائل انتقل إلى ملف مستقل (recordMerge.ts) لتقليل حجم هذا الملف.
+import { diffRecords } from './recordMerge';
+import type { SyncRecord } from './recordMerge';
+export { diffRecords, mergeRecords, hasVersionConflict } from './recordMerge';
+export type { SyncRecord } from './recordMerge';
 
 /**
  * Record-level synchronisation (مزامنة على مستوى السجل).
@@ -13,37 +18,7 @@ import { tableForKey, readTableRecords, upsertTableRecords, softDeleteTableRecor
  * so concurrent users cannot destroy each other's work.
  */
 
-export interface SyncRecord {
-  id: string;
-  updated_at?: string;
-  deleted_at?: string | null;
-  [key: string]: unknown;
-}
-
 const getClient = (connectionString: string) => neon(connectionString.trim());
-
-const recordId = (record: any, index: number, docKey: string): string =>
-  String(record?.id ?? `${docKey}-${index}`);
-
-/** Records whose content differs from the previously synced version. */
-export function diffRecords(previous: any[], current: any[], docKey: string): {
-  upserts: any[];
-  deletes: string[];
-} {
-  const previousById = new Map<string, string>();
-  previous.forEach((record, index) => {
-    previousById.set(recordId(record, index, docKey), JSON.stringify(record ?? null));
-  });
-  const upserts: any[] = [];
-  const currentIds = new Set<string>();
-  current.forEach((record, index) => {
-    const id = recordId(record, index, docKey);
-    currentIds.add(id);
-    if (previousById.get(id) !== JSON.stringify(record ?? null)) upserts.push(record);
-  });
-  const deletes = [...previousById.keys()].filter((id) => !currentIds.has(id));
-  return { upserts, deletes };
-}
 
 /** Uploads only the changed records and soft-deletes the removed ones. */
 export async function pushRecordChanges(
@@ -169,30 +144,6 @@ export async function pullChangedRecords(
   } catch (error: any) {
     return { records: [], deletedIds: [], nextCursor: since, error: error?.message || String(error) };
   }
-}
-
-/**
- * Merges records coming from the server into the local array.
- * Newest `updated_at` wins; soft-deleted records are removed; local-only records survive.
- */
-export function mergeRecords(local: any[], incoming: SyncRecord[], deletedIds: string[]): any[] {
-  const byId = new Map<string, any>();
-  local.forEach((record, index) => byId.set(recordId(record, index, 'local'), record));
-  deletedIds.forEach((id) => byId.delete(id));
-  incoming.forEach((record) => {
-    const existing = byId.get(record.id);
-    if (!existing) {
-      byId.set(record.id, record);
-    } else {
-      const incomingTime = String(record.updated_at || '');
-      const existingTime = String(existing.updated_at || '');
-      // If existing has a newer timestamp than incoming, retain the newer local version!
-      if (!existingTime || (incomingTime && incomingTime >= existingTime)) {
-        byId.set(record.id, record);
-      }
-    }
-  });
-  return [...byId.values()];
 }
 
 /**
