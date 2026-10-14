@@ -149,6 +149,44 @@ ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS branch_id VARCHAR(100);
 ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS payment_method_id VARCHAR(100);
 
 -- =========================================================================
+-- مخزن السجلات الرئيسي (app_records)
+-- =========================================================================
+-- ⚠️ هذا الجدول هو **المصدر الوحيد للبيانات** في التطبيق: كل شاشة تقرأ وتكتب
+-- منه عبر مفاتيح المستندات (doc_key) والسجلات (record_id).
+--
+-- كان مفقوداً من كل ملفات الـ Migrations — أي أن إنشاء قاعدة بيانات جديدة من
+-- الصفر كان يفشل عند أول كتابة من الواجهة. أُضيف هنا لسدّ هذه الثغرة.
+--
+-- الفهارس مصمّمة لاستعلامات التطبيق الفعلية:
+--   • قراءة مجموعة بيانات كاملة مرتّبة بالمفتاح (Keyset Pagination)
+--   • جلب التغييرات منذ مؤشر زمني (المزامنة التزايدية)
+-- =========================================================================
+CREATE TABLE IF NOT EXISTS app_records (
+  tenant_id  VARCHAR(100) NOT NULL,
+  doc_key    VARCHAR(100) NOT NULL,
+  record_id  VARCHAR(200) NOT NULL,
+  payload    JSONB        NOT NULL DEFAULT '{}'::jsonb,
+  updated_at TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  deleted_at TIMESTAMPTZ,
+  CONSTRAINT pk_app_records PRIMARY KEY (tenant_id, doc_key, record_id)
+);
+
+-- قراءة مجموعة بيانات بترتيب ثابت (يمنع Sort كامل عند عشرات الآلاف من السجلات)
+CREATE INDEX IF NOT EXISTS idx_app_records_doc_order
+  ON app_records (tenant_id, doc_key, record_id)
+  WHERE deleted_at IS NULL;
+
+-- المزامنة التزايدية: "هات كل ما تغيّر بعد هذا الوقت"
+CREATE INDEX IF NOT EXISTS idx_app_records_updated
+  ON app_records (tenant_id, doc_key, updated_at DESC)
+  WHERE deleted_at IS NULL;
+
+-- البحث في السجلات المحذوفة (ناعماً) للتنظيف الدوري
+CREATE INDEX IF NOT EXISTS idx_app_records_deleted
+  ON app_records (tenant_id, deleted_at)
+  WHERE deleted_at IS NOT NULL;
+
+-- =========================================================================
 -- تم بنجاح! هذا الكود آمن تماماً ولا يمس أو يحذف أي بيانات مسجلة.
 -- =========================================================================
 
