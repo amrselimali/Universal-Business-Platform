@@ -68,7 +68,7 @@ export function exportDatabaseToMultiSheetExcel(payload: DatabaseBackupPayload):
       'اسم الفرع (إنجليزي)': b.nameEn || '',
       'كود النظام': b.code || '',
       'رقم الهاتف': b.phone || '',
-      'المدينة / العنوان': (b as any).address || b.city || '',
+      'المدينة / العنوان': b.city || '',
       'الحالة': b.isArchived ? 'مؤرشف' : 'مفعل نشط',
     })));
 
@@ -77,8 +77,8 @@ export function exportDatabaseToMultiSheetExcel(payload: DatabaseBackupPayload):
       'كود المخزن': w.id,
       'اسم المخزن': w.name,
       'الفرع التابع له': payload.branches.find((b) => b.id === w.branchId)?.name || w.branchId,
-      'أمين المخزن المسؤول': (w as any).managerName || '',
-      'رقم الهاتف': (w as any).phone || '',
+      'أمين المخزن المسؤول': '',
+      'رقم الهاتف': '',
       'العنوان والموقع': w.location || '',
       'الحالة': w.isArchived ? 'مؤرشف' : 'نشط',
     })));

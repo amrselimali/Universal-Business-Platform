@@ -149,7 +149,7 @@ export async function fetchAccountBalances(params: {
       `SELECT code, name_ar, account_type, balance FROM accounts WHERE tenant_id = $1 ORDER BY code`,
       [params.tenantId]
     );
-    return (rows as any[]).map((row) => ({
+    return (rows as { code: unknown; name_ar: unknown; account_type: unknown; balance: unknown }[]).map((row) => ({
       code: String(row.code),
       name: String(row.name_ar),
       type: String(row.account_type),
