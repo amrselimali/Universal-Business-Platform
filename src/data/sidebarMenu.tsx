@@ -23,6 +23,7 @@ export interface MenuSectionDef {
 }
 
 import {
+  GitMerge,
   LayoutDashboard, ShoppingCart, Package, Calculator, Receipt, Undo2, Stethoscope, Users,
   SlidersHorizontal, Database, RotateCcw, Sparkles, Building2, ShieldCheck, CreditCard,
   Activity, Calendar, UserCheck, ShieldAlert, Clock, FileText, Wallet, Truck, Zap, Warehouse,
@@ -212,6 +213,14 @@ export const SIDEBAR_MENU_SECTIONS: MenuSectionDef[] = [
           labelEn: 'Payment & Collection Methods',
           icon: CreditCard,
           alwaysShow: true,
+        },
+        {
+          id: 'accounting_mapping',
+          labelAr: 'ربط العمليات بالحسابات',
+          labelEn: 'Posting-to-Accounts Mapping',
+          icon: GitMerge,
+          alwaysShow: false,
+          highlight: true,
         },
         {
           id: 'accounting',

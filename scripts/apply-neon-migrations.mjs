@@ -39,6 +39,8 @@ const MIGRATIONS = [
   { file: 'scripts/neon_phase4_infrastructure.sql', title: 'المرحلة 4: Outbox + التسلسل بلا فجوات' },
   { file: 'scripts/neon_phase4_missing_tables.sql', title: 'المرحلة 4: المرفقات والعملات و ETA' },
   { file: 'scripts/neon_retention_policy.sql', title: 'سياسة تنظيف السجلات المحذوفة ناعماً' },
+  { file: 'scripts/neon_accounting_mapping.sql', title: 'ربط العمليات بالحسابات: المخطط' },
+  { file: 'scripts/neon_accounting_mapping_seed.sql', title: 'ربط العمليات بالحسابات: القواعد الأساسية' },
 ];
 
 /** استعلامات التحقق — تُشغَّل بعد التطبيق. */
@@ -63,6 +65,9 @@ const CHECKS = [
   ['مستخدم قاعدة البيانات المحدود', `SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='app_api') AS ok`],
   ['سياسة تنظيف السجلات', `SELECT to_regclass('public.retention_policies') IS NOT NULL AS ok`],
   ['دالة purge_all_soft_deleted', `SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname='purge_all_soft_deleted') AS ok`],
+  ['جدول قواعد الربط المحاسبي', `SELECT to_regclass('public.accounting_mapping_rules') IS NOT NULL AS ok`],
+  ['دالة فحص تغطية الربط', `SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname='fn_mapping_coverage_gaps') AS ok`],
+  ['عدد قواعد الربط', `SELECT count(*)::int AS value FROM accounting_mapping_rules`],
 ];
 
 // ---------------------------------------------------------------------------

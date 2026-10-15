@@ -1232,6 +1232,228 @@ $$ LANGUAGE plpgsql;
 
 
 -- ============================================================================
+-- [ربط العمليات بالحسابات: المخطط]
+-- المصدر: scripts/neon_accounting_mapping.sql
+-- ============================================================================
+
+-- =========================================================================
+-- شاشة ربط العمليات بالحسابات — المصدر الوحيد والحصري للقيود المحاسبية
+-- =========================================================================
+-- الفكرة:
+--   كل قيد محاسبي في النظام يُولَّد من **قاعدة ربط** مسجّلة هنا. لا يوجد أي
+--   قيد يدوي، ولا أي حساب مكتوب في الكود.
+--
+--   مثال: «مبيعات الكاشير» → مدين: نقدية/بنك حسب وسيلة الدفع، دائن: إيرادات.
+--   تغيير الحساب = تعديل صف واحد في الشاشة، بلا نشر وبلا مبرمج.
+--
+-- الأمان: متكرر (Idempotent) ولا يحذف أي بيانات.
+-- =========================================================================
+
+-- 1) قواعد الربط ----------------------------------------------------------
+CREATE TABLE IF NOT EXISTS accounting_mapping_rules (
+  id                   BIGSERIAL PRIMARY KEY,
+  tenant_id            VARCHAR(100) NOT NULL,
+  code                 VARCHAR(100) NOT NULL,   -- RULE-POS-SALE
+  name_ar              VARCHAR(255) NOT NULL,
+  name_en              VARCHAR(255) NOT NULL,
+  transaction_type     VARCHAR(100) NOT NULL,   -- pos_sale / expense / session / supplier_payment / asset_depreciation
+  source_screen        VARCHAR(150) NOT NULL,   -- الشاشة التي تُنتج هذا النوع من العمليات
+  debit_account_id     VARCHAR(150),
+  debit_account_code   VARCHAR(50)  NOT NULL,
+  debit_account_name   VARCHAR(255) NOT NULL,
+  credit_account_id    VARCHAR(150),
+  credit_account_code  VARCHAR(50)  NOT NULL,
+  credit_account_name  VARCHAR(255) NOT NULL,
+  -- «مصدر حصري»: يمنع إنشاء قيد يدوي لهذا النوع من خارج القاعدة
+  is_strict_exclusive  BOOLEAN NOT NULL DEFAULT TRUE,
+  -- «ترحيل آلي»: يُرحَّل القيد فوراً بلا تدخل بشري
+  auto_post_enabled    BOOLEAN NOT NULL DEFAULT TRUE,
+  is_active            BOOLEAN NOT NULL DEFAULT TRUE,
+  description          TEXT,
+  created_at           TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at           TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uq_mapping_rule_code UNIQUE (tenant_id, code)
+);
+
+CREATE INDEX IF NOT EXISTS idx_mapping_rules_tenant
+  ON accounting_mapping_rules (tenant_id, is_active, transaction_type);
+
+-- 2) سجل القيود المولَّدة آلياً (للتدقيق: أي قاعدة ولّدت أي قيد) -------------
+CREATE TABLE IF NOT EXISTS accounting_generated_entries (
+  id                BIGSERIAL PRIMARY KEY,
+  tenant_id         VARCHAR(100) NOT NULL,
+  rule_id           BIGINT REFERENCES accounting_mapping_rules(id) ON DELETE SET NULL,
+  rule_code         VARCHAR(100),
+  journal_entry_id  VARCHAR(150),
+  entry_number      VARCHAR(100),
+  source_screen     VARCHAR(150),
+  source_document   VARCHAR(150),
+  debit_account_code  VARCHAR(50),
+  credit_account_code VARCHAR(50),
+  amount            NUMERIC(18, 4) NOT NULL DEFAULT 0,
+  is_balanced       BOOLEAN NOT NULL DEFAULT TRUE,
+  posted_at         TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_generated_entries_tenant
+  ON accounting_generated_entries (tenant_id, posted_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_generated_entries_doc
+  ON accounting_generated_entries (tenant_id, source_document);
+
+-- 3) دالة التحقق من تغطية العمليات ---------------------------------------
+--    تُرجع كل نوع عملية **ليس له قاعدة ربط فعّالة** — أي قيد لن يُولَّد له.
+--    تُستخدم كفحص رقابي في الشاشة وفي الـ CI.
+CREATE OR REPLACE FUNCTION fn_mapping_coverage_gaps(p_tenant_id VARCHAR)
+RETURNS TABLE (transaction_type VARCHAR, reason TEXT) AS $$
+BEGIN
+  RETURN QUERY
+  SELECT t.type::VARCHAR,
+         'لا توجد قاعدة ربط فعّالة لهذا النوع'::TEXT
+    FROM (VALUES
+      ('pos_sale'), ('expense'), ('session'), ('supplier_payment'),
+      ('asset_depreciation'), ('purchase_receipt'), ('customer_collection'),
+      ('payroll'), ('inventory_adjustment'), ('goods_issue')
+    ) AS t(type)
+   WHERE NOT EXISTS (
+     SELECT 1 FROM accounting_mapping_rules r
+      WHERE r.tenant_id = p_tenant_id
+        AND r.transaction_type = t.type
+        AND r.is_active = TRUE
+   );
+END;
+$$ LANGUAGE plpgsql;
+
+-- =========================================================================
+-- تم بنجاح. شغّل neon_accounting_mapping_seed.sql لتعبئة القواعد.
+-- =========================================================================
+
+
+-- ============================================================================
+-- [ربط العمليات بالحسابات: القواعد الأساسية]
+-- المصدر: scripts/neon_accounting_mapping_seed.sql
+-- ============================================================================
+
+-- =========================================================================
+-- قواعد ربط العمليات بالحسابات — البيانات الأولية
+-- =========================================================================
+-- ⚠️ مولَّد يدوياً ليطابق دليل الحسابات الحالي في التطبيق.
+--    الحسابات المستخدمة (من src/data/initialData.ts):
+--      1111 الخزينة الرئيسية · 1112 البنك الأهلي · 1120 العملاء والمدينون
+--      1130 المخزون · 2100 الموردون · 2150 ضريبة القيمة المضافة
+--      4100 إيرادات المبيعات · 4200 إيرادات الخدمات والعيادات
+--      5100 تكلفة الباعة المباعة · 5200 مصروفات تشغيلية
+--      5250 صيانة أجهزة الليزر · 5300 الرواتب والأجور
+--
+-- التطبيق: شغّله بعد neon_accounting_mapping.sql — متكرر بأمان.
+-- =========================================================================
+
+INSERT INTO accounting_mapping_rules (
+  tenant_id, code, name_ar, name_en, transaction_type, source_screen,
+  debit_account_id, debit_account_code, debit_account_name,
+  credit_account_id, credit_account_code, credit_account_name,
+  is_strict_exclusive, auto_post_enabled, is_active, description
+) VALUES
+
+-- 1) مبيعات الكاشير — نقدي
+('tenant-eg-001', 'RULE-POS-CASH', 'مبيعات الكاشير النقدية', 'POS Cash Sales', 'pos_sale', 'شاشة الكاشير (POS)',
+ 'acc-1111', '1111', 'الخزينة الرئيسية (النقدية بالصندوق)',
+ 'acc-4100', '4100', 'إيرادات مبيعات الأجهزة والمستلزمات',
+ TRUE, TRUE, TRUE,
+ 'كل إيصال كاشير نقدي يُنشئ قيداً فورياً: نقدية مدين / إيراد مبيعات دائن. لا يُقبل قيد يدوي لهذا النوع.'),
+
+-- 2) مبيعات الكاشير — بطاقة/بنك
+('tenant-eg-001', 'RULE-POS-CARD', 'مبيعات الكاشير بالبطاقة والتحويل', 'POS Card Sales', 'pos_sale', 'شاشة الكاشير (POS)',
+ 'acc-1112', '1112', 'البنك الأهلي المصري (حساب جاري)',
+ 'acc-4100', '4100', 'إيرادات مبيعات الأجهزة والمستلزمات',
+ TRUE, TRUE, TRUE,
+ 'المبيعات بالبطاقة أو التحويل البنكي تُرحَّل على حساب البنك بدل النقدية.'),
+
+-- 3) جلسات التشغيل اليومية
+('tenant-eg-001', 'RULE-SESSION-RUN', 'إيراد جلسة تشغيل يومية', 'Daily Session Revenue', 'session', 'شاشة التشغيل (الريسيبشن)',
+ 'acc-1111', '1111', 'الخزينة الرئيسية (النقدية بالصندوق)',
+ 'acc-4200', '4200', 'إيرادات الكشوفات والخدمات والعيادات',
+ TRUE, TRUE, TRUE,
+ 'كل سطر في كشف تشغيل الوردية يولّد قيد إيراد خدمة. تُستخدم 4200 لأن الجلسات خدمات طبية لا بضاعة.'),
+
+-- 4) سندات صرف المصروفات
+('tenant-eg-001', 'RULE-EXP-VOUCHER', 'سند صرف مصروف تشغيلي', 'Operating Expense Voucher', 'expense', 'شاشة المصروفات / الوردية',
+ 'acc-5200', '5200', 'مصروفات تشغيلية وإيجارات',
+ 'acc-1111', '1111', 'الخزينة الرئيسية (النقدية بالصندوق)',
+ TRUE, TRUE, TRUE,
+ 'المصروف التشغيلي (إيجار، كهرباء، صيانة عامة) يُحمَّل على 5200. مصروفات صيانة الليزر تُوجَّه إلى 5250.'),
+
+-- 5) سداد الموردين
+('tenant-eg-001', 'RULE-SUPP-PAY', 'سند سداد مديونية مورد', 'Supplier Payment', 'supplier_payment', 'شاشة المشتريات / الموردين',
+ 'acc-2100', '2100', 'الموردون والدائنون التجاريون',
+ 'acc-1112', '1112', 'البنك الأهلي المصري (حساب جاري)',
+ TRUE, TRUE, TRUE,
+ 'السداد يخفّض مديونية المورد (مدين) ويخفّض البنك (دائن).'),
+
+-- 6) استلام بضاعة من مورد
+('tenant-eg-001', 'RULE-PURCHASE-RECEIPT', 'استلام بضاعة من مورد', 'Purchase Receipt', 'purchase_receipt', 'شاشة المشتريات',
+ 'acc-1130', '1130', 'مخزون البضائع ومستلزمات العيادة',
+ 'acc-2100', '2100', 'الموردون والدائنون التجاريون',
+ TRUE, TRUE, TRUE,
+ 'الاستلام يزيد المخزون (مدين) ويزيد مديونية المورد (دائن).'),
+
+-- 7) تحصيل من عميل
+('tenant-eg-001', 'RULE-CUSTOMER-COLLECTION', 'تحصيل نقدية من عميل', 'Customer Collection', 'customer_collection', 'شاشة التحصيلات',
+ 'acc-1111', '1111', 'الخزينة الرئيسية (النقدية بالصندوق)',
+ 'acc-1120', '1120', 'العملاء والمدينون التجاريون',
+ TRUE, TRUE, TRUE,
+ 'التحصيل يزيد النقدية (مدين) ويخفّض مديونية العميل (دائن).'),
+
+-- 8) الرواتب والأجور
+('tenant-eg-001', 'RULE-PAYROLL', 'صرف مسير الرواتب', 'Payroll Disbursement', 'payroll', 'شاشة الرواتب',
+ 'acc-5300', '5300', 'الرواتب والأجور ومكافآت الكادر',
+ 'acc-1112', '1112', 'البنك الأهلي المصري (حساب جاري)',
+ TRUE, TRUE, TRUE,
+ 'اعتماد مسير الرواتب يولّد قيداً واحداً بإجمالي الصافي.'),
+
+-- 9) صرف مخزني (استهلاك)
+('tenant-eg-001', 'RULE-GOODS-ISSUE', 'صرف مخزني للاستهلاك', 'Goods Issue', 'goods_issue', 'شاشة المخازن',
+ 'acc-5100', '5100', 'تكلفة البضاعة المباعة (COGS)',
+ 'acc-1130', '1130', 'مخزون البضائع ومستلزمات العيادة',
+ TRUE, TRUE, TRUE,
+ 'صرف المخزون للاستهلاك في الجلسات يُحمَّل على التكلفة (مدين) ويخفّض المخزون (دائن).'),
+
+-- 10) تسوية جرد المخزون
+('tenant-eg-001', 'RULE-INVENTORY-ADJ', 'تسوية عجز الجرد المخزني', 'Inventory Adjustment', 'inventory_adjustment', 'شاشة الجرد',
+ 'acc-5100', '5100', 'تكلفة البضاعة المباعة (COGS)',
+ 'acc-1130', '1130', 'مخزون البضائع ومستلزمات العيادة',
+ TRUE, TRUE, TRUE,
+ 'العجز في الجرد يُحمَّل على التكلفة، والزيادة تعكس الاتجاه.')
+
+ON CONFLICT (tenant_id, code) DO UPDATE SET
+  name_ar = EXCLUDED.name_ar,
+  name_en = EXCLUDED.name_en,
+  transaction_type = EXCLUDED.transaction_type,
+  source_screen = EXCLUDED.source_screen,
+  debit_account_id = EXCLUDED.debit_account_id,
+  debit_account_code = EXCLUDED.debit_account_code,
+  debit_account_name = EXCLUDED.debit_account_name,
+  credit_account_id = EXCLUDED.credit_account_id,
+  credit_account_code = EXCLUDED.credit_account_code,
+  credit_account_name = EXCLUDED.credit_account_name,
+  description = EXCLUDED.description,
+  updated_at = CURRENT_TIMESTAMP;
+
+-- =========================================================================
+-- ملاحظة رقابية:
+--   نوع العملية «إهلاك الأصول الثابتة» (asset_depreciation) **لم تُضف له قاعدة**
+--   لأن دليل الحسابات الحالي لا يحتوي على «مجمع الإهلاك» (حساب أصول مقابل).
+--
+--   شاشة الربط ستُظهره تلقائياً كـ «فجوة تغطية» عبر fn_mapping_coverage_gaps().
+--   المطلوب: إضافة حساب «مجمع إهلاك الأجهزة والمعدات» (مثلاً 1150) ثم قاعدة:
+--     مدين 5250 (صيانة وإهلاك) / دائن 1150 (مجمع الإهلاك)
+-- =========================================================================
+
+-- التحقق من التغطية بعد التعبئة
+SELECT * FROM fn_mapping_coverage_gaps('tenant-eg-001');
+
+
+-- ============================================================================
 -- ✅ انتهى. القاعدة الآن كاملة وجاهزة.
 --
 -- الخطوة التالية — ربط التطبيق:

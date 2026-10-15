@@ -124,3 +124,6 @@ export const SystemManualView = lazy(() =>
 export const MetadataStudioView = lazy(() =>
   import('./MetadataStudioView').then((m) => ({ default: m.MetadataStudioView }))
 );
+export const AccountingMappingView = lazy(() =>
+  import('./AccountingMappingView').then((m) => ({ default: m.AccountingMappingView }))
+);

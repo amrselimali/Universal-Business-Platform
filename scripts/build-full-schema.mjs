@@ -25,6 +25,8 @@ const SOURCES = [
   ['scripts/neon_phase4_infrastructure.sql', 'Outbox + التسلسل الرقمي بلا فجوات'],
   ['scripts/neon_phase4_missing_tables.sql', 'المرفقات والعملات و ETA + الفهارس'],
   ['scripts/neon_retention_policy.sql', 'سياسة تنظيف السجلات المحذوفة ناعماً'],
+  ['scripts/neon_accounting_mapping.sql', 'ربط العمليات بالحسابات: المخطط'],
+  ['scripts/neon_accounting_mapping_seed.sql', 'ربط العمليات بالحسابات: القواعد الأساسية'],
 ];
 
 const HEADER = `-- ============================================================================
