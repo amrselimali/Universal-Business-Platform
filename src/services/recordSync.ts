@@ -131,7 +131,7 @@ export async function pullChangedRecords(
     const records: SyncRecord[] = [];
     const deletedIds: string[] = [];
     let nextCursor = since;
-    (rows as any[]).forEach((row) => {
+    (rows as { record_id?: string; id?: string; doc_key?: string; payload?: Record<string, unknown>; updated_at?: unknown; deleted_at?: unknown }[]).forEach((row) => {
       const stamp = row.updated_at instanceof Date ? row.updated_at.toISOString() : String(row.updated_at);
       if (stamp > nextCursor) nextCursor = stamp;
       if (row.deleted_at) {
@@ -215,7 +215,7 @@ export async function fetchLiveRecords(
               ORDER BY record_id LIMIT $4`,
             [tenantId, docKey, lastId, PAGE]
           );
-      const list = rows as any[];
+      const list = rows as { record_id?: string; id?: string; doc_key?: string; payload?: Record<string, unknown>; updated_at?: unknown; deleted_at?: unknown }[];
       if (list.length === 0) break;
       list.forEach((row) => records.push({ ...(row.payload || {}), id: String(row.record_id) }));
       lastId = String(list[list.length - 1].record_id);
@@ -271,7 +271,7 @@ export async function fetchLiveRecordsBatch(
       recordsByDocKey[key] = [];
     });
 
-    (rows as any[]).forEach((row) => {
+    (rows as { record_id?: string; id?: string; doc_key?: string; payload?: Record<string, unknown>; updated_at?: unknown; deleted_at?: unknown }[]).forEach((row) => {
       const k = String(row.doc_key);
       if (recordsByDocKey[k]) {
         recordsByDocKey[k].push({ ...(row.payload || {}), id: String(row.record_id) });

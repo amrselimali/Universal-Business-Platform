@@ -52,7 +52,7 @@ export async function readTableRecords(params: {
       const rows: any = isGlobal
         ? await sql.query('SELECT id, payload FROM ' + table + " WHERE deleted_at IS NULL AND ($1 = '' OR id > $1) ORDER BY id LIMIT $2", [cursor, pageSize])
         : await sql.query('SELECT id, payload FROM ' + table + " WHERE tenant_id = $1 AND deleted_at IS NULL AND ($2 = '' OR id > $2) ORDER BY id LIMIT $3", [params.tenantId, cursor, pageSize]);
-      const list = rows as any[];
+      const list = rows as { id: string; payload?: Record<string, unknown> }[];
       if (list.length === 0) break;
       list.forEach((row) => records.push({ ...(row.payload || {}), id: String(row.id) }));
       cursor = String(list[list.length - 1].id);
@@ -85,7 +85,7 @@ export async function upsertTableRecords(params: {
       const slice = params.records.slice(start, start + BATCH);
       const values: unknown[] = [];
       const tuples = slice.map(function (record) {
-        const id = String((record as any).id || '');
+        const id = String((record as { id?: unknown }).id || '');
         const idPos = values.push(id);
         if (isGlobal) {
           const payloadPos = values.push(JSON.stringify(record));
@@ -152,7 +152,7 @@ export async function tableChangesSince(params: {
     const records: TableRecord[] = [];
     const deletedIds: string[] = [];
     let nextCursor = params.since;
-    (rows as any[]).forEach((row) => {
+    (rows as { record_id?: string; id?: string; doc_key?: string; payload?: Record<string, unknown>; updated_at?: unknown; deleted_at?: unknown }[]).forEach((row) => {
       const stamp = row.updated_at instanceof Date ? row.updated_at.toISOString() : String(row.updated_at);
       if (stamp > nextCursor) nextCursor = stamp;
       if (row.deleted_at) deletedIds.push(String(row.id));
