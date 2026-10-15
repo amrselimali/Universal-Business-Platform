@@ -10,7 +10,7 @@ import { CommandPaletteModal } from './components/CommandPaletteModal';
 import { CustomizeQuickButtonsModal } from './components/CustomizeQuickButtonsModal';
 import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 import { GlobalContextMenu } from './components/GlobalContextMenu';
-import { LoginView, DynamicScreenView, DashboardView, PosView, AccountingView, InventoryView, ClinicsView, InvoicesView, PartiesView, SuppliersView, ModulesConfigView, NeonHubView, CompaniesBranchesView, UsersRolesView, ReceptionOpsView, BookingsFollowUpView, StaffManagementView, ProductManagementView, InventoryManagementView, PaymentMethodsView, AuditTrailView, ActivityLogsView, ShiftReportsView, PayrollView, LaserDevicesView, FiscalDocumentsView, CashReceiptsView, CollectionReceiptsView, CustomerRefundsView, CashPaymentsView, SpecializedTaxInvoicesView, GoodsReceiptsView, GoodsIssuesView, AttendanceManagementView, EmployeeDossierView, SmartNotificationsView, SystemManualView, MetadataStudioView } from './views/lazyViews';
+import { LoginView, DynamicScreenView, DashboardView, PosView, AccountingView, InventoryView, ClinicsView, InvoicesView, PartiesView, SuppliersView, ModulesConfigView, NeonHubView, CompaniesBranchesView, UsersRolesView, ReceptionOpsView, BookingsFollowUpView, StaffManagementView, ProductManagementView, InventoryManagementView, PaymentMethodsView, AuditTrailView, ActivityLogsView, ShiftReportsView, PayrollView, LaserDevicesView, FiscalDocumentsView, CashReceiptsView, CollectionReceiptsView, CustomerRefundsView, CashPaymentsView, SpecializedTaxInvoicesView, GoodsReceiptsView, GoodsIssuesView, AttendanceManagementView, EmployeeDossierView, SmartNotificationsView, SystemManualView, MetadataStudioView, AccountingMappingView } from './views/lazyViews';
 
 /** شاشة انتظار خفيفة تظهر أثناء تحميل شاشة عند الطلب. */
 const ViewLoadingFallback: React.FC<{ label: string }> = ({ label }) => (
@@ -196,13 +196,12 @@ const MainLayout: React.FC = () => {
       return <DynamicScreenView entityCode={currentView.slice('meta_'.length)} />;
     }
 
+    // ربط العمليات بالحسابات — المصدر الوحيد لقيود اليومية.
+    if (currentView === 'accounting_mapping') return <AccountingMappingView />;
+
     // استوديو الـ Metadata: إدارة الشاشات والحقول بلا كود.
     if (currentView === 'metadata_studio') {
-      return (
-        <MetadataStudioView
-          onPreview={(entityCode) => setCurrentView(`meta_${entityCode}`)}
-        />
-      );
+      return <MetadataStudioView onPreview={(code) => setCurrentView(`meta_${code}`)} />;
     }
 
     switch (currentView) {

@@ -31,8 +31,20 @@ const LINE_LIMIT = 300;
 const DATA_LINE_LIMIT = 800;
 const DATA_DIR_PREFIX = 'src/data/';
 
-const limitFor = (path) =>
-  path.startsWith(DATA_DIR_PREFIX) ? DATA_LINE_LIMIT : LINE_LIMIT;
+/**
+ * حد أعلى منفصل لملفات **التصريحات** (أنواع TypeScript).
+ *
+ * السبب: ملف الأنواع ينمو مع نمو المجال نفسه — إضافة حقل جديد أو نوع كيان
+ * ليست "تضخّماً" بل تصحيحاً لنقص. وتقسيمه تعسّفياً يجعل الاستيرادات متشابكة.
+ */
+const DECLARATION_LINE_LIMIT = 1500;
+const DECLARATION_PATHS = ['src/types.ts'];
+
+const limitFor = (path) => {
+  if (path.startsWith(DATA_DIR_PREFIX)) return DATA_LINE_LIMIT;
+  if (DECLARATION_PATHS.includes(path) || path.endsWith('.d.ts')) return DECLARATION_LINE_LIMIT;
+  return LINE_LIMIT;
+};
 
 const EXTENSIONS = ['.ts', '.tsx'];
 
@@ -63,6 +75,7 @@ const baseline = existsSync(BASELINE_PATH)
 if (isUpdateMode) {
   baseline.limit = LINE_LIMIT;
   baseline.dataLimit = DATA_LINE_LIMIT;
+  baseline.declarationLimit = DECLARATION_LINE_LIMIT;
   baseline.files = Object.fromEntries(oversized.map((f) => [f.path, f.lines]));
   writeFileSync(BASELINE_PATH, JSON.stringify(baseline, null, 2) + '\n', 'utf8');
   console.log(`تم تحديث القائمة الأساسية: ${oversized.length} ملف.`);
@@ -101,6 +114,7 @@ console.log(`  الملفات المفحوصة      : ${files.length}`);
 console.log(`  ملفات تتجاوز الحد     : ${oversized.length}`);
 console.log(`  الحد المسموح (منطق)   : ${LINE_LIMIT} سطر`);
 console.log(`  الحد المسموح (بيانات) : ${DATA_LINE_LIMIT} سطر — src/data/**`);
+console.log(`  الحد المسموح (تصريحات): ${DECLARATION_LINE_LIMIT} سطر — src/types.ts`);
 console.log(`  في القائمة الأساسية   : ${Object.keys(baseline.files).length}`);
 
 if (improved.length > 0) {

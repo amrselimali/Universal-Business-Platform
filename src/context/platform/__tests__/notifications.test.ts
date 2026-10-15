@@ -13,7 +13,7 @@ import {
   ruleShowsToast,
   type NotificationAudience,
 } from '../notifications';
-import type { AppNotification, NotificationRule } from '../../../types';
+import type { AppNotification, NotificationRule, UserRole } from '../../../types';
 
 const buildNotification = (overrides: Partial<AppNotification> = {}): AppNotification =>
   ({
@@ -110,7 +110,7 @@ describe('canUserSeeNotification — عزل الإشعارات', () => {
   });
 
   it('يرى الإشعار الموجَّه للجميع (role = *)', () => {
-    const n = buildNotification({ targetRoles: ['*'] as any });
+    const n = buildNotification({ targetRoles: ['*'] as unknown as UserRole[] });
     expect(canUserSeeNotification(n, cashier)).toBe(true);
   });
 

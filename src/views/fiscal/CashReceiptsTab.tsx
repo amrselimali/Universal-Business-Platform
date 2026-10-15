@@ -372,7 +372,7 @@ export const CashReceiptsTab: React.FC<CashReceiptsTabProps> = ({ onPrintReceipt
                   </label>
                   <select
                     value={formData.paymentMethod}
-                    onChange={(e) => setFormData({ ...formData, paymentMethod: e.target.value as any })}
+                    onChange={(e) => setFormData({ ...formData, paymentMethod: e.target.value as typeof formData.paymentMethod })}
                     className="w-full px-3 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold focus:outline-none focus:border-emerald-500"
                   >
                     <option value="Cash">نقداً بالخزينة (Cash)</option>

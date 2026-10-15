@@ -1165,7 +1165,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setAllPeriodLocks([newLock, ...allPeriodLocks]);
     recordAudit({
       branchId: activeBranch?.id,
-      entityType: 'PeriodLock' as any,
+      entityType: 'PeriodLock',
       entityId: newLock.id,
       entityName: `إقفال حتى ${lockDate}`,
       actionType: 'CREATE',
@@ -2595,7 +2595,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               }
               const newConsumed = off.consumedQuantity + count;
               const newRemaining = off.remainingQuantity - count;
-              const newStatus = newRemaining <= 0 ? 'Consumed' : 'Active';
+              const newStatus: ClientOffer['status'] = newRemaining <= 0 ? 'Consumed' : 'Active';
               result = {
                 success: true,
                 remaining: newRemaining,
@@ -2605,7 +2605,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
                 ...off,
                 consumedQuantity: newConsumed,
                 remainingQuantity: newRemaining,
-                status: newStatus as any,
+                status: newStatus,
               };
             }
             return off;
@@ -3391,7 +3391,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setAllLaserDevices((prev) => [newDevice, ...prev]);
 
     recordAudit({
-      entityType: 'Device' as any,
+      entityType: 'Device',
       entityId: newDevice.id,
       entityName: newDevice.name,
       actionType: 'CREATE',
@@ -3420,7 +3420,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     );
 
     recordAudit({
-      entityType: 'Device' as any,
+      entityType: 'Device',
       entityId: id,
       entityName: prevDev?.name || 'Laser Device',
       actionType: 'UPDATE',
@@ -3446,7 +3446,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setAllLaserDevices((prev) => prev.filter((d) => d.id !== id));
 
     recordAudit({
-      entityType: 'Device' as any,
+      entityType: 'Device',
       entityId: id,
       entityName: prevDev.name,
       actionType: 'DELETE',
@@ -3671,7 +3671,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       // 5. سجل التدقيق وسجل نشاط المستخدمين
       recordAudit({
         branchId: activeBranch?.id,
-        entityType: 'Device' as any,
+        entityType: 'Device',
         entityId: data.deviceId,
         entityName: data.deviceName,
         actionType: 'UPDATE',
@@ -4581,7 +4581,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
       recordAudit({
         branchId: activeBranch?.id,
-        entityType: 'Shift' as any,
+        entityType: 'Shift',
         entityId: targetRow.id,
         entityName: targetRow.serviceName,
         actionType: 'DELETE',
@@ -4765,7 +4765,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     recordAudit({
       branchId: activeBranch?.id,
-      entityType: 'Shift' as any,
+      entityType: 'Shift',
       entityId: oldRowId,
       entityName: oldRow.serviceName,
       actionType: 'UPDATE',
@@ -5163,7 +5163,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         );
         recordAudit({
           branchId: activeBranch?.id,
-          entityType: 'Party' as any,
+          entityType: 'Party',
           entityId: newExp.supplierId,
           entityName: newExp.supplierName || 'مورد',
           actionType: 'UPDATE',
@@ -5184,7 +5184,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         );
         recordAudit({
           branchId: activeBranch?.id,
-          entityType: 'Party' as any,
+          entityType: 'Party',
           entityId: newExp.supplierId,
           entityName: newExp.supplierName || 'مورد',
           actionType: 'UPDATE',
@@ -5919,7 +5919,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     recordAudit({
       branchId: newAudit.branchId,
-      entityType: 'Inventory' as any,
+      entityType: 'Inventory',
       entityId: newAudit.id,
       entityName: `جرد مخزن ${newAudit.warehouseName}`,
       actionType: 'CREATE',
@@ -6125,7 +6125,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     recordAudit({
       branchId: targetAudit.branchId,
-      entityType: 'Inventory' as any,
+      entityType: 'Inventory',
       entityId: auditId,
       entityName: `تسوية جرد ${targetAudit.auditNumber}`,
       actionType: 'UPDATE',
@@ -6151,7 +6151,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setAllInventoryAudits((items) => items.filter((a) => a.id !== auditId));
     recordAudit({
       branchId: prev.branchId,
-      entityType: 'Inventory' as any,
+      entityType: 'Inventory',
       entityId: auditId,
       entityName: `حذف مسودة جرد ${prev.auditNumber}`,
       actionType: 'DELETE',
@@ -6260,7 +6260,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     recordAudit({
       branchId: branchId || activeBranch?.id,
-      entityType: 'Staff' as any,
+      entityType: 'Staff',
       entityId: newRun.id,
       entityName: `مسير رواتب ${month}`,
       actionType: 'CREATE',
@@ -6408,7 +6408,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
       recordAudit({
         branchId: activeBranch?.id,
-        entityType: 'Staff' as any,
+        entityType: 'Staff',
         entityId: (paidItem as StaffPayrollItem).staffId,
         entityName: (paidItem as StaffPayrollItem).staffNameAr,
         actionType: 'UPDATE',
@@ -6499,7 +6499,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     recordAudit({
       branchId: activeBranch?.id,
-      entityType: 'Staff' as any,
+      entityType: 'Staff',
       entityId: targetRun.id,
       entityName: `مسير رواتب ${targetRun.month}`,
       actionType: 'UPDATE',
@@ -6605,7 +6605,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setAllPosShifts((prev) => [newShift, ...prev]);
     recordAudit({
       branchId: targetBranchId,
-      entityType: 'Shift' as any,
+      entityType: 'Shift',
       entityId: newShift.id,
       entityName: `شيفت كاشير ${branchObj?.name || targetBranchId}`,
       actionType: 'CREATE',
@@ -7616,7 +7616,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     });
     recordAudit({
       branchId: activeBranch?.id,
-      entityType: 'Product' as any,
+      entityType: 'Product',
       entityId: newAcc.id,
       entityName: `${newAcc.code} - ${newAcc.nameAr}`,
       actionType: 'CREATE',
@@ -7659,7 +7659,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     recordAudit({
       branchId: activeBranch?.id,
-      entityType: 'Product' as any,
+      entityType: 'Product',
       entityId: accountId,
       entityName: `حساب ${accountId}`,
       actionType: 'UPDATE',
@@ -7685,7 +7685,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     });
     recordAudit({
       branchId: activeBranch?.id,
-      entityType: 'Product' as any,
+      entityType: 'Product',
       entityId: accountId,
       entityName: `${acc.code} - ${acc.nameAr}`,
       actionType: 'DELETE',
@@ -8938,7 +8938,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const syncErrors: string[] = [];
     for (let index = 0; index < allDocs.length; index += 1) {
       const doc = allDocs[index];
-      const currentArray = Array.isArray(doc.payload) ? (doc.payload as any[]) : [];
+      const currentArray: unknown[] = Array.isArray(doc.payload) ? doc.payload : [];
       setNeonAutoSyncProgress(`${index + 1}/${allDocs.length}`);
       const outcome = await pushRecordChanges(
         neonDb.connectionString,
@@ -9637,7 +9637,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
       allInvoices.forEach((invoice) => {
         const paid = (Number(invoice.cashPaid || 0) || 0) + (Number(invoice.cardPaid || 0) || 0);
-        addNet(resolveCustomer(invoice.customerId, (invoice as any).customerCode), Number(invoice.netAmount || 0) - paid);
+        addNet(resolveCustomer(invoice.customerId, invoice.customerCode), Number(invoice.netAmount || 0) - paid);
       });
 
       allReceptionShifts.forEach((shift) => {
@@ -10820,7 +10820,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     recordAudit({
       branchId: data.branchId,
-      entityType: 'Staff' as any,
+      entityType: 'Staff',
       entityId: newRecord.id,
       entityName: `حضور ${data.staffNameAr}`,
       actionType: 'CREATE',
@@ -10847,7 +10847,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     );
     recordAudit({
       branchId: prev?.branchId,
-      entityType: 'Staff' as any,
+      entityType: 'Staff',
       entityId: id,
       entityName: `حضور ${prev?.staffNameAr}`,
       actionType: 'UPDATE',
@@ -10863,7 +10863,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (prev) {
       recordAudit({
         branchId: prev.branchId,
-        entityType: 'Staff' as any,
+        entityType: 'Staff',
         entityId: id,
         entityName: `حضور ${prev.staffNameAr}`,
         actionType: 'DELETE',
@@ -11011,7 +11011,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // are left untouched (nothing is deleted locally).
   // ==========================================================================
   const buildBackupPayload = () => ({
-    tenantName: (tenant as any)?.nameAr || (tenant as any)?.name || 'المؤسسة الطبية',
+    tenantName: tenant?.name || 'المؤسسة الطبية',
     branches: allBranches,
     warehouses: allWarehouses,
     users: allUsers,
@@ -11253,7 +11253,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const pulled = await pullChangedRecords(rawConnection, tenantId, dataset.key, cursor);
       if (pulled.error) return { updated: 0, error: pulled.error };
       if (pulled.records.length === 0 && pulled.deletedIds.length === 0) continue;
-      const currentArray = Array.isArray(dataset.payload) ? (dataset.payload as any[]) : [];
+      const currentArray: unknown[] = Array.isArray(dataset.payload) ? dataset.payload : [];
       const merged = mergeRecords(currentArray, pulled.records, pulled.deletedIds);
       documents[dataset.key] = merged;
       changedKeys.push(dataset.key);
@@ -11390,7 +11390,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           id: tenantId,
           code: identity?.code || tenantId,
           name: identity?.name || tenantId,
-          currency: (identity?.currency as any) || 'EGP',
+          currency: (identity?.currency as string | undefined) || 'EGP',
           taxRate: identity?.taxRate ?? 0.14,
         };
         setAllTenants((previous) => previous.some((candidate) => candidate.id === tenantId)
@@ -11665,7 +11665,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       let deletedRecords = 0;
       const pushErrors: string[] = [];
       for (const doc of changed) {
-        const currentArray = Array.isArray(doc.payload) ? (doc.payload as any[]) : [];
+        const currentArray: unknown[] = Array.isArray(doc.payload) ? doc.payload : [];
         let previousArray = neonLastSyncedArraysRef.current.get(doc.key);
         if (previousArray === undefined) {
           // SAFETY NET: no baseline yet -> read the live records from the database so

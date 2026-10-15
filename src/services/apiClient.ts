@@ -90,7 +90,8 @@ async function apiRequest<T>(path: string, options: RequestOptions = {}): Promis
     const data = text ? JSON.parse(text) : ({} as T);
     if (!response.ok) {
       if (response.status === 401) clearApiSession();
-      return { ok: false, status: response.status, error: (data as any)?.message || (data as any)?.error || `http_${response.status}` };
+      const payload = data as { message?: string; error?: string } | null;
+      return { ok: false, status: response.status, error: payload?.message || payload?.error || `http_${response.status}` };
     }
     return { ok: true, status: response.status, data: data as T };
   } catch (error: any) {

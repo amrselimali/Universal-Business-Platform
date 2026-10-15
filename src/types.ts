@@ -511,6 +511,8 @@ export interface SalesInvoice {
   invoiceNumber: string;
   customerId: string;
   customerName: string;
+  /** كود العميل المسلسل — يُخزَّن مع الفاتورة للربط بكشوف الحسابات والتقارير. */
+  customerCode?: string;
   items: SalesInvoiceItem[];
   subtotal: number;
   taxAmount: number;
@@ -719,6 +721,8 @@ export interface ShiftRunRow {
   receiptArchivedAt?: string;
   receiptArchivedBy?: string;
   receiptVoucherId?: string;
+  /** رقم الإيصال المرتبط بحركة التشغيل — يُستخدم في كشوف التحصيل والتصدير. */
+  receiptNumber?: string;
 
   // الربط المحاسبي وعكس القيود
   journalEntryId?: string; // قيد الإيراد
@@ -925,7 +929,12 @@ export interface AuditRecord {
   id: string;
   tenantId: string;
   branchId?: string;
-  entityType: 'Party' | 'Appointment' | 'TreatmentPlan' | 'Staff' | 'StaffMember' | 'PaymentMethod' | 'Product' | 'Invoice' | 'Shift' | 'Tenant' | 'Branch' | 'Warehouse' | 'User' | 'Account' | 'JournalEntry' | 'CustomerRefund';
+  /** نوع الكيان في سجل التدقيق (كل الكيانات التي تُسجِّل حركات فعلاً). */
+  entityType:
+    | 'Party' | 'Appointment' | 'TreatmentPlan' | 'Staff' | 'StaffMember'
+    | 'PaymentMethod' | 'Product' | 'Invoice' | 'Shift' | 'Tenant' | 'Branch'
+    | 'Warehouse' | 'User' | 'Account' | 'JournalEntry' | 'CustomerRefund'
+    | 'PeriodLock' | 'Device' | 'Inventory';
   entityId: string;
   entityName: string;
   actionType: 'CREATE' | 'UPDATE' | 'DELETE' | 'ARCHIVE' | 'RESTORE' | 'CANCEL';

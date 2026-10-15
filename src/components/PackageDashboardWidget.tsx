@@ -488,7 +488,7 @@ export const PackageDashboardWidget: React.FC<PackageDashboardWidgetProps> = ({
                 <select
                   id="select-package-sort"
                   value={sortBy}
-                  onChange={(e) => setSortBy(e.target.value as any)}
+                  onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
                   className="px-2.5 py-1.5 bg-slate-50 border border-slate-200 text-xs font-semibold text-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
                 >
                   <option value="most_sold">{t('الأكثر مبيعاً وإسناداً', 'Most Sold / Assigned')}</option>

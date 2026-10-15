@@ -82,10 +82,10 @@ export const GoodsReceiptsTab: React.FC<GoodsReceiptsTabProps> = ({ onPrintRecei
 
   const createItemFromProduct = (prod?: Product, qty: number = 10): GoodsReceiptItem => {
     const target = prod || warehouseRegisteredProducts[0];
-    const cost = target?.purchasePrice ?? (target as any)?.costPrice ?? 50;
+    const cost = target?.purchasePrice ?? target?.costPrice ?? 50;
     return {
       productId: target?.id || '',
-      productName: target?.nameAr || (target as any)?.name || 'صنف مخزني',
+      productName: target?.nameAr || 'صنف مخزني',
       sku: target?.sku || '',
       unit: target?.unit || 'قطعة',
       expiryDate: new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString().split('T')[0],
@@ -145,11 +145,11 @@ export const GoodsReceiptsTab: React.FC<GoodsReceiptsTabProps> = ({ onPrintRecei
     if (!prod) return;
     const updated = [...items];
     const qty = updated[index]?.quantityReceived || 1;
-    const cost = prod.purchasePrice ?? (prod as any).costPrice ?? 0;
+    const cost = prod.purchasePrice ?? prod.costPrice ?? 0;
     updated[index] = {
       ...updated[index],
       productId: prod.id,
-      productName: prod.nameAr || (prod as any).name || '',
+      productName: prod.nameAr || '',
       sku: prod.sku,
       unit: prod.unit || 'قطعة',
       unitCost: cost,
@@ -582,7 +582,7 @@ export const GoodsReceiptsTab: React.FC<GoodsReceiptsTabProps> = ({ onPrintRecei
                                   >
                                     {warehouseRegisteredProducts.map((p) => (
                                       <option key={p.id} value={p.id}>
-                                        {p.nameAr || (p as any).name}
+                                        {p.nameAr}
                                       </option>
                                     ))}
                                   </select>

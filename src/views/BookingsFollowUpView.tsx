@@ -4,6 +4,8 @@ import { Appointment, TreatmentPlan, Party, PatientFollowUp, StaffWorkSchedule, 
 import { autoTranslateArabic } from '../utils/translator';
 import { buildCustomerDuplicateIndex, findCustomerDuplicates } from '../utils/customerDuplicateDetection';
 import { shareViaWhatsApp, generateBookingWhatsAppText } from '../utils/exportUtils';
+import { BOOKINGS_EXCEL_COLUMNS, FOLLOW_UPS_EXCEL_COLUMNS } from '../data/bookingsExcelColumns';
+import { NewTreatmentPlanModal } from '../components/NewTreatmentPlanModal';
 import {
   Calendar,
   Clock,
@@ -66,263 +68,9 @@ import {
   sortAppointments,
 } from '../utils/bookingTimeUtils';
 
-const bookingsExcelColumns: ExcelColumnConfig[] = [
-  {
-    key: 'branchName',
-    labelAr: 'اسم الفرع',
-    labelEn: 'Branch Name',
-    required: false,
-    type: 'text',
-    sampleValue: 'فرع المعادي',
-    instructions: 'اسم الفرع التابع له الحجز (اختياري - يحدد الفرع المفعل افتراضياً)',
-  },
-  {
-    key: 'customerCode',
-    labelAr: 'كود العميل',
-    labelEn: 'Customer Code',
-    required: false,
-    type: 'text',
-    sampleValue: '1',
-    instructions: 'كود العميل الرقمي المسريل للربط المباشر مع ملف المريض والتقارير وسجل الحسابات',
-  },
-  {
-    key: 'systemCode',
-    labelAr: 'كود السيستم (الورقي سابقاً)',
-    labelEn: 'System / Paper Code',
-    required: false,
-    type: 'text',
-    sampleValue: 'CUST-1001',
-    instructions: 'كود السيستم (الكود الورقي سابقاً المحتفظ بالبيانات الحالية للعميل)',
-  },
-  {
-    key: 'fileCode',
-    labelAr: 'كود الملف',
-    labelEn: 'File Code',
-    required: false,
-    type: 'text',
-    sampleValue: 'F-1042',
-    instructions: 'كود أو رقم الملف اليدوي للعميل بالأرشيف',
-  },
-  {
-    key: 'patientName',
-    labelAr: 'اسم العميل / المريض',
-    labelEn: 'Patient Name',
-    required: true,
-    type: 'text',
-    sampleValue: 'مريم عادل الشريف',
-    instructions: 'الاسم الكامل للعميل أو المريض متلقي الخدمة',
-  },
-  {
-    key: 'patientPhone',
-    labelAr: 'رقم الهاتف',
-    labelEn: 'Phone Number',
-    required: true,
-    type: 'phone',
-    sampleValue: '01234567890',
-    instructions: 'رقم هاتف صالح لا يقل عن 8 أرقام',
-  },
-  {
-    key: 'date',
-    labelAr: 'تاريخ الحجز',
-    labelEn: 'Booking Date',
-    required: true,
-    type: 'date',
-    sampleValue: '2026-10-05',
-    instructions: 'تاريخ الموعد بصيغة YYYY-MM-DD (مثال: 2026-10-05)',
-  },
-  {
-    key: 'doctorName',
-    labelAr: 'الطبيب المعالج / الأخصائي',
-    labelEn: 'Doctor / Specialist',
-    required: true,
-    type: 'text',
-    sampleValue: 'د. نورهان علي',
-    instructions: 'اسم الطبيب المعالج المنفذ للجلسة (مطلوب للتحقق من عدم تداخل المواعيد)',
-  },
-  {
-    key: 'startTime',
-    labelAr: 'وقت بدء الجلسة (من)',
-    labelEn: 'Start Time (From)',
-    required: true,
-    type: 'text',
-    sampleValue: '10:00',
-    instructions: 'وقت بداية الجلسة (مثال: 10:00 أو 10:00 AM)',
-  },
-  {
-    key: 'endTime',
-    labelAr: 'وقت انتهاء الجلسة (إلى)',
-    labelEn: 'End Time (To)',
-    required: true,
-    type: 'text',
-    sampleValue: '10:45',
-    instructions: 'وقت نهاية الجلسة (مثال: 10:45 أو 10:45 AM)',
-  },
-  {
-    key: 'serviceNameAr',
-    labelAr: 'الخدمة / الجلسة',
-    labelEn: 'Service Name',
-    required: true,
-    type: 'text',
-    sampleValue: 'جلسة ليزر فول بودي كانديلا',
-    instructions: 'اسم الخدمة الطبية أو الجلسة المحجوزة',
-  },
-  {
-    key: 'price',
-    labelAr: 'سعر الخدمة',
-    labelEn: 'Price',
-    required: false,
-    type: 'number',
-    sampleValue: 800,
-    instructions: 'السعر التقديري أو المتفق عليه للجلسة (رقم موجب)',
-  },
-  {
-    key: 'deposit',
-    labelAr: 'العربون أو المدفوع',
-    labelEn: 'Deposit Paid',
-    required: false,
-    type: 'number',
-    sampleValue: 200,
-    instructions: 'العربون المدفوع مقدماً إن وجد (0 إذا لم يدفع)',
-  },
-  {
-    key: 'status',
-    labelAr: 'حالة الحجز',
-    labelEn: 'Status',
-    required: false,
-    type: 'text',
-    sampleValue: 'Confirmed',
-    instructions: 'الحالة: Confirmed (مؤكد), Scheduled (مجدول), Completed (مكتمل)',
-  },
-  {
-    key: 'notes',
-    labelAr: 'ملاحظات الحجز',
-    labelEn: 'Notes',
-    required: false,
-    type: 'text',
-    sampleValue: 'طلب غرفة ليزر 1',
-    instructions: 'أي ملاحظات خاصة بالعميل أو الحجز',
-  },
-];
-
-const followUpsExcelColumns: ExcelColumnConfig[] = [
-  {
-    key: 'branchName',
-    labelAr: 'اسم الفرع',
-    labelEn: 'Branch Name',
-    required: false,
-    type: 'text',
-    sampleValue: 'فرع المعادي',
-    instructions: 'اسم الفرع التابع له المتابعة (اختياري - يحدد الفرع المفعل افتراضياً)',
-  },
-  {
-    key: 'customerCode',
-    labelAr: 'كود العميل',
-    labelEn: 'Customer Code',
-    required: false,
-    type: 'text',
-    sampleValue: '1',
-    instructions: 'كود العميل الرقمي المسريل للربط المباشر مع ملف وسجل المريض',
-  },
-  {
-    key: 'systemCode',
-    labelAr: 'كود السيستم (الورقي سابقاً)',
-    labelEn: 'System / Paper Code',
-    required: false,
-    type: 'text',
-    sampleValue: 'CUST-1001',
-    instructions: 'كود السيستم (الكود الورقي سابقاً المحتفظ بالبيانات الحالية للعميل)',
-  },
-  {
-    key: 'fileCode',
-    labelAr: 'كود الملف',
-    labelEn: 'File Code',
-    required: false,
-    type: 'text',
-    sampleValue: 'F-1042',
-    instructions: 'كود ورقم الملف اليدوي للعميل بالأرشيف',
-  },
-  {
-    key: 'patientName',
-    labelAr: 'اسم العميل / المريض',
-    labelEn: 'Patient Name',
-    required: true,
-    type: 'text',
-    sampleValue: 'سارة عبد الله',
-    instructions: 'الاسم الكامل للعميل أو متلقي المتابعة والتذكير',
-  },
-  {
-    key: 'patientPhone',
-    labelAr: 'رقم الهاتف',
-    labelEn: 'Phone Number',
-    required: true,
-    type: 'phone',
-    sampleValue: '01012345678',
-    instructions: 'رقم هاتف العميل للتواصل والمتابعة عبر واتساب أو الهاتف',
-  },
-  {
-    key: 'followUpDate',
-    labelAr: 'تاريخ المتابعة والتذكير',
-    labelEn: 'Follow-up Date',
-    required: true,
-    type: 'date',
-    sampleValue: '2026-10-06',
-    instructions: 'تاريخ استحقاق المتابعة بصيغة YYYY-MM-DD',
-  },
-  {
-    key: 'followUpTime',
-    labelAr: 'وقت المتابعة والتذكير',
-    labelEn: 'Follow-up Time',
-    required: false,
-    type: 'text',
-    sampleValue: '11:00 AM',
-    instructions: 'توقيت إجراء المكالمة أو التذكير (مثال: 11:00 AM أو 14:00)',
-  },
-  {
-    key: 'reason',
-    labelAr: 'موضوع وسبب المتابعة',
-    labelEn: 'Follow-up Reason',
-    required: true,
-    type: 'text',
-    sampleValue: 'تذكير بموعد جلسة الرتوش وعروض الليزر',
-    instructions: 'موضوع المتابعة (مثال: استفسار أسعار، متابعة ما بعد الجلسة، تذكير بموعد)',
-  },
-  {
-    key: 'type',
-    labelAr: 'نوع المتابعة',
-    labelEn: 'Type',
-    required: false,
-    type: 'text',
-    sampleValue: 'Recall',
-    instructions: 'النوع: Recall (تذكير), PostTreatment (ما بعد الجلسة), Inquiry (استفسار), Complaint (شكوى), General (عام)',
-  },
-  {
-    key: 'status',
-    labelAr: 'حالة المتابعة',
-    labelEn: 'Status',
-    required: false,
-    type: 'text',
-    sampleValue: 'Pending',
-    instructions: 'الحالة: Pending (قيد الانتظار), Contacted (تم التواصل), Booked (تم الحجز), NoAnswer (لم يرد), Cancelled (ملغي)',
-  },
-  {
-    key: 'notes',
-    labelAr: 'ملاحظات المتابعة',
-    labelEn: 'Notes',
-    required: false,
-    type: 'text',
-    sampleValue: 'العميل يفضل التواصل بعد الساعة 2 ظهراً',
-    instructions: 'تفاصيل وملاحظات مسؤول التواصل والمتابعة',
-  },
-  {
-    key: 'createdBy',
-    labelAr: 'الموظف المسؤول',
-    labelEn: 'Responsible Staff',
-    required: false,
-    type: 'text',
-    sampleValue: 'فريق الكول سنتر',
-    instructions: 'اسم الموظف أو القسم القائم بالمتابعة والتواصل',
-  },
-];
+// تعريفات أعمدة الإكسيل انتقلت إلى src/data/bookingsExcelColumns.ts
+const bookingsExcelColumns = BOOKINGS_EXCEL_COLUMNS;
+const followUpsExcelColumns = FOLLOW_UPS_EXCEL_COLUMNS;
 
 export const BookingsFollowUpView: React.FC = () => {
   const {
@@ -3782,7 +3530,7 @@ export const BookingsFollowUpView: React.FC = () => {
                           ) : (
                             <select
                               value={fup.status}
-                              onChange={(e) => updatePatientFollowUp(fup.id, { status: e.target.value as any })}
+                              onChange={(e) => updatePatientFollowUp(fup.id, { status: e.target.value as PatientFollowUp['status'] })}
                               className={`text-[11px] font-bold rounded-lg border px-2 py-0.5 cursor-pointer ${statusBadge}`}
                             >
                               <option value="Pending">{t('قيد الانتظار', 'Pending')}</option>
@@ -5364,7 +5112,7 @@ export const BookingsFollowUpView: React.FC = () => {
                   </label>
                   <select
                     value={fupType}
-                    onChange={(e) => setFupType(e.target.value as any)}
+                    onChange={(e) => setFupType(e.target.value as typeof fupType)}
                     className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
                   >
                     <option value="Inquiry">{t('استفسار عن خدمة / أسعار', 'Inquiry')}</option>
@@ -5780,116 +5528,22 @@ export const BookingsFollowUpView: React.FC = () => {
 
       {/* New Treatment Plan Modal */}
       {showNewPlanModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
-          <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl p-5">
-            <h3 className="text-base font-bold text-slate-900 dark:text-white mb-4">
-              {t('إنشاء خطة علاج / باكدج جلسات', 'New Treatment Care Plan')}
-            </h3>
-
-            <form onSubmit={(e) => {
-              e.preventDefault();
-              const p = parties.find((party) => party.id === planPatientId);
-              if (!p) return;
-              addTreatmentPlan({
-                patientId: p.id,
-                patientName: p.name,
-                doctorName: planDoctorName || 'د. الاستشاري',
-                title: planTitle,
-                totalSessions: planTotalSessions,
-                completedSessions: 0,
-                totalCost: planTotalCost,
-                status: 'Active',
-                startDate: todayIso,
-                sessions: [
-                  {
-                    sessionNumber: 1,
-                    date: todayIso,
-                    notes: 'جلسة أولى - فحص وخطة علاج',
-                    status: 'Pending',
-                  },
-                ],
-              });
-              setShowNewPlanModal(false);
-            }} className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  {t('المريض / العميل *', 'Patient *')}
-                </label>
-                <select
-                  required
-                  value={planPatientId}
-                  onChange={(e) => setPlanPatientId(e.target.value)}
-                  className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-indigo-600"
-                >
-                  <option value="">{t('اختر المريض...', 'Select Patient...')}</option>
-                  {parties.filter((party) => !party.isArchived && !party.mergedIntoPartyId).map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  {t('عنوان الخطة / الباكدج *', 'Plan Title *')}
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={planTitle}
-                  onChange={(e) => setPlanTitle(e.target.value)}
-                  placeholder="مثال: باكدج 6 جلسات ليزر كانديلا فول بودي..."
-                  className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-indigo-600"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    {t('إجمالي عدد الجلسات', 'Total Sessions')}
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={planTotalSessions}
-                    onChange={(e) => setPlanTotalSessions(Number(e.target.value))}
-                    className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-indigo-600"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    {t('التكلفة الإجمالية (ج.م)', 'Total Cost (EGP)')}
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={planTotalCost}
-                    onChange={(e) => setPlanTotalCost(Number(e.target.value))}
-                    className="w-full px-3 py-2 text-xs font-bold rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-indigo-600"
-                  />
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setShowNewPlanModal(false)}
-                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
-                >
-                  {t('إلغاء', 'Cancel')}
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl cursor-pointer"
-                >
-                  {t('إنشاء الخطة', 'Create Plan')}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <NewTreatmentPlanModal
+          t={t}
+          parties={parties}
+          todayIso={todayIso}
+          planPatientId={planPatientId}
+          planTitle={planTitle}
+          planTotalSessions={planTotalSessions}
+          planTotalCost={planTotalCost}
+          planDoctorName={planDoctorName}
+          onPatientChange={setPlanPatientId}
+          onTitleChange={setPlanTitle}
+          onSessionsChange={setPlanTotalSessions}
+          onCostChange={setPlanTotalCost}
+          onCreatePlan={addTreatmentPlan}
+          onClose={() => setShowNewPlanModal(false)}
+        />
       )}
 
       {/* Quick Add Customer Modal (مختصر لإضافة عميل جديد بالفرع المفعل فوراً) */}

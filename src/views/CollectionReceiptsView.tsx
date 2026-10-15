@@ -315,7 +315,7 @@ export const CollectionReceiptsView: React.FC = () => {
         const isRefund = collected < 0;
 
         const receiptNum =
-          (row as any).receiptNumber ||
+          row.receiptNumber ||
           (isPos
             ? `REC-POS-${row.id.replace(/\D/g, '').slice(-5) || row.id.slice(-5)}`
             : `REC-OPS-${row.id.replace(/\D/g, '').slice(-5) || row.id.slice(-5)}`);
@@ -332,7 +332,7 @@ export const CollectionReceiptsView: React.FC = () => {
           date: row.date || (shift.openedAt ? shift.openedAt.split('T')[0] : shift.shiftDate),
           dayName: row.dayName,
           customerId: row.customerId,
-          customerCode: (row as any).customerCode || parties.find((p) => p.id === (row.customerId || row.patientId))?.customerCode || parties.find((p) => p.id === (row.customerId || row.patientId))?.code,
+          customerCode: row.customerCode || parties.find((p) => p.id === (row.customerId || row.patientId))?.customerCode || parties.find((p) => p.id === (row.customerId || row.patientId))?.code,
           customerName: row.customerName || row.patientName || 'عميل نقدي عام',
           patientPhone: row.patientPhone,
           systemCode: row.systemCode,
@@ -1233,7 +1233,7 @@ export const CollectionReceiptsView: React.FC = () => {
           <div>
             <select
               value={selectedSource}
-              onChange={(e) => setSelectedSource(e.target.value as any)}
+              onChange={(e) => setSelectedSource(e.target.value as 'pos' | 'reception_ops' | 'all')}
               className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-blue-600 text-slate-800 dark:text-white"
             >
               <option value="all">{t('كافة المصادر (POS والتشغيل)', 'All Sources (POS & Ops)')}</option>

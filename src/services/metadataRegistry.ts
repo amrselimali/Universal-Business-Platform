@@ -18,8 +18,7 @@
 import { SYSTEM_ACTIONS, SYSTEM_VIEWS } from '../data/permissionsData';
 import type { ActionPermissionDef } from '../types';
 import { getApiToken, getApiUrl, isApiConfigured } from './apiClient';
-import { fetchRegistryFromNeon } from './metadataNeon';
-
+import { loadMetadataFromDirectDb } from './metadataDirectLoader';
 // ---------------------------------------------------------------------------
 // الأنواع
 // ---------------------------------------------------------------------------
@@ -159,6 +158,17 @@ const writeCache = (value: MetadataRegistry): void => {
 const cached = readCache();
 if (cached) registry = cached;
 
+// تحميل تلقائي عند بدء التطبيق عبر الاتصال المباشر (الوضع الافتراضي).
+// بدون هذا السطر لا يُحمَّل محرك الشاشات أبداً لمن لا يستخدم الـ API.
+if (!isApiConfigured() && typeof window !== 'undefined') {
+  void loadMetadataFromDirectDb().then((loaded) => {
+    if (loaded) {
+      registry = loaded;
+      writeCache(loaded);
+    }
+  });
+}
+
 // ---------------------------------------------------------------------------
 // التحميل
 // ---------------------------------------------------------------------------
@@ -175,7 +185,7 @@ export async function loadMetadataRegistry(force = false): Promise<MetadataRegis
   if (loadPromise && !needsFetch) return loadPromise;
 
   loadPromise = (async (): Promise<MetadataRegistry> => {
-    // 1. تجربة الـ API إن كان مهيئاً
+    // المسار (1): الـ API — إن كان مفعّلاً.
     if (isApiConfigured() && getApiToken()) {
       try {
         const response = await fetch(`${getApiUrl()}/metadata/registry`, {
@@ -206,7 +216,7 @@ export async function loadMetadataRegistry(force = false): Promise<MetadataRegis
     }
 
     // 2. التحميل المباشر من قاعدة بيانات Neon السحابية
-    const neonPayload = await fetchRegistryFromNeon();
+    const neonPayload = await loadMetadataFromDirectDb();
     if (neonPayload && neonPayload.entities && neonPayload.entities.length > 0) {
       const loaded: MetadataRegistry = {
         views: neonPayload.views?.length ? neonPayload.views : registry.views,

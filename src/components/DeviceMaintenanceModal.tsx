@@ -390,7 +390,7 @@ export const DeviceMaintenanceModal: React.FC<DeviceMaintenanceModalProps> = ({
               </label>
               <select
                 value={maintenanceType}
-                onChange={(e) => handleTypeChange(e.target.value as any)}
+                onChange={(e) => handleTypeChange(e.target.value as DeviceMaintenanceRecord['maintenanceType'])}
                 className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2 text-xs text-slate-900 focus:border-amber-500 focus:bg-white focus:outline-hidden dark:border-slate-700 dark:bg-slate-800 dark:text-white"
               >
                 <option value="Routine">{t('صيانة دورية عامة', 'Routine General')}</option>
@@ -410,7 +410,7 @@ export const DeviceMaintenanceModal: React.FC<DeviceMaintenanceModalProps> = ({
               </label>
               <select
                 value={deviceStatusAfter}
-                onChange={(e) => setDeviceStatusAfter(e.target.value as any)}
+                onChange={(e) => setDeviceStatusAfter(e.target.value as typeof deviceStatusAfter)}
                 className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2 text-xs text-slate-900 focus:border-amber-500 focus:bg-white focus:outline-hidden dark:border-slate-700 dark:bg-slate-800 dark:text-white font-bold"
               >
                 <option value="Active">{t('يعمل وجاهز للتشغيل (Active)', 'Active & Ready')}</option>
@@ -458,7 +458,7 @@ export const DeviceMaintenanceModal: React.FC<DeviceMaintenanceModalProps> = ({
                 </label>
                 <select
                   value={paymentStatus}
-                  onChange={(e) => setPaymentStatus(e.target.value as any)}
+                  onChange={(e) => setPaymentStatus(e.target.value as typeof paymentStatus)}
                   className="w-full rounded-xl border border-slate-200 bg-white p-2 text-xs font-bold text-slate-900 focus:border-indigo-500 focus:outline-hidden dark:border-slate-700 dark:bg-slate-900 dark:text-white"
                 >
                   <option value="OnCredit">

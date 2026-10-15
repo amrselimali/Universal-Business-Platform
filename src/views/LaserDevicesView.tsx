@@ -513,7 +513,7 @@ export const LaserDevicesView: React.FC<LaserDevicesViewProps> = ({ onNavigateTo
         serialNumber: row.serialNumber,
         room: row.room,
         branchId: branchToUse,
-        status: row.status as any,
+        status: row.status as LaserDevice['status'],
         totalShotsCounter: row.totalShotsCounter,
         currentLampShots: row.currentLampShots,
         warningLimitShots: row.warningLimitShots,
@@ -1206,7 +1206,7 @@ export const LaserDevicesView: React.FC<LaserDevicesViewProps> = ({ onNavigateTo
                   </label>
                   <select
                     value={formData.status}
-                    onChange={(e) => setFormData({ ...formData, status: e.target.value as any })}
+                    onChange={(e) => setFormData({ ...formData, status: e.target.value as LaserDevice['status'] })}
                     className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 dark:border-slate-700 dark:bg-slate-800 font-bold"
                   >
                     <option value="Active">{t('يعمل (Active)', 'Active')}</option>

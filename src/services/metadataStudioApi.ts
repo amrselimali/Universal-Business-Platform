@@ -57,7 +57,8 @@ export async function saveMetadataField(input: SaveFieldInput): Promise<Metadata
 
       if (!response.ok) {
         const payload = await response.json().catch(() => ({}));
-        return { ok: false, error: (payload as any)?.message || (payload as any)?.error || 'save_failed' };
+        const p = payload as { message?: string; error?: string };
+        return { ok: false, error: p?.message || p?.error || 'save_failed' };
       }
 
       await loadMetadataRegistry(true);
@@ -127,7 +128,8 @@ export async function deleteMetadataField(fieldId: number): Promise<MetadataWrit
 
       if (!response.ok) {
         const payload = await response.json().catch(() => ({}));
-        return { ok: false, error: (payload as any)?.message || (payload as any)?.error || 'delete_failed' };
+        const p = payload as { message?: string; error?: string };
+        return { ok: false, error: p?.message || p?.error || 'delete_failed' };
       }
 
       await loadMetadataRegistry(true);

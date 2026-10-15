@@ -703,7 +703,7 @@ export const AttendanceManagementView: React.FC = () => {
                   </label>
                   <select
                     value={formData.status}
-                    onChange={(e) => setFormData({ ...formData, status: e.target.value as any })}
+                    onChange={(e) => setFormData({ ...formData, status: e.target.value as AttendanceRecord['status'] })}
                     className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold rounded-xl p-2.5 text-slate-800 dark:text-white"
                   >
                     <option value="Present">{t('حاضر', 'Present')}</option>
@@ -802,7 +802,7 @@ export const AttendanceManagementView: React.FC = () => {
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">{t('الحالة:', 'Status:')}</label>
                   <select
                     value={selectedRecordToEdit.status}
-                    onChange={(e) => setSelectedRecordToEdit({ ...selectedRecordToEdit, status: e.target.value as any })}
+                    onChange={(e) => setSelectedRecordToEdit({ ...selectedRecordToEdit, status: e.target.value as AttendanceRecord['status'] })}
                     className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold rounded-xl p-2.5 text-slate-800 dark:text-white"
                   >
                     <option value="Present">{t('حاضر', 'Present')}</option>

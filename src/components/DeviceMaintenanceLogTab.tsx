@@ -167,7 +167,7 @@ export const DeviceMaintenanceLogTab: React.FC<DeviceMaintenanceLogTabProps> = (
           {/* Payment Filter */}
           <select
             value={paymentFilter}
-            onChange={(e) => setPaymentFilter(e.target.value as any)}
+            onChange={(e) => setPaymentFilter(e.target.value as typeof paymentFilter)}
             className="rounded-xl border border-slate-200 bg-slate-50 p-2 text-xs font-bold text-slate-700 focus:border-amber-500 focus:outline-hidden dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
           >
             <option value="ALL">{t('كل طرق السداد', 'All Payments')}</option>

@@ -2009,7 +2009,7 @@ export const ProductManagementView: React.FC = () => {
                 </label>
                 <select
                   value={categoryForm.type}
-                  onChange={(e) => setCategoryForm({ ...categoryForm, type: e.target.value as any })}
+                  onChange={(e) => setCategoryForm({ ...categoryForm, type: e.target.value as ItemCategory['type'] })}
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 >
                   <option value="service">{t('خدمات طبية وجلسات فقط', 'Medical Services Only')}</option>

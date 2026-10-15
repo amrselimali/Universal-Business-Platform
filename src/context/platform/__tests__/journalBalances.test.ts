@@ -50,7 +50,7 @@ describe('lineDeltaForAccount', () => {
 
   it('يتعامل مع القيم غير الرقمية كصفر', () => {
     const acc = buildAccount();
-    expect(lineDeltaForAccount(buildLine({ debit: undefined as any }), acc)).toBe(0);
+    expect(lineDeltaForAccount(buildLine({ debit: undefined as unknown as number }), acc)).toBe(0);
   });
 });
 

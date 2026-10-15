@@ -183,6 +183,15 @@ export const SYSTEM_VIEWS: SystemViewDef[] = [
     category: 'admin',
   },
   {
+    id: 'accounting_mapping',
+    nameAr: 'ربط العمليات بالحسابات',
+    nameEn: 'Posting-to-Accounts Mapping',
+    descriptionAr: 'المصدر الحصري والوحيد لقيود اليومية: ربط كل عملية تشغيلية بالحسابات المدينة والدائنة',
+    descriptionEn: 'The single exclusive source of journal entries: map each operation to debit/credit accounts',
+    iconName: 'GitMerge',
+    category: 'core',
+  },
+  {
     id: 'metadata_studio',
     nameAr: 'استوديو الشاشات والحقول',
     nameEn: 'Metadata Studio',
