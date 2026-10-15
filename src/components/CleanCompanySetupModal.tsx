@@ -332,7 +332,7 @@ export const CleanCompanySetupModal: React.FC<CleanCompanySetupModalProps> = ({
                           <button
                             key={act.id}
                             type="button"
-                            onClick={() => setActivityType(act.id as any)}
+                            onClick={() => setActivityType(act.id as typeof activityType)}
                             className={`flex flex-col items-center text-center p-3 rounded-2xl border transition-all cursor-pointer ${isSelected ? 'border-cyan-500 bg-cyan-50 text-cyan-800 dark:border-cyan-400 dark:bg-cyan-950/40 dark:text-cyan-200 font-bold shadow-xs' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-800/60 dark:text-slate-300'}`}
                           >
                             <Icon className={`h-4 w-4 mb-1 ${isSelected ? 'text-cyan-600 dark:text-cyan-400' : 'text-slate-400'}`} />

@@ -260,7 +260,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
       scopedInvoices.forEach((inv) => {
         const matchCustomer =
           inv.customerId === currentParty.id ||
-          matchesAutoSerial((inv as any).customerCode);
+          matchesAutoSerial(inv.customerCode);
 
         if (matchCustomer) {
           const invDate = normalizeStatementDate(inv.createdAt) || inv.createdAt.slice(0, 10);
@@ -1137,7 +1137,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
               ].map((item) => (
                 <button
                   key={item.id}
-                  onClick={() => setDateFilter(item.id as any)}
+                  onClick={() => setDateFilter(item.id as typeof dateFilter)}
                   className={`flex-1 py-1 px-2 text-[11px] font-bold rounded-lg transition-all cursor-pointer ${
                     dateFilter === item.id
                       ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
@@ -1185,7 +1185,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
 
               <select
                 value={balanceFilterType}
-                onChange={(e) => setBalanceFilterType(e.target.value as any)}
+                onChange={(e) => setBalanceFilterType(e.target.value as typeof balanceFilterType)}
                 className="rounded-xl border border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800 px-2.5 py-1.5 text-xs font-bold text-slate-900 dark:text-white outline-none focus:border-indigo-600"
               >
                 <option value="ALL">{t('كافة الأرصدة (بدون قيد)', 'All Balances')}</option>
