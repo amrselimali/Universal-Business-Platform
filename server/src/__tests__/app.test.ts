@@ -20,7 +20,7 @@ function createFakeDb(overrides: Partial<AppDeps['db']> = {}) {
   const db: AppDeps['db'] = {
     one: async (_tenantId, text, params) => {
       calls.push({ text, params });
-      return [] as any;
+      return [] as unknown as never;
     },
     withTenant: async (_tenantId, statements) => {
       statements.forEach((s) => calls.push({ text: s.text, params: s.params }));
@@ -28,7 +28,7 @@ function createFakeDb(overrides: Partial<AppDeps['db']> = {}) {
     },
     rawQuery: async (text, params) => {
       calls.push({ text, params });
-      return [] as any;
+      return [] as unknown as never;
     },
     ...overrides,
   };
@@ -134,7 +134,7 @@ describe('عزل المستأجرين (Tenant Isolation)', () => {
     const { db } = createFakeDb({
       one: async (tenantId: string) => {
         seenTenants.push(tenantId);
-        return [] as any;
+        return [] as unknown as never;
       },
     });
     const localApp = await buildApp({

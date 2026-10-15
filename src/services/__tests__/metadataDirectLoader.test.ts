@@ -12,7 +12,7 @@ import { loadMetadataFromDirectDb } from '../metadataDirectLoader';
 /** localStorage وهمي بسيط — البيئة هنا node بلا متصفح. */
 const installFakeStorage = (): void => {
   const store = new Map<string, string>();
-  (globalThis as any).localStorage = {
+  (globalThis as unknown as { localStorage: Partial<Storage> }).localStorage = {
     getItem: (k: string) => store.get(k) ?? null,
     setItem: (k: string, v: string) => void store.set(k, String(v)),
     removeItem: (k: string) => void store.delete(k),

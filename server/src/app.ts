@@ -144,7 +144,9 @@ export async function buildApp(deps: AppDeps) {
       allowedViews: Array.isArray(account.payload?.allowedViews) ? account.payload.allowedViews : [],
       allowedActions: Array.isArray(account.payload?.allowedActions) ? account.payload.allowedActions : [],
     };
-    const token = jwt.sign(payload, JWT_SECRET as string, { expiresIn: JWT_EXPIRES_IN } as any);
+    const token = jwt.sign(payload, JWT_SECRET, {
+      expiresIn: JWT_EXPIRES_IN as jwt.SignOptions['expiresIn'],
+    });
     if (!account.payload?.passwordHash && account.payload?.password) {
       request.log.warn(`User ${username} still stores a plaintext password - migrate to passwordHash`);
     }

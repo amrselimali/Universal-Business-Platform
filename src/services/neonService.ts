@@ -18,7 +18,7 @@ import {
   PaymentMethod,
 } from '../types';
 
-// مكتبة Neon تُعيد `any`؛ نضبط الحدود هنا بدل نشر `as any` في كل موضع.
+// مكتبة Neon تُعيد النتائج بلا نوع؛ نضبط الحدود هنا مرة واحدة.
 type NeonRow = Record<string, unknown>;
 const asRows = <T = NeonRow>(r: unknown): T[] => (Array.isArray(r) ? (r as T[]) : []);
 

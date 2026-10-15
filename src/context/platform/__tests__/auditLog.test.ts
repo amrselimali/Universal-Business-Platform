@@ -7,6 +7,7 @@ import {
   scopeAuditRecords,
   takeRecent,
   type AuditContext,
+  type AuditInput,
 } from '../auditLog';
 import type { AuditRecord, UserActivityLog } from '../../../types';
 
@@ -69,7 +70,7 @@ describe('buildAuditRecord', () => {
         entityName: 'عميل',
         actionType: 'CREATE',
         performedById: 'مستخدم-مزوّر',
-      } as any,
+      } as unknown as AuditInput,
       ctx
     );
     // السياق يُطبَّق بعد المدخلات فيتغلّب عليها دائماً.
