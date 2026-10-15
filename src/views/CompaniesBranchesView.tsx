@@ -1330,7 +1330,7 @@ export const CompaniesBranchesView: React.FC = () => {
                   </label>
                   <select
                     value={newCompanyPlan}
-                    onChange={(e) => setNewCompanyPlan(e.target.value as any)}
+                    onChange={(e) => setNewCompanyPlan(e.target.value as Tenant['plan'])}
                     className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-xs font-bold text-slate-800 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
                   >
                     <option value="Enterprise">Enterprise (غير محدود)</option>
@@ -1585,7 +1585,7 @@ export const CompaniesBranchesView: React.FC = () => {
                   </label>
                   <select
                     value={editPlan}
-                    onChange={(e) => setEditPlan(e.target.value as any)}
+                    onChange={(e) => setEditPlan(e.target.value as Tenant['plan'])}
                     className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-xs font-bold text-slate-800 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
                   >
                     <option value="Enterprise">Enterprise (غير محدود)</option>

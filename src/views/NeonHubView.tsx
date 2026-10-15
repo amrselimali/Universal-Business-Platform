@@ -141,7 +141,7 @@ export const NeonHubView: React.FC = () => {
       };
 
       const res = exportDatabaseToMultiSheetExcel({
-        tenantName: (tenant as any)?.nameAr || (tenant as any)?.name || 'المؤسسة الطبية',
+        tenantName: tenant?.name || 'المؤسسة الطبية',
         branches: fromNeon('erp_branches', allBranches || branches),
         warehouses: fromNeon('erp_warehouses', allWarehouses || warehouses),
         users: fromNeon('erp_users', allUsers || users),

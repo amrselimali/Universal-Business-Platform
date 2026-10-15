@@ -3530,7 +3530,7 @@ export const BookingsFollowUpView: React.FC = () => {
                           ) : (
                             <select
                               value={fup.status}
-                              onChange={(e) => updatePatientFollowUp(fup.id, { status: e.target.value as any })}
+                              onChange={(e) => updatePatientFollowUp(fup.id, { status: e.target.value as PatientFollowUp['status'] })}
                               className={`text-[11px] font-bold rounded-lg border px-2 py-0.5 cursor-pointer ${statusBadge}`}
                             >
                               <option value="Pending">{t('قيد الانتظار', 'Pending')}</option>
@@ -5112,7 +5112,7 @@ export const BookingsFollowUpView: React.FC = () => {
                   </label>
                   <select
                     value={fupType}
-                    onChange={(e) => setFupType(e.target.value as any)}
+                    onChange={(e) => setFupType(e.target.value as typeof fupType)}
                     className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
                   >
                     <option value="Inquiry">{t('استفسار عن خدمة / أسعار', 'Inquiry')}</option>
