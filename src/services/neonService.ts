@@ -522,7 +522,6 @@ export class NeonService {
     return inserted;
   }
 
-
   /** Creates/updates every dataset table from the shared schema definition.
    * Idempotent: existing tables/columns are preserved; missing ones are added. */
   static async runFullSchemaMigration(connectionString: string): Promise<{
@@ -666,7 +665,7 @@ export class NeonService {
         `SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name=$1 AND is_nullable='NO' AND column_default IS NULL`,
         [schema.table]
       );
-      for (const row of notNull as any[]) {
+      for (const row of asRows<{ column_name: string }>(notNull)) {
         if (row.column_name === 'id') continue;
         try { await sql.query(`ALTER TABLE ${schema.table} ALTER COLUMN ${row.column_name} DROP NOT NULL`, []); } catch { /* ignore */ }
       }
@@ -788,7 +787,7 @@ export class NeonService {
       const counts = await sql`
         SELECT tenant_id, COUNT(*)::int AS docs
         FROM app_records WHERE deleted_at IS NULL GROUP BY tenant_id ORDER BY docs DESC`;
-      const list = counts as any[];
+      const list = asRows<{ tenant_id: string; docs: number }>(counts);
       if (tenantsTableId && list.some((row) => String(row.tenant_id) === tenantsTableId)) {
         return tenantsTableId;
       }
@@ -836,11 +835,12 @@ export class NeonService {
       const rows = await sql`
         SELECT payload FROM app_documents WHERE tenant_id = ${tenantId} AND doc_key = ${key}
       `;
-      const payload: any = asRows(rows)[0]?.payload;
+      const payload = asRows<{ payload?: unknown }>(rows)[0]?.payload;
       if (payload === undefined) return { success: true, value: undefined, message: 'غير موجود' };
 
-      if (payload && typeof payload === 'object' && (payload as any).__chunked) {
-        const count = Number((payload as any).count) || 0;
+      const chunked = (payload ?? {}) as { __chunked?: boolean; count?: number };
+      if (chunked.__chunked) {
+        const count = Number(chunked.count) || 0;
         const merged: unknown[] = [];
         const CHUNKS_PER_REQUEST = 4;
         for (let start = 0; start < count; start += CHUNKS_PER_REQUEST) {
@@ -853,10 +853,10 @@ export class NeonService {
             params.push(name);
             return `doc_key = $${params.length}`;
           });
-          const chunkRows: any = await (sql as any).query(
+          const chunkRows = asRows<{ doc_key: string; payload: unknown }>(await sql.query(
             `SELECT doc_key, payload FROM app_documents WHERE tenant_id = $1 AND (${conditions.join(' OR ')})`,
             params
-          );
+          ));
           names.forEach((name) => {
             const found = asRows(chunkRows).find((row) => row.doc_key === name);
             if (Array.isArray(found?.payload)) merged.push(...found.payload);
@@ -1815,7 +1815,7 @@ export class NeonService {
                 `SELECT record_id, payload FROM app_records
                   WHERE tenant_id = $1 AND doc_key = $2 AND deleted_at IS NULL AND record_id > $3
                   ORDER BY record_id LIMIT $4`, [tenantId, docKey, lastId, PAGE]);
-          const list = page as any[];
+          const list = asRows<{ record_id: string; payload?: Record<string, unknown> }>(page);
           if (list.length === 0) break;
           list.forEach((row) => records.push({ ...(row.payload || {}), id: String(row.record_id) }));
           lastId = String(list[list.length - 1].record_id);
