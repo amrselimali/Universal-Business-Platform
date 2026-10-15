@@ -25,14 +25,11 @@ export interface CommandResult<T = unknown> {
   data?: T;
 }
 
+import { getEffectiveNeonConnectionString } from './neonConfig';
+
 export function getActiveDbConnection(): { connectionString: string; tenantId: string } | null {
   try {
-    const rawCfg = localStorage.getItem('erp_neon_cfg');
-    if (!rawCfg) return null;
-    const parsed = JSON.parse(rawCfg);
-    const conn = String(parsed?.connectionString || '').trim();
-    if (!conn.startsWith('postgres://') && !conn.startsWith('postgresql://')) return null;
-    if (conn.includes('ep-cool-snowflake-12345') || conn.includes('user:pass@')) return null;
+    const conn = getEffectiveNeonConnectionString();
     const tenantId = String(localStorage.getItem('erp_active_tenant_id') || '').trim() || 'tenant-eg-001';
     return { connectionString: conn, tenantId };
   } catch {

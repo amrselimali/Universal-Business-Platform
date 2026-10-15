@@ -11,7 +11,7 @@
  */
 
 import { neon } from '@neondatabase/serverless';
-import { getActiveDbConnection } from './commands';
+import { getEffectiveNeonConnectionString } from './neonConfig';
 import type { MetadataRegistry } from './metadataRegistry';
 
 /** صف قاعدة بيانات — مكتبة Neon تُعيد `any`. */
@@ -32,11 +32,11 @@ const str = (value: unknown, fallback = ''): string =>
  *          أو لم تكن الجداول موجودة بعد.
  */
 export async function loadMetadataFromDirectDb(): Promise<MetadataRegistry | null> {
-  const connection = getActiveDbConnection();
-  if (!connection?.connectionString) return null;
+  const connectionString = getEffectiveNeonConnectionString();
+  if (!connectionString) return null;
 
   try {
-    const sql = neon(connection.connectionString.trim());
+    const sql = neon(connectionString.trim());
 
     const [views, actions, entities, fields, screens] = await Promise.all([
       sql.query(
