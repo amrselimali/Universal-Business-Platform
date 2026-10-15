@@ -342,11 +342,7 @@ const MainLayout: React.FC = () => {
               ? t('تعذر الاتصال بقاعدة البيانات — التطبيق يعمل على البيانات المحلية.', 'Cannot reach the database — the app is running on local data.')
               : t('لم يتم إعداد رابط قاعدة البيانات بعد.', 'No database connection configured yet.')}
           </span>
-          <button
-            type="button"
-            onClick={() => void syncNow()}
-            className="ms-auto rounded-lg bg-amber-600 px-2.5 py-1 text-[10px] text-white hover:bg-amber-700 cursor-pointer"
-          >
+          <button type="button" onClick={() => { void retryNeonBootstrap(); void syncNow(); }} className="ms-auto rounded-lg bg-amber-600 px-2.5 py-1 text-[10px] text-white hover:bg-amber-700 cursor-pointer">
             {t('مزامنة الآن', 'Sync now')}
           </button>
         </div>

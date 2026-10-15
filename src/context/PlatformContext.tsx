@@ -8827,16 +8827,32 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   // Neon PostgreSQL state
   const [neonDb, setNeonDb] = useState<NeonDbState>(() => {
+    const defaultUrl = 'postgresql://neondb_owner:npg_rPVi0Rf4vuFB@ep-twilight-glitter-b9w0wh2i-pooler.c-7.eu-central-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require';
     const saved = localStorage.getItem('erp_neon_cfg');
-    return saved
-      ? JSON.parse(saved)
-      : {
-          connected: false,
-          connectionString: 'postgres://user:pass@ep-cool-snowflake-12345.eu-central-1.aws.neon.tech/neondb?sslmode=require',
-          isSyncing: false,
-          tablesCount: 15,
-          recordsCount: 84,
-        };
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        const conn = String(parsed?.connectionString || '').trim();
+        if (conn && !conn.includes('ep-cool-snowflake-12345') && !conn.includes('user:pass@') && !conn.includes('ep-cool-12345')) {
+          return parsed;
+        }
+      } catch {
+        /* fallback to default */
+      }
+    }
+    const initialConfig: NeonDbState = {
+      connected: true,
+      connectionString: defaultUrl,
+      isSyncing: false,
+      tablesCount: 22,
+      recordsCount: 84,
+    };
+    try {
+      localStorage.setItem('erp_neon_cfg', JSON.stringify(initialConfig));
+    } catch {
+      /* ignore */
+    }
+    return initialConfig;
   });
 
   const updateNeonConnectionString = (conn: string) => {

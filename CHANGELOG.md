@@ -1,6 +1,18 @@
 # CHANGELOG
 
-## 2026-10-14 — خطة تطوير Universal (تنفيذ المراحل 0 و1 و2)
+## 2026-10-15 — تشغيل وربط محرك الشاشات (Metadata Engine) بقاعدة بيانات Neon الجديدة
+
+### ما تم إنجازه
+- **تشغيل سكربتات محرك الشاشات:**
+  - تنفيذ `scripts/neon_metadata_engine.sql` لإنشاء جداول `erp_views`, `erp_actions`, `erp_entities`, `erp_entity_fields`, `erp_screens`.
+  - تنفيذ `scripts/neon_metadata_seed.sql` وتعبئة 22 شاشة، 44 فعلاً، 6 كيانات، و32 حقلاً قياسياً.
+  - تنفيذ جميع سكربتات الترحيل والتزامن المتفائل وRLS على قاعدة بيانات Neon الجديدة:
+    `neon_schema_migrations.sql`, `neon_optimistic_concurrency.sql`, `neon_phase4_infrastructure.sql`, `neon_phase4_missing_tables.sql`, `neon_accounting_functions.sql`, `neon_security_rls.sql`.
+- **دعم التحميل المباشر للـ Metadata من Neon:**
+  - تحديث `metadataRegistry.ts` و`metadataNeon.ts` لجلب الـ Metadata مباشرة من قاعدة بيانات Neon السحابية عند عدم تشغيل الـ API الخارجي.
+  - تحديث `metadataStudioApi.ts` لإمكانية حفظ وتعديل وحذف الحقول مباشرة على Neon عند غياب السيرفر الوسيط.
+  - تحسين شاشة `MetadataStudioView.tsx` بحالة تفاعلية `useState` والتحميل التلقائي فور فتح الشاشة مع زر إعادة تحميل سريع.
+  - ربط التطبيق الافتراضي برابط Neon الجديد في `neonConfig.ts`.
 
 ### القرار المعماري
 - **الستاك:** المسار (أ) — البقاء على TypeScript / Fastify. لم يُعتمد التحول إلى .NET.

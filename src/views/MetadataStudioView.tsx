@@ -1,25 +1,18 @@
-import React, { useMemo, useState } from 'react';
-import {
-  Save,
-  Trash2,
-  Plus,
-  Eye,
-  RefreshCw,
-  CheckCircle2,
-  AlertCircle,
-  Database,
-} from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Eye, RefreshCw, CheckCircle2, AlertCircle } from 'lucide-react';
 import { usePlatform } from '../context/PlatformContext';
 import {
   getMetadataRegistry,
   loadMetadataRegistry,
   type MetadataEntity,
   type MetadataField,
+  type MetadataRegistry,
 } from '../services/metadataRegistry';
 import { deleteMetadataField, saveMetadataField } from '../services/metadataStudioApi';
-import { MetadataFieldRow, toDraft, type FieldDraft } from '../components/MetadataFieldRow';
+import { toDraft, type FieldDraft } from '../components/MetadataFieldRow';
 import { MetadataEntityList } from '../components/MetadataEntityList';
-import { MetadataFieldsHeader } from '../components/MetadataFieldRow';
+import { MetadataStudioEmptyState } from '../components/MetadataStudioEmptyState';
+import { MetadataFieldsTable } from '../components/MetadataFieldsTable';
 
 /**
  * استوديو الـ Metadata (Metadata Studio)
@@ -39,13 +32,36 @@ export const MetadataStudioView: React.FC<{ onPreview?: (entityCode: string) => 
   const { t, language, currentUser } = usePlatform();
   const isArabic = language === 'ar';
 
-  const registry = getMetadataRegistry();
+  const [registry, setRegistry] = useState<MetadataRegistry>(() => getMetadataRegistry());
+  const [loading, setLoading] = useState(false);
   const entities = registry.entities;
 
   const [selectedCode, setSelectedCode] = useState<string>(entities[0]?.code ?? '');
   const [drafts, setDrafts] = useState<Record<number, FieldDraft>>({});
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    if (registry.entities.length === 0) {
+      setLoading(true);
+    }
+    loadMetadataRegistry(true)
+      .then((reg) => {
+        if (mounted) {
+          setRegistry(reg);
+          if (reg.entities.length > 0 && !selectedCode) {
+            setSelectedCode(reg.entities[0].code);
+          }
+        }
+      })
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const selected: MetadataEntity | undefined = useMemo(
     () => entities.find((e) => e.code === selectedCode),
@@ -59,6 +75,28 @@ export const MetadataStudioView: React.FC<{ onPreview?: (entityCode: string) => 
 
   const updateDraft = (fieldId: number, patch: Partial<FieldDraft>) =>
     setDrafts((prev) => ({ ...prev, [fieldId]: { ...prev[fieldId], ...patch } }));
+
+  const handleReload = async () => {
+    setBusy(true);
+    try {
+      const reg = await loadMetadataRegistry(true);
+      setRegistry(reg);
+      if (reg.entities.length > 0 && (!selectedCode || !reg.entities.some((e) => e.code === selectedCode))) {
+        setSelectedCode(reg.entities[0].code);
+      }
+      setFeedback({
+        type: 'ok',
+        text: t('تم تحديث محرك الشاشات بنجاح من قاعدة البيانات.', 'Metadata registry successfully reloaded.'),
+      });
+    } catch (err: any) {
+      setFeedback({
+        type: 'err',
+        text: t('فشل تحديث محرك الشاشات: ', 'Failed to reload metadata: ') + (err?.message || String(err)),
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const handleSave = async (field: MetadataField) => {
     if (!selected) return;
@@ -87,6 +125,7 @@ export const MetadataStudioView: React.FC<{ onPreview?: (entityCode: string) => 
         delete next[field.id ?? -1];
         return next;
       });
+      setRegistry(getMetadataRegistry());
       setFeedback({
         type: 'ok',
         text: t('تم الحفظ — الشاشة محدَّثة فوراً.', 'Saved — the screen is updated instantly.'),
@@ -96,7 +135,7 @@ export const MetadataStudioView: React.FC<{ onPreview?: (entityCode: string) => 
         type: 'err',
         text:
           result.error === 'api_not_configured'
-            ? t('الكتابة تحتاج تشغيل الـ API.', 'Writing requires the API to be running.')
+            ? t('الكتابة تحتاج تشغيل الـ API أو اتصال Neon.', 'Writing requires API or Neon connection.')
             : t('فشل الحفظ: ', 'Save failed: ') + (result.error ?? ''),
       });
     }
@@ -110,11 +149,12 @@ export const MetadataStudioView: React.FC<{ onPreview?: (entityCode: string) => 
     setBusy(true);
     const result = await deleteMetadataField(field.id);
     setBusy(false);
-    setFeedback(
-      result.ok
-        ? { type: 'ok', text: t('تم حذف الحقل.', 'Field removed.') }
-        : { type: 'err', text: result.error ?? 'delete_failed' }
-    );
+    if (result.ok) {
+      setRegistry(getMetadataRegistry());
+      setFeedback({ type: 'ok', text: t('تم حذف الحقل.', 'Field removed.') });
+    } else {
+      setFeedback({ type: 'err', text: result.error ?? 'delete_failed' });
+    }
   };
 
   const handleAddField = async () => {
@@ -139,31 +179,22 @@ export const MetadataStudioView: React.FC<{ onPreview?: (entityCode: string) => 
       width: 150,
     });
     setBusy(false);
-    setFeedback(
-      result.ok
-        ? { type: 'ok', text: t('تمت إضافة الحقل.', 'Field added.') }
-        : { type: 'err', text: result.error ?? 'save_failed' }
-    );
+    if (result.ok) {
+      setRegistry(getMetadataRegistry());
+      setFeedback({ type: 'ok', text: t('تمت إضافة الحقل.', 'Field added.') });
+    } else {
+      setFeedback({ type: 'err', text: result.error ?? 'save_failed' });
+    }
   };
 
-  // لا توجد كيانات مسجّلة (قاعدة البيانات غير مهيأة بعد)
   if (entities.length === 0) {
     return (
-      <div className="flex min-h-[40vh] flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-slate-300 p-8 text-center dark:border-slate-700">
-        <Database className="h-8 w-8 text-slate-400" />
-        <h2 className="text-sm font-extrabold text-slate-800 dark:text-slate-100">
-          {t('محرك الشاشات غير مهيأ بعد', 'The metadata engine is not set up yet')}
-        </h2>
-        <p className="max-w-xl text-xs leading-relaxed text-slate-500 dark:text-slate-400">
-          {t(
-            'شغّل ملفَي neon_metadata_engine.sql و neon_metadata_seed.sql ثم أعد التحميل.',
-            'Run neon_metadata_engine.sql and neon_metadata_seed.sql, then reload.'
-          )}
-        </p>
-        <code className="rounded-lg bg-slate-100 px-3 py-1 font-mono text-[11px] text-slate-700 dark:bg-slate-800 dark:text-slate-300">
-          scripts/neon_metadata_engine.sql → scripts/neon_metadata_seed.sql
-        </code>
-      </div>
+      <MetadataStudioEmptyState
+        loading={loading}
+        busy={busy}
+        onReload={handleReload}
+        t={t}
+      />
     );
   }
 
@@ -186,7 +217,7 @@ export const MetadataStudioView: React.FC<{ onPreview?: (entityCode: string) => 
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => void loadMetadataRegistry(true)}
+            onClick={handleReload}
             disabled={busy}
             className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
           >
@@ -245,49 +276,18 @@ export const MetadataStudioView: React.FC<{ onPreview?: (entityCode: string) => 
           }}
         />
 
-        {/* جدول الحقول */}
-        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xs dark:border-slate-800 dark:bg-slate-900">
-          <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3 dark:border-slate-800">
-            <h2 className="text-xs font-extrabold text-slate-800 dark:text-slate-100">
-              {t('حقول الكيان', 'Entity fields')}
-              {selected && <span className="font-mono text-slate-400"> — {selected.code}</span>}
-            </h2>
-            {canEdit && (
-              <button
-                type="button"
-                onClick={() => void handleAddField()}
-                disabled={busy}
-                className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-1.5 text-[11px] font-bold text-white hover:bg-emerald-700 disabled:opacity-50"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                {t('حقل جديد', 'New field')}
-              </button>
-            )}
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-right text-xs">
-              <MetadataFieldsHeader t={t} />
-              <tbody>
-                {(selected?.fields ?? []).map((field) => (
-                  <MetadataFieldRow
-                    key={field.columnName}
-                    field={field}
-                    draft={drafts[field.id ?? -1] ?? toDraft(field)}
-                    dirty={Boolean(drafts[field.id ?? -1])}
-                    canEdit={canEdit}
-                    busy={busy}
-                    isArabic={isArabic}
-                    t={t}
-                    onDraftChange={updateDraft}
-                    onSave={handleSave}
-                    onDelete={handleDelete}
-                  />
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        <MetadataFieldsTable
+          selected={selected}
+          canEdit={canEdit}
+          busy={busy}
+          isArabic={isArabic}
+          drafts={drafts}
+          t={t}
+          onAddField={() => void handleAddField()}
+          onDraftChange={updateDraft}
+          onSave={handleSave}
+          onDelete={handleDelete}
+        />
       </div>
     </div>
   );

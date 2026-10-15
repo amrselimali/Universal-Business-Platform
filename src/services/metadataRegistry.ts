@@ -18,6 +18,7 @@
 import { SYSTEM_ACTIONS, SYSTEM_VIEWS } from '../data/permissionsData';
 import type { ActionPermissionDef } from '../types';
 import { getApiToken, getApiUrl, isApiConfigured } from './apiClient';
+import { fetchRegistryFromNeon } from './metadataNeon';
 
 // ---------------------------------------------------------------------------
 // الأنواع
@@ -139,6 +140,7 @@ const readCache = (): MetadataRegistry | null => {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as MetadataRegistry;
     if (!Array.isArray(parsed?.views) || parsed.views.length === 0) return null;
+    if (!Array.isArray(parsed?.entities) || parsed.entities.length === 0) return null;
     return parsed;
   } catch {
     return null;
@@ -165,32 +167,52 @@ if (cached) registry = cached;
 export const getMetadataRegistry = (): MetadataRegistry => registry;
 
 /**
- * يُحمّل الـ Metadata من قاعدة البيانات عبر الـ API.
+ * يُحمّل الـ Metadata من قاعدة البيانات (عبر الـ API أو اتصال Neon المباشر).
  * لا يرفع استثناء أبداً: عند أي فشل يعود بالكتالوج المدمج أو الكاش.
  */
 export async function loadMetadataRegistry(force = false): Promise<MetadataRegistry> {
-  if (loadPromise && !force) return loadPromise;
+  const needsFetch = force || !Array.isArray(registry.entities) || registry.entities.length === 0;
+  if (loadPromise && !needsFetch) return loadPromise;
 
   loadPromise = (async (): Promise<MetadataRegistry> => {
-    if (!isApiConfigured() || !getApiToken()) return registry;
+    // 1. تجربة الـ API إن كان مهيئاً
+    if (isApiConfigured() && getApiToken()) {
+      try {
+        const response = await fetch(`${getApiUrl()}/metadata/registry`, {
+          headers: {
+            Authorization: `Bearer ${getApiToken()}`,
+            'Content-Type': 'application/json',
+          },
+        });
 
-    try {
-      const response = await fetch(`${getApiUrl()}/metadata/registry`, {
-        headers: {
-          Authorization: `Bearer ${getApiToken()}`,
-          'Content-Type': 'application/json',
-        },
-      });
+        if (response.ok) {
+          const payload = (await response.json()) as Partial<MetadataRegistry>;
+          const loaded: MetadataRegistry = {
+            views: payload.views?.length ? payload.views : registry.views,
+            actions: payload.actions?.length ? payload.actions : registry.actions,
+            entities: payload.entities ?? registry.entities,
+            screens: payload.screens ?? registry.screens,
+            source: 'database',
+            loadedAt: new Date().toISOString(),
+          };
 
-      if (!response.ok) return registry;
+          registry = loaded;
+          writeCache(loaded);
+          return loaded;
+        }
+      } catch {
+        /* fallback to Neon direct */
+      }
+    }
 
-      const payload = (await response.json()) as Partial<MetadataRegistry>;
-
+    // 2. التحميل المباشر من قاعدة بيانات Neon السحابية
+    const neonPayload = await fetchRegistryFromNeon();
+    if (neonPayload && neonPayload.entities && neonPayload.entities.length > 0) {
       const loaded: MetadataRegistry = {
-        views: payload.views?.length ? payload.views : registry.views,
-        actions: payload.actions?.length ? payload.actions : registry.actions,
-        entities: payload.entities ?? registry.entities,
-        screens: payload.screens ?? registry.screens,
+        views: neonPayload.views?.length ? neonPayload.views : registry.views,
+        actions: neonPayload.actions?.length ? neonPayload.actions : registry.actions,
+        entities: neonPayload.entities,
+        screens: neonPayload.screens ?? registry.screens,
         source: 'database',
         loadedAt: new Date().toISOString(),
       };
@@ -198,10 +220,9 @@ export async function loadMetadataRegistry(force = false): Promise<MetadataRegis
       registry = loaded;
       writeCache(loaded);
       return loaded;
-    } catch {
-      // الشبكة غير متاحة — نبقى على الكاش أو الكتالوج المدمج.
-      return registry;
     }
+
+    return registry;
   })();
 
   return loadPromise;
