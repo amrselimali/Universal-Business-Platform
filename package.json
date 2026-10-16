@@ -10,9 +10,12 @@
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "check:size": "node scripts/check-file-size.mjs",
+    "guardrails": "node scripts/architecture-guardrails.mjs",
+    "guardrails:check": "node scripts/architecture-guardrails.mjs --check",
+    "guardrails:update": "node scripts/architecture-guardrails.mjs --update",
     "test": "vitest run",
     "test:watch": "vitest",
-    "verify": "npm run lint && npm run test && npm run check:size && npm run build",
+    "verify": "npm run lint && npm run test && npm run check:size && npm run guardrails:check && npm run build",
     "e2e": "playwright test",
     "e2e:ui": "playwright test --ui"
   },

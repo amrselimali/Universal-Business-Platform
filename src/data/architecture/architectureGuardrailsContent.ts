@@ -93,14 +93,14 @@ export const GUARDRAIL_SCOPE_AR = [
   'erp-nextgen-local/** — التطبيق المرجعي (.NET 10 + SQL Migrations + السكربتات)',
   'src/services/architectureGuardrails.ts — منطق تقييم البوابات',
   'src/data/architecture/** — بيانات المعمارية واللقطة المقيسة',
-  'src/components/architecture/** و src/views/ArchitectureView.tsx — واجهة الشاشة',
-  'scripts/architecture-guardrails.mjs و src/__tests__/architectureGuardrails.test.ts',
+  'src/components/architecture/** و src/components/ViewRenderer.tsx و src/views/ArchitectureView.tsx',
+  'scripts/architecture-guardrails.mjs و scripts/guardrail-*.mjs و src/__tests__/architectureGuardrails.test.ts',
 ];
 
 export const GUARDRAIL_SCOPE_EN = [
   'erp-nextgen-local/** — the reference application (.NET 10 + SQL migrations + scripts)',
   'src/services/architectureGuardrails.ts — the gate evaluation logic',
   'src/data/architecture/** — the architecture content and measured snapshot',
-  'src/components/architecture/** and src/views/ArchitectureView.tsx — this screen',
-  'scripts/architecture-guardrails.mjs and src/__tests__/architectureGuardrails.test.ts',
+  'src/components/architecture/**, src/components/ViewRenderer.tsx and src/views/ArchitectureView.tsx',
+  'scripts/architecture-guardrails.mjs, scripts/guardrail-*.mjs and src/__tests__/architectureGuardrails.test.ts',
 ];

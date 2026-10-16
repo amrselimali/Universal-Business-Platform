@@ -40,7 +40,7 @@ const ENGINE_DIRS = ['erp-nextgen-local'];
 const ENGINE_FILES = [
   'src/services/architectureGuardrails.ts',
   'src/views/ArchitectureView.tsx',
-  'src/views/activeView.tsx',
+  'src/components/ViewRenderer.tsx',
   'scripts/architecture-guardrails.mjs',
   'scripts/guardrail-invariants.mjs',
   'scripts/guardrail-snapshot.mjs',

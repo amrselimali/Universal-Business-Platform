@@ -13,9 +13,9 @@
 export const CLIENT_SCOPE_PREFIXES = [
   'src/services/architectureGuardrails.ts',
   'src/components/architecture/',
+  'src/components/ViewRenderer.tsx',
   'src/data/architecture/',
   'src/views/ArchitectureView.tsx',
-  'src/views/activeView.tsx',
 ];
 
 const migrations = (file) => file.path.startsWith('erp-nextgen-local/db/migrations/');

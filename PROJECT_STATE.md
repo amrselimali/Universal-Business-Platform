@@ -1,4 +1,45 @@
 # PROJECT STATE
+## شاشة معمارية المنظومة الجديدة + بوابات الفحص المعماري الحقيقية (2026-10-16)
+
+### ما طلبه المالك
+إضافة شاشة داخل تطبيق Universal تعرض **المعمارية المعتمدة للمنظومة الجديدة
+(Clean Micro-Engine Architecture: YARP + .NET 10 + PostgreSQL RLS + SignalR)**
+مع الميزانية المعمارية (مستخدمون < 100، بدون Scale-to-Zero، ميزانية 200ms،
+Endpoint واحد لكل شاشة، حد 300 سطر في الـ CI، Default-Deny + Action Registry)،
+مخطط تدفق البيانات، حلقة المزامنة اللحظية، عيوب المنصة السابقة مقابل الحلول،
+مقتطفات الكود المعتمد، و**بوابات الفحص الآلي وميزانية السرعة (CI Guardrails)**.
+
+### ما تم تنفيذه
+1. **شاشة `architecture`** (`src/views/ArchitectureView.tsx` + `src/components/architecture/`)
+   بستة تبويبات، وتُفتح من القائمة الجانبية «معمارية المنظومة الجديدة» أو بـ `?view=architecture`.
+2. **محرك بوابات حقيقي** — لا أرقام وهمية:
+   - `src/services/architectureGuardrails.ts` (منطق التقييم النقي، 292 سطراً).
+   - `scripts/architecture-guardrails.mjs` + `guardrail-invariants.mjs` + `guardrail-snapshot.mjs`.
+   - `src/data/architecture/guardrailsSnapshot.ts` (لقطة مولَّدة من المستودع).
+   - `src/__tests__/architectureGuardrails.test.ts` (13 اختباراً: منطق + طزاجة اللقطة + حالة المستودع).
+3. **النتيجة المقيسة الآن:** 3 بوابات · 97 فحصاً · 0 فشل · 65 ملفاً مقيساً ·
+   12 موضع فحص صلاحيات · 19 ثابتاً معمارياً إلزامياً ناجحاً · 3 توصيات
+   (واحدة مفتوحة: PgBouncer/حد اتصالات صريح).
+4. **صلاحيات الشاشة:** `architecture.run_guardrails` و`architecture.copy_snippet`
+   في `SYSTEM_ACTIONS` (Default-Deny)، والشاشة في `SYSTEM_VIEWS` + القائمة الجانبية.
+5. **إعادة هيكلة إلزامية:** نقل رسم الشاشات من `App.tsx` إلى
+   `src/components/ViewRenderer.tsx` — `App.tsx` من 438 إلى **348 سطراً**،
+   وخط الأساس تم تضييقه (App.tsx 439 → 348، neonService 1832 → 1683، commands 479 → 441).
+6. **CI**: خطوة `node scripts/architecture-guardrails.mjs --check` في
+   `.github/workflows/ci.yml`، وأوامر `npm run guardrails[:check|:update]`،
+   وإصلاح `bun.lock` (كان يفشل `bun install --frozen-lockfile` في أول خطوة CI).
+
+### التحقق
+`tsc --noEmit` = 0 خطأ · `vitest` = **276/276** · `vite build` ناجح ·
+`check-file-size` ناجح · `guardrails --check` ناجح.
+
+### ما لم يُلمس (بحدود النطاق)
+- لم تُضف الشاشة إلى `CommandPaletteModal.tsx` لأن الملف (355 سطراً) مُقيَّد في
+  خط الأساس، وأي إضافة له تفشل بوابة الـ 300 سطر — يحتاج تقسيم الملف أولاً.
+- لم تُقس زمن الاستجابة الفعلي (k6/Lighthouse يحتاج بيئة حقيقية) — وهذا مذكور صراحة في الشاشة.
+- لم يُعدّل `MASTER_AI_INSTRUCTIONS.md`.
+
+
 
 ## توحيد الدفتر المحاسبي وإصلاح دوال الترحيل والتحصيل على Neon (2026-10-16)
 

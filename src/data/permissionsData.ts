@@ -218,6 +218,17 @@ export const SYSTEM_VIEWS: SystemViewDef[] = [
     iconName: 'BookOpen',
     category: 'admin',
   },
+  {
+    id: 'architecture',
+    nameAr: 'معمارية المنظومة الجديدة (Clean Micro-Engine)',
+    nameEn: 'New System Architecture (Clean Micro-Engine)',
+    descriptionAr:
+      'المعمارية المعتمدة لـ YARP + .NET 10 + PostgreSQL RLS + SignalR مع بوابات الفحص الآلي وميزانية السرعة',
+    descriptionEn:
+      'The approved YARP + .NET 10 + PostgreSQL RLS + SignalR architecture with CI guardrails and the speed budget',
+    iconName: 'Network',
+    category: 'admin',
+  },
 ];
 
 // إعادة تصدير سجل الأفعال (انتقل إلى actionsData.ts) للتوافق مع الاستيرادات القائمة.

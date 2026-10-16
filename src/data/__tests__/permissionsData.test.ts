@@ -98,7 +98,7 @@ describe('اتساق الموديولات', () => {
     const knownModules = new Set([
       'reception_ops', 'bookings', 'pos', 'staff', 'shift_reports', 'inventory',
       'parties', 'payment_methods', 'accounting', 'clinics', 'companies',
-      'branches', 'warehouses', 'users',
+      'branches', 'warehouses', 'users', 'architecture',
     ]);
 
     const unknown = SYSTEM_ACTIONS.filter(

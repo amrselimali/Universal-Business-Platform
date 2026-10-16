@@ -12,8 +12,8 @@
 
 import type { GuardrailsFacts } from '../../services/architectureGuardrails';
 
-export const GUARDRAILS_MEASURED_AT = '2026-10-16T19:14:50.595Z';
-export const GUARDRAILS_REVISION = '098d309';
+export const GUARDRAILS_MEASURED_AT = '2026-10-16T19:20:39.089Z';
+export const GUARDRAILS_REVISION = '3bfb388';
 
 export const GUARDRAILS_FACTS: GuardrailsFacts = /* GUARDRAILS_FACTS_BEGIN */
 {
@@ -68,14 +68,25 @@ export const GUARDRAILS_FACTS: GuardrailsFacts = /* GUARDRAILS_FACTS_BEGIN */
     { path: 'scripts/architecture-guardrails.mjs', lines: 259 },
     { path: 'scripts/guardrail-invariants.mjs', lines: 104 },
     { path: 'scripts/guardrail-snapshot.mjs', lines: 85 },
+    { path: 'src/__tests__/architectureGuardrails.test.ts', lines: 182 },
+    { path: 'src/components/architecture/ArchitectureBudgetGrid.tsx', lines: 76 },
+    { path: 'src/components/architecture/ArchitectureCiWorkflow.tsx', lines: 118 },
+    { path: 'src/components/architecture/ArchitectureDecisions.tsx', lines: 78 },
+    { path: 'src/components/architecture/ArchitectureGuardrails.tsx', lines: 259 },
+    { path: 'src/components/architecture/ArchitectureSnippets.tsx', lines: 93 },
+    { path: 'src/components/architecture/ArchitectureTopology.tsx', lines: 102 },
+    { path: 'src/components/ViewRenderer.tsx', lines: 168 },
     { path: 'src/data/architecture/architectureDecisions.ts', lines: 125 },
     { path: 'src/data/architecture/architectureGuardrailsContent.ts', lines: 107 },
     { path: 'src/data/architecture/architectureSnippets.ts', lines: 206 },
     { path: 'src/data/architecture/architectureSpec.ts', lines: 241 },
-    { path: 'src/data/architecture/guardrailsSnapshot.ts', lines: 123 },
-    { path: 'src/services/architectureGuardrails.ts', lines: 297 },
+    { path: 'src/data/architecture/guardrailsSnapshot.ts', lines: 134 },
+    { path: 'src/services/architectureGuardrails.ts', lines: 293 },
+    { path: 'src/views/ArchitectureView.tsx', lines: 105 },
   ],
   actionUsages: [
+    { actionKey: 'architecture.copy_snippet', file: 'src/views/ArchitectureView.tsx', line: 33 },
+    { actionKey: 'architecture.run_guardrails', file: 'src/views/ArchitectureView.tsx', line: 32 },
     { actionKey: 'bookings.add_followup', file: 'src/views/BookingsFollowUpView.tsx', line: 2340 },
     { actionKey: 'bookings.create_booking', file: 'src/views/BookingsFollowUpView.tsx', line: 2350 },
     { actionKey: 'bookings.manage_staff_schedule', file: 'src/views/BookingsFollowUpView.tsx', line: 3694 },
@@ -112,7 +123,7 @@ export const GUARDRAILS_FACTS: GuardrailsFacts = /* GUARDRAILS_FACTS_BEGIN */
     { id: 'emitted_events_pipeline', labelAr: 'معالجة الأحداث المُصدَّرة بلا تكرار', labelEn: 'Idempotent event processing', comparison: 'atLeast', expected: 1, found: 4, severity: 'advisory', evidence: ['erp-nextgen-local/db/migrations-original/0005_core_audit_outbox_infrastructure.sql', 'erp-nextgen-local/db/migrations/0005_core_audit_outbox_infrastructure.sql'] },
   ],
   legacy: {
-    scanned: 145,
+    scanned: 154,
     limit: 300,
     baseline: 59,
     violations: 59,

@@ -1,4 +1,36 @@
 # CHANGELOG
+# CHANGELOG
+
+## 2026-10-16 — شاشة «معمارية المنظومة الجديدة» + بوابات فحص معماري حقيقية (CI Guardrails)
+
+### ما تم إنجازه
+- **شاشة جديدة (`architecture`) — المعمارية المعتمدة للمنظومة الجديدة:**
+  - 6 تبويبات: ميزانية الالتزام (مستخدمون < 100، بدون Scale-to-Zero، ميزانية 200ms، Endpoint واحد لكل شاشة، حد 300 سطر، Default-Deny)، مخطط تدفق البيانات الحي بطبقاته الأربع (Client / YARP Gateway / Services / PostgreSQL)، حلقة المزامنة اللحظية (Optimistic UI ← version++ ← NOTIFY ← SignalR)، عيوب المنصة السابقة مقابل الحلول (بدليل مقيس)، مقتطفات كود التنفيذ المعتمد، وبوابات الفحص.
+  - المقتطفات **منقولة من كود موجود فعلاً** في `erp-nextgen-local/` (Generic Data endpoint، RLS + touch_row + realtime_notify، جسر LISTEN/SignalR، مسارات YARP).
+- **محرك بوابات فحص معماري حقيقي (لا أرقام وهمية):**
+  - `scripts/architecture-guardrails.mjs` — يقيس قرص المستودع فعلياً: أسطر ملفات نطاق المحرك، مواضع فحص الصلاحيات `canPerformAction(...)`، ووجود ثوابت RLS/version/NOTIFY/LISTEN/SignalR/YARP/Default-Deny/HttpOnly/Keyset/Outbox. الأطوار: تقرير، `--update` (توليد اللقطة)، `--check` (يفشل الـ Build إذا كانت اللقطة قديمة).
+  - `scripts/guardrail-invariants.mjs` — جدول الثوابت المعمارية (الحدود الدنيا المقبولة + التوصيات غير المُلزِمة).
+  - `scripts/guardrail-snapshot.mjs` — صيغة ملف اللقطة المولَّد + حل الاعتماد الذاتي على حجم الملف نفسه.
+  - `src/services/architectureGuardrails.ts` — منطق التقييم النقي (بوابة حد 300 سطر، بوابة سجل الأفعال، بوابة الثوابت المعمارية) يُستخدم في الشاشة وفي السكربت معاً.
+  - `src/data/architecture/guardrailsSnapshot.ts` — اللقطة المولَّدة (65 ملفاً مقيساً، 12 موضع فحص صلاحيات، 19 ثابتاً إلزامياً ناجحاً، 3 توصيات).
+  - النتيجة الحالية: **3 بوابات / 97 فحصاً / 0 فشل**، وتوصية واحدة مفتوحة: ضبط PgBouncer أو حد اتصالات صريح قبل التوسع.
+- **الصلاحيات والأمان على الشاشة نفسها:**
+  - فعلا `architecture.run_guardrails` و`architecture.copy_snippet` مسجّلان في `SYSTEM_ACTIONS` (Default-Deny): غير المصرح له يرى الزر مقفلاً مع سبب الرفض.
+  - إضافة الشاشة إلى `SYSTEM_VIEWS` و`SIDEBAR_MENU_SECTIONS` و`lazyViews`.
+- **إعادة هيكلة مطلوبة لإتاحة الشاشة دون كسر بوابة الأسطر:**
+  - نُقل سجل رسم الشاشات من `App.tsx` إلى `src/components/ViewRenderer.tsx` => `App.tsx` من **438 إلى 348 سطراً** (بدل أن يكبر)، وإضافة شاشة جديدة صارت في ملف واحد.
+  - تحديث خط أساس الحجم: `PlatformContext.tsx` 12,236 → 12,228 · `neonService.ts` 1,832 → 1,683 · `commands.ts` 479 → 441 · `App.tsx` 439 → 348.
+- **الـ CI:**
+  - `.github/workflows/ci.yml`: خطوة جديدة `node scripts/architecture-guardrails.mjs --check` داخل وظيفة «بوابات الجودة المعمارية».
+  - `package.json`: `guardrails` · `guardrails:check` · `guardrails:update`، وأُضيف `guardrails:check` إلى `npm run verify`.
+  - **إصلاح عطل موجود:** `bun.lock` كان غير متزامن مع `package.json` فكان `bun install --frozen-lockfile` يفشل في أول خطوة من الـ CI — تم تحديثه وتحققنا من نجاحه.
+- **الفحوصات والتحقق:** `tsc --noEmit` = 0 خطأ · `vitest` = **276/276** (منها 13 اختباراً جديداً للبوابات) · `vite build` ناجح · بوابة حجم الملفات ناجحة · `guardrails --check` ناجح.
+
+### قرارات مهمة لأي وكيل قادم
+- **القياس لا يُكتب يدوياً:** أي تعديل في ملفات نطاق المحرك يوجب `npm run guardrails:update` وإلا يفشل الـ CI (وهذا مقصود).
+- **الشاشة تخضع لقواعدها:** كل ملفاتها والمحرك تحت 300 سطر، وأزرارها بأفعال مسجّلة.
+- **ميزانية السرعة الأرقامية (200ms) لا تُقاس هنا:** الشاشة تنص صراحةً على أن قياس الزمن الفعلي يحتاج k6/Lighthouse على بيئة حقيقية، وأن ما يُفحص هنا هو الثوابت التي تمنعه.
+
 
 ## 2026-10-16 — توحيد الدفتر المحاسبي وإصلاح دوال الترحيل والتحصيل على Neon
 
