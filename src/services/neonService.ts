@@ -1,4 +1,5 @@
 import { neon } from '@neondatabase/serverless';
+import { isNeonPlaceholder } from './neonConfig';
 import { APP_DOCUMENTS_DDL, APP_DOCUMENTS_HISTORY_DDL, APP_DOCUMENTS_HISTORY_INDEX_DDL, NEON_SCHEMA_TABLES, NeonTableSchema, buildAlterTableSql, buildCreateTableSql } from './neonSchema';
 import {
   Product,
@@ -25,7 +26,11 @@ const asRows = <T = NeonRow>(r: unknown): T[] => (Array.isArray(r) ? (r as T[]) 
 export class NeonService {
   private static getClient(connectionString: string) {
     const c = connectionString.trim();
-    return neon((!c || c.includes('ep-cool-snowflake-12345') || c.includes('user:pass@')) ? 'postgresql://neondb_owner:npg_rPVi0Rf4vuFB@ep-twilight-glitter-b9w0wh2i-pooler.c-7.eu-central-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require' : c);
+    // 🔒 لا رابط افتراضي في الكود — يأتي من الإعدادات أو VITE_NEON_URL.
+    if (!c || isNeonPlaceholder(c)) {
+      throw new Error('NEON_CONNECTION_REQUIRED');
+    }
+    return neon(c);
   }
 
   static async testLiveConnection(
@@ -820,11 +825,7 @@ export class NeonService {
     return '';
   }
 
-
-  /**
-   * Fetches ONE dataset (with its chunks) using several small requests so no single
-   * Neon response exceeds the 64 MB HTTP limit.
-   */
+  /** Fetches ONE dataset (with chunks) via small requests — avoids Neon's 64 MB limit. */
   static async fetchDocumentByKey(
     connectionString: string,
     tenantId: string,
@@ -1532,7 +1533,6 @@ export class NeonService {
           balance NUMERIC(15, 2) DEFAULT 0.00
         );
       `;
-
 
       await sql`
         CREATE TABLE IF NOT EXISTS appointments (

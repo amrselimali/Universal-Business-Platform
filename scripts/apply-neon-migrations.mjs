@@ -32,6 +32,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 /** ترتيب التطبيق مهم: كل ملف يبني على الذي قبله. */
 const MIGRATIONS = [
   { file: 'scripts/neon_schema_migrations.sql', title: 'المخطط الأساسي (جداول التطبيق)' },
+  { file: 'scripts/neon_typed_tables.sql', title: 'الجداول المنمّطة الكاملة (34 جدولاً)' },
   { file: 'scripts/neon_security_rls.sql', title: 'الأمان: RLS + مستخدم app_api + الفهارس' },
   { file: 'scripts/neon_accounting_functions.sql', title: 'الدوال المحاسبية الذرّية' },
   { file: 'scripts/neon_optimistic_concurrency.sql', title: 'التزامن المتفاوت: version + Triggers' },

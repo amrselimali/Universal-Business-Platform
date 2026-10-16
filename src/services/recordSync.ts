@@ -1,6 +1,5 @@
-import { neon } from '@neondatabase/serverless';
 import { isApiConfigured, getApiToken, apiFetchRecords, apiFetchChanges, apiUpsertRecords, apiDeleteRecords } from './apiClient';
-import { tableForKey, readTableRecords, upsertTableRecords, softDeleteTableRecords, tableChangesSince } from './tableStore';
+import { readTableRecords, upsertTableRecords, softDeleteTableRecords, tableChangesSince } from './tableStore';
 // منطق الدمج والتزامن المتفائل انتقل إلى ملف مستقل (recordMerge.ts) لتقليل حجم هذا الملف.
 import { diffRecords } from './recordMerge';
 import type { SyncRecord } from './recordMerge';
@@ -18,7 +17,6 @@ export type { SyncRecord } from './recordMerge';
  * so concurrent users cannot destroy each other's work.
  */
 
-const getClient = (conn: string) => neon((!conn || conn.includes('ep-cool-snowflake-12345') || conn.includes('user:pass@')) ? 'postgresql://neondb_owner:npg_rPVi0Rf4vuFB@ep-twilight-glitter-b9w0wh2i-pooler.c-7.eu-central-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require' : conn.trim());
 
 /** Uploads only the changed records and soft-deletes the removed ones. */
 export async function pushRecordChanges(
@@ -55,8 +53,9 @@ export async function pushRecordChanges(
     }
   }
 
-  // REAL-TABLE PATH: the typed table is the source of truth when one exists.
-  if (tableForKey(docKey)) {
+  // المصدر الوحيد للحقيقة: الجدول المنمّط.
+  // أُزيل مسار مخزن المستندات (app_records) لإنهاء الازدواجية.
+  {
     let pushedCount = 0;
     let deletedCount = 0;
     if (upserts.length > 0) {
@@ -70,31 +69,6 @@ export async function pushRecordChanges(
       deletedCount = outcome.deleted;
     }
     return { pushed: pushedCount, deleted: deletedCount };
-  }
-
-  try {
-    const sql = getClient(connectionString);
-    let pushed = 0;
-    const BATCH = 500;
-    for (let start = 0; start < upserts.length; start += BATCH) {
-      const slice = upserts.slice(start, start + BATCH);
-      const rows: any = await sql.query(
-        `SELECT fn_upsert_records($1, $2, $3::jsonb, $4) AS n`,
-        [tenantId, docKey, JSON.stringify(slice), actor || 'app']
-      );
-      pushed += Number(rows?.[0]?.n || 0);
-    }
-    let deleted = 0;
-    if (deletes.length > 0) {
-      const rows: any = await sql.query(
-        `SELECT fn_soft_delete_records($1, $2, $3::jsonb, $4) AS n`,
-        [tenantId, docKey, JSON.stringify(deletes), actor || 'app']
-      );
-      deleted = Number(rows?.[0]?.n || 0);
-    }
-    return { pushed, deleted };
-  } catch (error: any) {
-    return { pushed: 0, deleted: 0, error: error?.message || String(error) };
   }
 }
 
@@ -115,35 +89,10 @@ export async function pullChangedRecords(
     };
   }
 
-  // REAL-TABLE PATH: read the changes from the typed table.
-  if (tableForKey(docKey)) {
-    const changed = await tableChangesSince({ connectionString, tenantId, docKey, since });
-    if (changed.error) return { records: [], deletedIds: [], nextCursor: since, error: changed.error };
-    return { records: changed.records as SyncRecord[], deletedIds: changed.deletedIds, nextCursor: changed.nextCursor };
-  }
-
-  try {
-    const sql = getClient(connectionString);
-    const rows: any = await sql.query(
-      `SELECT record_id, payload, updated_at, deleted_at FROM fn_changed_records($1, $2, $3::timestamptz)`,
-      [tenantId, docKey, since]
-    );
-    const records: SyncRecord[] = [];
-    const deletedIds: string[] = [];
-    let nextCursor = since;
-    (rows as { record_id?: string; id?: string; doc_key?: string; payload?: Record<string, unknown>; updated_at?: unknown; deleted_at?: unknown }[]).forEach((row) => {
-      const stamp = row.updated_at instanceof Date ? row.updated_at.toISOString() : String(row.updated_at);
-      if (stamp > nextCursor) nextCursor = stamp;
-      if (row.deleted_at) {
-        deletedIds.push(String(row.record_id));
-        return;
-      }
-      records.push({ ...(row.payload || {}), id: String(row.record_id) });
-    });
-    return { records, deletedIds, nextCursor };
-  } catch (error: any) {
-    return { records: [], deletedIds: [], nextCursor: since, error: error?.message || String(error) };
-  }
+  // المصدر الوحيد: الجدول المنمّط (أُزيل مسار مخزن المستندات).
+  const changed = await tableChangesSince({ connectionString, tenantId, docKey, since });
+  if (changed.error) return { records: [], deletedIds: [], nextCursor: since, error: changed.error };
+  return { records: changed.records as SyncRecord[], deletedIds: changed.deletedIds, nextCursor: changed.nextCursor };
 }
 
 /**
@@ -193,39 +142,9 @@ export async function fetchLiveRecords(
     }
   }
 
-  // REAL-TABLE PATH: load the live rows from the typed table.
-  if (tableForKey(docKey)) {
-    const loaded = await readTableRecords({ connectionString, tenantId, docKey, onProgress });
-    return { records: loaded.records, error: loaded.error };
-  }
-
-  try {
-    const sql = getClient(connectionString);
-    for (;;) {
-      const rows: any = lastId === null
-        ? await sql.query(
-            `SELECT record_id, payload FROM app_records
-              WHERE tenant_id = $1 AND doc_key = $2 AND deleted_at IS NULL
-              ORDER BY record_id LIMIT $3`,
-            [tenantId, docKey, PAGE]
-          )
-        : await sql.query(
-            `SELECT record_id, payload FROM app_records
-              WHERE tenant_id = $1 AND doc_key = $2 AND deleted_at IS NULL AND record_id > $3
-              ORDER BY record_id LIMIT $4`,
-            [tenantId, docKey, lastId, PAGE]
-          );
-      const list = rows as { record_id?: string; id?: string; doc_key?: string; payload?: Record<string, unknown>; updated_at?: unknown; deleted_at?: unknown }[];
-      if (list.length === 0) break;
-      list.forEach((row) => records.push({ ...(row.payload || {}), id: String(row.record_id) }));
-      lastId = String(list[list.length - 1].record_id);
-      if (onProgress) onProgress(records.length);
-      if (list.length < PAGE) break;
-    }
-    return { records };
-  } catch (error: any) {
-    return { records, error: error?.message || String(error) };
-  }
+  // المصدر الوحيد: الجدول المنمّط.
+  const loaded = await readTableRecords({ connectionString, tenantId, docKey, onProgress });
+  return { records: loaded.records, error: loaded.error };
 }
 
 /**
@@ -242,62 +161,20 @@ export async function fetchLiveRecordsBatch(
 ): Promise<{ recordsByDocKey: { [docKey: string]: any[] }; error?: string }> {
   if (docKeys.length === 0) return { recordsByDocKey: {} };
 
-  // Preferred path: read through backend API if configured
-  if (isApiConfigured() && getApiToken()) {
-    const recordsByDocKey: { [docKey: string]: any[] } = {};
-    for (let i = 0; i < docKeys.length; i++) {
-      const key = docKeys[i];
-      const res = await fetchLiveRecords(connectionString, tenantId, key);
-      if (res.error) return { recordsByDocKey, error: res.error };
-      recordsByDocKey[key] = res.records;
-      if (onProgress) onProgress(i + 1, docKeys.length);
-    }
-    return { recordsByDocKey };
-  }
-
-  try {
-    const sql = getClient(connectionString);
-    // Execute a single SQL batch query with ANY($2)
-    const rows: any = await sql.query(
-      `SELECT doc_key, record_id, payload 
-       FROM app_records 
-       WHERE tenant_id = $1 AND doc_key = ANY($2) AND deleted_at IS NULL 
-       ORDER BY doc_key, record_id`,
-      [tenantId, docKeys]
+  // المصدر الوحيد: الجداول المنمّطة (أُزيل مسار مخزن المستندات app_records).
+  // سحب متوازٍ محدود (6 تدفقات) بدل طلبات متسلسلة.
+  const recordsByDocKey: { [docKey: string]: any[] } = {};
+  const CONCURRENCY = 6;
+  for (let i = 0; i < docKeys.length; i += CONCURRENCY) {
+    const chunk = docKeys.slice(i, i + CONCURRENCY);
+    const results = await Promise.all(
+      chunk.map(async (key) => ({ key, single: await fetchLiveRecords(connectionString, tenantId, key) }))
     );
-
-    const recordsByDocKey: { [docKey: string]: any[] } = {};
-    docKeys.forEach((key) => {
-      recordsByDocKey[key] = [];
-    });
-
-    (rows as { record_id?: string; id?: string; doc_key?: string; payload?: Record<string, unknown>; updated_at?: unknown; deleted_at?: unknown }[]).forEach((row) => {
-      const k = String(row.doc_key);
-      if (recordsByDocKey[k]) {
-        recordsByDocKey[k].push({ ...(row.payload || {}), id: String(row.record_id) });
-      }
-    });
-
-    if (onProgress) onProgress(docKeys.length, docKeys.length);
-    return { recordsByDocKey };
-  } catch (error: any) {
-    // If the batch query encounters an issue, fallback to a fast parallel worker pool
-    try {
-      const recordsByDocKey: { [docKey: string]: any[] } = {};
-      const CONCURRENCY = 6;
-      for (let i = 0; i < docKeys.length; i += CONCURRENCY) {
-        const chunk = docKeys.slice(i, i + CONCURRENCY);
-        await Promise.all(
-          chunk.map(async (key) => {
-            const single = await fetchLiveRecords(connectionString, tenantId, key);
-            recordsByDocKey[key] = single.records;
-          })
-        );
-        if (onProgress) onProgress(Math.min(i + CONCURRENCY, docKeys.length), docKeys.length);
-      }
-      return { recordsByDocKey };
-    } catch (fallbackError: any) {
-      return { recordsByDocKey: {}, error: fallbackError?.message || error?.message || String(error) };
+    for (const { key, single } of results) {
+      if (single.error) return { recordsByDocKey, error: single.error };
+      recordsByDocKey[key] = single.records;
     }
+    if (onProgress) onProgress(Math.min(i + CONCURRENCY, docKeys.length), docKeys.length);
   }
+  return { recordsByDocKey };
 }

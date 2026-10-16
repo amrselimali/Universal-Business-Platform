@@ -192,28 +192,9 @@ export async function saveRecord(params: {
   if (directDb) {
     try {
       const sql = getNeonClient(directDb.connectionString);
-      // 1. Direct typed relational table upsert (e.g. tenants, branches, products, parties, accounts, ...)
+      // المصدر الوحيد للحقيقة: الجدول المنمّط.
+      // أُلغيت الكتابة المزدوجة في مخزن المستندات (app_records) لإنهاء الازدواجية.
       await syncToRelationalTable(directDb.connectionString, directDb.tenantId, docKey, record);
-
-      // 2. Direct document/record-level upsert in app_records to keep both stores 100% in sync
-      try {
-        await sql.query(
-          `INSERT INTO app_records (tenant_id, doc_key, record_id, payload, updated_at, deleted_at)
-           VALUES ($1, $2, $3, $4::jsonb, NOW(), NULL)
-           ON CONFLICT (tenant_id, doc_key, record_id)
-           DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW(), deleted_at = NULL`,
-          [directDb.tenantId, docKey, id, JSON.stringify(record)]
-        );
-      } catch (insertErr) {
-        try {
-          await sql.query(
-            `SELECT fn_upsert_records($1, $2, $3::jsonb, $4) AS n`,
-            [directDb.tenantId, docKey, JSON.stringify([record]), actor || 'app']
-          );
-        } catch (procErr) {
-          console.warn('Document store sync fallback (non-blocking):', procErr);
-        }
-      }
 
       applyLocal(record);
       return { success: true };
@@ -250,28 +231,9 @@ export async function deleteRecord(params: {
   const directDb = getActiveDbConnection();
   if (directDb) {
     try {
-      const sql = getNeonClient(directDb.connectionString);
-      // 1. Direct typed relational table delete
+      // المصدر الوحيد للحقيقة: الجدول المنمّط (حذف ناعم).
+      // أُلغيت الكتابة المزدوجة في مخزن المستندات (app_records).
       await deleteFromRelationalTable(directDb.connectionString, directDb.tenantId, docKey, id);
-
-      // 2. Direct document/record-level soft delete in app_records
-      try {
-        await sql.query(
-          `UPDATE app_records 
-           SET deleted_at = NOW(), updated_at = NOW() 
-           WHERE tenant_id = $1 AND doc_key = $2 AND record_id = $3`,
-          [directDb.tenantId, docKey, id]
-        );
-      } catch (updateErr) {
-        try {
-          await sql.query(
-            `SELECT fn_soft_delete_records($1, $2, $3::jsonb, $4) AS n`,
-            [directDb.tenantId, docKey, JSON.stringify([id]), actor || 'app']
-          );
-        } catch (procErr) {
-          console.warn('Document store delete fallback (non-blocking):', procErr);
-        }
-      }
 
       removeLocal(id);
       return { success: true };
