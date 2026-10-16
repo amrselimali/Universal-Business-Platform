@@ -33,6 +33,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const MIGRATIONS = [
   { file: 'scripts/neon_schema_migrations.sql', title: 'المخطط الأساسي (جداول التطبيق)' },
   { file: 'scripts/neon_typed_tables.sql', title: 'الجداول المنمّطة الكاملة (34 جدولاً)' },
+  { file: 'scripts/neon_auth_functions.sql', title: 'دوال المصادقة (تقرأ من الجداول المنمّطة)' },
   { file: 'scripts/neon_security_rls.sql', title: 'الأمان: RLS + مستخدم app_api + الفهارس' },
   { file: 'scripts/neon_accounting_functions.sql', title: 'الدوال المحاسبية الذرّية' },
   { file: 'scripts/neon_optimistic_concurrency.sql', title: 'التزامن المتفاوت: version + Triggers' },
@@ -69,6 +70,7 @@ const CHECKS = [
   ['دالة purge_all_soft_deleted', `SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname='purge_all_soft_deleted') AS ok`],
   ['جدول قواعد الربط المحاسبي', `SELECT to_regclass('public.accounting_mapping_rules') IS NOT NULL AS ok`],
   ['دالة فحص تغطية الربط', `SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname='fn_mapping_coverage_gaps') AS ok`],
+  ['دالة المصادقة (fn_authenticate_user)', `SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname='fn_authenticate_user') AS ok`],
   ['عدد قواعد الربط', `SELECT count(*)::int AS value FROM accounting_mapping_rules`],
 ];
 
