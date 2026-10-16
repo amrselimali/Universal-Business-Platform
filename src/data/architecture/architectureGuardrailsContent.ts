@@ -65,6 +65,7 @@ export const GUARDRAIL_COMMANDS = {
   verify: 'node scripts/architecture-guardrails.mjs --check',
   regenerate: 'node scripts/architecture-guardrails.mjs --update',
   withRatchet: 'node scripts/check-file-size.mjs',
+  speedBudget: 'k6 run perf/api-budget.js -e BASE_URL=… -e TOKEN=…',
 };
 
 /**
@@ -73,6 +74,8 @@ export const GUARDRAIL_COMMANDS = {
  * الخطوة موجودة في القالب `docs/ci/ci.yml` وتُنسخ يدوياً مرة واحدة (وهذا هو
  * نفسه الأسلوب الذي اتُّبع لتثبيت ملف الـ CI الأول في هذا المشروع).
  * أما محلياً فهي مفروضة فعلاً: `npm run verify` يشمل `guardrails:check`.
+ * وميزانية السرعة الرقمية (< 200ms) تُقاس فعلياً بـ `perf/api-budget.js` عبر k6
+ * على بيئة حقيقية — لا داخل المتصفح ولا في هذا الفحص.
  */
 export const CI_WORKFLOW_SNIPPET = `# .github/workflows/ci.yml — وظيفة "بوابات الجودة المعمارية"
 # أو: انسخ الملف الجاهز من docs/ci/ci.yml إلى .github/workflows/ci.yml

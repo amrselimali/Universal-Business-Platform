@@ -53,7 +53,6 @@
     "src/views/AuditTrailView.tsx": 395,
     "src/components/CustomizeQuickButtonsModal.tsx": 375,
     "src/components/NotificationBell.tsx": 361,
-    "src/components/CommandPaletteModal.tsx": 355,
     "src/App.tsx": 348,
     "src/views/ActivityLogsView.tsx": 348,
     "src/views/LoginView.tsx": 342,

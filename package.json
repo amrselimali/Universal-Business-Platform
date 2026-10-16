@@ -17,7 +17,8 @@
     "test:watch": "vitest",
     "verify": "npm run lint && npm run test && npm run check:size && npm run guardrails:check && npm run build",
     "e2e": "playwright test",
-    "e2e:ui": "playwright test --ui"
+    "e2e:ui": "playwright test --ui",
+    "perf:api": "k6 run perf/api-budget.js"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

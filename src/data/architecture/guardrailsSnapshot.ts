@@ -12,8 +12,8 @@
 
 import type { GuardrailsFacts } from '../../services/architectureGuardrails';
 
-export const GUARDRAILS_MEASURED_AT = '2026-10-16T19:23:14.213Z';
-export const GUARDRAILS_REVISION = 'a3cedab';
+export const GUARDRAILS_MEASURED_AT = '2026-10-16T19:27:00.287Z';
+export const GUARDRAILS_REVISION = '43f3198';
 
 export const GUARDRAILS_FACTS: GuardrailsFacts = /* GUARDRAILS_FACTS_BEGIN */
 {
@@ -77,7 +77,7 @@ export const GUARDRAILS_FACTS: GuardrailsFacts = /* GUARDRAILS_FACTS_BEGIN */
     { path: 'src/components/architecture/ArchitectureTopology.tsx', lines: 102 },
     { path: 'src/components/ViewRenderer.tsx', lines: 168 },
     { path: 'src/data/architecture/architectureDecisions.ts', lines: 125 },
-    { path: 'src/data/architecture/architectureGuardrailsContent.ts', lines: 114 },
+    { path: 'src/data/architecture/architectureGuardrailsContent.ts', lines: 117 },
     { path: 'src/data/architecture/architectureSnippets.ts', lines: 206 },
     { path: 'src/data/architecture/architectureSpec.ts', lines: 241 },
     { path: 'src/data/architecture/guardrailsSnapshot.ts', lines: 134 },
@@ -123,10 +123,10 @@ export const GUARDRAILS_FACTS: GuardrailsFacts = /* GUARDRAILS_FACTS_BEGIN */
     { id: 'emitted_events_pipeline', labelAr: 'معالجة الأحداث المُصدَّرة بلا تكرار', labelEn: 'Idempotent event processing', comparison: 'atLeast', expected: 1, found: 4, severity: 'advisory', evidence: ['erp-nextgen-local/db/migrations-original/0005_core_audit_outbox_infrastructure.sql', 'erp-nextgen-local/db/migrations/0005_core_audit_outbox_infrastructure.sql'] },
   ],
   legacy: {
-    scanned: 154,
+    scanned: 155,
     limit: 300,
-    baseline: 59,
-    violations: 59,
+    baseline: 58,
+    violations: 58,
     newViolations: [],
   },
 }

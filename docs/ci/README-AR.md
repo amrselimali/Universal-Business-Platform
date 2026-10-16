@@ -70,13 +70,31 @@ npm run guardrails          # تقرير فقط على الشاشة دون كت�
 npm run verify
 ```
 
-ده بيشغّل: فحص الأنواع + الاختبارات + بوابة الحجم + البناء — بنفس ترتيب الـ CI.
+ده بيشغّل: فحص الأنواع + الاختبارات + بوابة الحجم + بوابات المعمارية + البناء — بنفس ترتيب الـ CI.
+
+---
+
+## ميزانية السرعة (Speed Budget — k6)
+
+الهدف المعتمد: **p95 < 200ms** لكل نقطة نهاية. القياس يحتاج خدمة حقيقية تعمل،
+لذلك **لا يُشغَّل في الـ CI** بل قبل أي إصدار على بيئة staging:
+
+```bash
+# مرة واحدة: ثبّت k6 من https://grafana.com/docs/k6/latest/set-up/install-k6/
+npm run perf:api -- -e BASE_URL=http://localhost:5080 -e TOKEN=<access_token>
+```
+
+الملف: `perf/api-budget.js` — يفحص `GET /api/v1/generic/{module}.{entity}` بحدود
+`http_req_duration p(95)<200` و`p(99)<400` و`http_req_failed rate<0.01`.
+
+اختبار المتصفح لشاشة المعمارية: `e2e/architecture.spec.ts` (يحتاج
+`npx playwright install chromium` ثم `npm run e2e`).
 
 ---
 
 ## بوابة حجم الملفات (Ratchet Guardrail)
 
-المشروع فيه حالياً **63 ملفاً** يتجاوز 300 سطر. إصلاحها كلها مرة واحدة مستحيل،
+المشروع فيه حالياً **58 ملفاً** يتجاوز 300 سطر. إصلاحها كلها مرة واحدة مستحيل،
 لكن البوابة **تمنع تفاقم الوضع**:
 
 1. أي ملف **جديد** يتجاوز 300 سطر ⇒ فشل فوري.
@@ -108,5 +126,7 @@ node scripts/check-file-size.mjs --update
 | `scripts/guardrail-invariants.mjs` | جدول الثوابت المعمارية المقيسة |
 | `src/services/architectureGuardrails.ts` | منطق تقييم البوابات (يُستخدم في الشاشة أيضاً) |
 | `src/data/architecture/guardrailsSnapshot.ts` | لقطة القياس المولَّدة من المستودع |
+| `perf/api-budget.js` | ميزانية السرعة (k6) — p95 < 200ms |
+| `e2e/architecture.spec.ts` | اختبار متصفح لشاشة معمارية المنظومة الجديدة |
 | `vitest.config.ts` | إعداد الاختبارات |
 | `src/utils/__tests__/` | الاختبارات الحالية |
