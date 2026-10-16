@@ -25,6 +25,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { splitSqlStatements } from './sqlSplitter.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -160,9 +161,13 @@ const main = async () => {
 
       try {
         await db.begin();
-        await db.query(sql);
+        // سائق Neon السحابي لا يقبل أوامر متعددة في جملة واحدة — نجزّئها
+        const statements = splitSqlStatements(sql);
+        for (const statement of statements) {
+          await db.query(statement);
+        }
         await db.commit();
-        console.log(`✅ (${lineCount} سطر)`);
+        console.log(`✅ (${lineCount} سطر · ${statements.length} أمر)`);
         applied++;
       } catch (error) {
         await db.rollback().catch(() => {});
