@@ -67,8 +67,15 @@ export const GUARDRAIL_COMMANDS = {
   withRatchet: 'node scripts/check-file-size.mjs',
 };
 
-/** مقتطف CI المطبَّق فعلاً في `.github/workflows/ci.yml`. */
+/**
+ * مقتطف CI الجاهز. ⚠️ ملاحظة صريحة: تطبيق GitHub المربوط بهذا المستودع لا يملك
+ * صلاحية `workflows`، لذلك **لا يمكن دفعه** داخل `.github/workflows/` آلياً.
+ * الخطوة موجودة في القالب `docs/ci/ci.yml` وتُنسخ يدوياً مرة واحدة (وهذا هو
+ * نفسه الأسلوب الذي اتُّبع لتثبيت ملف الـ CI الأول في هذا المشروع).
+ * أما محلياً فهي مفروضة فعلاً: `npm run verify` يشمل `guardrails:check`.
+ */
 export const CI_WORKFLOW_SNIPPET = `# .github/workflows/ci.yml — وظيفة "بوابات الجودة المعمارية"
+# أو: انسخ الملف الجاهز من docs/ci/ci.yml إلى .github/workflows/ci.yml
 guardrails:
   name: بوابات الجودة المعمارية
   runs-on: ubuntu-latest

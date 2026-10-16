@@ -21,8 +21,9 @@
   - نُقل سجل رسم الشاشات من `App.tsx` إلى `src/components/ViewRenderer.tsx` => `App.tsx` من **438 إلى 348 سطراً** (بدل أن يكبر)، وإضافة شاشة جديدة صارت في ملف واحد.
   - تحديث خط أساس الحجم: `PlatformContext.tsx` 12,236 → 12,228 · `neonService.ts` 1,832 → 1,683 · `commands.ts` 479 → 441 · `App.tsx` 439 → 348.
 - **الـ CI:**
-  - `.github/workflows/ci.yml`: خطوة جديدة `node scripts/architecture-guardrails.mjs --check` داخل وظيفة «بوابات الجودة المعمارية».
-  - `package.json`: `guardrails` · `guardrails:check` · `guardrails:update`، وأُضيف `guardrails:check` إلى `npm run verify`.
+  - بوابة المعمارية الجديدة `node scripts/architecture-guardrails.mjs --check` أُضيفت إلى **قالب الـ CI** `docs/ci/ci.yml` وإلى `npm run verify`.
+  - ⚠️ **تعذّر دفع التعديل داخل `.github/workflows/`**: تطبيق GitHub المربوط لا يملك صلاحية `workflows` (نفس القيد الموثّق سابقاً في `docs/ci/README-AR.md`). التفعيل يحتاج خطوة يدوية واحدة: `cp docs/ci/ci.yml .github/workflows/ci.yml` ثم commit/push.
+  - `package.json`: `guardrails` · `guardrails:check` · `guardrails:update`، وأُضيف `guardrails:check` إلى `npm run verify` (فالبوابة مفروضة محلياً وعلى أي بيئة تشغيل).
   - **إصلاح عطل موجود:** `bun.lock` كان غير متزامن مع `package.json` فكان `bun install --frozen-lockfile` يفشل في أول خطوة من الـ CI — تم تحديثه وتحققنا من نجاحه.
 - **الفحوصات والتحقق:** `tsc --noEmit` = 0 خطأ · `vitest` = **276/276** (منها 13 اختباراً جديداً للبوابات) · `vite build` ناجح · بوابة حجم الملفات ناجحة · `guardrails --check` ناجح.
 

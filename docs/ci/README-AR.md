@@ -36,7 +36,31 @@ git push
 
 | الخطوة | الأمر | إيه اللي بيمنعه |
 |---|---|---|
-| حد حجم الملفات | `node scripts/check-file-size.mjs` | تكرار ملف بحجم `PlatformContext.tsx` (12,000+ سطر) |
+| حد حجم الملفات (التطبيق الحالي) | `node scripts/check-file-size.mjs` | تكرار ملف بحجم `PlatformContext.tsx` (12,000+ سطر) |
+| بوابات المعمارية الجديدة | `node scripts/architecture-guardrails.mjs --check` | تجاوز 300 سطر في نطاق المحرك، زر بلا فعل مسجّل، غياب ثابت معماري (RLS/version/NOTIFY/SignalR/YARP)، أو لقطة قياس قديمة |
+
+#### إيه اللي بيفحصه `architecture-guardrails`؟
+
+1. **حد 300 سطر** على نطاق المعمارية الجديدة: `erp-nextgen-local/**` (التطبيق
+   المرجعي .NET/SQL) + ملفات المحرك الجديد (`src/services/architectureGuardrails.ts`،
+   `src/components/architecture/**`، `src/data/architecture/**`، الشاشة، السكربتات).
+2. **سجل الأفعال (Action Registry)**: كل موضع فحص صلاحية في الشاشات
+   (`canPerformAction('...')`) يجب أن يكون مسجّلاً في `src/data/actionsData.ts`،
+   وأن يشير لشاشة موجودة — وإلا فشل الـ CI (Default-Deny).
+3. **الثوابت المعمارية**: سياسات RLS، أعمدة `version`، `pg_notify`، جسر
+   `LISTEN`/SignalR، مسارات YARP، فلتر 403، HttpOnly، Keyset Pagination، Outbox،
+   وألا يستورد كود العميل أي عميل قاعدة بيانات. التوصيات غير المُلزِمة (مثل
+   PgBouncer) تُعرض منفصلة ولا تُفشل الـ CI.
+
+القياس يُحفظ في لقطة مولَّدة: `src/data/architecture/guardrailsSnapshot.ts`
+ويُقرأ منه في شاشة «معمارية المنظومة الجديدة» داخل التطبيق. أي تغيير في ملفات
+النطاق يوجب تحديث اللقطة:
+
+```bash
+npm run guardrails:update   # يحدّث اللقطة (وبعده commit)
+npm run guardrails:check    # التحقق نفسه الذي يعمل في الـ CI
+npm run guardrails          # تقرير فقط على الشاشة دون كتابة
+```
 
 ---
 
@@ -79,6 +103,10 @@ node scripts/check-file-size.mjs --update
 |---|---|
 | `docs/ci/ci.yml` | قالب الـ CI (انسخه إلى `.github/workflows/`) |
 | `.github/file-size-baseline.json` | القائمة الأساسية لحجم الملفات |
-| `scripts/check-file-size.mjs` | سكربت البوابة |
+| `scripts/check-file-size.mjs` | سكربت بوابة الحجم (التطبيق الحالي) |
+| `scripts/architecture-guardrails.mjs` | سكربت بوابات المعمارية الجديدة |
+| `scripts/guardrail-invariants.mjs` | جدول الثوابت المعمارية المقيسة |
+| `src/services/architectureGuardrails.ts` | منطق تقييم البوابات (يُستخدم في الشاشة أيضاً) |
+| `src/data/architecture/guardrailsSnapshot.ts` | لقطة القياس المولَّدة من المستودع |
 | `vitest.config.ts` | إعداد الاختبارات |
 | `src/utils/__tests__/` | الاختبارات الحالية |

@@ -12,7 +12,10 @@ interface Props {
   canCopy: boolean;
 }
 
-/** تعريف البوابات الثلاث + أمر التشغيل + ملف الـ CI المطبَّق فعلاً. */
+/**
+ * تعريف البوابات الثلاث + أمر التشغيل + قالب ملف الـ CI
+ * (القالب `docs/ci/ci.yml` لأنه لا يمكن دفع تعديلات `.github/workflows/` آلياً).
+ */
 export const ArchitectureCiWorkflow: React.FC<Props> = ({ t, isArabic, canCopy }) => {
   const [showWorkflow, setShowWorkflow] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -94,7 +97,7 @@ export const ArchitectureCiWorkflow: React.FC<Props> = ({ t, isArabic, canCopy }
           <div className="mt-3 overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800">
             <div className="flex items-center justify-between bg-slate-900 px-3 py-1.5">
               <span className="font-mono text-[10px] text-slate-300" dir="ltr">
-                .github/workflows/ci.yml
+                docs/ci/ci.yml → .github/workflows/ci.yml
               </span>
               <button
                 type="button"

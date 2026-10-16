@@ -25,9 +25,12 @@ Endpoint واحد لكل شاشة، حد 300 سطر في الـ CI، Default-Den
 5. **إعادة هيكلة إلزامية:** نقل رسم الشاشات من `App.tsx` إلى
    `src/components/ViewRenderer.tsx` — `App.tsx` من 438 إلى **348 سطراً**،
    وخط الأساس تم تضييقه (App.tsx 439 → 348، neonService 1832 → 1683، commands 479 → 441).
-6. **CI**: خطوة `node scripts/architecture-guardrails.mjs --check` في
-   `.github/workflows/ci.yml`، وأوامر `npm run guardrails[:check|:update]`،
-   وإصلاح `bun.lock` (كان يفشل `bun install --frozen-lockfile` في أول خطوة CI).
+6. **CI**: خطوة `node scripts/architecture-guardrails.mjs --check` أُضيفت إلى قالب
+   الـ CI `docs/ci/ci.yml` وإلى `npm run verify`. ⚠️ تعذّر دفعها داخل
+   `.github/workflows/ci.yml` لأن تطبيق GitHub المربوط لا يملك صلاحية `workflows`
+   (نفس القيد الموثّق في `docs/ci/README-AR.md`) — التفعيل يحتاج خطوة يدوية واحدة:
+   `cp docs/ci/ci.yml .github/workflows/ci.yml`. وأُصلح أيضاً `bun.lock`
+   (كان يفشل `bun install --frozen-lockfile` في أول خطوة CI).
 
 ### التحقق
 `tsc --noEmit` = 0 خطأ · `vitest` = **276/276** · `vite build` ناجح ·

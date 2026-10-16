@@ -82,3 +82,9 @@ jobs:
       # يسمح بالوضع الحالي لكن يفشل على أي ملف جديد أو أي ملف يكبر أكثر.
       - name: Enforce file-size ratchet (300-line limit)
         run: node scripts/check-file-size.mjs
+
+      # بوابات المعمارية الجديدة: نطاق المحرك (حد 300 سطر) + سجل الأفعال
+      # (Default-Deny) + الثوابت المعمارية (RLS/version/NOTIFY/SignalR/YARP).
+      # يفشل أيضاً إذا كانت لقطة القياس `guardrailsSnapshot.ts` قديمة.
+      - name: Architecture guardrails (engine + actions + invariants)
+        run: node scripts/architecture-guardrails.mjs --check

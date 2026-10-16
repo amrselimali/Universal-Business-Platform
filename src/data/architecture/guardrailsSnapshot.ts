@@ -12,8 +12,8 @@
 
 import type { GuardrailsFacts } from '../../services/architectureGuardrails';
 
-export const GUARDRAILS_MEASURED_AT = '2026-10-16T19:20:39.089Z';
-export const GUARDRAILS_REVISION = '3bfb388';
+export const GUARDRAILS_MEASURED_AT = '2026-10-16T19:22:21.407Z';
+export const GUARDRAILS_REVISION = '41a69c7';
 
 export const GUARDRAILS_FACTS: GuardrailsFacts = /* GUARDRAILS_FACTS_BEGIN */
 {
@@ -70,14 +70,14 @@ export const GUARDRAILS_FACTS: GuardrailsFacts = /* GUARDRAILS_FACTS_BEGIN */
     { path: 'scripts/guardrail-snapshot.mjs', lines: 85 },
     { path: 'src/__tests__/architectureGuardrails.test.ts', lines: 182 },
     { path: 'src/components/architecture/ArchitectureBudgetGrid.tsx', lines: 76 },
-    { path: 'src/components/architecture/ArchitectureCiWorkflow.tsx', lines: 118 },
+    { path: 'src/components/architecture/ArchitectureCiWorkflow.tsx', lines: 121 },
     { path: 'src/components/architecture/ArchitectureDecisions.tsx', lines: 78 },
     { path: 'src/components/architecture/ArchitectureGuardrails.tsx', lines: 259 },
     { path: 'src/components/architecture/ArchitectureSnippets.tsx', lines: 93 },
     { path: 'src/components/architecture/ArchitectureTopology.tsx', lines: 102 },
     { path: 'src/components/ViewRenderer.tsx', lines: 168 },
     { path: 'src/data/architecture/architectureDecisions.ts', lines: 125 },
-    { path: 'src/data/architecture/architectureGuardrailsContent.ts', lines: 107 },
+    { path: 'src/data/architecture/architectureGuardrailsContent.ts', lines: 114 },
     { path: 'src/data/architecture/architectureSnippets.ts', lines: 206 },
     { path: 'src/data/architecture/architectureSpec.ts', lines: 241 },
     { path: 'src/data/architecture/guardrailsSnapshot.ts', lines: 134 },
