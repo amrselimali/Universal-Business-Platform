@@ -61,7 +61,7 @@ export const ArchitectureView: React.FC = () => {
           </div>
           <div className="flex flex-col items-end gap-1 text-[10px] text-slate-300">
             <span className="rounded-lg bg-white/10 px-2 py-1 font-mono" dir="ltr">
-              rev {GUARDRAILS_REVISION}
+              snapshot @ {GUARDRAILS_REVISION}
             </span>
             <span className="rounded-lg bg-white/10 px-2 py-1 font-mono" dir="ltr">
               erp-nextgen-local/
