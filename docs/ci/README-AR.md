@@ -31,6 +31,7 @@ git push
 | فحص الأنواع | `npm run lint` | رجوع أخطاء TypeScript تاني |
 | الاختبارات | `npm run test` | كسر منطق موجود |
 | البناء | `npm run build` | كود مش بيتبني |
+| ميزانية حجم الحزمة | `node scripts/check-bundle-budget.mjs` | تضخّم الحزمة الابتدائية (أول ما يشعر به المستخدم) |
 
 ### المهمة 2 — `guardrails`
 
@@ -74,10 +75,10 @@ npm run verify
 
 ---
 
-## ميزانية السرعة (Speed Budget — k6)
+## ميزانية السرعة (Speed Budget — k6 والحزمة)
 
-الهدف المعتمد: **p95 < 200ms** لكل نقطة نهاية. القياس يحتاج خدمة حقيقية تعمل،
-لذلك **لا يُشغَّل في الـ CI** بل قبل أي إصدار على بيئة staging:
+الهدف المعتمد: **p95 < 200ms** لكل نقطة نهاية. قياس زمن الـ API يحتاج خدمة حقيقية
+تعمل، لذلك **لا يُشغَّل في الـ CI** بل قبل أي إصدار على بيئة staging:
 
 ```bash
 # مرة واحدة: ثبّت k6 من https://grafana.com/docs/k6/latest/set-up/install-k6/
@@ -86,6 +87,15 @@ npm run perf:api -- -e BASE_URL=http://localhost:5080 -e TOKEN=<access_token>
 
 الملف: `perf/api-budget.js` — يفحص `GET /api/v1/generic/{module}.{entity}` بحدود
 `http_req_duration p(95)<200` و`p(99)<400` و`http_req_failed rate<0.01`.
+
+**ميزانية الحزمة (تعمل في الـ CI بعد البناء):**
+
+```bash
+npm run build && npm run budget:bundle
+```
+
+الحدود: حزمة الإقلاع `index-*.js` ≤ 160KB · CSS ≤ 30KB · أكبر حزمة مؤجّلة ≤ 160KB ·
+إجمالي كل الحزم ≤ 1200KB (كلها gzip). تفصيل الأسباب: `scripts/check-bundle-budget.mjs`.
 
 اختبار المتصفح لشاشة المعمارية: `e2e/architecture.spec.ts` (يحتاج
 `npx playwright install chromium` ثم `npm run e2e`).
@@ -122,6 +132,7 @@ node scripts/check-file-size.mjs --update
 | `docs/ci/ci.yml` | قالب الـ CI (انسخه إلى `.github/workflows/`) |
 | `.github/file-size-baseline.json` | القائمة الأساسية لحجم الملفات |
 | `scripts/check-file-size.mjs` | سكربت بوابة الحجم (التطبيق الحالي) |
+| `scripts/check-bundle-budget.mjs` | ميزانية حجم الحزمة (gzip) — بعد البناء |
 | `scripts/architecture-guardrails.mjs` | سكربت بوابات المعمارية الجديدة |
 | `scripts/guardrail-invariants.mjs` | جدول الثوابت المعمارية المقيسة |
 | `src/services/architectureGuardrails.ts` | منطق تقييم البوابات (يُستخدم في الشاشة أيضاً) |

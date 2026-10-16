@@ -21,7 +21,8 @@ Endpoint واحد لكل شاشة، حد 300 سطر في الـ CI، Default-Den
    12 موضع فحص صلاحيات · 19 ثابتاً معمارياً إلزامياً ناجحاً · 3 توصيات
    (واحدة مفتوحة: PgBouncer/حد اتصالات صريح).
 4. **صلاحيات الشاشة:** `architecture.run_guardrails` و`architecture.copy_snippet`
-   في `SYSTEM_ACTIONS` (Default-Deny)، والشاشة في `SYSTEM_VIEWS` + القائمة الجانبية.
+   في `SYSTEM_ACTIONS` (Default-Deny)، والشاشة في `SYSTEM_VIEWS` + القائمة الجانبية
+   + لوحة الأوامر (`Ctrl+K`).
 5. **إعادة هيكلة إلزامية:** نقل رسم الشاشات من `App.tsx` إلى
    `src/components/ViewRenderer.tsx` — `App.tsx` من 438 إلى **348 سطراً**،
    وخط الأساس تم تضييقه (App.tsx 439 → 348، neonService 1832 → 1683، commands 479 → 441).
@@ -34,7 +35,15 @@ Endpoint واحد لكل شاشة، حد 300 سطر في الـ CI، Default-Den
 
 ### التحقق
 `tsc --noEmit` = 0 خطأ · `vitest` = **276/276** · `vite build` ناجح ·
-`check-file-size` ناجح · `guardrails --check` ناجح.
+`check-file-size` ناجح · `guardrails --check` ناجح · `budget:bundle` ناجح ·
+`npm run verify` يغطيها كلها بالترتيب نفسه الذي يعمل به الـ CI.
+
+### ميزانية السرعة (الحالة النهائية)
+- **زمن الـ API:** الحد المعتمد p95 < 200ms — أداة القياس جاهزة وقابلة للتشغيل
+  (`perf/api-budget.js` بـ k6 عبر `npm run perf:api`) على بيئة حقيقية.
+- **حجم الحزمة (يُقاس في الـ CI):** إقلاع 137.1KB gzip / CSS 22.1KB /
+  أكبر حزمة مؤجّلة 138.2KB / الإجمالي 995.2KB — داخل الحدود الأربعة.
+- **توصية الاتصالات:** أُغلقت بضبط `Maximum Pool Size=25` في التطبيق المرجعي.
 
 ### ما لم يُلمس (بحدود النطاق)
 - لم تُقس زمن الاستجابة الفعلي داخل الشاشة (يحتاج بيئة حقيقية) — والمطلوب لذلك

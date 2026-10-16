@@ -13,9 +13,10 @@
     "guardrails": "node scripts/architecture-guardrails.mjs",
     "guardrails:check": "node scripts/architecture-guardrails.mjs --check",
     "guardrails:update": "node scripts/architecture-guardrails.mjs --update",
+    "budget:bundle": "node scripts/check-bundle-budget.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
-    "verify": "npm run lint && npm run test && npm run check:size && npm run guardrails:check && npm run build",
+    "verify": "npm run lint && npm run test && npm run check:size && npm run guardrails:check && npm run build && npm run budget:bundle",
     "e2e": "playwright test",
     "e2e:ui": "playwright test --ui",
     "perf:api": "k6 run perf/api-budget.js"

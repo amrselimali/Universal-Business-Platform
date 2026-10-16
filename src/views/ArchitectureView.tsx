@@ -7,6 +7,7 @@ import { ArchitectureDecisions } from '../components/architecture/ArchitectureDe
 import { ArchitectureSnippets } from '../components/architecture/ArchitectureSnippets';
 import { ArchitectureGuardrails } from '../components/architecture/ArchitectureGuardrails';
 import { ArchitectureCiWorkflow } from '../components/architecture/ArchitectureCiWorkflow';
+import { ArchitectureCompanionGates } from '../components/architecture/ArchitectureCompanionGates';
 import { GUARDRAILS_REVISION } from '../data/architecture/guardrailsSnapshot';
 
 type TabId = 'budget' | 'topology' | 'decisions' | 'snippets' | 'guardrails' | 'ci';
@@ -97,7 +98,12 @@ export const ArchitectureView: React.FC = () => {
       {tab === 'guardrails' && (
         <ArchitectureGuardrails t={t} isArabic={isArabic} canRun={canRunGuardrails} />
       )}
-      {tab === 'ci' && <ArchitectureCiWorkflow t={t} isArabic={isArabic} canCopy={canCopySnippet} />}
+      {tab === 'ci' && (
+        <div className="space-y-3">
+          <ArchitectureCiWorkflow t={t} isArabic={isArabic} canCopy={canCopySnippet} />
+          <ArchitectureCompanionGates t={t} isArabic={isArabic} />
+        </div>
+      )}
     </div>
   );
 

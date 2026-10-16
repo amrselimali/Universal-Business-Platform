@@ -12,8 +12,8 @@
 
 import type { GuardrailsFacts } from '../../services/architectureGuardrails';
 
-export const GUARDRAILS_MEASURED_AT = '2026-10-16T19:27:00.287Z';
-export const GUARDRAILS_REVISION = '43f3198';
+export const GUARDRAILS_MEASURED_AT = '2026-10-16T19:32:58.899Z';
+export const GUARDRAILS_REVISION = '37cb7c9';
 
 export const GUARDRAILS_FACTS: GuardrailsFacts = /* GUARDRAILS_FACTS_BEGIN */
 {
@@ -71,22 +71,23 @@ export const GUARDRAILS_FACTS: GuardrailsFacts = /* GUARDRAILS_FACTS_BEGIN */
     { path: 'src/__tests__/architectureGuardrails.test.ts', lines: 182 },
     { path: 'src/components/architecture/ArchitectureBudgetGrid.tsx', lines: 76 },
     { path: 'src/components/architecture/ArchitectureCiWorkflow.tsx', lines: 121 },
+    { path: 'src/components/architecture/ArchitectureCompanionGates.tsx', lines: 108 },
     { path: 'src/components/architecture/ArchitectureDecisions.tsx', lines: 78 },
     { path: 'src/components/architecture/ArchitectureGuardrails.tsx', lines: 259 },
     { path: 'src/components/architecture/ArchitectureSnippets.tsx', lines: 93 },
     { path: 'src/components/architecture/ArchitectureTopology.tsx', lines: 102 },
     { path: 'src/components/ViewRenderer.tsx', lines: 168 },
     { path: 'src/data/architecture/architectureDecisions.ts', lines: 125 },
-    { path: 'src/data/architecture/architectureGuardrailsContent.ts', lines: 117 },
+    { path: 'src/data/architecture/architectureGuardrailsContent.ts', lines: 163 },
     { path: 'src/data/architecture/architectureSnippets.ts', lines: 206 },
     { path: 'src/data/architecture/architectureSpec.ts', lines: 241 },
-    { path: 'src/data/architecture/guardrailsSnapshot.ts', lines: 134 },
+    { path: 'src/data/architecture/guardrailsSnapshot.ts', lines: 135 },
     { path: 'src/services/architectureGuardrails.ts', lines: 293 },
-    { path: 'src/views/ArchitectureView.tsx', lines: 105 },
+    { path: 'src/views/ArchitectureView.tsx', lines: 111 },
   ],
   actionUsages: [
-    { actionKey: 'architecture.copy_snippet', file: 'src/views/ArchitectureView.tsx', line: 33 },
-    { actionKey: 'architecture.run_guardrails', file: 'src/views/ArchitectureView.tsx', line: 32 },
+    { actionKey: 'architecture.copy_snippet', file: 'src/views/ArchitectureView.tsx', line: 34 },
+    { actionKey: 'architecture.run_guardrails', file: 'src/views/ArchitectureView.tsx', line: 33 },
     { actionKey: 'bookings.add_followup', file: 'src/views/BookingsFollowUpView.tsx', line: 2340 },
     { actionKey: 'bookings.create_booking', file: 'src/views/BookingsFollowUpView.tsx', line: 2350 },
     { actionKey: 'bookings.manage_staff_schedule', file: 'src/views/BookingsFollowUpView.tsx', line: 3694 },
@@ -119,11 +120,11 @@ export const GUARDRAILS_FACTS: GuardrailsFacts = /* GUARDRAILS_FACTS_BEGIN */
     { id: 'transactional_outbox', labelAr: 'Outbox ذري لعدم فقد الحركات', labelEn: 'Transactional outbox', comparison: 'atLeast', expected: 1, found: 2, severity: 'required', evidence: ['erp-nextgen-local/db/migrations/0005_core_audit_outbox_infrastructure.sql'] },
     { id: 'no_client_db_driver', labelAr: 'كود العميل الجديد لا يستورد أي عميل قاعدة بيانات', labelEn: 'New client code imports no database driver', comparison: 'none', expected: 0, found: 0, severity: 'required', evidence: [] },
     { id: 'always_on_runtime', labelAr: 'تشغيل دائم بلا Scale-to-Zero', labelEn: 'Always-on runtime (no scale-to-zero)', comparison: 'atLeast', expected: 1, found: 2, severity: 'advisory', evidence: ['erp-nextgen-local/docker-compose.yml'] },
-    { id: 'connection_pooling_guard', labelAr: 'PgBouncer أو حد اتصالات صريح قبل التوسع', labelEn: 'PgBouncer or an explicit connection cap', comparison: 'atLeast', expected: 1, found: 0, severity: 'advisory', evidence: [] },
+    { id: 'connection_pooling_guard', labelAr: 'PgBouncer أو حد اتصالات صريح قبل التوسع', labelEn: 'PgBouncer or an explicit connection cap', comparison: 'atLeast', expected: 1, found: 1, severity: 'advisory', evidence: ['erp-nextgen-local/dotnet/src/Erp.Api/appsettings.json'] },
     { id: 'emitted_events_pipeline', labelAr: 'معالجة الأحداث المُصدَّرة بلا تكرار', labelEn: 'Idempotent event processing', comparison: 'atLeast', expected: 1, found: 4, severity: 'advisory', evidence: ['erp-nextgen-local/db/migrations-original/0005_core_audit_outbox_infrastructure.sql', 'erp-nextgen-local/db/migrations/0005_core_audit_outbox_infrastructure.sql'] },
   ],
   legacy: {
-    scanned: 155,
+    scanned: 156,
     limit: 300,
     baseline: 58,
     violations: 58,

@@ -65,8 +65,54 @@ export const GUARDRAIL_COMMANDS = {
   verify: 'node scripts/architecture-guardrails.mjs --check',
   regenerate: 'node scripts/architecture-guardrails.mjs --update',
   withRatchet: 'node scripts/check-file-size.mjs',
+  bundleBudget: 'node scripts/check-bundle-budget.mjs   # بعد npm run build',
   speedBudget: 'k6 run perf/api-budget.js -e BASE_URL=… -e TOKEN=…',
 };
+
+export interface BundleBudgetDef {
+  id: string;
+  labelAr: string;
+  labelEn: string;
+  limitGb: string;
+  whyAr: string;
+  whyEn: string;
+}
+
+/** ميزانية حجم الحزمة (gzip) — أول ما يشعر به المستخدم قبل أي طلب API. */
+export const BUNDLE_BUDGETS: BundleBudgetDef[] = [
+  {
+    id: 'entry',
+    labelAr: 'حزمة الإقلاع index-*.js',
+    labelEn: 'Entry bundle index-*.js',
+    limitGb: '≤ 160 KB',
+    whyAr: 'تُحمَّل قبل ظهور أي شاشة — هي «زمن أول رسم» الفعلي',
+    whyEn: 'Loaded before any screen paints — this is real time-to-first-paint',
+  },
+  {
+    id: 'css',
+    labelAr: 'إجمالي الـ CSS',
+    labelEn: 'Total CSS',
+    limitGb: '≤ 30 KB',
+    whyAr: 'Tailwind يُنتج CSS مضغوطاً؛ تجاوزه يعني فئات غير مُستخدَمة',
+    whyEn: 'Tailwind output is compact; exceeding it means unused classes',
+  },
+  {
+    id: 'lazy',
+    labelAr: 'أكبر حزمة مؤجّلة',
+    labelEn: 'Largest lazy chunk',
+    limitGb: '≤ 160 KB',
+    whyAr: 'تُحمَّل عند فتح شاشتها فقط (مثل Excel/الرسوم) فلا تُعطّل الإقلاع',
+    whyEn: 'Loaded only when its screen opens (Excel/charts) so startup stays fast',
+  },
+  {
+    id: 'total',
+    labelAr: 'إجمالي كل الحزم',
+    labelEn: 'Total of all chunks',
+    limitGb: '≤ 1200 KB',
+    whyAr: 'سقف يمنع التضخّم التدريجي الذي يعود بالحزمة إلى 3.8 ميجابايت',
+    whyEn: 'A ceiling that prevents drifting back to the former 3.8 MB bundle',
+  },
+];
 
 /**
  * مقتطف CI الجاهز. ⚠️ ملاحظة صريحة: تطبيق GitHub المربوط بهذا المستودع لا يملك

@@ -329,6 +329,13 @@ $env:Path += ";C:\Program Files\PostgreSQL\17\bin"
 ### `permission denied for table ...`
 شغّل `0001_extensions_and_roles.sql` مرة أخرى — فيه إصلاح الصلاحيات الافتراضية.
 
+### `too many clients already` / استهلاك الاتصالات
+`ConnectionStrings:Postgres` في `appsettings.json` مضبوط بحد اتصالات صريح:
+`Pooling=true;Minimum Pool Size=2;Maximum Pool Size=25;Timeout=5`.
+هذا كافٍ لأقل من 100 مستخدم متزامن؛ لو زاد العدد أو صار عندك أكثر من نسخة من
+الـ API، ضع **PgBouncer** أمام PostgreSQL (وضع `transaction`) ووجّه الاتصال إليه
+بدل المنفذ `5432` مباشرة.
+
 ### `The type or namespace name 'X' could not be found` عند البناء
 ```powershell
 dotnet restore Erp.sln
