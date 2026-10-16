@@ -18,6 +18,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SOURCES = [
   ['scripts/neon_schema_migrations.sql', 'المخطط الأساسي + مخزن السجلات app_records'],
   ['scripts/neon_typed_tables.sql', 'الجداول المنمّطة الكاملة'],
+  ['scripts/neon_auth_functions.sql', 'دوال المصادقة'],
   ['scripts/neon_security_rls.sql', 'الأمان: RLS + مستخدم app_api + الفهارس'],
   ['scripts/neon_accounting_functions.sql', 'الدوال المحاسبية الذرّية'],
   ['scripts/neon_optimistic_concurrency.sql', 'التزامن المتفاوت: عمود version + Triggers'],

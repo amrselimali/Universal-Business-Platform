@@ -176,59 +176,15 @@ ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS branch_id VARCHAR(100);
 ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS payment_method_id VARCHAR(100);
 
 -- =========================================================================
--- مخزن السجلات الرئيسي (app_records)
--- =========================================================================
--- ⚠️ هذا الجدول هو **المصدر الوحيد للبيانات** في التطبيق: كل شاشة تقرأ وتكتب
--- منه عبر مفاتيح المستندات (doc_key) والسجلات (record_id).
+-- مخزن المستندات — أُزيل من المعمارية
+-- -------------------------------------------------------------------------
+-- كان التطبيق يكتب كل سجل في مكانين: الجدول المنمّط + مخزن مستندات JSONB
+-- (app_records ثم app_documents). أُلغيت هذه الازدواجية: **الجداول المنمّطة
+-- (neon_typed_tables.sql) هي المصدر الوحيد للحقيقة**.
 --
--- كان مفقوداً من كل ملفات الـ Migrations — أي أن إنشاء قاعدة بيانات جديدة من
--- الصفر كان يفشل عند أول كتابة من الواجهة. أُضيف هنا لسدّ هذه الثغرة.
---
--- الفهارس مصمّمة لاستعلامات التطبيق الفعلية:
---   • قراءة مجموعة بيانات كاملة مرتّبة بالمفتاح (Keyset Pagination)
---   • جلب التغييرات منذ مؤشر زمني (المزامنة التزايدية)
+-- لا تُنشئ هذه الجداول هنا. لإزالتها من قاعدة قديمة:
+--   node scripts/drop-document-store.mjs --i-have-a-backup
 -- =========================================================================
-CREATE TABLE IF NOT EXISTS app_records (
-  tenant_id  VARCHAR(100) NOT NULL,
-  doc_key    VARCHAR(100) NOT NULL,
-  record_id  VARCHAR(200) NOT NULL,
-  payload    JSONB        NOT NULL DEFAULT '{}'::jsonb,
-  updated_at TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-  deleted_at TIMESTAMPTZ,
-  CONSTRAINT pk_app_records PRIMARY KEY (tenant_id, doc_key, record_id)
-);
-
--- قراءة مجموعة بيانات بترتيب ثابت (يمنع Sort كامل عند عشرات الآلاف من السجلات)
-CREATE INDEX IF NOT EXISTS idx_app_records_doc_order
-  ON app_records (tenant_id, doc_key, record_id)
-  WHERE deleted_at IS NULL;
-
--- المزامنة التزايدية: "هات كل ما تغيّر بعد هذا الوقت"
-CREATE INDEX IF NOT EXISTS idx_app_records_updated
-  ON app_records (tenant_id, doc_key, updated_at DESC)
-  WHERE deleted_at IS NULL;
-
--- البحث في السجلات المحذوفة (ناعماً) للتنظيف الدوري
-CREATE INDEX IF NOT EXISTS idx_app_records_deleted
-  ON app_records (tenant_id, deleted_at)
-  WHERE deleted_at IS NOT NULL;
-
--- =========================================================================
--- تم بنجاح! هذا الكود آمن تماماً ولا يمس أو يحذف أي بيانات مسجلة.
--- =========================================================================
-
--- =========================================================================
--- Unified document store: one JSONB row per dataset per tenant.
--- This is what the app's automatic Neon sync writes to, so EVERY dataset
--- (collection receipts, customer refunds, shifts, payroll, ...) is stored in Neon.
--- =========================================================================
-CREATE TABLE IF NOT EXISTS app_documents (
-  tenant_id  VARCHAR(100) NOT NULL,
-  doc_key    VARCHAR(100) NOT NULL,
-  payload    JSONB        NOT NULL,
-  updated_at TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-  PRIMARY KEY (tenant_id, doc_key)
-);
 
 
 -- ============================================================================
@@ -1066,6 +1022,70 @@ CREATE INDEX IF NOT EXISTS notifications_history_keyset_idx ON notifications_his
 --
 -- الخطوة التالية: التطبيق يقرأ ويكتب هذه الجداول فقط.
 -- ============================================================================
+
+
+-- ============================================================================
+-- [دوال المصادقة]
+-- المصدر: scripts/neon_auth_functions.sql
+-- ============================================================================
+
+-- =========================================================================
+-- دوال المصادقة — تقرأ من الجداول المنمّطة
+-- =========================================================================
+-- الخلفية:
+--   تسجيل الدخول يحدث **قبل** معرفة المنشأة، لذلك لا يوجد سياق لـ RLS
+--   (`app.tenant_id`) ولا يمكن قراءة جدول `users` مباشرة من تطبيق العميل.
+--
+--   الحل: دالة بـ SECURITY DEFINER تُعيد فقط الصفوف المطابقة لاسم المستخدم
+--   المطلوب — ولا تكشف أي شيء آخر.
+--
+-- ⚠️ الأمان:
+--   • `SECURITY DEFINER` يمنح الدالة صلاحية القراءة متجاوزةً RLS — لذلك:
+--     - `SET search_path` مثبّت (يمنع هجوم تبديل المخطط)
+--     - تُعيد حقولاً محدّدة فقط (لا `SELECT *`)
+--     - تُرشّح على اسم المستخدم وحده
+--   • كلمات المرور تُقارَن في كود التطبيق (لا تُرسَل أو تُقارَن في SQL).
+-- =========================================================================
+
+CREATE OR REPLACE FUNCTION fn_authenticate_user(p_username TEXT)
+RETURNS TABLE (
+  out_tenant_id VARCHAR,
+  out_user_id   VARCHAR,
+  out_payload   JSONB
+)
+LANGUAGE sql
+SECURITY DEFINER
+STABLE
+SET search_path = public, pg_temp
+AS $$
+  SELECT u.tenant_id::VARCHAR,
+         u.id::VARCHAR,
+         u.payload
+    FROM users u
+   WHERE u.username = p_username
+     AND u.deleted_at IS NULL
+     AND COALESCE(u.is_active, TRUE) = TRUE;
+$$;
+
+-- =========================================================================
+-- منح التنفيذ: دور التطبيق المحدود فقط (+ المالك).
+-- لا يُمنح لدور التقارير للقراءة فقط.
+-- =========================================================================
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_api') THEN
+    EXECUTE 'GRANT EXECUTE ON FUNCTION fn_authenticate_user(TEXT) TO app_api';
+  END IF;
+END $$;
+
+-- =========================================================================
+-- تنظيف الدالة القديمة (كانت تقرأ من مخزن المستندات app_records)
+-- =========================================================================
+DROP FUNCTION IF EXISTS fn_login(TEXT);
+
+-- =========================================================================
+-- تم بنجاح.
+-- =========================================================================
 
 
 -- ============================================================================

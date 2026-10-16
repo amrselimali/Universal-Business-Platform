@@ -113,7 +113,7 @@ export const NeonHubView: React.FC = () => {
     setBackupFeedback(null);
     try {
       // Read the data from Neon when connected (single source of truth); each dataset is a
-      // JSONB document in app_documents. Any dataset missing in Neon falls back to the
+      // typed table. Any dataset missing in Neon falls back to the
       // in-browser copy so the backup is never empty.
       const canReadNeon = neonDb.connected && Boolean(neonDb.connectionString) && Boolean(tenant?.id);
       let neonDocs: { [key: string]: any } = {};

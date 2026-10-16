@@ -110,8 +110,7 @@ export const OUTBOX_NOTE =
  * the HTTP response limit.
  *
  * This is what the app must load on startup: reading the whole-dataset snapshot from
- * `app_documents` would resurrect records that were deleted (the deletion is recorded
- * per record in `app_records`, not in the snapshot).
+ * per record in the typed table, not in a whole-dataset snapshot).
  */
 export async function fetchLiveRecords(
   connectionString: string,

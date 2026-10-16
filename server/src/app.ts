@@ -6,6 +6,8 @@ import jwt from 'jsonwebtoken';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import { expandPermissions } from './permissionExpansion.js';
+import { isTenantScoped, resolveTable } from './datasetTables.js';
+import { softDeleteRecords, writeRecords } from './recordWriter.js';
 
 /**
  * Universal Business Platform API
@@ -118,12 +120,11 @@ export async function buildApp(deps: AppDeps) {
     if (!parsed.success) return reply.code(400).send({ error: 'invalid_payload' });
     const { username, password, tenantId } = parsed.data;
 
-    // Users live in app_records; the tenant is verified from the record itself.
-    // Login happens before a tenant is known, so it goes through a SECURITY DEFINER
-    // function that only returns the matching user rows (RLS still protects everything
-    // else). Passwords are compared in constant time.
+    // المصدر الوحيد: الجدول المنمّط users (عبر دالة SECURITY DEFINER,
+    // لأن تسجيل الدخول يسبق معرفة المنشأة فلا يوجد سياق لـ RLS).
     const rows = await rawQuery<any[]>(
-      `SELECT out_tenant_id AS tenant_id, out_payload AS payload FROM fn_login($1)`,
+      `SELECT out_tenant_id AS tenant_id, out_user_id AS user_id, out_payload AS payload
+         FROM fn_authenticate_user($1)`,
       [username]
     );
     const matches = (rows || []).filter((row) => {
@@ -440,36 +441,62 @@ export async function buildApp(deps: AppDeps) {
     const tenantId = assertTenant(request);
     const limit = Math.min(Number(query.limit || PAGE_SIZE), PAGE_SIZE);
     const after = query.after || '';
+
+    // 🔒 الجدول من خريطة معتمدة فقط (Allow-list) — لا أسماء خام من العميل.
+    const table = resolveTable(docKey);
+    if (!table) return reply.code(404).send({ error: 'unknown_dataset', docKey });
+
+    // المصدر الوحيد: الجدول المنمّط.
+    const scoped = isTenantScoped(docKey);
     const rows = await one<any[]>(
       tenantId,
-      `SELECT record_id, payload, updated_at FROM app_records
-        WHERE doc_key = $1 AND deleted_at IS NULL AND ($2 = '' OR record_id > $2)
-        ORDER BY record_id LIMIT $3`,
-      [docKey, after, limit]
+      scoped
+        ? `SELECT id, payload, updated_at FROM ${table}
+            WHERE tenant_id = $1 AND deleted_at IS NULL AND ($2 = '' OR id > $2)
+            ORDER BY id LIMIT $3`
+        : `SELECT id, payload, updated_at FROM ${table}
+            WHERE deleted_at IS NULL AND ($1 = '' OR id > $1)
+            ORDER BY id LIMIT $2`,
+      scoped ? [tenantId, after, limit] : [after, limit]
     );
-    const records = (rows || []).map((row: any) => ({ ...(row.payload || {}), id: String(row.record_id) }));
-    const nextAfter = rows && rows.length === limit ? String(rows[rows.length - 1].record_id) : null;
+
+    const records = (rows || []).map((row: any) => ({ ...(row.payload || {}), id: String(row.id) }));
+    const nextAfter =
+      rows && rows.length === limit ? String(rows[rows.length - 1].id) : null;
     return { records, nextAfter, count: records.length };
   });
 
   /** Changes since a cursor - what the client polls for. */
-  app.get('/records/:docKey/changes', async (request) => {
+  app.get('/records/:docKey/changes', async (request, reply) => {
     const { docKey } = request.params as { docKey: string };
     const query = request.query as { since?: string };
     const tenantId = assertTenant(request);
+    const since = query.since || '1970-01-01T00:00:00.000Z';
+
+    const table = resolveTable(docKey);
+    if (!table) return reply.code(404).send({ error: 'unknown_dataset', docKey });
+
+    const scoped = isTenantScoped(docKey);
     const rows = await one<any[]>(
       tenantId,
-      `SELECT record_id, payload, updated_at, deleted_at FROM fn_changed_records($1, $2, $3::timestamptz)`,
-      [tenantId, docKey, query.since || '1970-01-01T00:00:00.000Z']
+      scoped
+        ? `SELECT id, payload, updated_at, deleted_at FROM ${table}
+            WHERE tenant_id = $1 AND updated_at > $2::timestamptz
+            ORDER BY updated_at`
+        : `SELECT id, payload, updated_at, deleted_at FROM ${table}
+            WHERE updated_at > $1::timestamptz
+            ORDER BY updated_at`,
+      scoped ? [tenantId, since] : [since]
     );
+
     const records: any[] = [];
     const deletedIds: string[] = [];
-    let nextCursor = query.since || '1970-01-01T00:00:00.000Z';
+    let nextCursor = since;
     (rows || []).forEach((row: any) => {
       const stamp = row.updated_at instanceof Date ? row.updated_at.toISOString() : String(row.updated_at);
       if (stamp > nextCursor) nextCursor = stamp;
-      if (row.deleted_at) deletedIds.push(String(row.record_id));
-      else records.push({ ...(row.payload || {}), id: String(row.record_id) });
+      if (row.deleted_at) deletedIds.push(String(row.id));
+      else records.push({ ...(row.payload || {}), id: String(row.id) });
     });
     return { records, deletedIds, nextCursor };
   });
@@ -495,20 +522,23 @@ export async function buildApp(deps: AppDeps) {
     const ids = incoming.map((r) => String(r?.id ?? '')).filter(Boolean);
     if (ids.length === 0) return [];
 
+    const table = resolveTable(docKey);
+    if (!table) return []; // مجموعة غير معروفة — لا يمكن فحص التعارض
+
+    const scoped = isTenantScoped(docKey);
     const rows = await one<any[]>(
       tenantId,
-      `SELECT record_id, payload->>'version' AS version
-         FROM app_records
-        WHERE tenant_id = $1
-          AND doc_key = $2
-          AND record_id = ANY($3)
-          AND deleted_at IS NULL`,
-      [tenantId, docKey, ids]
+      scoped
+        ? `SELECT id, payload->>'version' AS version FROM ${table}
+            WHERE tenant_id = $1 AND id = ANY($2) AND deleted_at IS NULL`
+        : `SELECT id, payload->>'version' AS version FROM ${table}
+            WHERE id = ANY($1) AND deleted_at IS NULL`,
+      scoped ? [tenantId, ids] : [ids]
     );
 
     const conflicts: { id: string; serverVersion: number; clientVersion: number }[] = [];
     for (const row of rows || []) {
-      const recordId = String(row.record_id);
+      const recordId = String(row.id);
       const serverVersion = Number(row.version);
       const clientRecord = incoming.find((r) => String(r?.id ?? '') === recordId);
       const clientVersion = Number(clientRecord?.version);
@@ -543,12 +573,23 @@ export async function buildApp(deps: AppDeps) {
       }
     }
 
-    const rows = await one<any[]>(
+    // المصدر الوحيد: الجدول المنمّط (كتابة مباشرة بأعمدته الفعلية).
+    const table = resolveTable(docKey);
+    if (!table) return reply.code(404).send({ error: 'unknown_dataset', docKey });
+
+    const result = await writeRecords({
+      query: (text, params) => one<any[]>(tenantId, text, params),
+      table,
       tenantId,
-      `SELECT fn_upsert_records($1, $2, $3::jsonb, $4) AS n`,
-      [tenantId, docKey, JSON.stringify(parsed.data.records), actor]
-    );
-    return { upserted: Number(rows?.[0]?.n || 0) };
+      scoped: isTenantScoped(docKey),
+      records: parsed.data.records,
+      actor,
+    });
+
+    if (result.error) {
+      return reply.code(500).send({ error: 'write_failed', message: result.error });
+    }
+    return { upserted: result.written };
   });
 
   const deleteSchema = z.object({ ids: z.array(z.string().min(1)).min(1).max(1000) });
@@ -561,12 +602,24 @@ export async function buildApp(deps: AppDeps) {
     const tenantId = assertTenant(request);
     assertAction(request, 'record.delete');
     const actor = String(request.auth?.sub || 'api');
-    const rows = await one<any[]>(
+
+    // المصدر الوحيد: الجدول المنمّط (حذف ناعم).
+    const table = resolveTable(docKey);
+    if (!table) return reply.code(404).send({ error: 'unknown_dataset', docKey });
+
+    const result = await softDeleteRecords({
+      query: (text, params) => one<any[]>(tenantId, text, params),
+      table,
       tenantId,
-      `SELECT fn_soft_delete_records($1, $2, $3::jsonb, $4) AS n`,
-      [tenantId, docKey, JSON.stringify(parsed.data.ids), actor]
-    );
-    return { deleted: Number(rows?.[0]?.n || 0) };
+      scoped: isTenantScoped(docKey),
+      ids: parsed.data.ids,
+      actor,
+    });
+
+    if (result.error) {
+      return reply.code(500).send({ error: 'delete_failed', message: result.error });
+    }
+    return { deleted: result.written };
   });
 
   // ---------------------------------------------------------------------------

@@ -83,7 +83,7 @@ export type DocumentsCache = { [key: string]: CachedDocument };
 /**
  * Legacy business datasets that used to be persisted in the browser.
  * They are removed once on startup so the device never keeps a second copy of the data:
- * Neon (app_records) is the single source of truth.
+ * The typed Neon tables are the single source of truth.
  */
 export const LEGACY_LOCAL_KEYS = [
   'erp_tenants', 'erp_users', 'erp_branches', 'erp_warehouses', 'erp_categories',

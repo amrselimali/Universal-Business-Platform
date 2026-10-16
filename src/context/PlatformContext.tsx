@@ -8922,9 +8922,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       patientFollowUps,
       journalEntries,
     });
-    // 2) EVERY dataset as a JSONB document in app_documents (full initial transfer).
-    // SINGLE SOURCE OF TRUTH: the full sync also writes RECORDS only (app_records).
-    // Whole-dataset snapshots in app_documents are no longer written, so there is never
+    // 2) كل مجموعة بيانات تُرفع إلى **جدولها المنمّط** (المصدر الوحيد للحقيقة).
+    // لا تُكتب لقطات كاملة — السجلات المتغيّرة فقط، فلا يوجد تعارض بين مخزنين.
     // a second, staler copy of the business data.
     const allDocs = buildAllDatasetDocuments();
     setNeonAutoSyncProgress(`0/${allDocs.length}`);
@@ -8952,7 +8951,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       success: syncErrors.length === 0,
       saved: allDocs.length,
       message: syncErrors.length === 0
-        ? `تم رفع ${pushedRecords} سجل إلى app_records`
+        ? `تم رفع ${pushedRecords} سجل إلى الجداول المنمّطة`
         : syncErrors[0],
     };
     // 3) Mirror EVERY dataset into its matching typed table so no table stays empty.
@@ -8980,7 +8979,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       ? ` — ونُقلت ${mirrorResult.mirroredRows} سجلًا إلى ${mirrorResult.mirroredTables} جدول مُصنَّف`
       : '';
     const combinedMessage = documentResult.success
-      ? `${res.message} — وتم رفع ${documentResult.saved} مجموعة بيانات كاملة إلى app_documents${mirrorNote}`
+      ? `${res.message} — وتم رفع ${documentResult.saved} مجموعة بيانات إلى الجداول المنمّطة${mirrorNote}`
       : `${res.message} — لكن فشل رفع المجموعات الكاملة: ${documentResult.message}`;
     return {
       success: res.success && documentResult.success,
@@ -11609,7 +11608,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // Automatic Neon sync (مزامنة تلقائية لكل البيانات إلى Neon)
   // --------------------------------------------------------------------------
   // Every dataset below is stored as one JSONB document per tenant in the
-  // app_documents table, so receipts, refunds, shifts and everything else live in
+  // typed tables, so receipts, refunds, shifts and everything else live in
   // Neon as a single source of truth. Only datasets whose content actually changed
   // are uploaded, and uploads are debounced so rapid edits produce one write.
   // ==========================================================================
