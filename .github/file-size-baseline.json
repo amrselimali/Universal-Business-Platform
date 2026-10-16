@@ -59,8 +59,7 @@
     "src/views/LoginView.tsx": 342,
     "src/utils/bookingTimeUtils.ts": 332,
     "src/utils/translator.ts": 321,
-    "src/components/GlobalContextMenu.tsx": 314,
-    "src/services/recordSync.ts": 304
+    "src/components/GlobalContextMenu.tsx": 314
   },
   "dataLimit": 800,
   "declarationLimit": 1500

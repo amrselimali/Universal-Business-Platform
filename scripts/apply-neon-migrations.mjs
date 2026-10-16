@@ -48,7 +48,7 @@ const MIGRATIONS = [
 
 /** استعلامات التحقق — تُشغَّل بعد التطبيق. */
 const CHECKS = [
-  ['جدول app_records (التخزين الرئيسي)', `SELECT to_regclass('public.app_records') IS NOT NULL AS ok`],
+  ['الجداول المنمّطة الرئيسية (tenants)', `SELECT to_regclass('public.tenants') IS NOT NULL AS ok`],
   ['عمود version على branches', `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='branches' AND column_name='version') AS ok`],
   ['دالة touch_row', `SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname='touch_row') AS ok`],
   ['دالة fn_next_document_number', `SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname='fn_next_document_number') AS ok`],
@@ -71,6 +71,10 @@ const CHECKS = [
   ['جدول قواعد الربط المحاسبي', `SELECT to_regclass('public.accounting_mapping_rules') IS NOT NULL AS ok`],
   ['دالة فحص تغطية الربط', `SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname='fn_mapping_coverage_gaps') AS ok`],
   ['دالة المصادقة (fn_authenticate_user)', `SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname='fn_authenticate_user') AS ok`],
+  ['دالة ترحيل القيود الموحّدة (fn_post_journal)', `SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname='fn_post_journal') AS ok`],
+  ['دالة إيصال التحصيل (fn_post_customer_receipt)', `SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname='fn_post_customer_receipt') AS ok`],
+  ['دالة استرداد المستحقات (fn_post_customer_refund)', `SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname='fn_post_customer_refund') AS ok`],
+  ['View بنود القيود (v_journal_entry_lines)', `SELECT to_regclass('public.v_journal_entry_lines') IS NOT NULL AS ok`],
   ['عدد قواعد الربط', `SELECT count(*)::int AS value FROM accounting_mapping_rules`],
 ];
 
