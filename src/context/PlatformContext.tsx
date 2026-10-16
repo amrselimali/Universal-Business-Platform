@@ -130,6 +130,7 @@ import { reverseJournal, fetchAccountBalances } from '../services/accountingApi'
 import { normalizeStatementDate, isReceiptMatchingParty } from '../utils/statementUtils';
 import { normalizeCustomerPartyCodes as normalizeCustomerPartyCodesPure } from './platform/customerCodes';
 import { getEntity } from '../services/metadataRegistry';
+import { isNeonPlaceholder } from '../services/neonConfig';
 import { applyJournalLinesToAccounts as applyJournalLinesToAccountsPure } from './platform/journalBalances';
 import {
   buildActivityLog,
@@ -8828,32 +8829,24 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   // Neon PostgreSQL state
   const [neonDb, setNeonDb] = useState<NeonDbState>(() => {
-    const defaultUrl = 'postgresql://neondb_owner:npg_rPVi0Rf4vuFB@ep-twilight-glitter-b9w0wh2i-pooler.c-7.eu-central-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require';
     const saved = localStorage.getItem('erp_neon_cfg');
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
         const conn = String(parsed?.connectionString || '').trim();
-        if (conn && !conn.includes('ep-cool-snowflake-12345') && !conn.includes('user:pass@') && !conn.includes('ep-cool-12345')) {
-          return parsed;
-        }
+        if (conn && !isNeonPlaceholder(conn)) return parsed;
       } catch {
-        /* fallback to default */
+        /* إعدادات تالفة — نبدأ بلا اتصال */
       }
     }
-    const initialConfig: NeonDbState = {
-      connected: true,
-      connectionString: defaultUrl,
+    // 🔒 لا يوجد رابط افتراضي مكتوب في الكود: الاتصال يُضبط من شاشة Neon Hub.
+    return {
+      connected: false,
+      connectionString: '',
       isSyncing: false,
-      tablesCount: 22,
-      recordsCount: 84,
+      tablesCount: 0,
+      recordsCount: 0,
     };
-    try {
-      localStorage.setItem('erp_neon_cfg', JSON.stringify(initialConfig));
-    } catch {
-      /* ignore */
-    }
-    return initialConfig;
   });
 
   const updateNeonConnectionString = (conn: string) => {
