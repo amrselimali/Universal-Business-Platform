@@ -341,4 +341,21 @@ export const SYSTEM_ACTIONS: ActionPermissionDef[] = [
     viewId: 'users',
     descriptionAr: 'إيقاف حساب موظف أو حذفه نهائياً من النظام',
   },
+
+  // Architecture Guardrails (شاشة معمارية المنظومة الجديدة)
+  {
+    key: 'architecture.run_guardrails',
+    nameAr: 'تشغيل بوابات الفحص المعماري وإعادة تقييمها',
+    nameEn: 'Run & Re-evaluate Architecture Guardrails',
+    viewId: 'architecture',
+    descriptionAr:
+      'السماح بإعادة تقييم بوابات الجودة (حد 300 سطر، تسجيل الأزرار، الثوابت المعمارية) وعرض نتائجها',
+  },
+  {
+    key: 'architecture.copy_snippet',
+    nameAr: 'نسخ مقتطفات الكود المعتمد',
+    nameEn: 'Copy Approved Code Snippets',
+    viewId: 'architecture',
+    descriptionAr: 'السماح بنسخ مقتطفات التنفيذ المعتمد وملف بوابات الـ CI من الشاشة',
+  },
 ];

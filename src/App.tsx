@@ -9,7 +9,8 @@ import { CommandPaletteModal } from './components/CommandPaletteModal';
 import { CustomizeQuickButtonsModal } from './components/CustomizeQuickButtonsModal';
 import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 import { GlobalContextMenu } from './components/GlobalContextMenu';
-import { LoginView, DynamicScreenView, DashboardView, PosView, AccountingView, InventoryView, ClinicsView, InvoicesView, PartiesView, SuppliersView, ModulesConfigView, NeonHubView, CompaniesBranchesView, UsersRolesView, ReceptionOpsView, BookingsFollowUpView, StaffManagementView, ProductManagementView, InventoryManagementView, PaymentMethodsView, AuditTrailView, ActivityLogsView, ShiftReportsView, PayrollView, LaserDevicesView, FiscalDocumentsView, CashReceiptsView, CollectionReceiptsView, CustomerRefundsView, CashPaymentsView, SpecializedTaxInvoicesView, GoodsReceiptsView, GoodsIssuesView, AttendanceManagementView, EmployeeDossierView, SmartNotificationsView, SystemManualView, MetadataStudioView, AccountingMappingView } from './views/lazyViews';
+import { LoginView, DashboardView } from './views/lazyViews';
+import { renderActiveView as renderRegisteredView } from './components/ViewRenderer';
 
 /** شاشة انتظار خفيفة تظهر أثناء تحميل شاشة عند الطلب. */
 const ViewLoadingFallback: React.FC<{ label: string }> = ({ label }) => (
@@ -189,104 +190,13 @@ const MainLayout: React.FC = () => {
       );
     }
 
-    // شاشات مولّدة من محرك الشاشات (Metadata): meta_parties، meta_products، ...
-    // تُبنى من تعريف الكيان في قاعدة البيانات بلا كود مكتوب لكل حقل.
-    if (currentView.startsWith('meta_')) {
-      return <DynamicScreenView entityCode={currentView.slice('meta_'.length)} />;
-    }
-
-    // ربط العمليات بالحسابات — المصدر الوحيد لقيود اليومية.
-    if (currentView === 'accounting_mapping') return <AccountingMappingView />;
-
-    // استوديو الـ Metadata: إدارة الشاشات والحقول بلا كود.
-    if (currentView === 'metadata_studio') {
-      return <MetadataStudioView onPreview={(code) => setCurrentView(`meta_${code}`)} />;
-    }
-
-    switch (currentView) {
-      case 'dashboard':
-        return <DashboardView onNavigate={(view) => setCurrentView(view)} />;
-      case 'reception_ops':
-        return <ReceptionOpsView onNavigateToLaserDevices={() => setCurrentView('laser_devices')} />;
-      case 'laser_devices':
-        return <LaserDevicesView onNavigateToReception={() => setCurrentView('reception_ops')} />;
-      case 'bookings':
-        return <BookingsFollowUpView />;
-      case 'pos':
-        return <PosView />;
-      case 'invoices':
-        return <InvoicesView />;
-      case 'collection_receipts':
-        return <CollectionReceiptsView />;
-      case 'customer_refunds':
-        return <CustomerRefundsView />;
-      case 'parties':
-        return <PartiesView />;
-      case 'suppliers':
-        return <SuppliersView />;
-      case 'staff':
-        return (
-          <StaffManagementView
-            onNavigateToPayroll={() => setCurrentView('payroll')}
-            onNavigateToDossier={(staffId) => {
-              setSelectedStaffDossierId(staffId);
-              setCurrentView('employee_dossier');
-            }}
-          />
-        );
-      case 'attendance':
-        return <AttendanceManagementView />;
-      case 'payroll':
-        return <PayrollView />;
-      case 'employee_dossier':
-        return <EmployeeDossierView initialStaffId={selectedStaffDossierId} />;
-      case 'products':
-        return <ProductManagementView />;
-      case 'inventory_mgmt':
-        return <InventoryManagementView />;
-      case 'inventory':
-        return <ProductManagementView />;
-      case 'payment_methods':
-        return <PaymentMethodsView />;
-      case 'cash_receipts':
-        return <CashReceiptsView />;
-      case 'cash_payments':
-        return <CashPaymentsView />;
-      case 'tax_invoices':
-        return <SpecializedTaxInvoicesView />;
-      case 'goods_receipts':
-        return <GoodsReceiptsView />;
-      case 'goods_issues':
-        return <GoodsIssuesView />;
-      case 'fiscal_documents':
-        return <FiscalDocumentsView initialTab="receipts" />;
-      case 'goods_vouchers':
-        return <GoodsReceiptsView />;
-      case 'accounting':
-        return <AccountingView />;
-      case 'shift_reports':
-        return <ShiftReportsView />;
-      case 'audit_trail':
-        return <AuditTrailView />;
-      case 'activity_logs':
-        return <ActivityLogsView />;
-      case 'clinics':
-        return <ClinicsView />;
-      case 'modules':
-        return <ModulesConfigView />;
-      case 'companies':
-        return <CompaniesBranchesView />;
-      case 'users':
-        return <UsersRolesView />;
-      case 'neon':
-        return <NeonHubView />;
-      case 'notifications_config':
-        return <SmartNotificationsView onNavigate={(view) => setCurrentView(view)} />;
-      case 'system_manual':
-        return <SystemManualView />;
-      default:
-        return <DashboardView onNavigate={(view) => setCurrentView(view)} />;
-    }
+    // رسم الشاشة الفعلية — المنطق انتقل إلى src/components/ViewRenderer.tsx
+    // (مصدر واحد للتنقل، وإضافة أي شاشة جديدة لا تُكبّر ملف التخطيط).
+    return renderRegisteredView(currentView, {
+      setCurrentView,
+      selectedStaffDossierId,
+      setSelectedStaffDossierId,
+    });
   };
 
   // ==========================================================================

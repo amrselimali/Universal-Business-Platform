@@ -42,6 +42,11 @@ jobs:
       - name: Production build
         run: bun run build
 
+      # ميزانية حجم الحزمة: حزمة الإقلاع ≤ 160KB gzip، الـ CSS ≤ 30KB،
+      # أكبر حزمة مؤجّلة ≤ 160KB، الإجمالي ≤ 1200KB. تحتاج dist/ بعد البناء.
+      - name: Bundle speed budget (gzip)
+        run: node scripts/check-bundle-budget.mjs
+
   server:
     name: فحص واختبار الـ API (أمان + صلاحيات)
     runs-on: ubuntu-latest
@@ -82,3 +87,9 @@ jobs:
       # يسمح بالوضع الحالي لكن يفشل على أي ملف جديد أو أي ملف يكبر أكثر.
       - name: Enforce file-size ratchet (300-line limit)
         run: node scripts/check-file-size.mjs
+
+      # بوابات المعمارية الجديدة: نطاق المحرك (حد 300 سطر) + سجل الأفعال
+      # (Default-Deny) + الثوابت المعمارية (RLS/version/NOTIFY/SignalR/YARP).
+      # يفشل أيضاً إذا كانت لقطة القياس `guardrailsSnapshot.ts` قديمة.
+      - name: Architecture guardrails (engine + actions + invariants)
+        run: node scripts/architecture-guardrails.mjs --check

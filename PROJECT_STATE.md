@@ -1,4 +1,58 @@
 # PROJECT STATE
+## شاشة معمارية المنظومة الجديدة + بوابات الفحص المعماري الحقيقية (2026-10-16)
+
+### ما طلبه المالك
+إضافة شاشة داخل تطبيق Universal تعرض **المعمارية المعتمدة للمنظومة الجديدة
+(Clean Micro-Engine Architecture: YARP + .NET 10 + PostgreSQL RLS + SignalR)**
+مع الميزانية المعمارية (مستخدمون < 100، بدون Scale-to-Zero، ميزانية 200ms،
+Endpoint واحد لكل شاشة، حد 300 سطر في الـ CI، Default-Deny + Action Registry)،
+مخطط تدفق البيانات، حلقة المزامنة اللحظية، عيوب المنصة السابقة مقابل الحلول،
+مقتطفات الكود المعتمد، و**بوابات الفحص الآلي وميزانية السرعة (CI Guardrails)**.
+
+### ما تم تنفيذه
+1. **شاشة `architecture`** (`src/views/ArchitectureView.tsx` + `src/components/architecture/`)
+   بستة تبويبات، وتُفتح من القائمة الجانبية «معمارية المنظومة الجديدة» أو بـ `?view=architecture`.
+2. **محرك بوابات حقيقي** — لا أرقام وهمية:
+   - `src/services/architectureGuardrails.ts` (منطق التقييم النقي، 292 سطراً).
+   - `scripts/architecture-guardrails.mjs` + `guardrail-invariants.mjs` + `guardrail-snapshot.mjs`.
+   - `src/data/architecture/guardrailsSnapshot.ts` (لقطة مولَّدة من المستودع).
+   - `src/__tests__/architectureGuardrails.test.ts` (13 اختباراً: منطق + طزاجة اللقطة + حالة المستودع).
+3. **النتيجة المقيسة الآن:** 3 بوابات · 97 فحصاً · 0 فشل · 65 ملفاً مقيساً ·
+   12 موضع فحص صلاحيات · 19 ثابتاً معمارياً إلزامياً ناجحاً · 3 توصيات
+   (واحدة مفتوحة: PgBouncer/حد اتصالات صريح).
+4. **صلاحيات الشاشة:** `architecture.run_guardrails` و`architecture.copy_snippet`
+   في `SYSTEM_ACTIONS` (Default-Deny)، والشاشة في `SYSTEM_VIEWS` + القائمة الجانبية
+   + لوحة الأوامر (`Ctrl+K`).
+5. **إعادة هيكلة إلزامية:** نقل رسم الشاشات من `App.tsx` إلى
+   `src/components/ViewRenderer.tsx` — `App.tsx` من 438 إلى **348 سطراً**،
+   وخط الأساس تم تضييقه (App.tsx 439 → 348، neonService 1832 → 1683، commands 479 → 441).
+6. **CI**: خطوة `node scripts/architecture-guardrails.mjs --check` أُضيفت إلى قالب
+   الـ CI `docs/ci/ci.yml` وإلى `npm run verify`. ⚠️ تعذّر دفعها داخل
+   `.github/workflows/ci.yml` لأن تطبيق GitHub المربوط لا يملك صلاحية `workflows`
+   (نفس القيد الموثّق في `docs/ci/README-AR.md`) — التفعيل يحتاج خطوة يدوية واحدة:
+   `cp docs/ci/ci.yml .github/workflows/ci.yml`. وأُصلح أيضاً `bun.lock`
+   (كان يفشل `bun install --frozen-lockfile` في أول خطوة CI).
+
+### التحقق
+`tsc --noEmit` = 0 خطأ · `vitest` = **276/276** · `vite build` ناجح ·
+`check-file-size` ناجح · `guardrails --check` ناجح · `budget:bundle` ناجح ·
+`npm run verify` يغطيها كلها بالترتيب نفسه الذي يعمل به الـ CI.
+
+### ميزانية السرعة (الحالة النهائية)
+- **زمن الـ API:** الحد المعتمد p95 < 200ms — أداة القياس جاهزة وقابلة للتشغيل
+  (`perf/api-budget.js` بـ k6 عبر `npm run perf:api`) على بيئة حقيقية.
+- **حجم الحزمة (يُقاس في الـ CI):** إقلاع 137.1KB gzip / CSS 22.1KB /
+  أكبر حزمة مؤجّلة 138.2KB / الإجمالي 995.2KB — داخل الحدود الأربعة.
+- **توصية الاتصالات:** أُغلقت بضبط `Maximum Pool Size=25` في التطبيق المرجعي.
+
+### ما لم يُلمس (بحدود النطاق)
+- لم تُقس زمن الاستجابة الفعلي داخل الشاشة (يحتاج بيئة حقيقية) — والمطلوب لذلك
+  صار جاهزاً للتشغيل: `perf/api-budget.js` بـ k6 (`npm run perf:api`)، ومذكور صراحة في الشاشة.
+- لم يُشغَّل اختبار المتصفح `e2e/architecture.spec.ts` في هذه البيئة (مكتبة نظام
+  ناقصة للمتصفح) — التصيير الفعلي للمكوّنات تم عبر `react-dom/server` بلا أخطاء.
+- لم يُعدّل `MASTER_AI_INSTRUCTIONS.md`.
+
+
 
 ## توحيد الدفتر المحاسبي وإصلاح دوال الترحيل والتحصيل على Neon (2026-10-16)
 

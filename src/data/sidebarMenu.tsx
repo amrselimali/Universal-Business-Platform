@@ -27,7 +27,7 @@ import {
   LayoutDashboard, ShoppingCart, Package, Calculator, Receipt, Undo2, Stethoscope, Users,
   SlidersHorizontal, Database, RotateCcw, Sparkles, Building2, ShieldCheck, CreditCard,
   Activity, Calendar, UserCheck, ShieldAlert, Clock, FileText, Wallet, Truck, Zap, Warehouse,
-  Boxes, BookOpen, PackagePlus, PackageMinus, ArrowDownLeft, ArrowUpRight, Contact, Bell,
+  Boxes, BookOpen, PackagePlus, PackageMinus, ArrowDownLeft, ArrowUpRight, Contact, Bell, Network,
 } from 'lucide-react';
 
 export const SIDEBAR_MENU_SECTIONS: MenuSectionDef[] = [
@@ -307,6 +307,14 @@ export const SIDEBAR_MENU_SECTIONS: MenuSectionDef[] = [
           labelAr: 'دليل المستخدم والتوثيق التقني',
           labelEn: 'User Manual & Tech Specs',
           icon: BookOpen,
+          highlight: true,
+        },
+        {
+          // المعمارية المعتمدة للمنظومة الجديدة + بوابات الفحص الآلي الحقيقية.
+          id: 'architecture',
+          labelAr: 'معمارية المنظومة الجديدة',
+          labelEn: 'New System Architecture',
+          icon: Network,
           highlight: true,
         },
       ],
