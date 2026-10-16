@@ -262,9 +262,7 @@ export const NEON_SCHEMA_TABLES: NeonTableSchema[] = [
 
 /** Builds the CREATE TABLE statement (idempotent). */
 /** History/archive table: every previous version of a document is kept here before it is overwritten. */
-export const APP_DOCUMENTS_HISTORY_DDL = `CREATE TABLE IF NOT EXISTS app_documents_history (\n  id BIGSERIAL PRIMARY KEY,\n  tenant_id VARCHAR(100) NOT NULL,\n  doc_key VARCHAR(100) NOT NULL,\n  payload JSONB NOT NULL,\n  archived_at TIMESTAMPTZ NOT NULL DEFAULT NOW()\n);`;
 
-export const APP_DOCUMENTS_HISTORY_INDEX_DDL = `CREATE INDEX IF NOT EXISTS app_documents_history_key_idx ON app_documents_history (tenant_id, doc_key, archived_at DESC);`;
 
 export function buildCreateTableSql(schema: NeonTableSchema): string {
   const created = schema.columns.filter((column) => column.create);
@@ -284,4 +282,3 @@ export function buildAlterTableSql(schema: NeonTableSchema): string[] {
 }
 
 /** The CREATE TABLE statement for the unified document store. */
-export const APP_DOCUMENTS_DDL = `CREATE TABLE IF NOT EXISTS app_documents (\n  tenant_id  VARCHAR(100) NOT NULL,\n  doc_key    VARCHAR(100) NOT NULL,\n  payload    JSONB        NOT NULL,\n  updated_at TIMESTAMPTZ  NOT NULL DEFAULT NOW(),\n  PRIMARY KEY (tenant_id, doc_key)\n);`;

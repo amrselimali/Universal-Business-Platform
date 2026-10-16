@@ -1,6 +1,6 @@
 import { neon } from '@neondatabase/serverless';
 import { isNeonPlaceholder } from './neonConfig';
-import { APP_DOCUMENTS_DDL, APP_DOCUMENTS_HISTORY_DDL, APP_DOCUMENTS_HISTORY_INDEX_DDL, NEON_SCHEMA_TABLES, NeonTableSchema, buildAlterTableSql, buildCreateTableSql } from './neonSchema';
+import { NEON_SCHEMA_TABLES, NeonTableSchema, buildAlterTableSql, buildCreateTableSql } from './neonSchema';
 import {
   Product,
   Account,
@@ -543,8 +543,7 @@ export class NeonService {
     try {
       const sql = this.getClient(connectionString);
 
-      // app_documents is legacy: the single source of truth is app_records,
-      // so the migration no longer creates the whole-dataset snapshot table.
+      // المصدر الوحيد للحقيقة هو الجداول المنمّطة (بلا مخزن مستندات).
 
       for (const schema of NEON_SCHEMA_TABLES) {
         try {
@@ -825,59 +824,12 @@ export class NeonService {
     return '';
   }
 
-  /** Fetches ONE dataset (with chunks) via small requests — avoids Neon's 64 MB limit. */
-  static async fetchDocumentByKey(
-    connectionString: string,
-    tenantId: string,
-    key: string
-  ): Promise<{ success: boolean; value?: unknown; message: string }> {
-    try {
-      const sql = this.getClient(connectionString);
-      const rows = await sql`
-        SELECT payload FROM app_documents WHERE tenant_id = ${tenantId} AND doc_key = ${key}
-      `;
-      const payload = asRows<{ payload?: unknown }>(rows)[0]?.payload;
-      if (payload === undefined) return { success: true, value: undefined, message: 'غير موجود' };
-
-      const chunked = (payload ?? {}) as { __chunked?: boolean; count?: number };
-      if (chunked.__chunked) {
-        const count = Number(chunked.count) || 0;
-        const merged: unknown[] = [];
-        const CHUNKS_PER_REQUEST = 4;
-        for (let start = 0; start < count; start += CHUNKS_PER_REQUEST) {
-          const names: string[] = [];
-          for (let index = start; index < Math.min(start + CHUNKS_PER_REQUEST, count); index += 1) {
-            names.push(`${key}#${index}`);
-          }
-          const params: unknown[] = [tenantId];
-          const conditions = names.map((name) => {
-            params.push(name);
-            return `doc_key = $${params.length}`;
-          });
-          const chunkRows = asRows<{ doc_key: string; payload: unknown }>(await sql.query(
-            `SELECT doc_key, payload FROM app_documents WHERE tenant_id = $1 AND (${conditions.join(' OR ')})`,
-            params
-          ));
-          names.forEach((name) => {
-            const found = asRows(chunkRows).find((row) => row.doc_key === name);
-            if (Array.isArray(found?.payload)) merged.push(...found.payload);
-          });
-        }
-        return { success: true, value: merged, message: `تم تجميع ${merged.length} سجل` };
-      }
-
-      return { success: true, value: payload, message: '' };
-    } catch (err: any) {
-      return { success: false, message: `فشل تحميل (${key}): ` + (err?.message || String(err)) };
-    }
-  }
   /** Lightweight metadata only (doc_key + updated_at) used to diff against the local cache. */
   static async fetchDocumentMetadata(
     connectionString: string,
     tenantId: string
   ): Promise<{ success: boolean; metadata: { [key: string]: string }; message: string }> {
-    // Reads the dataset list and their last change time from app_records (the single
-    // source of truth). app_documents no longer exists.
+    // يقرأ قائمة مجموعات البيانات وآخر وقت تغيير لكل منها من app_records.
     try {
       const sql = this.getClient(connectionString);
       const rows: any = await sql.query(
@@ -896,23 +848,6 @@ export class NeonService {
     }
   }
 
-  /** Fetches the requested datasets one-by-one (each in its own small request). */
-  static async fetchDocumentsByKeys(
-    connectionString: string,
-    tenantId: string,
-    keys: string[]
-  ): Promise<{ success: boolean; documents: { [key: string]: unknown }; message: string }> {
-    if (keys.length === 0) return { success: true, documents: {}, message: 'لا توجد اختلافات' };
-    const documents: { [key: string]: unknown } = {};
-    for (const key of keys) {
-      const result = await NeonService.fetchDocumentByKey(connectionString, tenantId, key);
-      if (!result.success) {
-        return { success: false, documents, message: result.message };
-      }
-      if (result.value !== undefined) documents[key] = result.value;
-    }
-    return { success: true, documents, message: `تم تحميل ${Object.keys(documents).length} مجموعة محدّثة` };
-  }
   // --- Realtime Direct Table Operations (Database-First) ---
 
   static async upsertTenantDirect(connectionString: string, tenant: Tenant): Promise<boolean> {
@@ -1648,119 +1583,6 @@ export class NeonService {
       return { success: true, message: 'تم تحديث وترحيل هيكل الجداول في Neon بنجاح تام وبأمان 100% دون أي مساس بالبيانات الحالية!' };
     } catch (err: any) {
       return { success: false, message: 'فشل في تحديث هيكل الجداول: ' + (err.message || String(err)) };
-    }
-  }
-
-  // ==========================================================================
-  // Unified document store (مخزن البيانات الموحّد)
-  // --------------------------------------------------------------------------
-  // One JSONB row per dataset per tenant, so EVERY browser dataset (receipts,
-  // refunds, shifts, payroll, ...) can live in Neon without lossy column mapping.
-  // ==========================================================================
-  static async ensureDocumentsTable(_connectionString: string): Promise<boolean> {
-    // Legacy table removed: app_records is the single source of truth.
-    return true;
-  }
-
-  private static unusedEnsureDocumentsTableLegacy(connectionString: string): any {
-    try {
-      const sql = this.getClient(connectionString);
-      return sql`
-        CREATE TABLE IF NOT EXISTS app_documents_removed (
-          tenant_id  VARCHAR(100) NOT NULL,
-          doc_key    VARCHAR(100) NOT NULL,
-          payload    JSONB        NOT NULL,
-          updated_at TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-          PRIMARY KEY (tenant_id, doc_key)
-        );
-      `;
-      return true;
-    } catch (err) {
-      console.warn('Neon app_documents creation failed:', err);
-      return false;
-    }
-  }
-
-  static async saveDocuments(
-    connectionString: string,
-    tenantId: string,
-    documents: { key: string; payload: unknown }[],
-    onProgress?: (done: number, total: number, label: string) => void
-  ): Promise<{ success: boolean; saved: number; message: string }> {
-    if (documents.length === 0) return { success: true, saved: 0, message: 'لا توجد تغييرات للرفع' };
-    try {
-      const sql = this.getClient(connectionString);
-      const ready = await this.ensureDocumentsTable(connectionString);
-      if (!ready) {
-        return { success: false, saved: 0, message: 'تعذر إنشاء جدول التخزين الموحّد app_documents' };
-      }
-      // Best-effort archive so an accidental overwrite can always be recovered.
-      let historyReady = false;
-      try {
-        await sql.query(APP_DOCUMENTS_HISTORY_DDL);
-        await sql.query(APP_DOCUMENTS_HISTORY_INDEX_DDL);
-        historyReady = true;
-      } catch (historyError) {
-        console.warn('app_documents_history unavailable:', historyError);
-      }
-
-      // Large datasets are split into small chunk documents so no single HTTP request
-      // becomes huge (the previous single-request-per-dataset behaviour made big
-      // datasets like journals/parties take minutes).
-      const tasks: { key: string; payload: unknown }[] = [];
-      for (const doc of documents) {
-        const serialized = JSON.stringify(doc.payload ?? []);
-        if (Array.isArray(doc.payload) && serialized.length > NeonService.CHUNK_THRESHOLD_BYTES) {
-          const chunks = NeonService.splitIntoChunks(doc.payload);
-          tasks.push({ key: doc.key, payload: { __chunked: true, count: chunks.length } });
-          chunks.forEach((chunk, index) => tasks.push({ key: `${doc.key}#${index}`, payload: chunk }));
-        } else {
-          tasks.push(doc);
-        }
-      }
-
-      let done = 0;
-      let failed: string | null = null;
-      const total = tasks.length;
-      let cursor = 0;
-      const CONCURRENCY = 4;
-      const runners = Array.from({ length: Math.min(CONCURRENCY, total) }, async () => {
-        while (cursor < total && !failed) {
-          const task = tasks[cursor++];
-          try {
-            if (historyReady) {
-              try {
-                await sql`
-                  INSERT INTO app_documents_history (tenant_id, doc_key, payload)
-                  SELECT tenant_id, doc_key, payload FROM app_documents
-                  WHERE tenant_id = ${tenantId} AND doc_key = ${task.key}
-                `;
-              } catch (archiveError) {
-                console.warn('Archive before overwrite failed:', archiveError);
-              }
-            }
-            await sql`
-              INSERT INTO app_documents (tenant_id, doc_key, payload, updated_at)
-              VALUES (${tenantId}, ${task.key}, ${JSON.stringify(task.payload ?? [])}::jsonb, NOW())
-              ON CONFLICT (tenant_id, doc_key) DO UPDATE SET
-                payload = EXCLUDED.payload,
-                updated_at = NOW();
-            `;
-            done += 1;
-            if (onProgress) onProgress(done, total, task.key);
-          } catch (taskError: any) {
-            failed = `${task.key}: ${taskError?.message || String(taskError)}`;
-          }
-        }
-      });
-      await Promise.all(runners);
-
-      if (failed) {
-        return { success: false, saved: done, message: `فشل رفع (${failed})` };
-      }
-      return { success: true, saved: documents.length, message: `تم رفع ${documents.length} مجموعة بيانات إلى Neon` };
-    } catch (err: any) {
-      return { success: false, saved: 0, message: 'فشل رفع البيانات إلى Neon: ' + (err?.message || String(err)) };
     }
   }
 
