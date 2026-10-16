@@ -1,6 +1,5 @@
 import React, { useState, useEffect, Suspense } from 'react';
 import { PlatformProvider, usePlatform } from './context/PlatformContext';
-import { setRecoveryMode } from './utils/persistenceMode';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 

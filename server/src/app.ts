@@ -5,6 +5,7 @@ import rateLimit from '@fastify/rate-limit';
 import jwt from 'jsonwebtoken';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
+import { expandPermissions } from './permissionExpansion.js';
 
 /**
  * Universal Business Platform API
@@ -142,7 +143,11 @@ export async function buildApp(deps: AppDeps) {
       allowedTenantIds: Array.isArray(account.payload?.allowedTenantIds) ? account.payload.allowedTenantIds : [String(account.tenant_id)],
       allowedBranchIds: Array.isArray(account.payload?.allowedBranchIds) ? account.payload.allowedBranchIds : [],
       allowedViews: Array.isArray(account.payload?.allowedViews) ? account.payload.allowedViews : [],
-      allowedActions: Array.isArray(account.payload?.allowedActions) ? account.payload.allowedActions : [],
+      // توسيع أكواد شاشات الواجهة إلى الأكواد العامة التي يفرضها الـ API
+      // (بدون هذا التوسيع: مستخدم يملك pos.checkout يحصل على 403 على record.save)
+      allowedActions: expandPermissions(
+        Array.isArray(account.payload?.allowedActions) ? account.payload.allowedActions : []
+      ),
     };
     const token = jwt.sign(payload, JWT_SECRET, {
       expiresIn: JWT_EXPIRES_IN as jwt.SignOptions['expiresIn'],
