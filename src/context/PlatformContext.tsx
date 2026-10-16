@@ -121,7 +121,7 @@ import {
 import { NeonService } from '../services/neonService';
 import { autoTranslateArabic } from '../utils/translator';
 import { exportDatabaseToMultiSheetExcel } from '../utils/fullDatabaseExcelBackup';
-import { pushRecordChanges, pullChangedRecords, mergeRecords, fetchLiveRecords, fetchLiveRecordsBatch } from '../services/recordSync';
+import { pushRecordChanges, pullChangedRecords, fetchLiveRecords, fetchLiveRecordsBatch } from '../services/recordSync';
 import { postJournal } from '../services/accountingApi';
 import { postCustomerReceipt } from '../services/accountingApi';
 import { postCustomerRefund } from '../services/accountingApi';
@@ -157,6 +157,7 @@ import {
   ruleShowsToast,
 } from './platform/notifications';
 import { buildDatasetDocuments } from './platform/datasetDocuments';
+import { syncDatasets } from './platform/syncMerge';
 
 // منطق أكواد العملاء انتقل إلى src/context/platform/customerCodes.ts
 // (أول خطوة في تقسيم هذا الملف العملاق).
@@ -11245,21 +11246,20 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     // RECORD-LEVEL PULL: fetch only the records changed since each dataset's cursor and
     // merge them by id, so concurrent edits from other devices/users are never lost.
+    // قرار المزامنة انتقل إلى src/context/platform/syncMerge.ts (منطق نقي مُختبر).
     const datasets = buildAllDatasetDocuments();
-    const changedKeys: string[] = [];
-    const documents: { [key: string]: unknown } = {};
-    for (const dataset of datasets) {
-      const cursor = neonCursorsRef.current.get(dataset.key) || '1970-01-01T00:00:00.000Z';
-      const pulled = await pullChangedRecords(rawConnection, tenantId, dataset.key, cursor);
-      if (pulled.error) return { updated: 0, error: pulled.error };
-      if (pulled.records.length === 0 && pulled.deletedIds.length === 0) continue;
-      const currentArray: unknown[] = Array.isArray(dataset.payload) ? dataset.payload : [];
-      const merged = mergeRecords(currentArray, pulled.records, pulled.deletedIds);
-      documents[dataset.key] = merged;
-      changedKeys.push(dataset.key);
-      neonLastSyncedArraysRef.current.set(dataset.key, merged);
-      neonCursorsRef.current.set(dataset.key, pulled.nextCursor);
-    }
+    const outcome = await syncDatasets(
+      datasets,
+      neonCursorsRef.current,
+      (key, cursor) => pullChangedRecords(rawConnection, tenantId, key, cursor)
+    );
+    if (outcome.error) return { updated: 0, error: outcome.error };
+
+    const { changedKeys, documents } = outcome;
+    changedKeys.forEach((key) => {
+      neonLastSyncedArraysRef.current.set(key, documents[key]);
+      neonCursorsRef.current.set(key, outcome.cursors[key]);
+    });
     if (changedKeys.length === 0) {
       setNeonLastRefresh(new Date().toLocaleTimeString(language === 'ar' ? 'ar-EG' : 'en-US'));
       return { updated: 0 };
