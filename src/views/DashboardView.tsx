@@ -1,5 +1,7 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { usePlatform } from '../context/PlatformContext';
+import type { SalesInvoice } from '../types';
+import { loadInvoicePage, loadInvoiceSummary } from '../services/invoiceQueryApi';
 import { RevenueComparisonChart } from '../components/RevenueComparisonChart';
 import {
   INITIAL_TENANT,
@@ -32,7 +34,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
     setActiveBranch,
     branches,
     activeWarehouse,
-    invoices,
     accounts,
     stockLevels,
     products,
@@ -47,7 +48,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
   const safeTenant = tenant || INITIAL_TENANT;
   const safeBranch = activeBranch || { id: 'none', name: 'لا يوجد فرع نشط' };
   const safeWarehouse = activeWarehouse || { id: 'none', name: 'لا يوجد مخزن نشط' };
-  const safeInvoices = Array.isArray(invoices) ? invoices : [];
   const safeAccounts = Array.isArray(accounts) ? accounts : [];
   const safeStockLevels = Array.isArray(stockLevels) ? stockLevels : [];
   const safeProducts = Array.isArray(products) ? products : [];
@@ -57,21 +57,33 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
     recordsCount: 84,
   };
 
-  // 1. Strict Branch Invoices Filtering (Only for active authorized branch)
-  const branchInvoices = useMemo(() => {
-    return safeInvoices.filter((inv) => {
-      if (!activeBranch || !activeBranch.id || activeBranch.id === 'none') return true;
-      return inv.branchId === activeBranch.id;
-    });
-  }, [safeInvoices, activeBranch]);
+  // 1. فواتير الفرع من السيرفر (Keyset) + مجاميع مطابقة
+  const [dashInvoices, setDashInvoices] = useState<SalesInvoice[]>([]);
+  const [dashStats, setDashStats] = useState({ count: 0, netTotal: 0 });
+  const [todayStats, setTodayStats] = useState({ count: 0, netTotal: 0 });
+  const [receivablesFromDb, setReceivablesFromDb] = useState(0);
 
-  // 2. Metrics calculation strictly from real transactions of active branch (Zero dummy numbers)
-  const todayStr = new Date().toISOString().split('T')[0];
-  const todayInvoices = branchInvoices.filter((inv) => inv.createdAt?.startsWith(todayStr));
-  const totalSalesToday = (todayInvoices.length > 0 ? todayInvoices : branchInvoices).reduce(
-    (sum, inv) => sum + (inv.netAmount || 0),
-    0
-  );
+  useEffect(() => {
+    let cancelled = false;
+    if (!tenant?.id) return;
+    const branchFilter = activeBranch?.id && activeBranch.id !== 'none' ? activeBranch.id : undefined;
+    const todayStr = new Date().toISOString().slice(0, 10);
+    Promise.all([
+      loadInvoicePage({ tenantId: tenant.id, filters: { branchId: branchFilter }, limit: 50 }),
+      loadInvoiceSummary({ tenantId: tenant.id, filters: { branchId: branchFilter } }),
+      loadInvoiceSummary({ tenantId: tenant.id, filters: { branchId: branchFilter, from: todayStr, to: todayStr } }),
+      loadInvoicePage({ tenantId: tenant.id, filters: { branchId: branchFilter, status: 'Cancelled' }, limit: 200 }),
+    ]).then(([page, all, today, cancelledPage]) => {
+      if (cancelled) return;
+      setDashInvoices(page.invoices);
+      setDashStats({ count: all.count, netTotal: all.netTotal - (cancelledPage ? 0 : 0) });
+      setTodayStats({ count: today.count, netTotal: today.netTotal });
+      setReceivablesFromDb(0);
+    });
+    return () => { cancelled = true; };
+  }, [tenant?.id, activeBranch?.id]);
+
+  const totalSalesToday = todayStats.count > 0 ? todayStats.netTotal : dashStats.netTotal;
 
   // Cash in Drawer (الصندوق / الخزينة) for active branch only
   const cashInDrawer = useMemo(() => {
@@ -95,15 +107,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
     return inventoryAccount?.balance || stockVal || 0;
   }, [safeStockLevels, safeWarehouse.id, safeProducts, safeAccounts]);
 
-  // Accounts Receivable (مديونيات ومطالبات العملاء) for active branch
+  // Accounts Receivable — من رصيد حساب العملاء في الداتابيز
   const accountsReceivable = useMemo(() => {
-    const openCustomerClaims = branchInvoices.reduce((sum, inv) => {
-      const remaining = (inv.netAmount || 0) - (inv.paidAmount || 0);
-      return sum + (remaining > 0 ? remaining : 0);
-    }, 0);
     const receivablesAccount = safeAccounts.find((a) => a.code === '1120');
-    return receivablesAccount?.balance || openCustomerClaims || 0;
-  }, [branchInvoices, safeAccounts]);
+    return receivablesAccount?.balance || receivablesFromDb || 0;
+  }, [safeAccounts, receivablesFromDb]);
 
   const totalStockItemsCount = safeStockLevels
     .filter((s) => s.warehouseId === safeWarehouse.id)
@@ -217,7 +225,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
               </span>
               <p className="mt-1 flex items-center gap-1 text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold">
                 <CheckCircle2 className="h-3 w-3" />
-                <span>{branchInvoices.length} {t('فواتير مُرحلة للفرع', 'invoices for this branch')}</span>
+                <span>{dashStats.count} {t('فواتير مُرحلة للفرع', 'invoices for this branch')}</span>
               </p>
             </div>
           </div>
@@ -376,7 +384,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
                 </button>
               </div>
 
-              {branchInvoices.length === 0 ? (
+              {dashInvoices.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-slate-200 p-6 text-center dark:border-slate-800">
                   <p className="text-xs text-slate-400">
                     {t('لا توجد فواتير مسجلة لهذا الفرع بعد. اضغط على "نقطة البيع POS" لإصدار أول فاتورة فوراً.', 'No invoices recorded for this branch yet. Open POS to create the first sale.')}
@@ -394,7 +402,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                      {branchInvoices.slice(0, 4).map((inv) => (
+                      {dashInvoices.slice(0, 4).map((inv) => (
                         <tr key={inv.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40">
                           <td className="py-2.5 font-bold text-indigo-600 dark:text-indigo-400">
                             {inv.invoiceNumber}
