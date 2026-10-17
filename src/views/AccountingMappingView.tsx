@@ -1,298 +1,198 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  GitMerge,
-  Lock,
-  ShieldCheck,
-  AlertTriangle,
-  CheckCircle2,
-  RefreshCw,
-  Save,
-  FileText,
-} from 'lucide-react';
+import { AlertCircle, CheckCircle2, GitMerge, Layers, ListChecks, Lock, Send } from 'lucide-react';
 import { usePlatform } from '../context/PlatformContext';
-import {
-  TRANSACTION_TYPE_LABELS,
-  loadAccountingMapping,
-  saveAccountingMappingRule,
-  type MappingLoadResult,
-} from '../services/accountingMappingApi';
-import type { AccountingMappingRule } from '../types/accountingMapping';
+import { loadPostingSnapshot } from '../services/postingRulesApi';
+import { computeCoverage } from '../data/accountingOperations';
+import type { PostingRulesSnapshot } from '../types/postingRules';
+import { PostingRulesPanel } from '../components/accounting/PostingRulesPanel';
+import { PostingDocumentsPanel } from '../components/accounting/PostingDocumentsPanel';
+import { PeriodLocksPanel } from '../components/accounting/PeriodLocksPanel';
+import { PostingCoveragePanel } from '../components/accounting/PostingCoveragePanel';
 
 /**
- * شاشة ربط التسجيل بالحسابات — المصدر الحصري والوحيد لقيود اليومية
+ * شاشة ربط العمليات بالقيود المحاسبية — المصدر الوحيد للتوجيه
  * ---------------------------------------------------------------------------
- * كل قيد في النظام يُولَّد من قاعدة ربط مسجّلة هنا. لا قيد يدوي، ولا حساب
- * مكتوب في الكود. تغيير الحساب = تعديل صف واحد.
+ * أربعة تبويبات:
+ *   1. قواعد الترحيل : كل خلية رقمية في كل عملية ← اتجاه + حساب (أو "غير مربوطة").
+ *   2. الترحيل        : زر ترحيل ظاهر + طابور المستندات (معلّق/فاشل/مُرحَّل).
+ *   3. إقفال الفترات  : أزرار إقفال/فتح تُفحص داخل الداتابيز.
+ *   4. التغطية        : نسبة الخلايا المربوطة + الفجوات التي تمنع الترحيل.
  *
- * الرقابة:
- *   • «فجوة تغطية»: أي نوع عملية بلا قاعدة ⇒ قيد لن يُولَّد ⇒ تحذير ظاهر.
- *   • «مصدر حصري»: يمنع إنشاء قيد يدوي لهذا النوع من خارج القاعدة.
- *   • سجل القيود المولَّدة: أثر تدقيقي كامل (أي قاعدة ولّدت أي قيد).
+ * لا يوجد قيد يُبنى من حسابات مخزّنة على المنتج/طريقة الدفع/العميل، ولا كود
+ * يحتوي أكواد حسابات احتياطية. غياب القاعدة = رفض الترحيل.
  */
 
-const EMPTY: MappingLoadResult = { rules: [], gaps: [], generated: [] };
+type TabId = 'rules' | 'posting' | 'locks' | 'coverage';
 
-/** أعمدة جدول القواعد. */
-const HEADERS: [string, string][] = [
-  ['نوع العملية', 'Transaction'], ['القاعدة', 'Rule'], ['مدين', 'Debit'],
-  ['دائن', 'Credit'], ['حصري', 'Exclusive'], ['آلي', 'Auto'], ['', ''],
-];
+const EMPTY: PostingRulesSnapshot = { rules: [], documents: [], locks: [] };
 
 export const AccountingMappingView: React.FC = () => {
-  const { t, language, tenant, formatMoney } = usePlatform();
+  const { t, language, tenant, accounts, currentUser, canPerformAction, formatMoney, activeBranch } =
+    usePlatform();
   const isArabic = language === 'ar';
+  const tenantId = tenant?.id || 'tenant-eg-001';
 
-  const [data, setData] = useState<MappingLoadResult>(EMPTY);
-  const [drafts, setDrafts] = useState<Record<number, AccountingMappingRule>>({});
+  const [tab, setTab] = useState<TabId>('rules');
+  const [snapshot, setSnapshot] = useState<PostingRulesSnapshot>(EMPTY);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
 
-  const tenantId = tenant?.id || 'tenant-eg-001';
+  const notify = useCallback((type: 'ok' | 'err', text: string) => setNotice({ type, text }), []);
 
   const reload = useCallback(async () => {
     setBusy(true);
-    const loaded = await loadAccountingMapping(tenantId);
-    setData(loaded);
-    setDrafts({});
+    const loaded = await loadPostingSnapshot(tenantId);
+    setSnapshot(loaded);
     setBusy(false);
-    const noConn =
-      'لا يوجد اتصال بقاعدة البيانات — من شاشة Neon Hub أدخل الرابط ثم أعد المحاولة.';
     if (loaded.error === 'no_database_connection') {
-      setNotice({ type: 'err', text: t(noConn, 'No database connection — configure it from the Neon Hub screen.') });
+      notify('err', t('لا يوجد اتصال بقاعدة البيانات — اضبطه من شاشة Neon Hub.', 'No database connection — configure it from the Neon Hub screen.'));
     } else if (loaded.error) {
-      setNotice({ type: 'err', text: t('تعذّر تحميل القواعد: ', 'Failed to load rules: ') + loaded.error });
+      notify('err', t('تعذّر تحميل القواعد: ', 'Failed to load rules: ') + loaded.error);
     }
-  }, [tenantId, t]);
+  }, [tenantId, t, notify]);
 
   useEffect(() => {
     void reload();
   }, [reload]);
 
-  const updateDraft = (rule: AccountingMappingRule, patch: Partial<AccountingMappingRule>) =>
-    setDrafts((prev) => ({ ...prev, [rule.id ?? -1]: { ...(prev[rule.id ?? -1] ?? rule), ...patch } }));
+  const coverage = useMemo(() => computeCoverage(snapshot.rules), [snapshot.rules]);
+  const canPost = canPerformAction('accounting.post_journal');
+  const canLock = canPerformAction('accounting.lock_period');
+  const canOpen = canPerformAction('accounting.open_period');
+  const accountOptions = useMemo(
+    () => accounts.map((account) => ({ id: account.id, code: account.code ?? '', nameAr: account.nameAr })),
+    [accounts]
+  );
 
-  const handleSave = async (rule: AccountingMappingRule) => {
-    const draft = drafts[rule.id ?? -1] ?? rule;
-    if (draft.debitAccountCode === draft.creditAccountCode) {
-      setNotice({ type: 'err', text: t('لا يمكن أن يكون المدين هو الدائن.', 'Debit and credit must differ.') });
-      return;
-    }
-    setBusy(true);
-    const result = await saveAccountingMappingRule(draft);
-    setBusy(false);
-    if (result.ok) {
-      setNotice({ type: 'ok', text: t('تم حفظ القاعدة.', 'Rule saved.') });
-      await reload();
-    } else {
-      setNotice({ type: 'err', text: result.error ?? 'save_failed' });
-    }
-  };
+  const tabs: { id: TabId; labelAr: string; labelEn: string; icon: React.ReactNode }[] = [
+    { id: 'rules', labelAr: 'قواعد الترحيل', labelEn: 'Posting rules', icon: <GitMerge className="h-3.5 w-3.5" /> },
+    { id: 'posting', labelAr: 'الترحيل', labelEn: 'Posting', icon: <Send className="h-3.5 w-3.5" /> },
+    { id: 'locks', labelAr: 'إقفال الفترات', labelEn: 'Period locks', icon: <Lock className="h-3.5 w-3.5" /> },
+    { id: 'coverage', labelAr: 'التغطية', labelEn: 'Coverage', icon: <ListChecks className="h-3.5 w-3.5" /> },
+  ];
 
-  const grouped = useMemo(() => {
-    const map = new Map<string, AccountingMappingRule[]>();
-    data.rules.forEach((rule) => {
-      const list = map.get(rule.transactionType) ?? [];
-      list.push(rule);
-      map.set(rule.transactionType, list);
-    });
-    return [...map.entries()];
-  }, [data.rules]);
+  const failedCount = snapshot.documents.filter((doc) => doc.status === 'failed').length;
 
   return (
-    <div className="space-y-5" dir={isArabic ? 'rtl' : 'ltr'}>
-      {/* الترويسة */}
-      <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-xs sm:flex-row sm:items-center sm:justify-between dark:border-slate-800 dark:bg-slate-900">
-        <div>
-          <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-[11px] font-semibold text-indigo-800 dark:border-indigo-900/40 dark:bg-indigo-950/40 dark:text-indigo-300">
-            <Lock className="h-3.5 w-3.5" />
-            <span>{t('المصدر الحصري والوحيد لقيود اليومية', 'Single Exclusive Source of Truth')}</span>
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+        <div className="flex items-center gap-3">
+          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-400">
+            <GitMerge className="h-5 w-5" />
           </div>
-          <h1 className="flex items-center gap-2 text-lg font-extrabold text-slate-900 dark:text-white">
-            <GitMerge className="h-5 w-5 text-indigo-600" />
-            <span>{t('ربط التسجيل بالحسابات ومولّد القيود', 'Posting-to-Accounts Mapping')}</span>
-          </h1>
-          <p className="mt-1 max-w-2xl text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
-            {t(
-              'كل قيد محاسبي يُولَّد تلقائياً من قاعدة ربط مسجّلة هنا — لا قيد يدوي ولا حساب مكتوب في الكود.',
-              'Every journal entry is generated from a rule registered here — no manual entries, no hardcoded accounts.'
-            )}
-          </p>
+          <div>
+            <h1 className="text-base font-black text-slate-900 dark:text-white">
+              {t('ربط العمليات بالقيود المحاسبية', 'Posting rules & chart routing')}
+            </h1>
+            <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+              {t('المصدر الوحيد لتوجيه القيود · لا حسابات مخزّنة ولا أكواد في الكود', 'The single source of journal routing · no stored account fields, no hardcoded codes')}
+            </p>
+          </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <span className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] font-bold text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
-            <ShieldCheck className="h-3.5 w-3.5" />
-            {t('توازن مدين = دائن', 'Debit = Credit')}
+        <div className="flex flex-wrap items-center gap-2 text-[10px] font-bold">
+          <span className="inline-flex items-center gap-1 rounded-xl bg-slate-100 px-2 py-1 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+            <Layers className="h-3 w-3" /> {snapshot.rules.length} {t('قاعدة', 'rules')}
           </span>
+          <span
+            className={`inline-flex items-center gap-1 rounded-xl px-2 py-1 ${
+              coverage.covered === coverage.total
+                ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
+                : 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300'
+            }`}
+          >
+            {coverage.covered} / {coverage.total} {t('خلية مربوطة', 'cells bound')}
+          </span>
+          {failedCount > 0 && (
+            <span className="inline-flex items-center gap-1 rounded-xl bg-rose-50 px-2 py-1 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">
+              <AlertCircle className="h-3 w-3" /> {failedCount} {t('ترحيل فاشل', 'failed')}
+            </span>
+          )}
           <button
             type="button"
             onClick={() => void reload()}
             disabled={busy}
-            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 px-3 py-2 text-[11px] font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+            className="rounded-xl border border-slate-200 px-2 py-1 text-slate-600 hover:bg-slate-50 disabled:opacity-40 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
           >
-            <RefreshCw className={`h-3.5 w-3.5 ${busy ? 'animate-spin' : ''}`} />
-            {t('تحديث', 'Reload')}
+            {busy ? t('تحديث…', 'Refreshing…') : t('تحديث', 'Refresh')}
           </button>
         </div>
       </div>
 
-      {/* التنبيه */}
       {notice && (
         <div
-          className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-[11px] font-bold ${
+          className={`flex items-start gap-2 rounded-2xl border px-3 py-2 text-[11px] font-bold ${
             notice.type === 'ok'
               ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300'
               : 'border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-300'
           }`}
         >
-          {notice.type === 'ok' ? <CheckCircle2 className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
-          <span>{notice.text}</span>
+          {notice.type === 'ok' ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /> : <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />}
+          <span className="leading-5">{notice.text}</span>
         </div>
       )}
 
-      {/* فجوات التغطية */}
-      {data.gaps.length > 0 && (
-        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/40 dark:bg-amber-950/30">
-          <div className="mb-1 flex items-center gap-2 text-xs font-extrabold text-amber-900 dark:text-amber-300">
-            <AlertTriangle className="h-4 w-4" />
-            <span>{t('فجوات تغطية: ', 'Coverage gaps: ')}{data.gaps.length}</span>
-          </div>
-          <p className="mb-2 text-[11px] text-amber-800 dark:text-amber-400">
-            {t(
-              'أنواع عمليات بلا قاعدة ربط ⇒ لن يُولَّد لها أي قيد محاسبي.',
-              'Transaction types without a rule ⇒ no journal entry will be generated.'
-            )}
-          </p>
-          <div className="flex flex-wrap gap-1.5">
-            {data.gaps.map((gap) => (
-              <span
-                key={gap.transactionType}
-                className="rounded-lg border border-amber-300 bg-white px-2 py-1 font-mono text-[10px] font-bold text-amber-900 dark:border-amber-800 dark:bg-slate-900 dark:text-amber-300"
-              >
-                {TRANSACTION_TYPE_LABELS[gap.transactionType]?.ar ?? gap.transactionType}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-      {/* جدول القواعد */}
-      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xs dark:border-slate-800 dark:bg-slate-900">
-        <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3 dark:border-slate-800">
-          <h2 className="flex items-center gap-2 text-xs font-extrabold text-slate-800 dark:text-slate-100">
-            <GitMerge className="h-4 w-4 text-indigo-600" />
-            {t('قواعد الربط', 'Mapping rules')}
-            <span className="font-mono text-slate-400">({data.rules.length})</span>
-          </h2>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full text-right text-xs">
-            <thead className="bg-slate-50 dark:bg-slate-800/60">
-              <tr>
-                {HEADERS.map(([ar, en]) => (
-                  <th key={en} className="px-3 py-2 font-extrabold text-slate-600 dark:text-slate-300">
-                    {t(ar, en)}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {data.rules.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="px-3 py-10 text-center text-slate-400">
-                    {busy
-                      ? t('جارٍ التحميل…', 'Loading…')
-                      : t(
-                          'لا توجد قواعد. شغّل neon_accounting_mapping_seed.sql لتحميل القواعد الأساسية.',
-                          'No rules. Run neon_accounting_mapping_seed.sql to load the defaults.'
-                        )}
-                  </td>
-                </tr>
-              ) : (
-                grouped.flatMap(([type, rules]) =>
-                  rules.map((rule, index) => {
-                    const draft = drafts[rule.id ?? -1] ?? rule;
-                    const dirty = Boolean(drafts[rule.id ?? -1]);
-                    const input =
-                      'w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold outline-none focus:border-indigo-400 dark:border-slate-700 dark:bg-slate-800 dark:text-white';
-
-                    return (
-                      <tr
-                        key={rule.code}
-                        className={`border-b border-slate-100 last:border-0 dark:border-slate-800 ${
-                          dirty ? 'bg-amber-50/60 dark:bg-amber-950/20' : ''
-                        }`}
-                      >
-                        <td className="px-3 py-2 text-[11px] font-bold text-slate-700 dark:text-slate-200">
-                          {index === 0 ? (
-                            TRANSACTION_TYPE_LABELS[type]?.ar ?? type
-                          ) : (
-                            <span className="text-slate-300">↳</span>
-                          )}
-                        </td>
-                        <td className="px-3 py-2">
-                          <span className="block text-[11px] font-bold text-slate-800 dark:text-slate-100">
-                            {rule.nameAr}
-                          </span>
-                          <span className="block font-mono text-[10px] text-slate-400">{rule.code}</span>
-                        </td>
-                        <td className="px-3 py-2">
-                          <input
-                            value={draft.debitAccountCode}
-                            onChange={(e) => updateDraft(rule, { debitAccountCode: e.target.value })}
-                            className={`${input} w-20 font-mono`}
-                          />
-                          <span className="mt-0.5 block text-[10px] text-slate-400">
-                            {draft.debitAccountName}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2">
-                          <input
-                            value={draft.creditAccountCode}
-                            onChange={(e) => updateDraft(rule, { creditAccountCode: e.target.value })}
-                            className={`${input} w-20 font-mono`}
-                          />
-                          <span className="mt-0.5 block text-[10px] text-slate-400">
-                            {draft.creditAccountName}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2 text-center">
-                          <input
-                            type="checkbox"
-                            checked={draft.isStrictExclusive}
-                            onChange={(e) => updateDraft(rule, { isStrictExclusive: e.target.checked })}
-                            className="h-4 w-4 accent-indigo-600"
-                          />
-                        </td>
-                        <td className="px-3 py-2 text-center">
-                          <input
-                            type="checkbox"
-                            checked={draft.autoPostEnabled}
-                            onChange={(e) => updateDraft(rule, { autoPostEnabled: e.target.checked })}
-                            className="h-4 w-4 accent-indigo-600"
-                          />
-                        </td>
-                        <td className="px-3 py-2">
-                          <button
-                            type="button"
-                            onClick={() => void handleSave(rule)}
-                            disabled={busy || !dirty}
-                            className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-2 py-1 text-[10px] font-bold text-white hover:bg-indigo-700 disabled:opacity-30"
-                          >
-                            <Save className="h-3 w-3" />
-                            {t('حفظ', 'Save')}
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )
-              )}
-            </tbody>
-          </table>
-        </div>
+      <div className="flex flex-wrap gap-2">
+        {tabs.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            onClick={() => setTab(item.id)}
+            className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-[11px] font-bold ${
+              tab === item.id
+                ? 'border-indigo-600 bg-indigo-600 text-white'
+                : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800'
+            }`}
+          >
+            {item.icon}
+            {isArabic ? item.labelAr : item.labelEn}
+          </button>
+        ))}
       </div>
 
+      {tab === 'rules' && (
+        <PostingRulesPanel
+          t={t}
+          isArabic={isArabic}
+          tenantId={tenantId}
+          rules={snapshot.rules}
+          accounts={accountOptions}
+          canEdit={canPost}
+          actor={currentUser?.name}
+          notify={notify}
+          onSaved={reload}
+        />
+      )}
+      {tab === 'posting' && (
+        <PostingDocumentsPanel
+          t={t}
+          isArabic={isArabic}
+          tenantId={tenantId}
+          branchId={activeBranch?.id}
+          documents={snapshot.documents}
+          canPost={canPost}
+          actor={currentUser?.name}
+          formatMoney={formatMoney}
+          notify={notify}
+          onChanged={reload}
+        />
+      )}
+      {tab === 'locks' && (
+        <PeriodLocksPanel
+          t={t}
+          isArabic={isArabic}
+          tenantId={tenantId}
+          locks={snapshot.locks}
+          canLock={canLock}
+          canOpen={canOpen}
+          actor={currentUser?.name}
+          notify={notify}
+          onChanged={reload}
+        />
+      )}
+      {tab === 'coverage' && (
+        <PostingCoveragePanel t={t} isArabic={isArabic} coverage={coverage} documents={snapshot.documents} />
+      )}
     </div>
   );
 };

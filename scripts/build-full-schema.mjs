@@ -29,6 +29,8 @@ const SOURCES = [
   ['scripts/neon_retention_policy.sql', 'سياسة تنظيف السجلات المحذوفة ناعماً'],
   ['scripts/neon_accounting_mapping.sql', 'ربط العمليات بالحسابات: المخطط'],
   ['scripts/neon_accounting_mapping_seed.sql', 'ربط العمليات بالحسابات: القواعد الأساسية'],
+  ['scripts/neon_posting_rules_engine.sql', 'محرك قواعد الترحيل: المخطط والدوال'],
+  ['scripts/neon_posting_rules_seed.sql', 'محرك قواعد الترحيل: بذور تعكس السلوك الحالي'],
 ];
 
 const HEADER = `-- ============================================================================

@@ -90,8 +90,12 @@ describe('resolveAccount', () => {
     expect(resolveAccount(accounts, undefined, undefined, 'Expense').id).toBe('a3');
   });
 
-  it('يرجع أول حساب كملاذ أخير', () => {
-    expect(resolveAccount(accounts, undefined, '9999', 'Liability').id).toBe('a1');
+  it('يرفض الترحيل بدل السقوط إلى أول حساب عشوائي', () => {
+    expect(() => resolveAccount(accounts, undefined, '9999', 'Liability')).toThrow(/تعذر تحديد الحساب/);
+  });
+
+  it('يرفض أيضاً حين يكون الدليل فارغاً', () => {
+    expect(() => resolveAccount([], undefined, '1120', 'Asset')).toThrow();
   });
 });
 
