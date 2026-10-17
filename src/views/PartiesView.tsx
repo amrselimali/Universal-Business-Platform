@@ -49,6 +49,8 @@ import {
 } from '../components/ExcelDataTransferModal';
 import { partyExcelColumns } from './parties/partiesExcelColumns';
 import { MultiSelectFilter } from './parties/MultiSelectFilter';
+import { loadPartiesPage } from '../services/partiesPaged';
+import { buildCodingCodeOptions, filterCodingResults } from './parties/codingSearch';
 
 export const PartiesView: React.FC = () => {
   const {
@@ -181,6 +183,35 @@ export const PartiesView: React.FC = () => {
   const [itemsPerPage, setItemsPerPage] = useState<number>(50);
   const [viewMode, setViewMode] = useState<'GRID' | 'TABLE'>('GRID');
 
+  // ترقيم من السيرفر: نطلب صفحة واحدة فقط (نفس أزرار الصفحات الحالية).
+  const [pagedRows, setPagedRows] = useState<Party[]>([]);
+  const [pagedTotal, setPagedTotal] = useState(0);
+  const [pagedLoading, setPagedLoading] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const branchKeys = [currentBranchId, activeBranch?.name, activeBranch?.code].filter(Boolean) as string[];
+    const fallbackBranch = currentBranchId === (branches[0]?.id || 'branch-cairo');
+    setPagedLoading(true);
+    loadPartiesPage({
+      tenantId: tenant?.id || '',
+      search: searchQuery,
+      status: customerStatusFilter,
+      balance: activeFilter,
+      branchKeys,
+      fallbackBranch,
+      limit: itemsPerPage,
+      offset: (currentPage - 1) * itemsPerPage,
+    }).then((result) => {
+      if (cancelled) return;
+      setPagedRows(result.rows);
+      setPagedTotal(result.total);
+      setPagedLoading(false);
+      if (result.total > 0 && result.rows.length === 0 && currentPage > 1) setCurrentPage(1);
+    });
+    return () => { cancelled = true; };
+  }, [tenant?.id, searchQuery, customerStatusFilter, activeFilter, currentBranchId, activeBranch?.name, activeBranch?.code, branches, currentPage, itemsPerPage]);
+
   // Reset page when search or filter changes
   useEffect(() => {
     setCurrentPage(1);
@@ -208,52 +239,16 @@ export const PartiesView: React.FC = () => {
   }, [statusFilteredCustomers, activeFilter, searchQuery]);
 
   const runCodingSearch = () => {
-    const q = codingFilters.query.trim().toLocaleLowerCase();
-    const phone = codingFilters.phone.trim().toLocaleLowerCase();
-    const results = parties.filter((party) => {
-      if (!(party.type === 'Customer' || party.type === 'Both')) return false;
-      const isArchived = Boolean(party.isArchived || party.mergedIntoPartyId);
-      if (codingFilters.statuses.length && !codingFilters.statuses.includes(isArchived ? 'archived' : 'active')) return false;
-      const assignedBranch = branches.find((branch) => branch.id === party.branchId || branch.name === party.branchId || branch.code === party.branchId)?.id || party.branchId;
-      const customerBranches = new Set([assignedBranch, ...(party.branchIds || []).map((value) => branches.find((branch) => branch.id === value || branch.name === value || branch.code === value)?.id || value)].filter(Boolean));
-      if (codingFilters.branchIds.length && !codingFilters.branchIds.some((branchId) => customerBranches.has(branchId))) return false;
-      const customerCode = party.customerCode || party.code || '';
-      const systemCode = party.systemCode || party.paperCode || '';
-      const fileCode = party.fileCode || party.fileNumber || '';
-      if (codingFilters.customerCodes.length && !codingFilters.customerCodes.includes(customerCode)) return false;
-      if (codingFilters.systemCodes.length && !codingFilters.systemCodes.includes(systemCode)) return false;
-      if (codingFilters.fileCodes.length && !codingFilters.fileCodes.includes(fileCode)) return false;
-      if (phone && ![party.phone, party.altPhone].some((value) => value?.toLocaleLowerCase().includes(phone))) return false;
-      const createdDate = party.createdAt?.slice(0, 10) || '';
-      if (codingFilters.dateFrom && (!createdDate || createdDate < codingFilters.dateFrom)) return false;
-      if (codingFilters.dateTo && (!createdDate || createdDate > codingFilters.dateTo)) return false;
-      if (q) {
-        const values = Object.values(party).flatMap((value) => Array.isArray(value) ? value : [value]);
-        if (!values.some((value) => value != null && String(value).toLocaleLowerCase().includes(q))) return false;
-      }
-      return true;
-    });
+    const results = filterCodingResults(parties, branches, codingFilters);
     setCodingResults(results);
     setSelectedCodingPartyIds([]);
     setMergePrimaryId('');
   };
 
-  const codingPartyOptions = useMemo(() => {
-    const scopedParties = parties.filter((party) => {
-      if (!(party.type === 'Customer' || party.type === 'Both')) return false;
-      const isArchived = Boolean(party.isArchived || party.mergedIntoPartyId);
-      if (codingFilters.statuses.length && !codingFilters.statuses.includes(isArchived ? 'archived' : 'active')) return false;
-      const assignedBranch = branches.find((branch) => branch.id === party.branchId || branch.name === party.branchId || branch.code === party.branchId)?.id || party.branchId;
-      const partyBranchIds = new Set([assignedBranch, ...(party.branchIds || []).map((value) => branches.find((branch) => branch.id === value || branch.name === value || branch.code === value)?.id || value)].filter(Boolean));
-      return !codingFilters.branchIds.length || codingFilters.branchIds.some((branchId) => partyBranchIds.has(branchId));
-    });
-    const optionsFor = (getValue: (party: Party) => string | undefined) => Array.from(new Set(scopedParties.map(getValue).filter((value): value is string => Boolean(value?.trim())))).sort((a, b) => a.localeCompare(b, language === 'ar' ? 'ar' : 'en')).map((value) => ({ value, label: value }));
-    return {
-      customerCodes: optionsFor((party) => party.customerCode || party.code),
-      systemCodes: optionsFor((party) => party.systemCode || party.paperCode),
-      fileCodes: optionsFor((party) => party.fileCode || party.fileNumber),
-    };
-  }, [parties, branches, codingFilters.branchIds, codingFilters.statuses, language]);
+  const codingPartyOptions = useMemo(
+    () => buildCodingCodeOptions(parties, branches, codingFilters.branchIds, codingFilters.statuses, language),
+    [parties, branches, codingFilters.branchIds, codingFilters.statuses, language]
+  );
 
   const selectedCodingIdSet = useMemo(() => new Set(selectedCodingPartyIds), [selectedCodingPartyIds]);
   const selectedCodingParties = parties.filter((party) => selectedCodingIdSet.has(party.id));
@@ -413,13 +408,10 @@ export const PartiesView: React.FC = () => {
   };
 
 
-  const totalPages = Math.max(1, Math.ceil(filteredParties.length / itemsPerPage));
+  const totalPages = Math.max(1, Math.ceil(pagedTotal / itemsPerPage));
   const safeCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
 
-  const paginatedParties = useMemo(() => {
-    const start = (safeCurrentPage - 1) * itemsPerPage;
-    return filteredParties.slice(start, start + itemsPerPage);
-  }, [filteredParties, safeCurrentPage, itemsPerPage]);
+  const paginatedParties = pagedRows;
 
   const handleAutoTranslateName = () => {
     if (newParty.name.trim()) {
@@ -821,19 +813,19 @@ export const PartiesView: React.FC = () => {
             <Zap className="h-3.5 w-3.5 text-amber-500" />
             <span>
               {t(
-                `عرض ${filteredParties.length === 0 ? 0 : (safeCurrentPage - 1) * itemsPerPage + 1} - ${Math.min(
+                `عرض ${pagedTotal === 0 ? 0 : (safeCurrentPage - 1) * itemsPerPage + 1} - ${Math.min(
                   safeCurrentPage * itemsPerPage,
-                  filteredParties.length
-                )} من إجمالي ${filteredParties.length} عميل`,
-                `Showing ${filteredParties.length === 0 ? 0 : (safeCurrentPage - 1) * itemsPerPage + 1} - ${Math.min(
+                  pagedTotal
+                )} من إجمالي ${pagedTotal} عميل`,
+                `Showing ${pagedTotal === 0 ? 0 : (safeCurrentPage - 1) * itemsPerPage + 1} - ${Math.min(
                   safeCurrentPage * itemsPerPage,
-                  filteredParties.length
-                )} of ${filteredParties.length} clients`
+                  pagedTotal
+                )} of ${pagedTotal} clients`
               )}
             </span>
           </span>
 
-          {filteredParties.length > 500 && (
+          {pagedTotal > 500 && (
             <span className="hidden sm:inline-block text-[11px] text-slate-400 font-medium">
               ⚡ {t('نظام تقسيم الصفحات عالي الأداء مفعل لمنع تعليق المتصفح', 'High-performance pagination active')}
             </span>
@@ -885,7 +877,7 @@ export const PartiesView: React.FC = () => {
       </div>
 
       {/* Main Display: Grid or Table */}
-      {filteredParties.length === 0 ? (
+      {pagedTotal === 0 && !pagedLoading ? (
         <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-12 text-center text-slate-400 space-y-2">
           <Users className="h-12 w-12 mx-auto text-slate-300 dark:text-slate-600" />
           <p className="text-sm font-bold text-slate-700 dark:text-slate-300">
@@ -1157,8 +1149,8 @@ export const PartiesView: React.FC = () => {
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900 shadow-xs text-xs">
           <div className="text-slate-500 dark:text-slate-400 font-medium">
             {t(
-              `صفحة ${safeCurrentPage} من إجمالي ${totalPages} صفحة (${filteredParties.length} عميل)`,
-              `Page ${safeCurrentPage} of ${totalPages} (${filteredParties.length} clients)`
+              `صفحة ${safeCurrentPage} من إجمالي ${totalPages} صفحة (${pagedTotal} عميل)`,
+              `Page ${safeCurrentPage} of ${totalPages} (${pagedTotal} clients)`
             )}
           </div>
 
