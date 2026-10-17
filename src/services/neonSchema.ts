@@ -225,13 +225,7 @@ export const NEON_SCHEMA_TABLES: NeonTableSchema[] = [
     { name: 'serial_number', type: 'VARCHAR(150)' },
   ] },
   // أُخرج `erp_period_locks` من الإقلاع: يُقرأ من accounting_period_locks في الداتابيز.
-  { table: 'audit_records', sourceKey: 'erp_audit_records', columns: [
-    { name: 'id', type: 'VARCHAR(200)', create: true },
-    { name: 'tenant_id', type: 'VARCHAR(100)', create: true },
-    { name: 'entity_type', type: 'VARCHAR(80)' },
-    { name: 'action_type', type: 'VARCHAR(40)' },
-    { name: 'performed_at', type: 'VARCHAR(40)' },
-  ] },
+  // أُخرج `erp_audit_records` من الإقلاع: شاشة سجل التدقيق تقرأ من الداتابيز بالصفحات (loadAuditPage).
   // أُخرج `erp_activity_logs` من الإقلاع: يُقرأ من الداتابيز بالصفحات (loadActivityPage).
   { table: 'notifications_history', sourceKey: 'erp_notifications_history', columns: [
     { name: 'id', type: 'VARCHAR(200)', create: true },
