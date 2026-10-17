@@ -48,7 +48,6 @@
     "src/utils/fullDatabaseExcelBackup.ts": 476,
     "src/views/DashboardView.tsx": 472,
     "src/components/DeviceMaintenanceHistoryModal.tsx": 425,
-    "src/services/commands.ts": 424,
     "src/components/DeviceMaintenanceLogTab.tsx": 415,
     "src/components/CustomizeQuickButtonsModal.tsx": 375,
     "src/components/NotificationBell.tsx": 361,

@@ -5,8 +5,7 @@
  * مع عدّاد مطابق للفلاتر. تُستخدم في شاشة سجل التدقيق فقط.
  */
 
-import { neon } from '@neondatabase/serverless';
-import { getActiveDbConnection } from './commands';
+import { apiRequest } from './apiClient';
 import type { AuditRecord } from '../types';
 
 export interface AuditPageQuery {
@@ -34,60 +33,21 @@ const toRecord = (row: Record<string, unknown>): AuditRecord => {
 };
 
 export async function loadAuditPage(query: AuditPageQuery): Promise<AuditPageResult> {
-  const connection = getActiveDbConnection();
-  if (!connection?.connectionString) {
-    return { rows: [], total: 0, nextAfter: null, error: 'no_database_connection' };
-  }
+  const params = new URLSearchParams();
+  if (query.limit) params.set('limit', String(query.limit));
+  if (query.afterId) params.set('afterId', query.afterId);
+  if (query.search?.trim()) params.set('search', query.search.trim());
+  if (query.action && query.action !== 'All') params.set('action', query.action);
+  if (query.entity && query.entity !== 'All') params.set('entity', query.entity);
+  if (query.userId && query.userId !== 'All') params.set('userId', query.userId);
 
-  const sql = neon(connection.connectionString.trim());
-  const limit = Math.min(Math.max(query.limit ?? 100, 1), 300);
-  const params: unknown[] = [query.tenantId];
-  const filters: string[] = ['tenant_id = $1', 'deleted_at IS NULL'];
+  const result = await apiRequest<{ items?: any[]; nextAfterId?: string | null }>(`/audit-records?${params.toString()}`);
+  if (!result.ok) return { rows: [], total: 0, nextAfter: null, error: result.error };
 
-  if (query.action && query.action !== 'All') {
-    params.push(query.action);
-    filters.push(`payload->>'actionType' = $${params.length}`);
-  }
-  if (query.entity && query.entity !== 'All') {
-    params.push(query.entity);
-    filters.push(`payload->>'entityType' = $${params.length}`);
-  }
-  if (query.userId && query.userId !== 'All') {
-    params.push(query.userId);
-    filters.push(`payload->>'performedById' = $${params.length}`);
-  }
-  if (query.search?.trim()) {
-    params.push(`%${query.search.trim()}%`);
-    const index = params.length;
-    const expr = SEARCH_FIELDS.map((field) => `COALESCE(payload->>'${field}', '')`).join(" || ' ' || ");
-    filters.push(`(${expr}) ILIKE $${index}`);
-  }
-
-  const where = filters.join(' AND ');
-  const pageParams = [...params];
-  let pageWhere = where;
-  if (query.afterId) {
-    pageParams.push(query.afterId);
-    pageWhere += ` AND id < $${pageParams.length}`;
-  }
-  pageParams.push(limit);
-
-  try {
-    const [rows, counts] = await Promise.all([
-      sql.query(
-        `SELECT id, payload FROM audit_records WHERE ${pageWhere} ORDER BY id DESC LIMIT $${pageParams.length}`,
-        pageParams
-      ),
-      sql.query(`SELECT count(*)::bigint AS total FROM audit_records WHERE ${where}`, params),
-    ]);
-
-    const list = (Array.isArray(rows) ? rows : []).map((row: any) => toRecord(row));
-    return {
-      rows: list,
-      total: Number((Array.isArray(counts) ? counts[0] : counts)?.total ?? 0),
-      nextAfter: list.length === limit ? String(list[list.length - 1].id) : null,
-    };
-  } catch (error: any) {
-    return { rows: [], total: 0, nextAfter: null, error: error?.message || 'audit_page_failed' };
-  }
+  const items = Array.isArray(result.data?.items) ? result.data!.items! : [];
+  return {
+    rows: items.map(toRecord),
+    total: items.length,
+    nextAfter: result.data?.nextAfterId ? String(result.data.nextAfterId) : null,
+  };
 }

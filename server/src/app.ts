@@ -9,6 +9,7 @@ import { expandPermissions } from './permissionExpansion.js';
 import { isTenantScoped, resolveTable } from './datasetTables.js';
 import { softDeleteRecords, writeRecords } from './recordWriter.js';
 import { registerInvoiceRoutes } from './routes/invoices.js';
+import { registerReadRoutes } from './routes/reads.js';
 
 /**
  * Universal Business Platform API
@@ -757,6 +758,9 @@ export async function buildApp(deps: AppDeps) {
   // الفواتير: قراءة/كتابة من السيرفر وحده (tenant من التوكن + RLS).
   // ---------------------------------------------------------------------------
   await registerInvoiceRoutes(app, { db: deps.db, assertTenant, assertAction });
+
+  // القراءات المُرقَّمة (قيود/نشاط/تدقيق) — tenant من التوكن + RLS.
+  await registerReadRoutes(app, { db: deps.db, assertTenant, assertAction });
 
   return app;
 }
