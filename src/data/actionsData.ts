@@ -342,6 +342,29 @@ export const SYSTEM_ACTIONS: ActionPermissionDef[] = [
     descriptionAr: 'إيقاف حساب موظف أو حذفه نهائياً من النظام',
   },
 
+  // Accounting posting & period locks (محرك قواعد الترحيل)
+  {
+    key: 'accounting.post_journal',
+    nameAr: 'ترحيل القيود المحاسبية',
+    nameEn: 'Post Journal Entries',
+    viewId: 'accounting_mapping',
+    descriptionAr: 'ترحيل مستند محاسبي بقيد يُبنى من قواعد الربط فقط (بدون أي مصدر آخر)',
+  },
+  {
+    key: 'accounting.lock_period',
+    nameAr: 'إقفال الفترات المحاسبية',
+    nameEn: 'Lock Accounting Periods',
+    viewId: 'accounting_mapping',
+    descriptionAr: 'إقفال فترة حتى تاريخ معيّن لمنع أي ترحيل أو تعديل داخلها',
+  },
+  {
+    key: 'accounting.open_period',
+    nameAr: 'فتح الفترات المحاسبية المقفلة',
+    nameEn: 'Reopen Accounting Periods',
+    viewId: 'accounting_mapping',
+    descriptionAr: 'فتح فترة مقفلة — صلاحية حساسة يجب حصرها على المدير المالي',
+  },
+
   // Architecture Guardrails (شاشة معمارية المنظومة الجديدة)
   {
     key: 'architecture.run_guardrails',

@@ -44,6 +44,8 @@ const MIGRATIONS = [
   { file: 'scripts/neon_retention_policy.sql', title: 'سياسة تنظيف السجلات المحذوفة ناعماً' },
   { file: 'scripts/neon_accounting_mapping.sql', title: 'ربط العمليات بالحسابات: المخطط' },
   { file: 'scripts/neon_accounting_mapping_seed.sql', title: 'ربط العمليات بالحسابات: القواعد الأساسية' },
+  { file: 'scripts/neon_posting_rules_engine.sql', title: 'محرك قواعد الترحيل: المخطط والدوال' },
+  { file: 'scripts/neon_posting_rules_seed.sql', title: 'محرك قواعد الترحيل: بذور تعكس السلوك الحالي' },
 ];
 
 /** استعلامات التحقق — تُشغَّل بعد التطبيق. */

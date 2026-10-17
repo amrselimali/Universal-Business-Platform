@@ -1,3 +1,5 @@
+import { resolveAccount } from './accountingAccounts';
+export { resolveAccount };
 import {
   JournalEntry,
   JournalLine,
@@ -61,33 +63,7 @@ export function isDateLockedInPeriod(
   return { isLocked: false };
 }
 
-/**
- * Find the most suitable account in Chart of Accounts:
- * 1) Provided specific account ID
- * 2) Fallback to account matching code or fallback code
- * 3) Fallback to first matching account type
- */
-export function resolveAccount(
-  accounts: Account[],
-  preferredAccountId?: string,
-  fallbackCode?: string,
-  fallbackType?: 'Asset' | 'Liability' | 'Revenue' | 'Expense'
-): Account {
-  if (preferredAccountId) {
-    const found = accounts.find((a) => a.id === preferredAccountId);
-    if (found) return found;
-  }
-  if (fallbackCode) {
-    const foundCode = accounts.find((a) => a.code === fallbackCode || a.code.startsWith(fallbackCode));
-    if (foundCode) return foundCode;
-  }
-  if (fallbackType) {
-    const foundType = accounts.find((a) => a.type === fallbackType);
-    if (foundType) return foundType;
-  }
-  return accounts[0];
-}
-
+// اختيار الحساب انتقل إلى accountingAccounts.ts (تنفيذ + إعادة تصدير للتوافق)
 export function resolveCustomerControlAccount(
   accounts: Account[],
   tenantId: string
