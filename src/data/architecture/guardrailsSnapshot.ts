@@ -12,8 +12,8 @@
 
 import type { GuardrailsFacts } from '../../services/architectureGuardrails';
 
-export const GUARDRAILS_MEASURED_AT = '2026-10-17T09:31:44.721Z';
-export const GUARDRAILS_REVISION = '5a65695';
+export const GUARDRAILS_MEASURED_AT = '2026-10-17T09:39:49.658Z';
+export const GUARDRAILS_REVISION = '56daf10';
 
 export const GUARDRAILS_FACTS: GuardrailsFacts = /* GUARDRAILS_FACTS_BEGIN */
 {

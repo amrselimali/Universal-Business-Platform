@@ -30,7 +30,7 @@ export const SCREEN_METRICS: ScreenMetric[] = [
   { viewId: 'EmployeeDossierView', file: 'src/views/EmployeeDossierView.tsx', lines: 2216, useState: 14, useEffect: 3, heavyLibs: ['xlsx'], overLimit: true },
   { viewId: 'PartiesView', file: 'src/views/PartiesView.tsx', lines: 2101, useState: 40, useEffect: 3, heavyLibs: ['xlsx'], overLimit: true },
   { viewId: 'CollectionReceiptsView', file: 'src/views/CollectionReceiptsView.tsx', lines: 1951, useState: 32, useEffect: 0, heavyLibs: [], overLimit: true },
-  { viewId: 'InvoicesView', file: 'src/views/InvoicesView.tsx', lines: 1811, useState: 27, useEffect: 1, heavyLibs: [], overLimit: true },
+  { viewId: 'InvoicesView', file: 'src/views/InvoicesView.tsx', lines: 1733, useState: 27, useEffect: 1, heavyLibs: [], overLimit: true },
   { viewId: 'UsersRolesView', file: 'src/views/UsersRolesView.tsx', lines: 1605, useState: 23, useEffect: 0, heavyLibs: [], overLimit: true },
   { viewId: 'InventoryView', file: 'src/views/InventoryView.tsx', lines: 1509, useState: 16, useEffect: 0, heavyLibs: [], overLimit: true },
   { viewId: 'LaserDevicesView', file: 'src/views/LaserDevicesView.tsx', lines: 1486, useState: 14, useEffect: 0, heavyLibs: [], overLimit: true },

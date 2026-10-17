@@ -144,9 +144,9 @@ export const InvoicesView: React.FC = () => {
     };
   }, [searchQuery, periodFilter, dateFrom, dateTo, sourceFilter, selectedCustomerFilter, currentBranchId]);
 
-  useEffect(() => {
+  const reloadInvoices = useCallback(() => {
     let cancelled = false;
-    if (!tenant?.id) return;
+    if (!tenant?.id) return () => {};
     setServerLoading(true);
     cursorRef.current = { date: null, id: null };
     Promise.all([
@@ -168,6 +168,11 @@ export const InvoicesView: React.FC = () => {
     });
     return () => { cancelled = true; };
   }, [tenant?.id, invoiceFilters]);
+
+  useEffect(() => {
+    const cancel = reloadInvoices();
+    return cancel;
+  }, [reloadInvoices]);
 
   const loadMoreInvoices = useCallback(async () => {
     if (!tenant?.id || !cursorRef.current.id) return;
@@ -203,92 +208,6 @@ export const InvoicesView: React.FC = () => {
       (s) => s.status === 'Open' && s.tenantId === tenant?.id && (!currentBranchId || s.branchId === currentBranchId)
     );
   }, [allReceptionShifts, tenant?.id, currentBranchId]);
-
-  // Build unified list of all revenue invoices strictly for active branch
-  const unifiedInvoices = useMemo(() => {
-    const list: SalesInvoice[] = [];
-
-    // 1. Invoices stored in allInvoices (POS, Seed, and Official Tax Invoices)
-    invoices.forEach((inv) => {
-      const belongsToBranch =
-        inv.branchId === currentBranchId ||
-        (!inv.branchId && currentBranchId === (branches[0]?.id || 'branch-cairo'));
-      if (belongsToBranch) {
-        list.push({
-          ...inv,
-          source: inv.source || (inv.invoiceNumber.startsWith('INV-TAX') ? 'manual_tax_invoice' : 'pos'),
-        });
-      }
-    });
-
-    // 2. Revenue operations from Reception Ops shifts belonging to this branch
-    const branchShifts = allReceptionShifts.filter(
-      (s) => s.tenantId === tenant?.id && (!currentBranchId || s.branchId === currentBranchId)
-    );
-
-    branchShifts.forEach((shift) => {
-      shift.runRows.forEach((r) => {
-        // Only rows that represent direct revenue (> 0)
-        // Skip rows already originating from POS or Official Tax Invoices or internal adjustments
-        const isPosRow =
-          r.description?.includes('فاتورة نقطة بيع رقم INV-') ||
-          r.roomNumber === 'نقطة البيع (POS)';
-        const isTaxInvRow =
-          r.description?.includes('فاتورة ضريبية رسمية رقم INV-') ||
-          r.roomNumber === 'فاتورة ضريبية رسمية';
-        const isAdjustmentRow =
-          r.serviceName?.includes('تسوية') ||
-          r.serviceName?.includes('فرق تعديل') ||
-          r.description?.includes('فرق تعديل');
-
-        if (r.totalRevenue > 0 && !isPosRow && !isTaxInvRow && !isAdjustmentRow) {
-          // Check if already in list
-          const exists = list.some(
-            (item) => item.sourceRunRowId === r.id || item.invoiceNumber.includes(r.id.slice(-6))
-          );
-          if (!exists) {
-            const invoiceNumber = `INV-OPS-${r.id.slice(-6).toUpperCase()}`;
-            list.push({
-              id: `inv-ops-${r.id}`,
-              tenantId: tenant?.id || '',
-              branchId: shift.branchId,
-              invoiceNumber,
-              customerId: r.customerId || r.patientId || '',
-              customerName: r.customerName || r.patientName || 'عميل تشغيل نقدي',
-              items: [
-                {
-                  productId: 'srv-reception',
-                  productNameAr: r.serviceName,
-                  productNameEn: r.serviceName,
-                  quantity: r.consumedQuantity || 1,
-                  unitPrice: r.unitPrice || r.totalRevenue,
-                  discount: 0,
-                  tax: 0,
-                  lineTotal: r.totalRevenue,
-                },
-              ],
-              subtotal: r.totalRevenue,
-              taxAmount: 0,
-              discountAmount: 0,
-              netAmount: r.totalRevenue,
-              paymentMethod: r.paymentMethod || 'نقداً (كاش)',
-              status: r.serviceName?.includes('(ملغي)') ? 'Cancelled' : 'Posted',
-              createdAt: `${r.date}T10:00:00Z`,
-              cashierName: r.doctorName || shift.receptionistName || 'الاستقبال',
-              source: 'reception_ops',
-              sourceShiftId: shift.id,
-              sourceShiftNumber: shift.shiftNumber,
-              sourceRunRowId: r.id,
-              notes: r.notes || r.description,
-            });
-          }
-        }
-      });
-    });
-
-    // Sort by createdAt descending
-    return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  }, [invoices, allReceptionShifts, tenant?.id, currentBranchId, branches]);
 
   // Statistics — من ملخص السيرفر (مطابق للفلاتر)
   const totalNetRevenue = serverStats.net;
@@ -386,6 +305,7 @@ export const InvoicesView: React.FC = () => {
         )
       );
       setShowCreateModal(false);
+      reloadInvoices();
       // Reset form
       setNewCustomerId('');
       setNewCustomerName('');
@@ -429,6 +349,7 @@ export const InvoicesView: React.FC = () => {
     if (res.success) {
       setActionSuccess(t('تم تعديل الفاتورة وتطبيق الأثر في شيفت التشغيل بنجاح.', 'Invoice updated successfully.'));
       setEditingInvoice(null);
+      reloadInvoices();
     } else {
       setActionError(res.error || t('فشل في تعديل الفاتورة!', 'Failed to edit invoice!'));
     }
@@ -459,6 +380,7 @@ export const InvoicesView: React.FC = () => {
     if (res.success) {
       setActionSuccess(t('تم إلغاء الفاتورة وتسجيل أثر الإلغاء في شيفت التشغيل بنجاح.', 'Invoice cancelled successfully.'));
       setCancellingInvoice(null);
+      reloadInvoices();
     } else {
       setActionError(res.error || t('فشل في إلغاء الفاتورة!', 'Failed to cancel invoice!'));
     }
@@ -1788,7 +1710,7 @@ export const InvoicesView: React.FC = () => {
         entityTitleEn="Sales Invoices & Revenues"
         descriptionAr="استيراد وتصدير فواتير المبيعات والإيرادات التشغيلية مع الفحص الخلوي الذكي لمطابقة المبالغ والضرائب"
         columns={invoiceExcelColumns}
-        currentDataForExport={unifiedInvoices.map((inv) => ({
+        currentDataForExport={serverInvoices.map((inv) => ({
           customerName: inv.customerName,
           patientPhone: '',
           date: inv.createdAt ? inv.createdAt.split('T')[0] : '',
