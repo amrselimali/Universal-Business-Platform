@@ -36,7 +36,7 @@ export const SCREEN_METRICS: ScreenMetric[] = [
   { viewId: 'LaserDevicesView', file: 'src/views/LaserDevicesView.tsx', lines: 1486, useState: 14, useEffect: 0, heavyLibs: [], overLimit: true },
   { viewId: 'SmartNotificationsView', file: 'src/views/SmartNotificationsView.tsx', lines: 1443, useState: 12, useEffect: 0, heavyLibs: [], overLimit: true },
   { viewId: 'StaffManagementView', file: 'src/views/StaffManagementView.tsx', lines: 1278, useState: 34, useEffect: 0, heavyLibs: [], overLimit: true },
-  { viewId: 'PosView', file: 'src/views/PosView.tsx', lines: 1181, useState: 19, useEffect: 1, heavyLibs: [], overLimit: true },
+  { viewId: 'PosView', file: 'src/views/PosView.tsx', lines: 1189, useState: 20, useEffect: 2, heavyLibs: [], overLimit: true },
   { viewId: 'PaymentMethodsView', file: 'src/views/PaymentMethodsView.tsx', lines: 1142, useState: 16, useEffect: 0, heavyLibs: [], overLimit: true },
   { viewId: 'SystemManualView', file: 'src/views/SystemManualView.tsx', lines: 1140, useState: 4, useEffect: 0, heavyLibs: [], overLimit: true },
   { viewId: 'AttendanceManagementView', file: 'src/views/AttendanceManagementView.tsx', lines: 904, useState: 12, useEffect: 0, heavyLibs: ['xlsx'], overLimit: true },
