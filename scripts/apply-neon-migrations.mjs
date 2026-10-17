@@ -51,6 +51,8 @@ const MIGRATIONS = [
   { file: 'scripts/neon_parties_performance_indexes.sql', title: 'فهارس أداء العملاء (trgm + أكواد + حالة)' },
   { file: 'scripts/neon_invoice_slice.sql', title: 'شريحة الفواتير: أعمدة/سطور/فهارس/دوال' },
   { file: 'scripts/neon_revenue_invoices_view.sql', title: 'توحيد مصدر الفواتير: View موحّد + دوال محدّثة' },
+  { file: 'scripts/neon_invoice_source_filter.sql', title: 'فواتير: فلتر المصدر في الدوال' },
+  { file: 'scripts/neon_invoice_rows_payload.sql', title: 'فواتير: حمولة الصف الكاملة في القائمة' },
 ];
 
 /** استعلامات التحقق — تُشغَّل بعد التطبيق. */
