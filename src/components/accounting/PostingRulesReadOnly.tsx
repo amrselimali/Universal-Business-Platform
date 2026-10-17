@@ -22,6 +22,7 @@ interface Props {
   gaps: CoverageGapRow[];
   coverage: { total: number; covered: number };
   paymentMethods: PaymentMethodRef[];
+  tenantId: string;
 }
 
 const selectorLabel = (key: string, methods: PaymentMethodRef[], isArabic: boolean): string => {
@@ -41,7 +42,7 @@ const selectorLabel = (key: string, methods: PaymentMethodRef[], isArabic: boole
 };
 
 export const PostingRulesReadOnly: React.FC<Props> = ({
-  t, isArabic, rules, gaps, coverage, paymentMethods,
+  t, isArabic, rules, gaps, coverage, paymentMethods, tenantId,
 }) => {
   const byType = useMemo(() => {
     const map = new Map<string, PostingRule[]>();
@@ -58,16 +59,44 @@ export const PostingRulesReadOnly: React.FC<Props> = ({
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900">
-        <p className="text-[11px] font-bold text-slate-600 dark:text-slate-300">
-          {t(
-            'مرجع للقراءة فقط: القواعد التي وُجّهت بها القيود. للتعديل افتح «أدوات الإدارة».',
-            'Read-only reference: the rules that routed the entries. Use “Admin tools” to edit.'
-          )}
-        </p>
+        <div className="min-w-0">
+          <p className="text-[11px] font-bold text-slate-600 dark:text-slate-300">
+            {t(
+              'مرجع للقراءة فقط لقواعد محرك الترحيل الجديد. للتعديل افتح «أدوات الإدارة».',
+              'Read-only reference for the new posting engine rules. Use “Admin tools” to edit.'
+            )}
+          </p>
+          <p className="mt-0.5 text-[10px] leading-4 text-slate-500 dark:text-slate-400">
+            {t(
+              'هذه النسبة لا تعني توقف القيود: الترحيل الحالي في التطبيق ما زال يعمل عبر المسار القديم حتى اكتمال المرحلة 2.',
+              'This ratio does not mean posting stopped: the app still posts through the legacy path until phase 2 is complete.'
+            )}
+          </p>
+        </div>
         <span className="inline-flex items-center gap-1 rounded-xl bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
           <Lock className="h-3 w-3" /> {coverage.covered}/{coverage.total} {t('خلية مربوطة', 'cells bound')}
         </span>
       </div>
+
+      {rules.length === 0 && (
+        <div className="space-y-1 rounded-2xl border border-amber-200 bg-amber-50/70 p-3 text-[11px] leading-5 text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200">
+          <p className="font-extrabold">
+            {t('لا توجد قواعد مسجّلة لهذه المنشأة: ', 'No rules registered for this tenant: ') + tenantId}
+          </p>
+          <p>
+            {t(
+              'الأسباب المحتملة: (1) لم تُطبَّق ملفات الترحيل على قاعدة البيانات، (2) لم تُنفَّذ بذور القواعد لهذه المنشأة، (3) معرّف المنشأة النشط مختلف عن معرّف البذور.',
+              'Likely causes: (1) migrations not applied, (2) default rules not seeded for this tenant, (3) the active tenant id differs from the seeded one.'
+            )}
+          </p>
+          <p className="font-bold">
+            {t(
+              'الحل: «أدوات الإدارة» ← «تهيئة القواعد الافتراضية لهذه المنشأة» (تُدرج فقط الحسابات الموجودة في دليلك).',
+              'Fix: “Admin tools” → “Seed default rules for this tenant” (inserts only accounts that exist in your chart).'
+            )}
+          </p>
+        </div>
+      )}
 
       {ACCOUNTING_OPERATIONS.map((op) => {
         const list = byType.get(op.type) ?? [];

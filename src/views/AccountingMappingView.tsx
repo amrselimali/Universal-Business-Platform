@@ -18,6 +18,7 @@ import type { PostingRulesSnapshot } from '../types/postingRules';
 import { JournalEntriesExplorer } from '../components/accounting/JournalEntriesExplorer';
 import { PostingRulesReadOnly } from '../components/accounting/PostingRulesReadOnly';
 import { PostingStatusReadOnly } from '../components/accounting/PostingStatusReadOnly';
+import { SeedDefaultsCard } from '../components/accounting/SeedDefaultsCard';
 import { PostingRulesPanel } from '../components/accounting/PostingRulesPanel';
 import { PostingDocumentsPanel } from '../components/accounting/PostingDocumentsPanel';
 import { PeriodLocksPanel } from '../components/accounting/PeriodLocksPanel';
@@ -217,6 +218,7 @@ export const AccountingMappingView: React.FC = () => {
           gaps={coverage.gaps}
           coverage={coverage}
           paymentMethods={paymentMethodRefs}
+          tenantId={tenantId}
         />
       )}
       {!adminMode && tab === 'status' && (
@@ -230,6 +232,15 @@ export const AccountingMappingView: React.FC = () => {
       )}
 
       {adminMode && adminTab === 'edit-rules' && (
+        <div className="space-y-3">
+          <SeedDefaultsCard
+            t={t}
+            tenantId={tenantId}
+            canEdit={canPost}
+            hasRules={snapshot.rules.length > 0}
+            notify={notify}
+            onSeeded={reload}
+          />
         <PostingRulesPanel
           t={t}
           isArabic={isArabic}
@@ -241,7 +252,8 @@ export const AccountingMappingView: React.FC = () => {
           actor={currentUser?.name}
           notify={notify}
           onSaved={reload}
-        />
+          />
+        </div>
       )}
       {adminMode && adminTab === 'posting' && (
         <PostingDocumentsPanel

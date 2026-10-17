@@ -12,6 +12,7 @@
 import { neon } from '@neondatabase/serverless';
 import { getActiveDbConnection } from './commands';
 import { num, toDocument, toGenerated, toLock, toRule } from './postingRulesMappers';
+import { DEFAULT_POSTING_RULES } from '../data/postingRuleDefaults';
 import type {
   PeriodLock,
   PostingComponent,
@@ -119,6 +120,45 @@ export async function savePostingRule(rule: RuleDraft): Promise<{ ok: boolean; e
     return { ok: true };
   } catch (error: any) {
     return { ok: false, error: error?.message || 'save_failed' };
+  }
+}
+
+/**
+ * تهيئة القواعد الافتراضية لهذه المنشأة من داخل الشاشة.
+ * - تُدرج فقط القواعد التي **حسابها موجود فعلاً** في دليل حسابات المنشأة.
+ * - لا تمس أي قاعدة موجودة (ON CONFLICT DO NOTHING).
+ * - تُرجع عدد القواعد المُدرجة فعلاً.
+ */
+export async function seedDefaultPostingRules(tenantId: string): Promise<{
+  ok: boolean;
+  inserted: number;
+  error?: string;
+}> {
+  const ctx = client();
+  if (!ctx) return { ok: false, inserted: 0, error: 'no_database_connection' };
+
+  try {
+    const rows: any = await ctx.sql.query(
+      `INSERT INTO accounting_posting_rules
+         (tenant_id, transaction_type, field_key, selector_key, direction,
+          account_code, account_name, auto_post_enabled, is_active, strict_exclusive, updated_by)
+       SELECT $1, r.transaction_type, r.field_key, r.selector_key, r.direction, r.account_code,
+              COALESCE((SELECT a.name_ar FROM accounts a
+                         WHERE a.tenant_id = $1 AND a.code = r.account_code AND a.deleted_at IS NULL
+                         LIMIT 1), r.account_code),
+              TRUE, TRUE, TRUE, 'seed:ui'
+         FROM jsonb_to_recordset($2::jsonb)
+              AS r(transaction_type text, field_key text, selector_key text,
+                   direction text, account_code text)
+        WHERE EXISTS (SELECT 1 FROM accounts a
+                       WHERE a.tenant_id = $1 AND a.code = r.account_code AND a.deleted_at IS NULL)
+       ON CONFLICT (tenant_id, transaction_type, field_key, selector_key) DO NOTHING
+       RETURNING id`,
+      [tenantId, JSON.stringify(DEFAULT_POSTING_RULES)]
+    );
+    return { ok: true, inserted: Array.isArray(rows) ? rows.length : 0 };
+  } catch (error: any) {
+    return { ok: false, inserted: 0, error: error?.message || 'seed_failed' };
   }
 }
 

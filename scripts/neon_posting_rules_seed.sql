@@ -94,6 +94,13 @@ SELECT 'tenant-eg-001', v.t_type, v.field, v.sel, v.dir, v.code,
     ,('payroll', 'net_paid', 'pmt:wallet', 'credit', '1111')
     ,('payroll', 'net_paid', 'pmt:card', 'credit', '1112')
     ,('payroll', 'net_paid', 'pmt:transfer', 'credit', '1112')
+    ,('session', 'collected_amount', 'default', 'debit', '1111')
+    ,('expense', 'paid_amount', 'default', 'credit', '1111')
+    ,('customer_collection', 'collected_amount', 'default', 'debit', '1111')
+    ,('cash_receipt', 'amount', 'default', 'debit', '1111')
+    ,('cash_payment', 'paid_amount', 'default', 'credit', '1111')
+    ,('supplier_payment', 'paid_amount', 'default', 'credit', '1111')
+    ,('payroll', 'net_paid', 'default', 'credit', '1111')
   ) AS v(t_type, field, sel, dir, code)
  WHERE EXISTS (
    SELECT 1 FROM accounts a
