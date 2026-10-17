@@ -42,7 +42,6 @@ export const PosView: React.FC = () => {
     getProductStock,
     processCheckout,
     refundInvoice,
-    invoices,
     activeReceptionShift,
     openReceptionShift,
     currentUser,

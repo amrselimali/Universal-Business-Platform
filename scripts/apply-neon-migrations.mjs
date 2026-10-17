@@ -54,6 +54,7 @@ const MIGRATIONS = [
   { file: 'scripts/neon_invoice_source_filter.sql', title: 'فواتير: فلتر المصدر في الدوال' },
   { file: 'scripts/neon_invoice_rows_payload.sql', title: 'فواتير: حمولة الصف الكاملة في القائمة' },
   { file: 'scripts/neon_invoice_scope_filters.sql', title: 'فواتير: فلاتر المصدر/العميل/الفرع' },
+  { file: 'scripts/neon_invoice_write.sql', title: 'فواتير: دوال التعديل والإلغاء' },
 ];
 
 /** استعلامات التحقق — تُشغَّل بعد التطبيق. */

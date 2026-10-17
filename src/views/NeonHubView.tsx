@@ -233,8 +233,8 @@ export const NeonHubView: React.FC = () => {
     { name: 'products', descAr: 'دليل الأصناف والخدمات الطبية والتسعير', count: products.length },
     { name: 'stock_levels', descAr: 'أرصدة الأصناف بكل مخزن بدقة', count: products.length * 2 },
     { name: 'accounts', descAr: 'شجرة الحسابات العامة (Chart of Accounts)', count: accounts.length },
-    { name: 'journal_entries', descAr: 'دفتر اليومية العامة والقيود المتوازنة', count: invoices.length + 1 },
-    { name: 'sales_invoices', descAr: 'فواتير المبيعات ونقاط البيع السريعة', count: invoices.length },
+    { name: 'journal_entries', descAr: 'دفتر اليومية العامة والقيود المتوازنة', count: 0 },
+    { name: 'sales_invoices', descAr: 'فواتير المبيعات ونقاط البيع السريعة', count: 0 },
     { name: 'parties', descAr: 'العملاء والمرضى والموردون (الجدول الموحّد)', count: parties.length },
     { name: 'appointments', descAr: 'مواعيد الأطباء وحجوزات الكشوفات', count: 2 },
   ];
