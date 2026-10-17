@@ -1,6 +1,31 @@
 # CHANGELOG
 # CHANGELOG
 
+## 2026-10-17 — نقل مسار records والقراءات المُرقَّمة إلى الـ API
+
+### ما نُفِّذ
+- **`commands.ts` لم يعد يستورد Neon إطلاقاً** (0 مراجع):
+  - `saveRecord`/`deleteRecord`: لا كتابة مباشرة من المتصفح — عبر API فقط،
+    وبلا API تُطبَّق محلياً (نمط offline-first كما كان).
+  - `createJournalEntry`/`reverseJournalEntry`: **رسالة صريحة** `api_not_configured`
+    بدل ترحيل صامت من المتصفح.
+  - حُذفت الدالتان الميتتان `syncToRelationalTable` و`deleteFromRelationalTable`
+    (كانتا تُكتبان مباشرة في الداتابيز): الملف **455 ⇒ 244 سطراً**.
+- **مسارات قراءة جديدة في السيرفر** (`server/src/routes/reads.ts`):
+  `GET /journals` · `/journals/summary` · `/activity-logs` · `/audit-records`
+  — tenant من التوكن + `db.one(tenantId)` (RLS) + صلاحية `generic.record.read`.
+- **ثلاث خدمات عميل صارت API clients** (0 neon): `journalQueryApi`،
+  `activityLogPaged`، `auditLogPaged`.
+
+### الأثر
+- ملفات `src/services` التي تستورد Neon مباشرة: **16 ⇒ 12** (من 18 قبل جلستين).
+- **أثر تشغيلي:** القراءات (قيود/نشاط/تدقيق) والكتابة (records/قيود) تحتاج الآن
+  عنوان الـ API مُهيّأً (`erp_api_url`). بدونها: قراءات فارغة + رسالة صريحة عند الكتابة.
+
+### التحقق
+`server tests` **63/63** (+3 للقراءات) · `client tests` **316/316** · `tsc` 0 للطرفين ·
+`vite build` ناجح · بوابة الحجم · بوابة التجميد (29 dataset).
+
 ## 2026-10-17 — نقل خدمات المحاسبة إلى الـ API (إزالة الاتصال المباشر من المتصفح)
 
 ### ما نُفِّذ

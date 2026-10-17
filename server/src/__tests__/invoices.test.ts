@@ -254,3 +254,65 @@ describe('المحاسبة: مسار الاسترداد', () => {
     await app.close();
   });
 });
+
+describe('القراءات المُرقَّمة (قيود/نشاط/تدقيق)', () => {
+  it('القيود: tenant من التوكن ودالة fn_journal_list تُنادى', async () => {
+    const calls: { tenantId: string; params?: unknown[] }[] = [];
+    const db: AppDeps['db'] = {
+      one: async (tenantId, text, params) => {
+        calls.push({ tenantId, params });
+        return [{ page: { items: [], nextAfterId: null } }] as never;
+      },
+      withTenant: async () => [],
+      rawQuery: async () => [] as never,
+    };
+    const app = await buildApp({ db, jwtSecret: JWT_SECRET, logger: false, disableRateLimit: true });
+    await app.ready();
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/journals?limit=50&tenantId=tenant-attacker',
+      headers: auth(makeToken()),
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(calls[0]?.tenantId).toBe('tenant-1');
+    expect(calls[0]?.params?.[0]).toBe('tenant-1');
+    await app.close();
+  });
+
+  it('سجل النشاط يقرأ من الجدول بمعرّف المنشأة (RLS)', async () => {
+    const calls: { text: string; tenantId: string }[] = [];
+    const db: AppDeps['db'] = {
+      one: async (tenantId, text) => {
+        calls.push({ text, tenantId });
+        return [{ id: 'log-1', payload: { userName: 'أ' } }] as never;
+      },
+      withTenant: async () => [],
+      rawQuery: async () => [] as never,
+    };
+    const app = await buildApp({ db, jwtSecret: JWT_SECRET, logger: false, disableRateLimit: true });
+    await app.ready();
+
+    const response = await app.inject({ method: 'GET', url: '/activity-logs?limit=10', headers: auth(makeToken()) });
+    expect(response.statusCode).toBe(200);
+    expect(calls[0]?.tenantId).toBe('tenant-1');
+    expect(calls[0]?.text).toContain('activity_logs');
+    await app.close();
+  });
+
+  it('سجل التدقيق يرفض بلا فعل (403)', async () => {
+    const db: AppDeps['db'] = {
+      one: async () => [] as never,
+      withTenant: async () => [],
+      rawQuery: async () => [] as never,
+    };
+    const app = await buildApp({ db, jwtSecret: JWT_SECRET, logger: false, disableRateLimit: true });
+    await app.ready();
+    const response = await app.inject({
+      method: 'GET', url: '/audit-records', headers: auth(makeToken({ allowedActions: [] })),
+    });
+    expect(response.statusCode).toBe(403);
+    await app.close();
+  });
+});
