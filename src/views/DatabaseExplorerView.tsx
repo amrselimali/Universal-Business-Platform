@@ -65,11 +65,6 @@ export const DatabaseExplorerView: React.FC = () => {
     const effLimit = limit !== undefined ? limit : pageSize;
     const result = await fetchTableRows({ schema: table.schema, table: table.name, offset, limit: effLimit, bypassRls });
     setPage(result);
-    if (result.columns && result.columns.length > 0) {
-      table.columns = result.columns;
-      if (result.primaryKey) table.primaryKey = result.primaryKey;
-      setSelected((prev) => (prev && prev.name === table.name ? { ...prev, columns: result.columns!, primaryKey: result.primaryKey || prev.primaryKey } : prev));
-    }
     setBusy(false);
     if (result.error) notify('err', result.error);
   }, [notify, pageSize, bypassRls]);
