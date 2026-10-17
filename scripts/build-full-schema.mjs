@@ -34,6 +34,7 @@ const SOURCES = [
   ['scripts/neon_journal_edit.sql', 'تعديل القيود الموثّق + مزامنة المصدر'],
   ['scripts/neon_db_admin_audit.sql', 'تدقيق إدارة قاعدة البيانات من الواجهة'],
   ['scripts/neon_parties_performance_indexes.sql', 'فهارس أداء العملاء (trgm + أكواد + حالة)'],
+  ['scripts/neon_invoice_slice.sql', 'شريحة الفواتير: أعمدة/سطور/فهارس/دوال'],
 ];
 
 const HEADER = `-- ============================================================================
