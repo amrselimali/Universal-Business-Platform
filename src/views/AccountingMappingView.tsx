@@ -6,48 +6,38 @@ import {
   AlertTriangle,
   CheckCircle2,
   RefreshCw,
-  Save,
+  Plus,
+  Sparkles,
   FileText,
 } from 'lucide-react';
 import { usePlatform } from '../context/PlatformContext';
 import {
-  TRANSACTION_TYPE_LABELS,
   loadAccountingMapping,
   saveAccountingMappingRule,
+  createAccountingMappingRule,
+  seedDefaultMappingRules,
+  TRANSACTION_TYPE_LABELS,
   type MappingLoadResult,
 } from '../services/accountingMappingApi';
 import type { AccountingMappingRule } from '../types/accountingMapping';
-
-/**
- * شاشة ربط التسجيل بالحسابات — المصدر الحصري والوحيد لقيود اليومية
- * ---------------------------------------------------------------------------
- * كل قيد في النظام يُولَّد من قاعدة ربط مسجّلة هنا. لا قيد يدوي، ولا حساب
- * مكتوب في الكود. تغيير الحساب = تعديل صف واحد.
- *
- * الرقابة:
- *   • «فجوة تغطية»: أي نوع عملية بلا قاعدة ⇒ قيد لن يُولَّد ⇒ تحذير ظاهر.
- *   • «مصدر حصري»: يمنع إنشاء قيد يدوي لهذا النوع من خارج القاعدة.
- *   • سجل القيود المولَّدة: أثر تدقيقي كامل (أي قاعدة ولّدت أي قيد).
- */
+import { MappingRulesTable } from './accounting-mapping/MappingRulesTable';
+import { GeneratedEntriesTable } from './accounting-mapping/GeneratedEntriesTable';
+import { NewRuleModal } from './accounting-mapping/NewRuleModal';
 
 const EMPTY: MappingLoadResult = { rules: [], gaps: [], generated: [] };
 
-/** أعمدة جدول القواعد. */
-const HEADERS: [string, string][] = [
-  ['نوع العملية', 'Transaction'], ['القاعدة', 'Rule'], ['مدين', 'Debit'],
-  ['دائن', 'Credit'], ['حصري', 'Exclusive'], ['آلي', 'Auto'], ['', ''],
-];
-
 export const AccountingMappingView: React.FC = () => {
-  const { t, language, tenant, formatMoney } = usePlatform();
+  const { t, language, tenant, accounts, formatMoney } = usePlatform();
   const isArabic = language === 'ar';
 
+  const [activeTab, setActiveTab] = useState<'rules' | 'generated'>('rules');
   const [data, setData] = useState<MappingLoadResult>(EMPTY);
   const [drafts, setDrafts] = useState<Record<number, AccountingMappingRule>>({});
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+  const [isNewModalOpen, setIsNewModalOpen] = useState(false);
 
-  const tenantId = tenant?.id || 'tenant-eg-001';
+  const tenantId = tenant?.id || 'tenant-eg-003';
 
   const reload = useCallback(async () => {
     setBusy(true);
@@ -55,10 +45,8 @@ export const AccountingMappingView: React.FC = () => {
     setData(loaded);
     setDrafts({});
     setBusy(false);
-    const noConn =
-      'لا يوجد اتصال بقاعدة البيانات — من شاشة Neon Hub أدخل الرابط ثم أعد المحاولة.';
     if (loaded.error === 'no_database_connection') {
-      setNotice({ type: 'err', text: t(noConn, 'No database connection — configure it from the Neon Hub screen.') });
+      setNotice({ type: 'err', text: t('لا يوجد اتصال بقاعدة البيانات — تحقق من الاتصال.', 'No database connection.') });
     } else if (loaded.error) {
       setNotice({ type: 'err', text: t('تعذّر تحميل القواعد: ', 'Failed to load rules: ') + loaded.error });
     }
@@ -81,10 +69,35 @@ export const AccountingMappingView: React.FC = () => {
     const result = await saveAccountingMappingRule(draft);
     setBusy(false);
     if (result.ok) {
-      setNotice({ type: 'ok', text: t('تم حفظ القاعدة.', 'Rule saved.') });
+      setNotice({ type: 'ok', text: t('تم حفظ وتحديث قاعدة الربط بنجاح.', 'Rule saved successfully.') });
       await reload();
     } else {
       setNotice({ type: 'err', text: result.error ?? 'save_failed' });
+    }
+  };
+
+  const handleCreateRule = async (newRule: Omit<AccountingMappingRule, 'id'>) => {
+    setBusy(true);
+    const res = await createAccountingMappingRule(newRule);
+    setBusy(false);
+    if (res.ok) {
+      setIsNewModalOpen(false);
+      setNotice({ type: 'ok', text: t('تم إضافة قاعدة الربط الجديدة بنجاح.', 'New rule added successfully.') });
+      await reload();
+    } else {
+      setNotice({ type: 'err', text: res.error || 'Failed to create rule' });
+    }
+  };
+
+  const handleSeedDefaults = async () => {
+    setBusy(true);
+    const res = await seedDefaultMappingRules(tenantId);
+    setBusy(false);
+    if (res.ok) {
+      setNotice({ type: 'ok', text: t(`تم تهيئة ${res.count} قاعدة ربط قياسية لهذا الكيان بنجاح!`, `Initialized ${res.count} default rules!`) });
+      await reload();
+    } else {
+      setNotice({ type: 'err', text: res.error || 'Failed to seed rules' });
     }
   };
 
@@ -99,31 +112,46 @@ export const AccountingMappingView: React.FC = () => {
   }, [data.rules]);
 
   return (
-    <div className="space-y-5" dir={isArabic ? 'rtl' : 'ltr'}>
-      {/* الترويسة */}
+    <div className="space-y-4" dir={isArabic ? 'rtl' : 'ltr'}>
+      {/* Header */}
       <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-xs sm:flex-row sm:items-center sm:justify-between dark:border-slate-800 dark:bg-slate-900">
         <div>
           <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-[11px] font-semibold text-indigo-800 dark:border-indigo-900/40 dark:bg-indigo-950/40 dark:text-indigo-300">
             <Lock className="h-3.5 w-3.5" />
-            <span>{t('المصدر الحصري والوحيد لقيود اليومية', 'Single Exclusive Source of Truth')}</span>
+            <span>{t('المصدر الحصري والوحيد لقيود اليومية في المنظومة', 'Single Exclusive Source of Truth')}</span>
           </div>
           <h1 className="flex items-center gap-2 text-lg font-extrabold text-slate-900 dark:text-white">
             <GitMerge className="h-5 w-5 text-indigo-600" />
-            <span>{t('ربط التسجيل بالحسابات ومولّد القيود', 'Posting-to-Accounts Mapping')}</span>
+            <span>{t('ربط العمليات بالحسابات ومولّد القيود', 'Posting-to-Accounts Mapping')}</span>
           </h1>
           <p className="mt-1 max-w-2xl text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
             {t(
-              'كل قيد محاسبي يُولَّد تلقائياً من قاعدة ربط مسجّلة هنا — لا قيد يدوي ولا حساب مكتوب في الكود.',
-              'Every journal entry is generated from a rule registered here — no manual entries, no hardcoded accounts.'
+              'كل قيد محاسبي يُولَّد تلقائياً من قاعدة ربط مسجّلة هنا — تعديل الحساب هنا يوجه كافة القيود فوراً.',
+              'Every journal entry is generated from a rule registered here — editing an account here updates all future postings immediately.'
             )}
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          <span className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] font-bold text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
-            <ShieldCheck className="h-3.5 w-3.5" />
-            {t('توازن مدين = دائن', 'Debit = Credit')}
-          </span>
+        <div className="flex flex-wrap items-center gap-2">
+          {data.rules.length === 0 && (
+            <button
+              type="button"
+              onClick={() => void handleSeedDefaults()}
+              disabled={busy}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-amber-500 px-3 py-2 text-[11px] font-bold text-white shadow-xs hover:bg-amber-600 disabled:opacity-50"
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              {t('تهيئة القواعد القياسية', 'Seed Default Rules')}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setIsNewModalOpen(true)}
+            className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3 py-2 text-[11px] font-bold text-white shadow-xs hover:bg-indigo-700"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            {t('قاعدة جديدة', 'New Rule')}
+          </button>
           <button
             type="button"
             onClick={() => void reload()}
@@ -136,7 +164,41 @@ export const AccountingMappingView: React.FC = () => {
         </div>
       </div>
 
-      {/* التنبيه */}
+      {/* Tabs */}
+      <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800">
+        <button
+          type="button"
+          onClick={() => setActiveTab('rules')}
+          className={`flex items-center gap-2 border-b-2 px-4 py-2.5 text-xs font-bold transition-colors ${
+            activeTab === 'rules'
+              ? 'border-indigo-600 text-indigo-600 dark:border-indigo-400 dark:text-indigo-400'
+              : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'
+          }`}
+        >
+          <GitMerge className="h-4 w-4" />
+          <span>{t('قواعد ربط العمليات', 'Mapping Rules')}</span>
+          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-extrabold dark:bg-slate-800">
+            {data.rules.length}
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('generated')}
+          className={`flex items-center gap-2 border-b-2 px-4 py-2.5 text-xs font-bold transition-colors ${
+            activeTab === 'generated'
+              ? 'border-indigo-600 text-indigo-600 dark:border-indigo-400 dark:text-indigo-400'
+              : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'
+          }`}
+        >
+          <FileText className="h-4 w-4" />
+          <span>{t('سجل القيود المولَّدة آلياً', 'Generated Entries Log')}</span>
+          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-extrabold dark:bg-slate-800">
+            {data.generated.length}
+          </span>
+        </button>
+      </div>
+
+      {/* Notice */}
       {notice && (
         <div
           className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-[11px] font-bold ${
@@ -150,20 +212,14 @@ export const AccountingMappingView: React.FC = () => {
         </div>
       )}
 
-      {/* فجوات التغطية */}
+      {/* Coverage Gaps Alert */}
       {data.gaps.length > 0 && (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/40 dark:bg-amber-950/30">
           <div className="mb-1 flex items-center gap-2 text-xs font-extrabold text-amber-900 dark:text-amber-300">
             <AlertTriangle className="h-4 w-4" />
-            <span>{t('فجوات تغطية: ', 'Coverage gaps: ')}{data.gaps.length}</span>
+            <span>{t('فجوات تغطية تحتاج ضبط قاعدة: ', 'Coverage gaps requiring rules: ')}{data.gaps.length}</span>
           </div>
-          <p className="mb-2 text-[11px] text-amber-800 dark:text-amber-400">
-            {t(
-              'أنواع عمليات بلا قاعدة ربط ⇒ لن يُولَّد لها أي قيد محاسبي.',
-              'Transaction types without a rule ⇒ no journal entry will be generated.'
-            )}
-          </p>
-          <div className="flex flex-wrap gap-1.5">
+          <div className="mt-2 flex flex-wrap gap-1.5">
             {data.gaps.map((gap) => (
               <span
                 key={gap.transactionType}
@@ -175,124 +231,36 @@ export const AccountingMappingView: React.FC = () => {
           </div>
         </div>
       )}
-      {/* جدول القواعد */}
-      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xs dark:border-slate-800 dark:bg-slate-900">
-        <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3 dark:border-slate-800">
-          <h2 className="flex items-center gap-2 text-xs font-extrabold text-slate-800 dark:text-slate-100">
-            <GitMerge className="h-4 w-4 text-indigo-600" />
-            {t('قواعد الربط', 'Mapping rules')}
-            <span className="font-mono text-slate-400">({data.rules.length})</span>
-          </h2>
-        </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-right text-xs">
-            <thead className="bg-slate-50 dark:bg-slate-800/60">
-              <tr>
-                {HEADERS.map(([ar, en]) => (
-                  <th key={en} className="px-3 py-2 font-extrabold text-slate-600 dark:text-slate-300">
-                    {t(ar, en)}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {data.rules.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="px-3 py-10 text-center text-slate-400">
-                    {busy
-                      ? t('جارٍ التحميل…', 'Loading…')
-                      : t(
-                          'لا توجد قواعد. شغّل neon_accounting_mapping_seed.sql لتحميل القواعد الأساسية.',
-                          'No rules. Run neon_accounting_mapping_seed.sql to load the defaults.'
-                        )}
-                  </td>
-                </tr>
-              ) : (
-                grouped.flatMap(([type, rules]) =>
-                  rules.map((rule, index) => {
-                    const draft = drafts[rule.id ?? -1] ?? rule;
-                    const dirty = Boolean(drafts[rule.id ?? -1]);
-                    const input =
-                      'w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold outline-none focus:border-indigo-400 dark:border-slate-700 dark:bg-slate-800 dark:text-white';
+      {/* Tab content */}
+      {activeTab === 'rules' ? (
+        <MappingRulesTable
+          grouped={grouped}
+          drafts={drafts}
+          busy={busy}
+          accounts={accounts}
+          t={t}
+          updateDraft={updateDraft}
+          handleSave={handleSave}
+        />
+      ) : (
+        <GeneratedEntriesTable
+          entries={data.generated}
+          formatMoney={formatMoney}
+          t={t}
+          isArabic={isArabic}
+        />
+      )}
 
-                    return (
-                      <tr
-                        key={rule.code}
-                        className={`border-b border-slate-100 last:border-0 dark:border-slate-800 ${
-                          dirty ? 'bg-amber-50/60 dark:bg-amber-950/20' : ''
-                        }`}
-                      >
-                        <td className="px-3 py-2 text-[11px] font-bold text-slate-700 dark:text-slate-200">
-                          {index === 0 ? (
-                            TRANSACTION_TYPE_LABELS[type]?.ar ?? type
-                          ) : (
-                            <span className="text-slate-300">↳</span>
-                          )}
-                        </td>
-                        <td className="px-3 py-2">
-                          <span className="block text-[11px] font-bold text-slate-800 dark:text-slate-100">
-                            {rule.nameAr}
-                          </span>
-                          <span className="block font-mono text-[10px] text-slate-400">{rule.code}</span>
-                        </td>
-                        <td className="px-3 py-2">
-                          <input
-                            value={draft.debitAccountCode}
-                            onChange={(e) => updateDraft(rule, { debitAccountCode: e.target.value })}
-                            className={`${input} w-20 font-mono`}
-                          />
-                          <span className="mt-0.5 block text-[10px] text-slate-400">
-                            {draft.debitAccountName}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2">
-                          <input
-                            value={draft.creditAccountCode}
-                            onChange={(e) => updateDraft(rule, { creditAccountCode: e.target.value })}
-                            className={`${input} w-20 font-mono`}
-                          />
-                          <span className="mt-0.5 block text-[10px] text-slate-400">
-                            {draft.creditAccountName}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2 text-center">
-                          <input
-                            type="checkbox"
-                            checked={draft.isStrictExclusive}
-                            onChange={(e) => updateDraft(rule, { isStrictExclusive: e.target.checked })}
-                            className="h-4 w-4 accent-indigo-600"
-                          />
-                        </td>
-                        <td className="px-3 py-2 text-center">
-                          <input
-                            type="checkbox"
-                            checked={draft.autoPostEnabled}
-                            onChange={(e) => updateDraft(rule, { autoPostEnabled: e.target.checked })}
-                            className="h-4 w-4 accent-indigo-600"
-                          />
-                        </td>
-                        <td className="px-3 py-2">
-                          <button
-                            type="button"
-                            onClick={() => void handleSave(rule)}
-                            disabled={busy || !dirty}
-                            className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-2 py-1 text-[10px] font-bold text-white hover:bg-indigo-700 disabled:opacity-30"
-                          >
-                            <Save className="h-3 w-3" />
-                            {t('حفظ', 'Save')}
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
+      <NewRuleModal
+        isOpen={isNewModalOpen}
+        tenantId={tenantId}
+        accounts={accounts}
+        busy={busy}
+        onClose={() => setIsNewModalOpen(false)}
+        onSubmit={handleCreateRule}
+        t={t}
+      />
     </div>
   );
 };

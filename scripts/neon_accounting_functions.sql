@@ -243,105 +243,129 @@ BEGIN
     RAISE EXCEPTION 'receipt amount must be positive';
   END IF;
 
-  -- 1) تحديد حساب العميل
-  v_cust_acc_id := fn_customer_account_id(p_tenant, p_customer_code);
-  IF v_cust_acc_id IS NULL THEN
-    RAISE EXCEPTION 'customer account not found for code: %', p_customer_code;
-  END IF;
+  -- 1) التحقق من قاعدة الربط المحاسبي (المصدر الحصري للقيود)
+  DECLARE
+    v_rule_id bigint;
+    v_rule_code text;
+    v_map_debit text;
+    v_map_credit text;
+  BEGIN
+    SELECT id, code, debit_account_code, credit_account_code
+      INTO v_rule_id, v_rule_code, v_map_debit, v_map_credit
+      FROM accounting_mapping_rules
+     WHERE tenant_id = p_tenant AND transaction_type = 'customer_collection' AND is_active = TRUE
+     LIMIT 1;
 
-  -- بيانات حساب السداد (الخزينة / البنك)
-  SELECT id, code, name_ar INTO v_pay_acc FROM accounts
-   WHERE tenant_id = p_tenant AND (id = p_payment_account_id OR code = p_payment_account_id)
-   LIMIT 1;
+    -- حساب العميل
+    v_cust_acc_id := fn_customer_account_id(p_tenant, p_customer_code);
+    IF v_cust_acc_id IS NULL THEN
+      RAISE EXCEPTION 'customer account not found for code: %', p_customer_code;
+    END IF;
 
-  -- بيانات حساب العميل
-  SELECT id, code, name_ar INTO v_cust_acc FROM accounts
-   WHERE tenant_id = p_tenant AND id = v_cust_acc_id
-   LIMIT 1;
+    -- حساب السداد (الخزينة/البنك)
+    SELECT id, code, name_ar INTO v_pay_acc FROM accounts
+     WHERE tenant_id = p_tenant AND (id = p_payment_account_id OR code = p_payment_account_id OR code = v_map_debit)
+     LIMIT 1;
 
-  -- 2) تكوين خطوط القيد المحاسبي
-  -- مدين: حساب الخزينة أو طريقة الدفع
-  -- دائن: حساب العميل
-  v_lines := jsonb_build_array(
-    jsonb_build_object(
-      'accountId', COALESCE(v_pay_acc.id, p_payment_account_id),
-      'account_id', COALESCE(v_pay_acc.id, p_payment_account_id),
-      'accountCode', COALESCE(v_pay_acc.code, '1111'),
-      'account_code', COALESCE(v_pay_acc.code, '1111'),
-      'accountNameAr', COALESCE(v_pay_acc.name_ar, 'الخزينة الرئيسية'),
-      'account_name_ar', COALESCE(v_pay_acc.name_ar, 'الخزينة الرئيسية'),
-      'memo', 'سند تحصيل عميل كود ' || p_customer_code || ' - ' || COALESCE(p_service, ''),
-      'debit', p_amount,
-      'credit', 0
-    ),
-    jsonb_build_object(
-      'accountId', v_cust_acc_id,
-      'account_id', v_cust_acc_id,
-      'accountCode', COALESCE(v_cust_acc.code, '1120'),
-      'account_code', COALESCE(v_cust_acc.code, '1120'),
-      'accountNameAr', COALESCE(v_cust_acc.name_ar, 'العملاء والمدينون التجاريون'),
-      'account_name_ar', COALESCE(v_cust_acc.name_ar, 'العملاء والمدينون التجاريون'),
-      'memo', 'سند تحصيل عميل كود ' || p_customer_code || ' - ' || COALESCE(p_service, ''),
-      'debit', 0,
-      'credit', p_amount
-    )
-  );
+    -- حساب العميل الدائن
+    SELECT id, code, name_ar INTO v_cust_acc FROM accounts
+     WHERE tenant_id = p_tenant AND (id = v_cust_acc_id OR code = v_map_credit)
+     LIMIT 1;
 
-  -- 3) ترحيل القيد المحاسبي في journal_entries وتحديث أرصدة الحسابات
-  v_journal_id := fn_post_journal(
-    p_tenant,
-    p_branch,
-    p_date,
-    'سند تحصيل نقدي/بنكي من العميل كود: ' || p_customer_code,
-    'CR-' || to_char(NOW(), 'YYYYMMDD-HH24MISS'),
-    v_lines,
-    p_actor
-  );
+    -- 2) تكوين خطوط القيد المحاسبي
+    v_lines := jsonb_build_array(
+      jsonb_build_object(
+        'accountId', COALESCE(v_pay_acc.id, p_payment_account_id),
+        'account_id', COALESCE(v_pay_acc.id, p_payment_account_id),
+        'accountCode', COALESCE(v_pay_acc.code, v_map_debit, '1111'),
+        'account_code', COALESCE(v_pay_acc.code, v_map_debit, '1111'),
+        'accountNameAr', COALESCE(v_pay_acc.name_ar, 'الخزينة الرئيسية'),
+        'account_name_ar', COALESCE(v_pay_acc.name_ar, 'الخزينة الرئيسية'),
+        'memo', 'سند تحصيل عميل كود ' || p_customer_code || ' - ' || COALESCE(p_service, ''),
+        'debit', p_amount,
+        'credit', 0
+      ),
+      jsonb_build_object(
+        'accountId', COALESCE(v_cust_acc.id, v_cust_acc_id),
+        'account_id', COALESCE(v_cust_acc.id, v_cust_acc_id),
+        'accountCode', COALESCE(v_cust_acc.code, v_map_credit, '1120'),
+        'account_code', COALESCE(v_cust_acc.code, v_map_credit, '1120'),
+        'accountNameAr', COALESCE(v_cust_acc.name_ar, 'العملاء والمدينون التجاريون'),
+        'account_name_ar', COALESCE(v_cust_acc.name_ar, 'العملاء والمدينون التجاريون'),
+        'memo', 'سند تحصيل عميل كود ' || p_customer_code || ' - ' || COALESCE(p_service, ''),
+        'debit', 0,
+        'credit', p_amount
+      )
+    );
 
-  -- 4) حفظ سند القبض في جدول cash_receipts
-  v_receipt_id := COALESCE(p_receipt->>'id', 'cr-' || extract(epoch from now())::bigint || '-' || substr(gen_random_uuid()::text, 1, 5));
-  v_voucher_no := COALESCE(p_receipt->>'voucherNumber', p_receipt->>'receiptNumber', 'CR-' || to_char(NOW(), 'YYYYMMDD-HH24MISS'));
+    -- 3) ترحيل القيد المحاسبي في journal_entries وتحديث أرصدة الحسابات
+    v_journal_id := fn_post_journal(
+      p_tenant,
+      p_branch,
+      p_date,
+      'سند تحصيل نقدي/بنكي من العميل كود: ' || p_customer_code,
+      'CR-' || to_char(NOW(), 'YYYYMMDD-HH24MISS'),
+      v_lines,
+      p_actor
+    );
 
-  v_final_receipt := p_receipt || jsonb_build_object(
-    'id', v_receipt_id,
-    'tenantId', p_tenant,
-    'branchId', p_branch,
-    'voucherNumber', v_voucher_no,
-    'receiptDate', p_date,
-    'amount', p_amount,
-    'journalEntryId', v_journal_id,
-    'updatedAt', to_char(NOW(), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
-  );
+    -- 4) حفظ سند القبض في جدول cash_receipts
+    v_receipt_id := COALESCE(p_receipt->>'id', 'cr-' || extract(epoch from now())::bigint || '-' || substr(gen_random_uuid()::text, 1, 5));
+    v_voucher_no := COALESCE(p_receipt->>'voucherNumber', p_receipt->>'receiptNumber', 'CR-' || to_char(NOW(), 'YYYYMMDD-HH24MISS'));
 
-  INSERT INTO cash_receipts (
-    id, tenant_id, branch_id, voucher_number, receipt_date, amount, status, payload, version, updated_at
-  ) VALUES (
-    v_receipt_id, p_tenant, p_branch, v_voucher_no, p_date, p_amount, 'confirmed', v_final_receipt, 1, NOW()
-  ) ON CONFLICT (id) DO UPDATE SET
-    payload = EXCLUDED.payload,
-    amount = EXCLUDED.amount,
-    updated_at = NOW();
+    v_final_receipt := p_receipt || jsonb_build_object(
+      'id', v_receipt_id,
+      'tenantId', p_tenant,
+      'branchId', p_branch,
+      'voucherNumber', v_voucher_no,
+      'receiptDate', p_date,
+      'amount', p_amount,
+      'journalEntryId', v_journal_id,
+      'updatedAt', to_char(NOW(), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+    );
 
-  -- 5) تخفيض رصيد العميل في جدول parties
-  UPDATE parties p
-     SET balance = COALESCE(p.balance, 0) - p_amount,
-         updated_at = NOW()
-   WHERE p.tenant_id = p_tenant
-     AND (
-       p.customer_code = p_customer_code
-       OR p.payload->>'customerCode' = p_customer_code
-       OR p.payload->>'code' = p_customer_code
-       OR p.payload->>'systemCode' = p_customer_code
-     )
-     AND p.deleted_at IS NULL;
+    INSERT INTO cash_receipts (
+      id, tenant_id, branch_id, voucher_number, receipt_date, amount, status, payload, version, updated_at
+    ) VALUES (
+      v_receipt_id, p_tenant, p_branch, v_voucher_no, p_date, p_amount, 'confirmed', v_final_receipt, 1, NOW()
+    ) ON CONFLICT (id) DO UPDATE SET
+      payload = EXCLUDED.payload,
+      amount = EXCLUDED.amount,
+      updated_at = NOW();
 
-  RETURN jsonb_build_object(
-    'success', true,
-    'receiptId', v_receipt_id,
-    'journalId', v_journal_id,
-    'customerAccount', v_cust_acc_id,
-    'paymentAccount', COALESCE(v_pay_acc.id, p_payment_account_id)
-  );
+    -- 5) تخفيض رصيد العميل في جدول parties
+    UPDATE parties p
+       SET balance = COALESCE(p.balance, 0) - p_amount,
+           updated_at = NOW()
+     WHERE p.tenant_id = p_tenant
+       AND (
+         p.customer_code = p_customer_code
+         OR p.payload->>'customerCode' = p_customer_code
+         OR p.payload->>'code' = p_customer_code
+         OR p.payload->>'systemCode' = p_customer_code
+       )
+       AND p.deleted_at IS NULL;
+
+    -- 6) توثيق في سجل القيود المولَّدة آلياً (للتدقيق وربط القيد بقاعدته الحصرية)
+    INSERT INTO accounting_generated_entries (
+      tenant_id, rule_id, rule_code, journal_entry_id, entry_number,
+      source_screen, source_document, debit_account_code, credit_account_code,
+      amount, is_balanced, posted_at
+    ) VALUES (
+      p_tenant, v_rule_id, COALESCE(v_rule_code, 'RULE-CUSTOMER-COLLECTION'),
+      v_journal_id, v_voucher_no, 'شاشة التحصيلات', 'CR-' || v_voucher_no,
+      COALESCE(v_pay_acc.code, v_map_debit, '1111'), COALESCE(v_cust_acc.code, v_map_credit, '1120'),
+      p_amount, TRUE, NOW()
+    );
+
+    RETURN jsonb_build_object(
+      'success', true,
+      'receiptId', v_receipt_id,
+      'journalId', v_journal_id,
+      'customerAccount', v_cust_acc_id,
+      'paymentAccount', COALESCE(v_pay_acc.id, p_payment_account_id)
+    );
+  END;
 END; $$ LANGUAGE plpgsql;
 
 -- 8) استرداد مستحقات عميل ذرّي (Debit: Customer Account / Credit: Safe Account) --
