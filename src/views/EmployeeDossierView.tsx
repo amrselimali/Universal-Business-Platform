@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { usePlatform } from '../context/PlatformContext';
-import { StaffMember, ShiftRunRow, CashPaymentVoucher, AttendanceRecord, StaffPayrollItem } from '../types';
+import { loadActivityPage } from '../services/activityLogPaged';
+import { StaffMember, ShiftRunRow, CashPaymentVoucher, AttendanceRecord, StaffPayrollItem, UserActivityLog } from '../types';
 import * as XLSX from 'xlsx';
 import {
   UserCheck,
@@ -87,7 +88,6 @@ export const EmployeeDossierView: React.FC<EmployeeDossierViewProps> = ({ initia
     cashPayments,
     attendanceRecords,
     allPayrollRuns,
-    userActivityLogs,
     currentUser,
     recordAudit,
     language,
@@ -539,6 +539,22 @@ export const EmployeeDossierView: React.FC<EmployeeDossierViewProps> = ({ initia
     return items.sort((a, b) => (b.month > a.month ? 1 : -1));
   }, [allPayrollRuns, selectedStaff, dateFrom, dateTo]);
 
+  // سجل نشاط الموظف من السيرفر (بدل تحميل كل السجل في الإقلاع)
+  const [serverActivityLogs, setServerActivityLogs] = useState<UserActivityLog[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    if (!tenant?.id || !selectedStaff) return;
+    loadActivityPage({
+      tenantId: tenant.id,
+      userName: selectedStaff.nameAr,
+      userId: selectedStaff.id,
+      from: dateFrom || undefined,
+      to: dateTo || undefined,
+      limit: 200,
+    }).then((page) => { if (!cancelled) setServerActivityLogs(page.rows); });
+    return () => { cancelled = true; };
+  }, [tenant?.id, selectedStaff?.id, selectedStaff?.nameAr, dateFrom, dateTo]);
+
   // F. User Activity Logs (سجل النشاط)
   const employeeActivity = useMemo(() => {
     if (!selectedStaff) return [];
@@ -546,7 +562,7 @@ export const EmployeeDossierView: React.FC<EmployeeDossierViewProps> = ({ initia
     const staffNameAr = selectedStaff.nameAr.trim().toLowerCase();
     const staffId = selectedStaff.id;
 
-    return userActivityLogs
+    return serverActivityLogs
       .filter((log) => {
         const matchesUser =
           log.userName?.trim().toLowerCase() === staffNameAr ||
@@ -556,7 +572,7 @@ export const EmployeeDossierView: React.FC<EmployeeDossierViewProps> = ({ initia
         return isDateInRange(log.timestamp.split('T')[0]);
       })
       .sort((a, b) => (b.timestamp > a.timestamp ? 1 : -1));
-  }, [userActivityLogs, selectedStaff, dateFrom, dateTo]);
+  }, [serverActivityLogs, selectedStaff, dateFrom, dateTo]);
 
   // -------------------------------------------------------------
   // STATISTICAL KPI CALCULATIONS FOR THE SELECTED PERIOD

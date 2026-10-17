@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { usePlatform } from '../context/PlatformContext';
+import { loadActivityPage } from '../services/activityLogPaged';
 import { UserActivityLog } from '../types';
 import {
   Clock,
@@ -27,21 +28,23 @@ export const ActivityLogsView: React.FC = () => {
   const {
     language,
     t,
-    activityLogs,
-    userActivityLogs,
-    allUserActivityLogs,
     allTenants,
     tenant,
     users,
   } = usePlatform();
   const isRtl = language === 'ar';
 
-  const logsList =
-    allUserActivityLogs && allUserActivityLogs.length > 0
-      ? allUserActivityLogs
-      : (userActivityLogs && userActivityLogs.length > 0)
-      ? userActivityLogs
-      : activityLogs || [];
+  // سجل النشاط من السيرفر (الخطاف المشترك) — بدل تحميل كل السجل في الإقلاع
+  const [serverLogs, setServerLogs] = useState<UserActivityLog[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    if (!tenant?.id) return;
+    loadActivityPage({ tenantId: tenant.id, limit: 200 }).then((page) => {
+      if (!cancelled) setServerLogs(page.rows);
+    });
+    return () => { cancelled = true; };
+  }, [tenant?.id]);
+  const logsList = serverLogs;
 
   const [searchQuery, setSearchQuery] = useState('');
   const [tenantFilter, setTenantFilter] = useState<string>('All');
