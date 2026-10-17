@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { usePlatform } from '../context/PlatformContext';
 import { loadInvoicePage } from '../services/invoiceQueryApi';
+import { loadJournalPage } from '../services/journalQueryApi';
 import { exportRowsToExcel } from '../utils/excelExport';
-import { Party, ClientOffer, CashReceiptVoucher, CustomerRefundVoucher, SalesInvoice } from '../types';
+import { Party, ClientOffer, CashReceiptVoucher, CustomerRefundVoucher, SalesInvoice, JournalEntry } from '../types';
 import {
   FileText,
   Printer,
@@ -85,7 +86,6 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
     cashReceipts,
     allCashReceipts,
     customerRefunds,
-    journalEntries,
     deviceMaintenanceRecords,
     consumeClientOfferSession,
     addClientOffer,
@@ -153,7 +153,19 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
   }, [allCashReceipts, cashReceipts, tenant?.id]);
   const scopedReceipts = useMemo(() => (effectiveBranchScoped ? allAvailableReceipts.filter((rcpt) => rcpt.branchId === effectiveBranchScoped) : allAvailableReceipts), [allAvailableReceipts, effectiveBranchScoped]);
   const scopedRefunds = useMemo(() => (effectiveBranchScoped ? customerRefunds.filter((refund) => refund.branchId === effectiveBranchScoped) : customerRefunds), [customerRefunds, effectiveBranchScoped]);
-  const scopedJournals = useMemo(() => (effectiveBranchScoped ? journalEntries.filter((entry) => entry.branchId === effectiveBranchScoped) : journalEntries), [journalEntries, effectiveBranchScoped]);
+  // القيود من السيرفر (بدل تحميل كل الدفتر في الإقلاع)
+  const [scopedJournals, setScopedJournals] = useState<JournalEntry[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    if (!tenant?.id) return;
+    loadJournalPage({ tenantId: tenant.id, filters: {}, limit: 300 }).then((page) => {
+      if (cancelled) return;
+      setScopedJournals(
+        effectiveBranchScoped ? page.entries.filter((entry) => entry.branchId === effectiveBranchScoped) : page.entries
+      );
+    });
+    return () => { cancelled = true; };
+  }, [tenant?.id, effectiveBranchScoped]);
 
   // Filter parties by type, search query, branch, and balance criteria
   const matchesPartyBalance = (partyBalance: number) => {
@@ -569,7 +581,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
       cardBalance: ledgerRecordedBalance,
       cardBalanceDifference: Number((ledgerRecordedBalance - closeBal).toFixed(2)),
     };
-  }, [currentParty, branchScoped, scopedInvoices, receptionShifts, scopedReceipts, customerRefunds, journalEntries, deviceMaintenanceRecords, filterStart, filterEnd]);
+  }, [currentParty, branchScoped, scopedInvoices, scopedJournals, receptionShifts, scopedReceipts, customerRefunds, deviceMaintenanceRecords, filterStart, filterEnd]);
 
   // QUANTITY & SERVICE MOVEMENTS FROM COLLECTION RECEIPTS
   // (حركات الكميات والخدمة المقيدة من إيصالات التحصيل)

@@ -12,8 +12,8 @@
 
 import type { GuardrailsFacts } from '../../services/architectureGuardrails';
 
-export const GUARDRAILS_MEASURED_AT = '2026-10-17T10:12:25.064Z';
-export const GUARDRAILS_REVISION = '84e225c';
+export const GUARDRAILS_MEASURED_AT = '2026-10-17T10:20:49.457Z';
+export const GUARDRAILS_REVISION = 'c421d24';
 
 export const GUARDRAILS_FACTS: GuardrailsFacts = /* GUARDRAILS_FACTS_BEGIN */
 {
@@ -133,11 +133,11 @@ export const GUARDRAILS_FACTS: GuardrailsFacts = /* GUARDRAILS_FACTS_BEGIN */
     { id: 'emitted_events_pipeline', labelAr: 'معالجة الأحداث المُصدَّرة بلا تكرار', labelEn: 'Idempotent event processing', comparison: 'atLeast', expected: 1, found: 4, severity: 'advisory', evidence: ['erp-nextgen-local/db/migrations-original/0005_core_audit_outbox_infrastructure.sql', 'erp-nextgen-local/db/migrations/0005_core_audit_outbox_infrastructure.sql'] },
   ],
   legacy: {
-    scanned: 220,
+    scanned: 221,
     limit: 300,
     baseline: 58,
     violations: 58,
-    newViolations: [],
+    newViolations: ['src/components/PartyStatementModal.tsx (2099)', 'src/views/AccountingView.tsx (3331)'],
   },
 }
 /* GUARDRAILS_FACTS_END */;

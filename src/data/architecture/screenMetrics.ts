@@ -22,7 +22,7 @@ export const SCREEN_FILE_LIMIT = 300;
 
 export const SCREEN_METRICS: ScreenMetric[] = [
   { viewId: 'BookingsFollowUpView', file: 'src/views/BookingsFollowUpView.tsx', lines: 6061, useState: 102, useEffect: 1, heavyLibs: [], overLimit: true },
-  { viewId: 'AccountingView', file: 'src/views/AccountingView.tsx', lines: 3320, useState: 58, useEffect: 6, heavyLibs: [], overLimit: true },
+  { viewId: 'AccountingView', file: 'src/views/AccountingView.tsx', lines: 3331, useState: 59, useEffect: 7, heavyLibs: [], overLimit: true },
   { viewId: 'ReceptionOpsView', file: 'src/views/ReceptionOpsView.tsx', lines: 3054, useState: 45, useEffect: 1, heavyLibs: [], overLimit: true },
   { viewId: 'InventoryManagementView', file: 'src/views/InventoryManagementView.tsx', lines: 3005, useState: 34, useEffect: 1, heavyLibs: [], overLimit: true },
   { viewId: 'ProductManagementView', file: 'src/views/ProductManagementView.tsx', lines: 2504, useState: 22, useEffect: 0, heavyLibs: [], overLimit: true },
@@ -42,7 +42,7 @@ export const SCREEN_METRICS: ScreenMetric[] = [
   { viewId: 'AttendanceManagementView', file: 'src/views/AttendanceManagementView.tsx', lines: 904, useState: 12, useEffect: 0, heavyLibs: ['xlsx'], overLimit: true },
   { viewId: 'CustomerRefundsView', file: 'src/views/CustomerRefundsView.tsx', lines: 845, useState: 24, useEffect: 0, heavyLibs: [], overLimit: true },
   { viewId: 'PayrollView', file: 'src/views/PayrollView.tsx', lines: 821, useState: 14, useEffect: 0, heavyLibs: [], overLimit: true },
-  { viewId: 'NeonHubView', file: 'src/views/NeonHubView.tsx', lines: 810, useState: 19, useEffect: 0, heavyLibs: [], overLimit: true },
+  { viewId: 'NeonHubView', file: 'src/views/NeonHubView.tsx', lines: 809, useState: 19, useEffect: 0, heavyLibs: [], overLimit: true },
   { viewId: 'SuppliersView', file: 'src/views/SuppliersView.tsx', lines: 747, useState: 8, useEffect: 0, heavyLibs: [], overLimit: true },
   { viewId: 'ClinicsView', file: 'src/views/ClinicsView.tsx', lines: 536, useState: 5, useEffect: 0, heavyLibs: [], overLimit: true },
   { viewId: 'ShiftReportsView', file: 'src/views/ShiftReportsView.tsx', lines: 533, useState: 3, useEffect: 0, heavyLibs: [], overLimit: true },
