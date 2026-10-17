@@ -66,13 +66,13 @@ export const clearApiSession = (): void => {
 };
 
 interface RequestOptions {
-  method?: 'GET' | 'POST';
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   body?: unknown;
   /** When false a missing token is allowed (login/health). */
   requiresAuth?: boolean;
 }
 
-async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<{ ok: boolean; data?: T; status?: number; error?: string }> {
+export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<{ ok: boolean; data?: T; status?: number; error?: string }> {
   const base = getApiUrl();
   if (!base) return { ok: false, error: 'api_not_configured' };
   const token = getApiToken();
