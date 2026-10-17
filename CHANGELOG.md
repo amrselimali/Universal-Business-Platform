@@ -1,6 +1,16 @@
 # CHANGELOG
 # CHANGELOG
 
+## 2026-10-17 — توحيد مصدر الفواتير في قاعدة البيانات (View واحد)
+
+- `scripts/neon_revenue_invoices_view.sql`: عرض `v_revenue_invoices` يجمع
+  فواتير `sales_invoices` مع إيرادات الورديات المشتقة (`reception_shifts.payload.runRows`)
+  بنفس قواعد الاستثناء المطبّقة في الواجهة (POS/الفاتورة الضريبية/التسويات،
+  واستبعاد ما له فاتورة محفوظة عبر `sourceRunRowId` أو آخر 6 أحرف).
+- إعادة تعريف `fn_invoice_list` / `fn_invoice_summary` / `fn_invoice_detail`
+  لتقرأ من الـ View — فتصبح الشاشة قادرة على مسار واحد من السيرفر بدل مصدرين.
+- مُسجَّل في قائمة الترحيل والنمط الكامل.
+
 ## 2026-10-17 — تجميد PlatformContext + شريحة الفواتير (مليون صف، p95)
 
 ### القرارات
