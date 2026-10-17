@@ -28,7 +28,7 @@ export const SCREEN_METRICS: ScreenMetric[] = [
   { viewId: 'ProductManagementView', file: 'src/views/ProductManagementView.tsx', lines: 2504, useState: 22, useEffect: 0, heavyLibs: [], overLimit: true },
   { viewId: 'CompaniesBranchesView', file: 'src/views/CompaniesBranchesView.tsx', lines: 2351, useState: 49, useEffect: 0, heavyLibs: [], overLimit: true },
   { viewId: 'EmployeeDossierView', file: 'src/views/EmployeeDossierView.tsx', lines: 2216, useState: 14, useEffect: 3, heavyLibs: ['xlsx'], overLimit: true },
-  { viewId: 'PartiesView', file: 'src/views/PartiesView.tsx', lines: 2094, useState: 36, useEffect: 1, heavyLibs: ['xlsx'], overLimit: true },
+  { viewId: 'PartiesView', file: 'src/views/PartiesView.tsx', lines: 2101, useState: 40, useEffect: 3, heavyLibs: ['xlsx'], overLimit: true },
   { viewId: 'CollectionReceiptsView', file: 'src/views/CollectionReceiptsView.tsx', lines: 1951, useState: 32, useEffect: 0, heavyLibs: [], overLimit: true },
   { viewId: 'InvoicesView', file: 'src/views/InvoicesView.tsx', lines: 1779, useState: 23, useEffect: 0, heavyLibs: [], overLimit: true },
   { viewId: 'UsersRolesView', file: 'src/views/UsersRolesView.tsx', lines: 1605, useState: 23, useEffect: 0, heavyLibs: [], overLimit: true },

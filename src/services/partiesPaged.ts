@@ -105,3 +105,80 @@ export async function loadPartiesPage(query: PartiesPageQuery): Promise<PartiesP
     return { rows: [], total: 0, error: error?.message || 'parties_page_failed' };
   }
 }
+
+export interface PartyCodeOptions {
+  customerCodes: Array<{ value: string; label: string }>;
+  systemCodes: Array<{ value: string; label: string }>;
+  fileCodes: Array<{ value: string; label: string }>;
+}
+
+const EMPTY_CODE_OPTIONS: PartyCodeOptions = { customerCodes: [], systemCodes: [], fileCodes: [] };
+
+/**
+ * خيارات أكواد التكويد (عميل/سيستم/ملف) — من السيرفر بـ DISTINCT.
+ * تُستخدم في قوائم فلترة التكويد بدل مسح كل العملاء في المتصفح.
+ */
+export async function loadPartyCodeOptions(query: {
+  tenantId: string;
+  statuses: string[];
+  branchIds?: string[];
+  language?: 'ar' | 'en';
+}): Promise<PartyCodeOptions> {
+  const connection = getActiveDbConnection();
+  if (!connection?.connectionString || !query.tenantId) return EMPTY_CODE_OPTIONS;
+
+  const sql = neon(connection.connectionString.trim());
+  const params: unknown[] = [query.tenantId];
+  const filters: string[] = [
+    'tenant_id = $1',
+    'deleted_at IS NULL',
+    "COALESCE(payload->>'type', '') IN ('Customer', 'Both')",
+  ];
+
+  const statuses = query.statuses ?? [];
+  if (statuses.length === 1 && statuses[0] === 'active') {
+    filters.push("COALESCE(payload->>'isArchived', 'false') <> 'true'");
+    filters.push("COALESCE(payload->>'mergedIntoPartyId', '') = ''");
+  } else if (statuses.length === 1 && statuses[0] === 'archived') {
+    filters.push("(payload->>'isArchived' = 'true' OR COALESCE(payload->>'mergedIntoPartyId', '') <> '')");
+  }
+
+  if (query.branchIds && query.branchIds.length > 0) {
+    params.push(query.branchIds);
+    const index = params.length;
+    filters.push(`(payload->>'branchId' = ANY($${index}::text[])
+      OR (jsonb_typeof(payload->'branchIds') = 'array' AND EXISTS (
+            SELECT 1 FROM jsonb_array_elements_text(payload->'branchIds') AS b(value)
+             WHERE b.value = ANY($${index}::text[]))))`);
+  }
+
+  const where = filters.join(' AND ');
+  const expressions: Record<keyof PartyCodeOptions, string> = {
+    customerCodes: "COALESCE(NULLIF(payload->>'customerCode', ''), NULLIF(payload->>'code', ''))",
+    systemCodes: "COALESCE(NULLIF(payload->>'systemCode', ''), NULLIF(payload->>'paperCode', ''))",
+    fileCodes: "COALESCE(NULLIF(payload->>'fileCode', ''), NULLIF(payload->>'fileNumber', ''))",
+  };
+
+  try {
+    const results = await Promise.all(
+      (Object.keys(expressions) as Array<keyof PartyCodeOptions>).map(async (key) => {
+        const rows: any = await sql.query(
+          `SELECT DISTINCT ${expressions[key]} AS value FROM parties
+            WHERE ${where} AND ${expressions[key]} IS NOT NULL AND trim(${expressions[key]}) <> ''`,
+          params
+        );
+        const values = (Array.isArray(rows) ? rows : [])
+          .map((row: any) => String(row.value ?? ''))
+          .filter(Boolean)
+          .sort((a: string, b: string) => a.localeCompare(b, query.language === 'en' ? 'en' : 'ar'));
+        return [key, values.map((value: string) => ({ value, label: value }))] as const;
+      })
+    );
+
+    const options: PartyCodeOptions = { customerCodes: [], systemCodes: [], fileCodes: [] };
+    results.forEach(([key, value]) => { options[key] = value; });
+    return options;
+  } catch {
+    return EMPTY_CODE_OPTIONS;
+  }
+}

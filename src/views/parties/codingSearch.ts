@@ -67,38 +67,3 @@ export const filterCodingResults = (
     return true;
   });
 };
-
-/** خيارات أكواد العميل/السيستم/الملف لقوائم فلترة التكويد. */
-export const buildCodingCodeOptions = (
-  parties: Party[],
-  branches: BranchRef[],
-  branchIds: string[],
-  statuses: string[],
-  language: 'ar' | 'en'
-): { customerCodes: Array<{ value: string; label: string }>; systemCodes: Array<{ value: string; label: string }>; fileCodes: Array<{ value: string; label: string }> } => {
-  const scoped = parties.filter((party) => {
-    if (!(party.type === 'Customer' || party.type === 'Both')) return false;
-    const isArchived = Boolean(party.isArchived || party.mergedIntoPartyId);
-    if (statuses.length && !statuses.includes(isArchived ? 'archived' : 'active')) return false;
-    const assignedBranch =
-      branches.find((branch) => branch.id === party.branchId || branch.name === party.branchId || branch.code === party.branchId)?.id ||
-      party.branchId;
-    const partyBranchIds = new Set(
-      [assignedBranch, ...(party.branchIds || []).map((value) => branches.find((branch) => branch.id === value || branch.name === value || branch.code === value)?.id || value)].filter(
-        Boolean
-      )
-    );
-    return !branchIds.length || branchIds.some((branchId) => partyBranchIds.has(branchId));
-  });
-
-  const optionsFor = (getValue: (party: Party) => string | undefined) =>
-    Array.from(new Set(scoped.map(getValue).filter((value): value is string => Boolean(value?.trim()))))
-      .sort((a, b) => a.localeCompare(b, language === 'ar' ? 'ar' : 'en'))
-      .map((value) => ({ value, label: value }));
-
-  return {
-    customerCodes: optionsFor((party) => party.customerCode || party.code),
-    systemCodes: optionsFor((party) => party.systemCode || party.paperCode),
-    fileCodes: optionsFor((party) => party.fileCode || party.fileNumber),
-  };
-};
