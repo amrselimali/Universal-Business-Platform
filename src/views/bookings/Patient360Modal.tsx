@@ -2,7 +2,8 @@
  * نافذة ملف العميل 360 — مستخرجة من BookingsFollowUpView
  */
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import { loadInvoiceSummary } from '../../services/invoiceQueryApi';
 import type { Appointment, Party, TreatmentPlan } from '../../types';
 
 interface Props {
@@ -11,19 +12,25 @@ interface Props {
   patient: Party | null;
   appointments: Appointment[];
   treatmentPlans: TreatmentPlan[];
-  invoices: { customerName?: string }[];
   formatMoney: (value: number) => string;
   onClose: () => void;
 }
 
 export const Patient360Modal: React.FC<Props> = ({
-  t, open, patient, appointments, treatmentPlans, invoices, formatMoney, onClose,
+  t, open, patient, appointments, treatmentPlans, formatMoney, onClose,
 }) => {
   if (!open || !patient) return null;
 
   const visits = appointments.filter((item) => item.patientName === patient.name);
   const plans = treatmentPlans.filter((item) => item.patientName === patient.name);
-  const invoiceCount = invoices.filter((item) => item.customerName === patient.name).length;
+  const [invoiceCount, setInvoiceCount] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    if (!open || !patient) return;
+    loadInvoiceSummary({ tenantId: patient.tenantId || '', filters: { customerId: patient.id, search: patient.name } })
+      .then((summary) => { if (!cancelled) setInvoiceCount(summary.count); });
+    return () => { cancelled = true; };
+  }, [open, patient?.id, patient?.name, patient?.tenantId]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">

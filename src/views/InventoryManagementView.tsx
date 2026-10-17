@@ -1,5 +1,6 @@
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { usePlatform } from '../context/PlatformContext';
+import { loadInvoicePage } from '../services/invoiceQueryApi';
 import { LowStockAlertWidget } from '../components/LowStockAlertWidget';
 import {
   InventoryAudit,
@@ -43,6 +44,7 @@ export const InventoryManagementView: React.FC = () => {
     formatMoney,
     branches,
     activeBranch,
+    tenant,
     warehouses,
     products,
     stockLevels,
@@ -60,12 +62,27 @@ export const InventoryManagementView: React.FC = () => {
     settleInventoryAudit,
     staffMembers,
     receptionShifts,
-    invoices,
   } = usePlatform();
 
   // Active Tab: Stock items control, Movements log, Cost mapping (BOM), Consumption & Forecasting reports, Audits & Settlements
   const [activeTab, setActiveTab] = useState<'stock_items' | 'movements' | 'cost_mapping' | 'consumption_forecast' | 'audits'>('stock_items');
   const [selectedBranchId, setSelectedBranchId] = useState<string>(activeBranch?.id || 'all');
+
+  // سطور مبيعات الأصناف من السيرفر (بدل مصفوفة الفواتير الكاملة)
+  const [serverSaleLines, setServerSaleLines] = useState<Array<{ items?: Array<{ productId: string; quantity?: number }> }>>([]);
+  useEffect(() => {
+    let cancelled = false;
+    if (!tenant?.id) return;
+    loadInvoicePage({
+      tenantId: tenant.id,
+      filters: { branchId: selectedBranchId !== 'all' ? selectedBranchId : undefined },
+      limit: 200,
+    }).then((page) => {
+      if (!cancelled) setServerSaleLines(page.invoices as Array<{ items?: Array<{ productId: string; quantity?: number }> }>);
+    });
+    return () => { cancelled = true; };
+  }, [tenant?.id, selectedBranchId]);
+
   const [selectedWarehouseId, setSelectedWarehouseId] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [filterLinkedOnly, setFilterLinkedOnly] = useState<'all' | 'linked' | 'unlinked'>('all');
@@ -361,9 +378,7 @@ export const InventoryManagementView: React.FC = () => {
     const branchShifts = receptionShifts.filter(
       (s) => selectedBranchId === 'all' || !s.branchId || s.branchId === selectedBranchId
     );
-    const branchInvoices = invoices.filter(
-      (i) => selectedBranchId === 'all' || !i.branchId || i.branchId === selectedBranchId
-    );
+    const branchInvoices: Array<{ items?: Array<{ productId: string; quantity?: number }> }> = serverSaleLines;
 
     // From reception shifts runRows
     branchShifts.forEach((shift) => {
@@ -443,7 +458,7 @@ export const InventoryManagementView: React.FC = () => {
         linkedSalesNames,
       };
     });
-  }, [stockItems, salesItems, receptionShifts, invoices, warehouses, getProductStock]);
+  }, [stockItems, salesItems, receptionShifts, serverSaleLines, warehouses, getProductStock]);
 
   // --- Handlers: Add New Stock Item ---
   const handleOpenAddStockItem = () => {

@@ -101,7 +101,6 @@ export const BookingsFollowUpView: React.FC = () => {
     deletePatientFollowUp,
     addTreatmentPlan,
     progressTreatmentPlan,
-    invoices,
     updateParty,
     addParty,
     importPartiesBulk,
@@ -5091,7 +5090,6 @@ export const BookingsFollowUpView: React.FC = () => {
         patient={selectedPatientFor360}
         appointments={appointments}
         treatmentPlans={treatmentPlans}
-        invoices={invoices}
         formatMoney={formatMoney}
         onClose={() => setShowPatient360Modal(false)}
       />

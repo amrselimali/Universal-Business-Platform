@@ -21,10 +21,10 @@ export interface ScreenMetric {
 export const SCREEN_FILE_LIMIT = 300;
 
 export const SCREEN_METRICS: ScreenMetric[] = [
-  { viewId: 'BookingsFollowUpView', file: 'src/views/BookingsFollowUpView.tsx', lines: 6063, useState: 102, useEffect: 1, heavyLibs: [], overLimit: true },
+  { viewId: 'BookingsFollowUpView', file: 'src/views/BookingsFollowUpView.tsx', lines: 6061, useState: 102, useEffect: 1, heavyLibs: [], overLimit: true },
   { viewId: 'AccountingView', file: 'src/views/AccountingView.tsx', lines: 3320, useState: 58, useEffect: 6, heavyLibs: [], overLimit: true },
   { viewId: 'ReceptionOpsView', file: 'src/views/ReceptionOpsView.tsx', lines: 3054, useState: 45, useEffect: 1, heavyLibs: [], overLimit: true },
-  { viewId: 'InventoryManagementView', file: 'src/views/InventoryManagementView.tsx', lines: 2990, useState: 33, useEffect: 0, heavyLibs: [], overLimit: true },
+  { viewId: 'InventoryManagementView', file: 'src/views/InventoryManagementView.tsx', lines: 3005, useState: 34, useEffect: 1, heavyLibs: [], overLimit: true },
   { viewId: 'ProductManagementView', file: 'src/views/ProductManagementView.tsx', lines: 2504, useState: 22, useEffect: 0, heavyLibs: [], overLimit: true },
   { viewId: 'CompaniesBranchesView', file: 'src/views/CompaniesBranchesView.tsx', lines: 2351, useState: 49, useEffect: 0, heavyLibs: [], overLimit: true },
   { viewId: 'EmployeeDossierView', file: 'src/views/EmployeeDossierView.tsx', lines: 2216, useState: 14, useEffect: 3, heavyLibs: ['xlsx'], overLimit: true },

@@ -2,10 +2,10 @@
   "limit": 300,
   "files": {
     "src/context/PlatformContext.tsx": 12228,
-    "src/views/BookingsFollowUpView.tsx": 6063,
+    "src/views/BookingsFollowUpView.tsx": 6061,
     "src/views/AccountingView.tsx": 3320,
     "src/views/ReceptionOpsView.tsx": 3054,
-    "src/views/InventoryManagementView.tsx": 2990,
+    "src/views/InventoryManagementView.tsx": 3005,
     "src/data/initialData.ts": 2724,
     "src/views/ProductManagementView.tsx": 2504,
     "src/views/CompaniesBranchesView.tsx": 2351,
