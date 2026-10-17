@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { usePlatform } from '../context/PlatformContext';
 import { Product, SalesInvoice, PaymentSplit } from '../types';
+import { loadInvoicePage } from '../services/invoiceQueryApi';
 import {
   Search,
   Barcode,
@@ -175,13 +176,20 @@ export const PosView: React.FC = () => {
     return matchesCat && matchesSearch;
   });
 
-  // Invoices scoped strictly to current active branch
-  const branchInvoices = React.useMemo(() => {
-    return (invoices || []).filter((inv) => {
-      if (!activeBranch || !activeBranch.id || activeBranch.id === 'none') return true;
-      return inv.branchId === activeBranch.id;
+  // فواتير الفرع من السيرفر (Keyset) بدل تصفية المصفوفة المحلية
+  const [branchInvoices, setBranchInvoices] = useState<SalesInvoice[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    if (!tenant?.id) return;
+    loadInvoicePage({
+      tenantId: tenant.id,
+      filters: { branchId: activeBranch?.id && activeBranch.id !== 'none' ? activeBranch.id : undefined },
+      limit: 50,
+    }).then((page) => {
+      if (!cancelled) setBranchInvoices(page.invoices);
     });
-  }, [invoices, activeBranch]);
+    return () => { cancelled = true; };
+  }, [tenant?.id, activeBranch?.id]);
 
   const addToCart = (product: Product) => {
     // If product specifies defaultCollectionOnly, adopt it

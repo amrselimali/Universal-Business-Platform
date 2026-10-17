@@ -20,7 +20,7 @@
     "src/views/LaserDevicesView.tsx": 1486,
     "src/views/SmartNotificationsView.tsx": 1443,
     "src/views/StaffManagementView.tsx": 1278,
-    "src/views/PosView.tsx": 1181,
+    "src/views/PosView.tsx": 1189,
     "src/views/PaymentMethodsView.tsx": 1142,
     "src/views/SystemManualView.tsx": 1140,
     "src/views/fiscal/SpecializedTaxInvoicesTab.tsx": 1071,
