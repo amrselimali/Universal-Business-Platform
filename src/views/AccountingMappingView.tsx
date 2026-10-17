@@ -28,7 +28,7 @@ type TabId = 'rules' | 'posting' | 'locks' | 'coverage';
 const EMPTY: PostingRulesSnapshot = { rules: [], documents: [], locks: [], generated: [] };
 
 export const AccountingMappingView: React.FC = () => {
-  const { t, language, tenant, accounts, currentUser, canPerformAction, formatMoney, activeBranch } =
+  const { t, language, tenant, accounts, paymentMethods, currentUser, canPerformAction, formatMoney, activeBranch } =
     usePlatform();
   const isArabic = language === 'ar';
   const tenantId = tenant?.id || 'tenant-eg-001';
@@ -60,6 +60,14 @@ export const AccountingMappingView: React.FC = () => {
   const canPost = canPerformAction('accounting.post_journal');
   const canLock = canPerformAction('accounting.lock_period');
   const canOpen = canPerformAction('accounting.open_period');
+  const paymentMethodRefs = useMemo(
+    () =>
+      paymentMethods
+        .filter((method) => !method.isArchived)
+        .map((method) => ({ id: method.id, nameAr: method.nameAr, code: method.code, type: method.type })),
+    [paymentMethods]
+  );
+
   const accountOptions = useMemo(
     () => accounts.map((account) => ({ id: account.id, code: account.code ?? '', nameAr: account.nameAr })),
     [accounts]
@@ -158,6 +166,7 @@ export const AccountingMappingView: React.FC = () => {
           tenantId={tenantId}
           rules={snapshot.rules}
           accounts={accountOptions}
+          paymentMethods={paymentMethodRefs}
           canEdit={canPost}
           actor={currentUser?.name}
           notify={notify}
@@ -171,6 +180,7 @@ export const AccountingMappingView: React.FC = () => {
           tenantId={tenantId}
           branchId={activeBranch?.id}
           documents={snapshot.documents}
+          paymentMethods={paymentMethodRefs}
           canPost={canPost}
           actor={currentUser?.name}
           formatMoney={formatMoney}

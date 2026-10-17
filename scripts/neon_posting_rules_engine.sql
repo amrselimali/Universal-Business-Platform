@@ -114,10 +114,9 @@ BEGIN
    WHERE tenant_id = p_tenant AND lock_date = p_date;
 END; $$ LANGUAGE plpgsql;
 
--- 6) حل قاعدة الترحيل لخلية واحدة -----------------------------------------
---    غياب قاعدة فعّالة = الترحيل مرفوض (لا يوجد مصدر بديل للحساب).
-CREATE OR REPLACE FUNCTION fn_resolve_posting_rule(
-  p_tenant text, p_type text, p_field text, p_selector text DEFAULT 'default'
+-- 6) حل قاعدة الترحيل بسلسلة أولوية (الطريقة ← النوع ← المجموعة ← الافتراضي)
+CREATE OR REPLACE FUNCTION fn_resolve_posting_rule_chain(
+  p_tenant text, p_type text, p_field text, p_selectors text[]
 ) RETURNS TABLE (
   rule_id BIGINT, rule_code TEXT, direction TEXT,
   account_code TEXT, account_name TEXT
@@ -130,9 +129,23 @@ CREATE OR REPLACE FUNCTION fn_resolve_posting_rule(
      AND r.transaction_type = p_type
      AND r.field_key = p_field
      AND r.is_active = TRUE
-     AND r.selector_key IN (COALESCE(NULLIF(p_selector, ''), 'default'), 'default')
-   ORDER BY (r.selector_key = 'default') ASC
+     AND r.selector_key = ANY(p_selectors)
+   ORDER BY array_position(p_selectors, r.selector_key)
    LIMIT 1;
+$$ LANGUAGE sql STABLE;
+
+-- 6) حل قاعدة الترحيل لخلية واحدة -----------------------------------------
+--    غياب قاعدة فعّالة = الترحيل مرفوض (لا يوجد مصدر بديل للحساب).
+CREATE OR REPLACE FUNCTION fn_resolve_posting_rule(
+  p_tenant text, p_type text, p_field text, p_selector text DEFAULT 'default'
+) RETURNS TABLE (
+  rule_id BIGINT, rule_code TEXT, direction TEXT,
+  account_code TEXT, account_name TEXT
+) AS $$
+  SELECT * FROM fn_resolve_posting_rule_chain(
+    p_tenant, p_type, p_field,
+    ARRAY[COALESCE(NULLIF(p_selector, ''), 'default'), 'default']
+  );
 $$ LANGUAGE sql STABLE;
 
 -- 7) الدالة المركزية: ترحيل مستند من القواعد فقط ---------------------------
@@ -207,8 +220,13 @@ BEGIN
       v_rule_id := NULL; v_rule_cd := NULL; v_dir := NULL; v_acc_code := NULL; v_acc_name := NULL;
       SELECT t.rule_id, t.rule_code, t.direction, t.account_code, t.account_name
         INTO v_rule_id, v_rule_cd, v_dir, v_acc_code, v_acc_name
-        FROM fn_resolve_posting_rule(
-          p_tenant, p_type, v_comp->>'field_key', COALESCE(v_comp->>'selector', 'default')) t;
+        FROM fn_resolve_posting_rule_chain(
+          p_tenant, p_type, v_comp->>'field_key',
+          CASE
+            WHEN jsonb_typeof(v_comp->'selectors') = 'array'
+              THEN ARRAY(SELECT jsonb_array_elements_text(v_comp->'selectors'))
+            ELSE ARRAY[COALESCE(v_comp->>'selector', 'default'), 'default']
+          END) t;
 
       IF v_acc_code IS NULL THEN
         IF COALESCE((v_comp->>'optional')::boolean, false) THEN CONTINUE; END IF;
@@ -292,6 +310,7 @@ BEGIN
     EXECUTE 'GRANT USAGE, SELECT ON SEQUENCE accounting_period_locks_id_seq TO app_api';
     EXECUTE 'GRANT EXECUTE ON FUNCTION fn_post_document(text,text,text,text,text,text,text,text,jsonb,text) TO app_api';
     EXECUTE 'GRANT EXECUTE ON FUNCTION fn_resolve_posting_rule(text,text,text,text) TO app_api';
+    EXECUTE 'GRANT EXECUTE ON FUNCTION fn_resolve_posting_rule_chain(text,text,text,text[]) TO app_api';
     EXECUTE 'GRANT EXECUTE ON FUNCTION fn_is_period_locked(text,date) TO app_api';
     EXECUTE 'GRANT EXECUTE ON FUNCTION fn_lock_period(text,date,text,text) TO app_api';
     EXECUTE 'GRANT EXECUTE ON FUNCTION fn_open_period(text,date) TO app_api';

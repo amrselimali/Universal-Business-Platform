@@ -8,7 +8,12 @@
 
 import React, { useMemo, useState } from 'react';
 import { AlertCircle, CheckCircle2, Clock, RotateCw, Send } from 'lucide-react';
-import { ACCOUNTING_OPERATIONS, SELECTOR_OPTIONS, findOperation } from '../../data/accountingOperations';
+import {
+  ACCOUNTING_OPERATIONS,
+  findOperation,
+  selectorChainForValue,
+  type PaymentMethodRef,
+} from '../../data/accountingOperations';
 import { postDocument } from '../../services/postingRulesApi';
 import type { PostingComponent, PostingDocument } from '../../types/postingRules';
 
@@ -18,6 +23,7 @@ interface Props {
   tenantId: string;
   branchId?: string;
   documents: PostingDocument[];
+  paymentMethods: PaymentMethodRef[];
   canPost: boolean;
   actor?: string;
   formatMoney: (value: number) => string;
@@ -33,7 +39,7 @@ const statusStyle: Record<string, string> = {
 };
 
 export const PostingDocumentsPanel: React.FC<Props> = ({
-  t, isArabic, tenantId, branchId, documents, canPost, actor, formatMoney, notify, onChanged,
+  t, isArabic, tenantId, branchId, documents, paymentMethods, canPost, actor, formatMoney, notify, onChanged,
 }) => {
   const [opType, setOpType] = useState<string>(ACCOUNTING_OPERATIONS[0].type);
   const [documentRef, setDocumentRef] = useState<string>('');
@@ -50,7 +56,9 @@ export const PostingDocumentsPanel: React.FC<Props> = ({
       .map((field) => ({
         field_key: field.key,
         amount: Number(amounts[field.key] || 0),
-        selector: field.selector ? selectors[field.key] || 'default' : 'default',
+        selectors: field.selector
+          ? selectorChainForValue(selectors[field.key] ?? '', paymentMethods)
+          : ['default'],
         memo: description || undefined,
         optional: !field.required,
       }))
@@ -148,12 +156,16 @@ export const PostingDocumentsPanel: React.FC<Props> = ({
                 />
                 {field.selector && (
                   <select
-                    value={selectors[field.key] ?? 'default'}
+                    value={selectors[field.key] ?? ''}
                     onChange={(e) => setSelectors((prev) => ({ ...prev, [field.key]: e.target.value }))}
                     className="rounded-lg border border-slate-200 bg-white px-1 text-[10px] dark:border-slate-700 dark:bg-slate-900"
+                    title={t('طريقة الدفع التي تحدد حساب القيد', 'The payment method that selects the journal account')}
                   >
-                    {SELECTOR_OPTIONS[field.selector].map((option) => (
-                      <option key={option.key} value={option.key}>{isArabic ? option.labelAr : option.labelEn}</option>
+                    <option value="">{t('افتراضي', 'Default')}</option>
+                    <option value="cash">{t('أي نقدي', 'Any cash')}</option>
+                    <option value="bank">{t('أي بنك', 'Any bank')}</option>
+                    {paymentMethods.map((method) => (
+                      <option key={method.id} value={`pm:${method.id}`}>{method.nameAr}</option>
                     ))}
                   </select>
                 )}

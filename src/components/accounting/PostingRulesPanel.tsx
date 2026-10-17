@@ -10,9 +10,10 @@ import React, { useMemo, useState } from 'react';
 import { CheckCircle2, Save, ShieldOff } from 'lucide-react';
 import {
   ACCOUNTING_OPERATIONS,
-  SELECTOR_OPTIONS,
+  paymentSelectorOptions,
   type OperationDef,
   type OperationField,
+  type PaymentMethodRef,
 } from '../../data/accountingOperations';
 import { savePostingRule } from '../../services/postingRulesApi';
 import type { PostingRule } from '../../types/postingRules';
@@ -29,6 +30,7 @@ interface Props {
   tenantId: string;
   rules: PostingRule[];
   accounts: AccountOption[];
+  paymentMethods: PaymentMethodRef[];
   canEdit: boolean;
   actor?: string;
   notify: (type: 'ok' | 'err', text: string) => void;
@@ -50,6 +52,7 @@ const RuleRow: React.FC<{
   op: OperationDef;
   field: OperationField;
   selector: string;
+  selectorLabel: string;
   rule?: PostingRule;
   draft: Draft;
   accounts: AccountOption[];
@@ -59,7 +62,7 @@ const RuleRow: React.FC<{
   isArabic: boolean;
   onPatch: (patch: Partial<Draft>) => void;
   onSave: () => void;
-}> = ({ op, field, selector, rule, draft, accounts, canEdit, saving, t, isArabic, onPatch, onSave }) => (
+}> = ({ op, field, selector, selectorLabel, rule, draft, accounts, canEdit, saving, t, isArabic, onPatch, onSave }) => (
   <div className="grid items-center gap-2 rounded-xl bg-slate-50 px-2 py-1.5 sm:grid-cols-[1.3fr_0.7fr_0.6fr_1.5fr_auto] dark:bg-slate-800/40">
     <div className="min-w-0">
       <p className="truncate text-[11px] font-bold text-slate-700 dark:text-slate-200">
@@ -79,8 +82,11 @@ const RuleRow: React.FC<{
       </p>
     </div>
 
-    <span className="justify-self-start rounded-md bg-slate-200 px-1.5 py-0.5 font-mono text-[9px] text-slate-600 dark:bg-slate-700 dark:text-slate-200">
-      {selector}
+    <span
+      title={selector}
+      className="justify-self-start truncate rounded-md bg-slate-200 px-1.5 py-0.5 text-[9px] text-slate-600 dark:bg-slate-700 dark:text-slate-200"
+    >
+      {selectorLabel}
     </span>
 
     <select
@@ -140,10 +146,16 @@ const RuleRow: React.FC<{
 );
 
 export const PostingRulesPanel: React.FC<Props> = ({
-  t, isArabic, tenantId, rules, accounts, canEdit, actor, notify, onSaved,
+  t, isArabic, tenantId, rules, accounts, paymentMethods, canEdit, actor, notify, onSaved,
 }) => {
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [savingKey, setSavingKey] = useState<string | null>(null);
+
+  const paymentOptions = useMemo(() => paymentSelectorOptions(paymentMethods), [paymentMethods]);
+  const optionLabel = useMemo(
+    () => new Map(paymentOptions.map((option) => [option.key, isArabic ? option.labelAr : option.labelEn])),
+    [paymentOptions, isArabic]
+  );
 
   const accountList = useMemo(
     () => [...accounts].filter((a) => a.code).sort((a, b) => a.code.localeCompare(b.code)),
@@ -232,9 +244,11 @@ export const PostingRulesPanel: React.FC<Props> = ({
 
           <div className="mt-2 space-y-1.5">
             {op.fields.map((field) => {
-              const selectors = field.selector
-                ? SELECTOR_OPTIONS[field.selector].map((option) => option.key)
-                : ['default'];
+              const baseKeys = field.selector ? paymentOptions.map((option) => option.key) : ['default'];
+              const existingKeys = rules
+                .filter((rule) => rule.transactionType === op.type && rule.fieldKey === field.key)
+                .map((rule) => rule.selectorKey);
+              const selectors = [...new Set([...baseKeys, ...existingKeys])];
               return selectors.map((selector) => {
                 const key = keyOf(op.type, field.key, selector);
                 return (
@@ -243,6 +257,7 @@ export const PostingRulesPanel: React.FC<Props> = ({
                     op={op}
                     field={field}
                     selector={selector}
+                    selectorLabel={optionLabel.get(selector) ?? selector}
                     rule={rulesByKey.get(key)}
                     draft={draftFor(op.type, field.key, selector, rulesByKey.get(key))}
                     accounts={accountList}

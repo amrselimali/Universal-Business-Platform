@@ -30,6 +30,8 @@ export interface PostingRule {
 export interface PostingComponent {
   field_key: string;
   amount: number;
+  /** سلسلة أولوية للمُحدِّدات: pm:<id> ← pmt:<type> ← cash|bank ← default */
+  selectors?: string[];
   selector?: string;
   memo?: string;
   /** إن كان الحقل اختيارياً ولا قاعدة له: يُتجاهل بدل إفشال الترحيل. */
