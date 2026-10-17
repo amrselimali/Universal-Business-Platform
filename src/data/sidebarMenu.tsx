@@ -296,25 +296,33 @@ export const SIDEBAR_MENU_SECTIONS: MenuSectionDef[] = [
           highlight: true,
         },
         {
-          // مرآة حقيقية لجداول قاعدة البيانات — قراءة وكتابة محكومة.
-          id: 'database_admin',
-          labelAr: 'إدارة قاعدة البيانات',
-          labelEn: 'Database Explorer',
-          icon: Database,
-          highlight: true,
-        },
-        {
           id: 'neon',
           labelAr: 'قاعدة بيانات نيون السحابية',
           labelEn: 'Neon Cloud Database',
           icon: Database,
           alwaysShow: true,
         },
+      ],
+    },
+    {
+      titleAr: 'إعدادات الكود',
+      titleEn: 'Code Settings',
+      items: [
+        {
+          // مرآة حقيقية لجداول قاعدة البيانات — قراءة وكتابة محكومة.
+          id: 'database_admin',
+          labelAr: 'إدارة قاعدة البيانات',
+          labelEn: 'Database Explorer',
+          icon: Database,
+          alwaysShow: true,
+          highlight: true,
+        },
         {
           id: 'system_manual',
-          labelAr: 'دليل المستخدم والتوثيق التقني',
-          labelEn: 'User Manual & Tech Specs',
+          labelAr: 'دليل المستخدم والتوثيق',
+          labelEn: 'User Manual & Documentation',
           icon: BookOpen,
+          alwaysShow: true,
           highlight: true,
         },
         {
@@ -323,6 +331,7 @@ export const SIDEBAR_MENU_SECTIONS: MenuSectionDef[] = [
           labelAr: 'معمارية المنظومة الجديدة',
           labelEn: 'New System Architecture',
           icon: Network,
+          alwaysShow: true,
           highlight: true,
         },
       ],

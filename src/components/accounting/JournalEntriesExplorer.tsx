@@ -39,11 +39,17 @@ export const JournalEntriesExplorer: React.FC<Props> = ({
   const [dateTo, setDateTo] = useState('');
   const [expanded, setExpanded] = useState<string | null>(null);
 
+  const [expandAll, setExpandAll] = useState(false);
+
   const filtered = useMemo(
     () => filterJournals(entries, { search, dateFrom, dateTo }),
     [entries, search, dateFrom, dateTo]
   );
   const summary = useMemo(() => summarizeJournals(filtered), [filtered]);
+  const totalLinesCount = useMemo(
+    () => filtered.reduce((sum, entry) => sum + (entry.lines?.length || 0), 0),
+    [filtered]
+  );
 
   return (
     <div className="space-y-3">
@@ -76,6 +82,14 @@ export const JournalEntriesExplorer: React.FC<Props> = ({
 
           <button
             type="button"
+            onClick={() => setExpandAll((prev) => !prev)}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[11px] font-bold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+          >
+            {expandAll ? t('طي السطور', 'Collapse lines') : t(`عرض كل السطور (${totalLinesCount} سطر)`, `Expand lines (${totalLinesCount})`)}
+          </button>
+
+          <button
+            type="button"
             onClick={() => void onReload()}
             disabled={busy}
             className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 px-3 py-2 text-[11px] font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-40 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
@@ -102,9 +116,10 @@ export const JournalEntriesExplorer: React.FC<Props> = ({
         </p>
       )}
 
-      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
         {[
-          { key: 'count', labelAr: 'عدد القيود', labelEn: 'Entries', value: String(summary.count) },
+          { key: 'count', labelAr: 'عدد القيود (الرؤوس)', labelEn: 'Voucher Headers', value: String(summary.count) },
+          { key: 'lines', labelAr: 'إجمالي السطور (المدين والدائن)', labelEn: 'Entry Lines', value: String(totalLinesCount) },
           { key: 'debit', labelAr: 'إجمالي المدين', labelEn: 'Total debit', value: formatMoney(summary.totalDebit) },
           { key: 'credit', labelAr: 'إجمالي الدائن', labelEn: 'Total credit', value: formatMoney(summary.totalCredit) },
           { key: 'unbalanced', labelAr: 'قيود غير متوازنة', labelEn: 'Unbalanced', value: String(summary.unbalanced) },
@@ -143,7 +158,7 @@ export const JournalEntriesExplorer: React.FC<Props> = ({
               )}
 
               {filtered.map((entry) => {
-                const isOpen = expanded === entry.id;
+                const isOpen = expandAll || expanded === entry.id;
                 return (
                   <React.Fragment key={entry.id}>
                     <tr className="text-[11px] text-slate-700 dark:text-slate-200">

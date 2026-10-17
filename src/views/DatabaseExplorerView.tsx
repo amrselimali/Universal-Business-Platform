@@ -54,13 +54,21 @@ export const DatabaseExplorerView: React.FC = () => {
     return loaded;
   }, [t, notify]);
 
-  const loadRows = useCallback(async (table: DbTable, offset = 0) => {
+  const [pageSize, setPageSize] = useState<number>(50);
+
+  const loadRows = useCallback(async (table: DbTable, offset = 0, limit?: number) => {
     setBusy(true);
-    const result = await fetchTableRows({ schema: table.schema, table: table.name, offset });
+    const effLimit = limit !== undefined ? limit : pageSize;
+    const result = await fetchTableRows({ schema: table.schema, table: table.name, offset, limit: effLimit });
     setPage(result);
+    if (result.columns && result.columns.length > 0) {
+      table.columns = result.columns;
+      if (result.primaryKey) table.primaryKey = result.primaryKey;
+      setSelected((prev) => (prev && prev.name === table.name ? { ...prev, columns: result.columns!, primaryKey: result.primaryKey || prev.primaryKey } : prev));
+    }
     setBusy(false);
     if (result.error) notify('err', result.error);
-  }, [notify]);
+  }, [notify, pageSize]);
 
   useEffect(() => {
     void (async () => {
@@ -80,6 +88,13 @@ export const DatabaseExplorerView: React.FC = () => {
     setDropConfirm('');
     await loadRows(table);
   };
+
+  const selectByName = useCallback(async (tableName: string) => {
+    const target = catalog.tables.find((t) => t.name === tableName || `${t.schema}.${t.name}` === tableName);
+    if (target) {
+      await select(target);
+    }
+  }, [catalog.tables]);
 
   const afterWrite = async () => {
     // مرآة مزدوجة: نحدّث الجدول ثم نعيد مزامنة بيانات التطبيق من الداتابيز
@@ -238,9 +253,14 @@ export const DatabaseExplorerView: React.FC = () => {
               canWrite={canWrite}
               canDelete={canWrite}
               notify={notify}
-              reload={() => loadRows(selected, page.offset)}
-              onPage={(offset) => void loadRows(selected, offset)}
+              reload={() => loadRows(selected, page.offset, pageSize)}
+              onPage={(offset, limit) => {
+                const nextLimit = limit !== undefined ? limit : pageSize;
+                if (limit !== undefined) setPageSize(limit);
+                void loadRows(selected, offset, nextLimit);
+              }}
               onCatalogChanged={async () => { await reloadCatalog(); const s = await syncNow(); if (s.error) notify('err', s.error); }}
+              onSelectTable={(tableName) => void selectByName(tableName)}
             />
           ) : (
             <p className="rounded-2xl border border-dashed border-slate-200 p-6 text-center text-[11px] text-slate-400 dark:border-slate-700">

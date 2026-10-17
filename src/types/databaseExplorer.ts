@@ -37,6 +37,8 @@ export interface DbRowPage {
   total: number;
   limit: number;
   offset: number;
+  columns?: DbColumn[];
+  primaryKey?: string[];
   error?: string;
 }
 
