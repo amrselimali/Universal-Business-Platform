@@ -53,6 +53,7 @@ const MIGRATIONS = [
   { file: 'scripts/neon_revenue_invoices_view.sql', title: 'توحيد مصدر الفواتير: View موحّد + دوال محدّثة' },
   { file: 'scripts/neon_invoice_source_filter.sql', title: 'فواتير: فلتر المصدر في الدوال' },
   { file: 'scripts/neon_invoice_rows_payload.sql', title: 'فواتير: حمولة الصف الكاملة في القائمة' },
+  { file: 'scripts/neon_invoice_scope_filters.sql', title: 'فواتير: فلاتر المصدر/العميل/الفرع' },
 ];
 
 /** استعلامات التحقق — تُشغَّل بعد التطبيق. */

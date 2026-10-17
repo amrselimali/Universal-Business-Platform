@@ -19,6 +19,8 @@ export interface InvoiceFilters {
   to?: string;
   status?: string;
   source?: string;
+  customerId?: string;
+  branchId?: string;
 }
 
 export interface InvoicePage {
@@ -54,6 +56,8 @@ const params = (tenantId: string, filters: InvoiceFilters) => [
   filters.to || null,
   filters.status || null,
   filters.source && filters.source !== 'all' ? filters.source : null,
+  filters.customerId && filters.customerId !== 'all' ? filters.customerId : null,
+  filters.branchId || null,
 ];
 
 const toInvoice = (row: Record<string, any>): SalesInvoice => {
@@ -89,7 +93,7 @@ export async function loadInvoicePage(paramsInput: {
 
   try {
     const rows: any = await sql.query(
-      `SELECT fn_invoice_list($1,$2,$3::date,$4::date,$5,$6,$7::date,$8,$9) AS page`,
+      `SELECT fn_invoice_list($1,$2,$3::date,$4::date,$5,$6,$7::date,$8,$9,$10,$11) AS page`,
       [...params(paramsInput.tenantId, paramsInput.filters), paramsInput.limit ?? 50,
        paramsInput.afterDate ?? null, paramsInput.afterId ?? null]
     );
@@ -114,7 +118,7 @@ export async function loadInvoiceSummary(paramsInput: {
 
   try {
     const rows: any = await sql.query(
-      `SELECT fn_invoice_summary($1,$2,$3::date,$4::date,$5,$6) AS summary`,
+      `SELECT fn_invoice_summary($1,$2,$3::date,$4::date,$5,$6,$7,$8) AS summary`,
       params(paramsInput.tenantId, paramsInput.filters)
     );
     const summary = rows?.[0]?.summary ?? {};
