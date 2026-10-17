@@ -1,7 +1,8 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { usePlatform } from '../context/PlatformContext';
 import { AuditRecord } from '../types';
 import { loadAuditPage } from '../services/auditLogPaged';
+import { usePagedList } from '../hooks/usePagedList';
 import { AuditSnapshotModal } from './audit/AuditSnapshotModal';
 import {
   ShieldAlert,
@@ -29,63 +30,44 @@ export const AuditTrailView: React.FC = () => {
   const [entityFilter, setEntityFilter] = useState<string>('All');
   const [userFilter, setUserFilter] = useState<string>('All');
 
-  // قراءة مُرقَّمة من السيرفر: صفحة واحدة في كل مرة (لا تحميل للسجل كاملاً)
-  const [rows, setRows] = useState<AuditRecord[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [hasMore, setHasMore] = useState(false);
-  const [debouncedSearch, setDebouncedSearch] = useState('');
-  const afterRef = useRef<string | null>(null);
+  // Inspect / Reveal Snapshot Modal
+  const [selectedRecord, setSelectedRecord] = useState<AuditRecord | null>(null);
+  const [showSnapshotModal, setShowSnapshotModal] = useState(false);
 
+  // تنفيذ ترقيم واحد مشترك (src/hooks/usePagedList) — بلا تكرار بين الشاشات
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedSearch(searchQuery.trim()), 350);
     return () => window.clearTimeout(timer);
   }, [searchQuery]);
 
-  const reload = useCallback(async () => {
-    if (!tenant?.id) return;
-    setLoading(true);
-    const result = await loadAuditPage({
-      tenantId: tenant.id,
-      limit: 100,
+  const filters = useMemo(
+    () => ({
+      tenantId: tenant?.id ?? '',
       search: debouncedSearch,
       action: actionFilter,
       entity: entityFilter,
       userId: userFilter,
-    });
-    afterRef.current = result.nextAfter;
-    setRows(result.rows);
-    setTotal(result.total);
-    setHasMore(Boolean(result.nextAfter));
-    setLoading(false);
-  }, [tenant?.id, debouncedSearch, actionFilter, entityFilter, userFilter]);
+    }),
+    [tenant?.id, debouncedSearch, actionFilter, entityFilter, userFilter]
+  );
 
-  const loadMore = useCallback(async () => {
-    if (!tenant?.id || !afterRef.current || loading) return;
-    setLoading(true);
-    const result = await loadAuditPage({
-      tenantId: tenant.id,
-      limit: 100,
-      afterId: afterRef.current,
-      search: debouncedSearch,
-      action: actionFilter,
-      entity: entityFilter,
-      userId: userFilter,
-    });
-    afterRef.current = result.nextAfter;
-    setRows((prev) => [...prev, ...result.rows]);
-    setTotal(result.total);
-    setHasMore(Boolean(result.nextAfter));
-    setLoading(false);
-  }, [tenant?.id, debouncedSearch, actionFilter, entityFilter, userFilter, loading]);
-
-  useEffect(() => {
-    void reload();
-  }, [reload]);
-
-  // Inspect / Reveal Snapshot Modal
-  const [selectedRecord, setSelectedRecord] = useState<AuditRecord | null>(null);
-  const [showSnapshotModal, setShowSnapshotModal] = useState(false);
+  const { rows, total, loading, hasMore, loadMore } = usePagedList<AuditRecord, typeof filters>({
+    fetchPage: ({ filters: active, afterId, limit }) =>
+      loadAuditPage({
+        tenantId: active.tenantId,
+        limit,
+        afterId,
+        search: active.search,
+        action: active.action,
+        entity: active.entity,
+        userId: active.userId,
+      }),
+    filters,
+    pageSize: 100,
+    resetKey: tenant?.id ?? '',
+    enabled: Boolean(tenant?.id),
+  });
 
   const handleInspect = (record: AuditRecord) => {
     setSelectedRecord(record);
