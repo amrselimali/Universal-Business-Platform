@@ -67,6 +67,11 @@ import {
   checkDoctorAppointmentConflict,
   sortAppointments,
 } from '../utils/bookingTimeUtils';
+import { AddStaffScheduleModal } from './bookings/AddStaffScheduleModal';
+import { AttendanceModal } from './bookings/AttendanceModal';
+import { CancelAppointmentModal } from './bookings/CancelAppointmentModal';
+import { RescheduleModal } from './bookings/RescheduleModal';
+import { Patient360Modal } from './bookings/Patient360Modal';
 
 // تعريفات أعمدة الإكسيل انتقلت إلى src/data/bookingsExcelColumns.ts
 const bookingsExcelColumns = BOOKINGS_EXCEL_COLUMNS;
@@ -3847,158 +3852,28 @@ export const BookingsFollowUpView: React.FC = () => {
       )}
 
       {/* Modal: Add Staff Work Schedule */}
-      {showAddStaffScheduleModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
-          <div className="w-full max-w-lg bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl p-5 space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-              <div className="flex items-center gap-2">
-                <Users className="h-5 w-5 text-indigo-600" />
-                <h3 className="font-bold text-slate-900 dark:text-white text-base">
-                  {t('تسجيل موعد دوام موظف بالفرع', 'Add Staff Work Schedule')}
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowAddStaffScheduleModal(false)}
-                className="text-slate-400 hover:text-slate-600 text-lg leading-none cursor-pointer"
-              >
-                &times;
-              </button>
-            </div>
-
-            <form onSubmit={handleAddStaffScheduleSubmit} className="space-y-4">
-              {/* Employee Selection: From active branch employees registered in Staff Management */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  {t('اسم الموظف *', 'Employee Name *')}
-                </label>
-                <select
-                  required
-                  value={newSchStaffId}
-                  onChange={(e) => {
-                    const stId = e.target.value;
-                    setNewSchStaffId(stId);
-                    const selected = branchStaffMembers.find((s) => s.id === stId);
-                    if (selected) {
-                      setNewSchStaffName(selected.nameAr);
-                      const title = selected.jobTitleAr || selected.specialtyAr || selected.role || 'مقدم خدمة';
-                      setNewSchJobTitle(title);
-                    } else {
-                      setNewSchStaffName('');
-                      setNewSchJobTitle('');
-                    }
-                  }}
-                  className="w-full px-3 py-2.5 text-xs rounded-xl bg-indigo-50/50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800 text-slate-900 dark:text-white font-bold focus:outline-indigo-600"
-                >
-                  <option value="">{t('-- اختر اسم الموظف * --', '-- Select Staff Member * --')}</option>
-                  {branchStaffMembers.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.nameAr} {s.jobTitleAr ? `[${s.jobTitleAr}]` : s.specialtyAr ? `[${s.specialtyAr}]` : ''}
-                    </option>
-                  ))}
-                </select>
-                {branchStaffMembers.length === 0 && (
-                  <p className="text-[11px] text-amber-600 mt-1">
-                    {t('لا يوجد موظفون مكودون بهذا الفرع في إدارة الموظفين.', 'No staff found for this branch in Staff Management.')}
-                  </p>
-                )}
-              </div>
-
-              {/* Job Title */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  {t('الوظيفة', 'Job Title')}
-                </label>
-                <input
-                  type="text"
-                  value={newSchJobTitle}
-                  onChange={(e) => setNewSchJobTitle(e.target.value)}
-                  placeholder={t('الوظيفة...', 'Job Title...')}
-                  className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 font-bold"
-                />
-              </div>
-
-              {/* Date */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  {t('تاريخ الدوام *', 'Duty Date *')}
-                </label>
-                <input
-                  type="date"
-                  required
-                  min={todayIso}
-                  value={newSchDate}
-                  onChange={(e) => setNewSchDate(e.target.value)}
-                  className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-bold"
-                />
-              </div>
-
-              {/* Start & End Times */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    {t('وقت بداية العمل *', 'Start Time *')}
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={newSchStartTime}
-                    onChange={(e) => setNewSchStartTime(e.target.value)}
-                    placeholder="09:00 AM"
-                    className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-bold"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    {t('وقت انتهاء العمل *', 'End Time *')}
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={newSchEndTime}
-                    onChange={(e) => setNewSchEndTime(e.target.value)}
-                    placeholder="05:00 PM"
-                    className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-bold"
-                  />
-                </div>
-              </div>
-
-              {/* Notes */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  {t('ملاحظات', 'Notes')}
-                </label>
-                <textarea
-                  rows={2}
-                  value={newSchNotes}
-                  onChange={(e) => setNewSchNotes(e.target.value)}
-                  placeholder="ملاحظات العيادة، الغرفة، الشفت..."
-                  className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
-                />
-              </div>
-
-              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setShowAddStaffScheduleModal(false)}
-                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
-                >
-                  {t('إلغاء', 'Cancel')}
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl cursor-pointer shadow-md shadow-indigo-600/20"
-                >
-                  {t('حفظ موعد الدوام', 'Save Schedule')}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Modal: Edit Staff Work Schedule */}
+      <AddStaffScheduleModal
+        t={t}
+        open={showAddStaffScheduleModal}
+        onClose={() => setShowAddStaffScheduleModal(false)}
+        onSubmit={handleAddStaffScheduleSubmit}
+        branchStaffMembers={branchStaffMembers}
+        staffId={newSchStaffId}
+        setStaffId={setNewSchStaffId}
+        staffName={newSchStaffName}
+        setStaffName={setNewSchStaffName}
+        jobTitle={newSchJobTitle}
+        setJobTitle={setNewSchJobTitle}
+        date={newSchDate}
+        setDate={setNewSchDate}
+        startTime={newSchStartTime}
+        setStartTime={setNewSchStartTime}
+        endTime={newSchEndTime}
+        setEndTime={setNewSchEndTime}
+        notes={newSchNotes}
+        setNotes={setNewSchNotes}
+        todayIso={todayIso}
+      />
       {showEditStaffScheduleModal && editingSchedule && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
           <div className="w-full max-w-lg bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl p-5 space-y-4">
@@ -5172,361 +5047,54 @@ export const BookingsFollowUpView: React.FC = () => {
       )}
 
       {/* Attendance Modal */}
-      {showAttendanceModal && selectedApt && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
-          <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl p-5">
-            <h3 className="text-base font-bold text-slate-900 dark:text-white mb-3">
-              {t('تسجيل حضور / عدم حضور المريض', 'Mark Patient Attendance')}
-            </h3>
-
-            <p className="text-xs text-slate-500 mb-4">
-              {t('المريض:', 'Patient:')} <span className="font-bold text-slate-800 dark:text-slate-200">{selectedApt.patientName}</span> • {selectedApt.time}
-            </p>
-
-            <form onSubmit={handleAttendanceSubmit} className="space-y-4">
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => setAttendanceStatus('Attended')}
-                  className={`flex-1 py-2.5 text-xs font-bold rounded-xl border transition-all cursor-pointer ${
-                    attendanceStatus === 'Attended'
-                      ? 'bg-emerald-600 text-white border-emerald-600 shadow-md shadow-emerald-600/20'
-                      : 'bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
-                  }`}
-                >
-                  ✓ {t('حضر وتم تقديم الخدمة', 'Attended')}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setAttendanceStatus('NotAttended')}
-                  className={`flex-1 py-2.5 text-xs font-bold rounded-xl border transition-all cursor-pointer ${
-                    attendanceStatus === 'NotAttended'
-                      ? 'bg-amber-600 text-white border-amber-600 shadow-md shadow-amber-600/20'
-                      : 'bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
-                  }`}
-                >
-                  ✕ {t('لم يحضر (اعتذار / تأجيل)', 'Not Attended')}
-                </button>
-              </div>
-
-              {attendanceStatus === 'NotAttended' && (
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    {t('سبب عدم الحضور *', 'Reason for Non-Attendance *')}
-                  </label>
-                  <select
-                    value={notAttendedReason}
-                    onChange={(e) => setNotAttendedReason(e.target.value)}
-                    className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-indigo-600"
-                  >
-                    <option value="الهاتف مغلق / لم يرد">الهاتف مغلق / لم يرد</option>
-                    <option value="اعتذر لظروف طارئة وطلب تأجيل الموعد">اعتذر لظروف طارئة وطلب تأجيل الموعد</option>
-                    <option value="مسافر خارج المدينة">مسافر خارج المدينة</option>
-                    <option value="عدم توفر المبلغ حالياً">عدم توفر المبلغ حالياً</option>
-                    <option value="لم يحضر بدون إبداء أسباب">لم يحضر بدون إبداء أسباب</option>
-                  </select>
-                </div>
-              )}
-
-              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setShowAttendanceModal(false)}
-                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
-                >
-                  {t('إلغاء', 'Cancel')}
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl cursor-pointer"
-                >
-                  {t('تحديث الحالة', 'Update Status')}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Cancel Modal */}
-      {showCancelModal && selectedApt && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
-          <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl p-5">
-            <h3 className="text-base font-bold text-rose-600 mb-2">
-              {t('إلغاء موعد الحجز', 'Cancel Booking')}
-            </h3>
-            <p className="text-xs text-slate-500 mb-4">
-              {t('المريض:', 'Patient:')} <span className="font-bold">{selectedApt.patientName}</span> • {selectedApt.serviceNameAr}
-            </p>
-
-            <form onSubmit={handleCancelSubmit} className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  {t('سبب الإلغاء * (يتم حفظه في سجل الأوديت)', 'Cancellation Reason *')}
-                </label>
-                <textarea
-                  rows={3}
-                  required
-                  value={cancelReason}
-                  onChange={(e) => setCancelReason(e.target.value)}
-                  placeholder="سبب إلغاء الحجز..."
-                  className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-rose-600"
-                />
-              </div>
-
-              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setShowCancelModal(false)}
-                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
-                >
-                  {t('تراجع', 'Back')}
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl cursor-pointer"
-                >
-                  {t('تأكيد الإلغاء', 'Confirm Cancel')}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Reschedule Modal */}
-      {showRescheduleModal && selectedApt && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
-          <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl p-5">
-            <h3 className="text-base font-bold text-slate-900 dark:text-white mb-2">
-              {t('تعديل موعد الحجز (Reschedule)', 'Reschedule Appointment')}
-            </h3>
-
-            <form onSubmit={handleRescheduleSubmit} className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  {t('التاريخ الجديد * (تاريخ اليوم أو تاريخ مستقبلي)', 'New Date * (Today or Future)')}
-                </label>
-                <input
-                  type="date"
-                  required
-                  min={todayIso}
-                  value={newDate}
-                  onChange={(e) => setNewDate(e.target.value)}
-                  className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-indigo-600 font-bold"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-indigo-700 dark:text-indigo-300 mb-1 flex items-center gap-1">
-                    <Clock className="h-3.5 w-3.5 text-indigo-500" />
-                    <span>{t('وقت البدء (من) *', 'Start Time (From) *')}</span>
-                  </label>
-                  <input
-                    type="time"
-                    required
-                    value={newStartTime}
-                    onChange={(e) => {
-                      const newS = e.target.value;
-                      setNewStartTime(newS);
-                      const sM = parseTimeToMinutes(newS);
-                      if (sM !== null) {
-                        const curEM = parseTimeToMinutes(newEndTime);
-                        if (curEM === null || curEM <= sM) {
-                          setNewEndTime(formatMinutesTo24h(sM + 45));
-                        }
-                      }
-                    }}
-                    className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-indigo-600 font-mono font-bold"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-indigo-700 dark:text-indigo-300 mb-1 flex items-center gap-1">
-                    <Clock className="h-3.5 w-3.5 text-indigo-500" />
-                    <span>{t('وقت الانتهاء (إلى) *', 'End Time (To) *')}</span>
-                  </label>
-                  <input
-                    type="time"
-                    required
-                    value={newEndTime}
-                    onChange={(e) => setNewEndTime(e.target.value)}
-                    className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-indigo-600 font-mono font-bold"
-                  />
-                </div>
-              </div>
-
-              {/* Real-time Overlap Conflict Check Banner for Reschedule */}
-              {(() => {
-                const sMin = parseTimeToMinutes(newStartTime);
-                const endMin = parseTimeToMinutes(newEndTime);
-                const invalidInterval = sMin !== null && endMin !== null && endMin <= sMin;
-                const conflict = checkDoctorAppointmentConflict(
-                  newDate,
-                  selectedApt.doctorId,
-                  selectedApt.doctorName,
-                  newStartTime,
-                  newEndTime,
-                  appointments,
-                  selectedApt.id
-                );
-
-                if (invalidInterval) {
-                  return (
-                    <div className="p-2.5 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded-xl text-xs text-rose-800 dark:text-rose-300 flex items-center gap-2">
-                      <AlertTriangle className="h-4 w-4 shrink-0 text-rose-600" />
-                      <span>{t('وقت نهاية الجلسة (إلى) يجب أن يكون بعد وقت بدايتها (من)', 'End time must be after start time')}</span>
-                    </div>
-                  );
-                }
-
-                if (conflict.hasConflict) {
-                  return (
-                    <div className="p-3 bg-rose-50 dark:bg-rose-950/50 border border-rose-300 dark:border-rose-700 rounded-xl text-xs text-rose-900 dark:text-rose-200 space-y-1">
-                      <div className="flex items-center gap-2 font-bold text-rose-700 dark:text-rose-300">
-                        <AlertTriangle className="h-4 w-4 shrink-0" />
-                        <span>{t('تعارض موعد محجوز لنفس الطبيب!', 'Doctor Conflict!')}</span>
-                      </div>
-                      <p className="text-[11px] leading-relaxed">
-                        {isRtl ? conflict.reasonAr : conflict.reasonEn}
-                      </p>
-                    </div>
-                  );
-                }
-
-                if (sMin !== null && endMin !== null) {
-                  const duration = endMin - sMin;
-                  return (
-                    <div className="p-2 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 rounded-xl text-xs text-emerald-800 dark:text-emerald-300 flex items-center justify-between">
-                      <span className="flex items-center gap-1 font-bold">
-                        <Check className="h-3.5 w-3.5 text-emerald-600" />
-                        <span>{t('الموعد متاح بدون تعارض', 'Slot is available')}</span>
-                      </span>
-                      <span className="font-mono text-[10px] font-bold">
-                        {duration} {t('دقيقة', 'min')}
-                      </span>
-                    </div>
-                  );
-                }
-
-                return null;
-              })()}
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  {t('ملاحظات سبب التأجيل', 'Reschedule Notes')}
-                </label>
-                <input
-                  type="text"
-                  value={rescheduleNotes}
-                  onChange={(e) => setRescheduleNotes(e.target.value)}
-                  placeholder="طلب العميل التأجيل بسبب العمل..."
-                  className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-indigo-600"
-                />
-              </div>
-
-              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setShowRescheduleModal(false)}
-                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
-                >
-                  {t('إلغاء', 'Cancel')}
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl cursor-pointer"
-                >
-                  {t('تحديث الموعد', 'Save New Date')}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Patient 360-Degree History Modal */}
-      {showPatient360Modal && selectedPatientFor360 && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
-          <div className="w-full max-w-3xl bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl p-6 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800">
-              <div className="flex items-center gap-3">
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-600 text-white font-bold text-lg">
-                  {selectedPatientFor360.name.charAt(0)}
-                </div>
-                <div>
-                  <h3 className="font-bold text-base text-slate-900 dark:text-white">
-                    {selectedPatientFor360.name}
-                  </h3>
-                  <p className="text-xs text-slate-400">
-                    {t('كود العميل:', 'Customer Code:')} {selectedPatientFor360.customerCode || selectedPatientFor360.code || '—'} • {t('كود السيستم:', 'System Code:')} {selectedPatientFor360.systemCode || selectedPatientFor360.paperCode || '—'} • {selectedPatientFor360.phone} • {t('تاريخ التكويد:', 'Created:')} {selectedPatientFor360.createdAt?.split('T')[0] || '-'}
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setShowPatient360Modal(false)}
-                className="text-slate-400 hover:text-slate-600 text-lg leading-none cursor-pointer"
-              >
-                &times;
-              </button>
-            </div>
-
-            {/* Quick Metrics */}
-            <div className="grid grid-cols-3 gap-3 my-4">
-              <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-xl text-center">
-                <span className="text-[11px] text-slate-400 block">{t('إجمالي الزيارات', 'Total Visits')}</span>
-                <span className="text-lg font-bold text-slate-900 dark:text-white">
-                  {appointments.filter((a) => a.patientName === selectedPatientFor360.name).length}
-                </span>
-              </div>
-              <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-xl text-center">
-                <span className="text-[11px] text-slate-400 block">{t('خطط العلاج', 'Treatment Plans')}</span>
-                <span className="text-lg font-bold text-indigo-600">
-                  {treatmentPlans.filter((tp) => tp.patientName === selectedPatientFor360.name).length}
-                </span>
-              </div>
-              <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-xl text-center">
-                <span className="text-[11px] text-slate-400 block">{t('الفواتير المسجلة', 'Total Invoices')}</span>
-                <span className="text-lg font-bold text-emerald-600">
-                  {invoices.filter((i) => i.customerName === selectedPatientFor360.name).length}
-                </span>
-              </div>
-            </div>
-
-            {/* Past Appointments History */}
-            <div className="space-y-2 mt-4">
-              <h4 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">
-                {t('سجل الزيارات والحجوزات السابقة', 'Past Visits & Bookings')}
-              </h4>
-              <div className="divide-y divide-slate-100 dark:divide-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl overflow-hidden">
-                {appointments
-                  .filter((a) => a.patientName === selectedPatientFor360.name)
-                  .map((apt) => (
-                    <div key={apt.id} className="p-3 text-xs flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                      <div>
-                        <div className="font-bold text-slate-800 dark:text-slate-200">{apt.serviceNameAr}</div>
-                        <div className="text-[10px] text-slate-400">{apt.date} • {apt.time} • د. {apt.doctorName || 'استشاري'}</div>
-                      </div>
-                      <span className="font-bold text-slate-900 dark:text-white">{formatMoney(apt.price)}</span>
-                    </div>
-                  ))}
-              </div>
-            </div>
-
-            <div className="flex justify-end pt-4 mt-4 border-t border-slate-100 dark:border-slate-800">
-              <button
-                onClick={() => setShowPatient360Modal(false)}
-                className="px-5 py-2 text-xs font-bold text-white bg-slate-800 rounded-xl cursor-pointer"
-              >
-                {t('إغلاق', 'Close')}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* New Treatment Plan Modal */}
+      <AttendanceModal
+        t={t}
+        open={showAttendanceModal}
+        appointment={selectedApt}
+        status={attendanceStatus}
+        setStatus={setAttendanceStatus}
+        reason={notAttendedReason}
+        setReason={setNotAttendedReason}
+        onSubmit={handleAttendanceSubmit}
+        onClose={() => setShowAttendanceModal(false)}
+      />
+      <CancelAppointmentModal
+        t={t}
+        open={showCancelModal}
+        appointment={selectedApt}
+        reason={cancelReason}
+        setReason={setCancelReason}
+        onSubmit={handleCancelSubmit}
+        onClose={() => setShowCancelModal(false)}
+      />
+      <RescheduleModal
+        t={t}
+        open={showRescheduleModal}
+        appointment={selectedApt}
+        appointments={appointments}
+        isRtl={isRtl}
+        todayIso={todayIso}
+        date={newDate}
+        setDate={setNewDate}
+        startTime={newStartTime}
+        setStartTime={setNewStartTime}
+        endTime={newEndTime}
+        setEndTime={setNewEndTime}
+        notes={rescheduleNotes}
+        setNotes={setRescheduleNotes}
+        onSubmit={handleRescheduleSubmit}
+        onClose={() => setShowRescheduleModal(false)}
+      />
+      <Patient360Modal
+        t={t}
+        open={showPatient360Modal}
+        patient={selectedPatientFor360}
+        appointments={appointments}
+        treatmentPlans={treatmentPlans}
+        invoices={invoices}
+        formatMoney={formatMoney}
+        onClose={() => setShowPatient360Modal(false)}
+      />
       {showNewPlanModal && (
         <NewTreatmentPlanModal
           t={t}

@@ -12,8 +12,8 @@
 
 import type { GuardrailsFacts } from '../../services/architectureGuardrails';
 
-export const GUARDRAILS_MEASURED_AT = '2026-10-17T08:33:18.211Z';
-export const GUARDRAILS_REVISION = 'd08ce1e';
+export const GUARDRAILS_MEASURED_AT = '2026-10-17T08:37:50.554Z';
+export const GUARDRAILS_REVISION = '65b521e';
 
 export const GUARDRAILS_FACTS: GuardrailsFacts = /* GUARDRAILS_FACTS_BEGIN */
 {
@@ -94,10 +94,10 @@ export const GUARDRAILS_FACTS: GuardrailsFacts = /* GUARDRAILS_FACTS_BEGIN */
     { actionKey: 'accounting.post_journal', file: 'src/views/AccountingMappingView.tsx', line: 82 },
     { actionKey: 'architecture.copy_snippet', file: 'src/views/ArchitectureView.tsx', line: 35 },
     { actionKey: 'architecture.run_guardrails', file: 'src/views/ArchitectureView.tsx', line: 34 },
-    { actionKey: 'bookings.add_followup', file: 'src/views/BookingsFollowUpView.tsx', line: 2340 },
-    { actionKey: 'bookings.create_booking', file: 'src/views/BookingsFollowUpView.tsx', line: 2350 },
-    { actionKey: 'bookings.manage_staff_schedule', file: 'src/views/BookingsFollowUpView.tsx', line: 3694 },
-    { actionKey: 'bookings.manage_staff_schedule', file: 'src/views/BookingsFollowUpView.tsx', line: 3815 },
+    { actionKey: 'bookings.add_followup', file: 'src/views/BookingsFollowUpView.tsx', line: 2345 },
+    { actionKey: 'bookings.create_booking', file: 'src/views/BookingsFollowUpView.tsx', line: 2355 },
+    { actionKey: 'bookings.manage_staff_schedule', file: 'src/views/BookingsFollowUpView.tsx', line: 3699 },
+    { actionKey: 'bookings.manage_staff_schedule', file: 'src/views/BookingsFollowUpView.tsx', line: 3820 },
     { actionKey: 'database.ddl', file: 'src/views/DatabaseExplorerView.tsx', line: 41 },
     { actionKey: 'database.drop', file: 'src/views/DatabaseExplorerView.tsx', line: 42 },
     { actionKey: 'database.write', file: 'src/views/DatabaseExplorerView.tsx', line: 40 },
@@ -133,7 +133,7 @@ export const GUARDRAILS_FACTS: GuardrailsFacts = /* GUARDRAILS_FACTS_BEGIN */
     { id: 'emitted_events_pipeline', labelAr: 'معالجة الأحداث المُصدَّرة بلا تكرار', labelEn: 'Idempotent event processing', comparison: 'atLeast', expected: 1, found: 4, severity: 'advisory', evidence: ['erp-nextgen-local/db/migrations-original/0005_core_audit_outbox_infrastructure.sql', 'erp-nextgen-local/db/migrations/0005_core_audit_outbox_infrastructure.sql'] },
   ],
   legacy: {
-    scanned: 208,
+    scanned: 213,
     limit: 300,
     baseline: 58,
     violations: 58,

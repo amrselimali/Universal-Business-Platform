@@ -21,7 +21,7 @@ export interface ScreenMetric {
 export const SCREEN_FILE_LIMIT = 300;
 
 export const SCREEN_METRICS: ScreenMetric[] = [
-  { viewId: 'BookingsFollowUpView', file: 'src/views/BookingsFollowUpView.tsx', lines: 6495, useState: 102, useEffect: 1, heavyLibs: [], overLimit: true },
+  { viewId: 'BookingsFollowUpView', file: 'src/views/BookingsFollowUpView.tsx', lines: 6063, useState: 102, useEffect: 1, heavyLibs: [], overLimit: true },
   { viewId: 'AccountingView', file: 'src/views/AccountingView.tsx', lines: 3320, useState: 58, useEffect: 6, heavyLibs: [], overLimit: true },
   { viewId: 'ReceptionOpsView', file: 'src/views/ReceptionOpsView.tsx', lines: 3054, useState: 45, useEffect: 1, heavyLibs: [], overLimit: true },
   { viewId: 'InventoryManagementView', file: 'src/views/InventoryManagementView.tsx', lines: 2990, useState: 33, useEffect: 0, heavyLibs: [], overLimit: true },
