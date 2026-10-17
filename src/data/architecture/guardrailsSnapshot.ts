@@ -12,8 +12,8 @@
 
 import type { GuardrailsFacts } from '../../services/architectureGuardrails';
 
-export const GUARDRAILS_MEASURED_AT = '2026-10-17T08:27:06.419Z';
-export const GUARDRAILS_REVISION = 'e67fb37';
+export const GUARDRAILS_MEASURED_AT = '2026-10-17T08:33:18.211Z';
+export const GUARDRAILS_REVISION = 'd08ce1e';
 
 export const GUARDRAILS_FACTS: GuardrailsFacts = /* GUARDRAILS_FACTS_BEGIN */
 {
@@ -104,9 +104,9 @@ export const GUARDRAILS_FACTS: GuardrailsFacts = /* GUARDRAILS_FACTS_BEGIN */
     { actionKey: 'pos.checkout', file: 'src/views/PosView.tsx', line: 830 },
     { actionKey: 'pos.checkout', file: 'src/views/PosView.tsx', line: 833 },
     { actionKey: 'pos.discount', file: 'src/views/PosView.tsx', line: 672 },
-    { actionKey: 'reception_ops.add_run_row', file: 'src/views/ReceptionOpsView.tsx', line: 1042 },
-    { actionKey: 'reception_ops.open_shift', file: 'src/views/ReceptionOpsView.tsx', line: 1027 },
-    { actionKey: 'reception_ops.print_shift', file: 'src/views/ReceptionOpsView.tsx', line: 1065 },
+    { actionKey: 'reception_ops.add_run_row', file: 'src/views/ReceptionOpsView.tsx', line: 940 },
+    { actionKey: 'reception_ops.open_shift', file: 'src/views/ReceptionOpsView.tsx', line: 925 },
+    { actionKey: 'reception_ops.print_shift', file: 'src/views/ReceptionOpsView.tsx', line: 963 },
   ],
   invariants: [
     { id: 'rls_enabled_tables', labelAr: 'جداول عليها RLS مفعّل وإجباري', labelEn: 'Tables with RLS enabled and forced', comparison: 'atLeast', expected: 5, found: 5, severity: 'required', evidence: ['erp-nextgen-local/db/migrations/0006_core_rls_policies.sql'] },
@@ -133,7 +133,7 @@ export const GUARDRAILS_FACTS: GuardrailsFacts = /* GUARDRAILS_FACTS_BEGIN */
     { id: 'emitted_events_pipeline', labelAr: 'معالجة الأحداث المُصدَّرة بلا تكرار', labelEn: 'Idempotent event processing', comparison: 'atLeast', expected: 1, found: 4, severity: 'advisory', evidence: ['erp-nextgen-local/db/migrations-original/0005_core_audit_outbox_infrastructure.sql', 'erp-nextgen-local/db/migrations/0005_core_audit_outbox_infrastructure.sql'] },
   ],
   legacy: {
-    scanned: 201,
+    scanned: 208,
     limit: 300,
     baseline: 58,
     violations: 58,
