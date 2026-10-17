@@ -10,6 +10,7 @@
 | `scripts/neon_invoice_slice.sql` | أعمدة فلترة حقيقية + جدول `invoice_lines` + فهارس Keyset/فلاتر/trgm + دوال `fn_invoice_list` / `fn_invoice_summary` / `fn_invoice_detail` |
 | `scripts/seed-million-invoices.mjs` | توليد N فاتورة + سطورها داخل القاعدة بـ `generate_series` (بلا نقل صفوف) |
 | `scripts/measure-invoices-p95.mjs` | قياس p50/p95/p99 للقائمة/الملخص/التفاصيل ومقارنتها بـ 200ms |
+| `scripts/neon_revenue_invoices_view.sql` | **View موحّد `v_revenue_invoices`**: فواتير `sales_invoices` + إيرادات الورديات المشتقة بنفس قواعد الاستثناء، مع إعادة تعريف دوال القائمة/الملخص/التفاصيل لتقرأ منه |
 | `scripts/check-context-freeze.mjs` | بوابة CI: تفشل عند أي dataset جديد في `neonSchema.ts` (34 dataset مجمّدة) |
 
 ## خطوات التشغيل
