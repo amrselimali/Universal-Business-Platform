@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
-    "build": "vite build",
+    "build": "vite build && node scripts/emit-screen-budget.mjs",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
@@ -13,13 +13,15 @@
     "guardrails": "node scripts/architecture-guardrails.mjs",
     "guardrails:check": "node scripts/architecture-guardrails.mjs --check",
     "guardrails:update": "node scripts/architecture-guardrails.mjs --update",
-    "budget:bundle": "node scripts/check-bundle-budget.mjs",
+    "budget:bundle": "node scripts/check-bundle-budget.mjs && node scripts/emit-screen-budget.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
-    "verify": "npm run lint && npm run test && npm run check:size && npm run guardrails:check && npm run build && npm run budget:bundle",
+    "verify": "npm run lint && npm run test && npm run check:size && npm run guardrails:check && npm run build && npm run screens:check && npm run budget:bundle",
     "e2e": "playwright test",
     "e2e:ui": "playwright test --ui",
-    "perf:api": "k6 run perf/api-budget.js"
+    "perf:api": "k6 run perf/api-budget.js",
+    "screens:update": "node scripts/screen-metrics.mjs --update",
+    "screens:check": "node scripts/screen-metrics.mjs --check"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

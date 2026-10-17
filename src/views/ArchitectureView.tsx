@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { BadgeCheck, Gauge, ShieldCheck, Sparkles, Workflow, Layers } from 'lucide-react';
+import { BadgeCheck, Cpu, Gauge, ShieldCheck, Sparkles, Workflow, Layers } from 'lucide-react';
 import { usePlatform } from '../context/PlatformContext';
 import { ArchitectureBudgetGrid } from '../components/architecture/ArchitectureBudgetGrid';
 import { ArchitectureTopology } from '../components/architecture/ArchitectureTopology';
@@ -8,9 +8,10 @@ import { ArchitectureSnippets } from '../components/architecture/ArchitectureSni
 import { ArchitectureGuardrails } from '../components/architecture/ArchitectureGuardrails';
 import { ArchitectureCiWorkflow } from '../components/architecture/ArchitectureCiWorkflow';
 import { ArchitectureCompanionGates } from '../components/architecture/ArchitectureCompanionGates';
+import { ArchitectureScreenProfile } from '../components/architecture/ArchitectureScreenProfile';
 import { GUARDRAILS_REVISION } from '../data/architecture/guardrailsSnapshot';
 
-type TabId = 'budget' | 'topology' | 'decisions' | 'snippets' | 'guardrails' | 'ci';
+type TabId = 'budget' | 'topology' | 'decisions' | 'snippets' | 'guardrails' | 'screens' | 'ci';
 
 /**
  * شاشة معمارية المنظومة الجديدة (Clean Micro-Engine Architecture)
@@ -39,6 +40,7 @@ export const ArchitectureView: React.FC = () => {
     { id: 'decisions' as TabId, labelAr: 'عيوب المنصة ← الحلول', labelEn: 'Flaws to Fixes', icon: <BadgeCheck className="h-3.5 w-3.5" /> },
     { id: 'snippets' as TabId, labelAr: 'كود التنفيذ المعتمد', labelEn: 'Production Code', icon: <ShieldCheck className="h-3.5 w-3.5" /> },
     { id: 'guardrails' as TabId, labelAr: 'بوابات الفحص وميزانية السرعة', labelEn: 'Guardrails & Speed Budget', icon: <Workflow className="h-3.5 w-3.5" /> },
+    { id: 'screens' as TabId, labelAr: 'الشاشات والذاكرة والسرعة', labelEn: 'Screens, memory & speed', icon: <Cpu className="h-3.5 w-3.5" /> },
     { id: 'ci' as TabId, labelAr: 'بوابات الـ CI وحدودها', labelEn: 'CI Gates', icon: <Sparkles className="h-3.5 w-3.5" /> },
   ];
 
@@ -98,6 +100,7 @@ export const ArchitectureView: React.FC = () => {
       {tab === 'guardrails' && (
         <ArchitectureGuardrails t={t} isArabic={isArabic} canRun={canRunGuardrails} />
       )}
+      {tab === 'screens' && <ArchitectureScreenProfile t={t} isArabic={isArabic} />}
       {tab === 'ci' && (
         <div className="space-y-3">
           <ArchitectureCiWorkflow t={t} isArabic={isArabic} canCopy={canCopySnippet} />
