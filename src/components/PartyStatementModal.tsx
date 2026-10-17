@@ -1,7 +1,8 @@
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { usePlatform } from '../context/PlatformContext';
+import { loadInvoicePage } from '../services/invoiceQueryApi';
 import { exportRowsToExcel } from '../utils/excelExport';
-import { Party, ClientOffer, CashReceiptVoucher, CustomerRefundVoucher } from '../types';
+import { Party, ClientOffer, CashReceiptVoucher, CustomerRefundVoucher, SalesInvoice } from '../types';
 import {
   FileText,
   Printer,
@@ -80,7 +81,6 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
     branches,
     accounts,
     parties,
-    invoices,
     receptionShifts,
     cashReceipts,
     allCashReceipts,
@@ -126,7 +126,18 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
   const [includeAllBranches, setIncludeAllBranches] = useState<boolean>(true);
   const branchScoped = branchId && branchId !== 'all' && branchId !== 'general' ? branchId : null;
   const effectiveBranchScoped = includeAllBranches ? null : branchScoped;
-  const scopedInvoices = useMemo(() => (effectiveBranchScoped ? invoices.filter((inv) => inv.branchId === effectiveBranchScoped) : invoices), [invoices, effectiveBranchScoped]);
+  // فواتير العميل من السيرفر (بدل مصفوفة السياق)
+  const [scopedInvoices, setScopedInvoices] = useState<SalesInvoice[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    if (!currentParty?.id || !tenant?.id) return;
+    loadInvoicePage({
+      tenantId: tenant.id,
+      filters: { customerId: currentParty.id, branchId: effectiveBranchScoped || undefined },
+      limit: 200,
+    }).then((page) => { if (!cancelled) setScopedInvoices(page.invoices); });
+    return () => { cancelled = true; };
+  }, [currentParty?.id, tenant?.id, effectiveBranchScoped]);
   const scopedShifts = useMemo(() => (effectiveBranchScoped ? receptionShifts.filter((shift) => shift.branchId === effectiveBranchScoped) : receptionShifts), [receptionShifts, effectiveBranchScoped]);
   const allAvailableReceipts = useMemo(() => {
     const map = new Map<string, CashReceiptVoucher>();
@@ -558,7 +569,7 @@ export const PartyStatementModal: React.FC<PartyStatementModalProps> = ({
       cardBalance: ledgerRecordedBalance,
       cardBalanceDifference: Number((ledgerRecordedBalance - closeBal).toFixed(2)),
     };
-  }, [currentParty, branchScoped, invoices, receptionShifts, scopedReceipts, customerRefunds, journalEntries, deviceMaintenanceRecords, filterStart, filterEnd]);
+  }, [currentParty, branchScoped, scopedInvoices, receptionShifts, scopedReceipts, customerRefunds, journalEntries, deviceMaintenanceRecords, filterStart, filterEnd]);
 
   // QUANTITY & SERVICE MOVEMENTS FROM COLLECTION RECEIPTS
   // (حركات الكميات والخدمة المقيدة من إيصالات التحصيل)

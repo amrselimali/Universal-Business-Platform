@@ -12,8 +12,8 @@
 
 import type { GuardrailsFacts } from '../../services/architectureGuardrails';
 
-export const GUARDRAILS_MEASURED_AT = '2026-10-17T09:55:01.986Z';
-export const GUARDRAILS_REVISION = '7cdbf2c';
+export const GUARDRAILS_MEASURED_AT = '2026-10-17T10:04:29.709Z';
+export const GUARDRAILS_REVISION = 'bc2d69d';
 
 export const GUARDRAILS_FACTS: GuardrailsFacts = /* GUARDRAILS_FACTS_BEGIN */
 {
@@ -101,9 +101,9 @@ export const GUARDRAILS_FACTS: GuardrailsFacts = /* GUARDRAILS_FACTS_BEGIN */
     { actionKey: 'database.ddl', file: 'src/views/DatabaseExplorerView.tsx', line: 41 },
     { actionKey: 'database.drop', file: 'src/views/DatabaseExplorerView.tsx', line: 42 },
     { actionKey: 'database.write', file: 'src/views/DatabaseExplorerView.tsx', line: 40 },
-    { actionKey: 'pos.checkout', file: 'src/views/PosView.tsx', line: 838 },
-    { actionKey: 'pos.checkout', file: 'src/views/PosView.tsx', line: 841 },
-    { actionKey: 'pos.discount', file: 'src/views/PosView.tsx', line: 680 },
+    { actionKey: 'pos.checkout', file: 'src/views/PosView.tsx', line: 837 },
+    { actionKey: 'pos.checkout', file: 'src/views/PosView.tsx', line: 840 },
+    { actionKey: 'pos.discount', file: 'src/views/PosView.tsx', line: 679 },
     { actionKey: 'reception_ops.add_run_row', file: 'src/views/ReceptionOpsView.tsx', line: 940 },
     { actionKey: 'reception_ops.open_shift', file: 'src/views/ReceptionOpsView.tsx', line: 925 },
     { actionKey: 'reception_ops.print_shift', file: 'src/views/ReceptionOpsView.tsx', line: 963 },

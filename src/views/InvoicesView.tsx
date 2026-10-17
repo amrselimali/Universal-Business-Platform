@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePlatform } from '../context/PlatformContext';
 import { SalesInvoice, SalesInvoiceItem } from '../types';
-import { loadInvoicePage, loadInvoiceSummary } from '../services/invoiceQueryApi';
+import { cancelInvoiceRow, loadInvoicePage, loadInvoiceSummary, updateInvoiceRow } from '../services/invoiceQueryApi';
 import {
   Receipt,
   Search,
@@ -349,7 +349,16 @@ export const InvoicesView: React.FC = () => {
     if (res.success) {
       setActionSuccess(t('تم تعديل الفاتورة وتطبيق الأثر في شيفت التشغيل بنجاح.', 'Invoice updated successfully.'));
       setEditingInvoice(null);
-      reloadInvoices();
+      void updateInvoiceRow({
+        tenantId: tenant?.id || '',
+        invoiceId: editingInvoice.id,
+        netAmount: Number(editAmount),
+        paymentMethod: editPaymentMethod,
+        reason: editReason.trim(),
+      }).then((dbResult) => {
+        if (!dbResult.ok) setActionError(dbResult.error || 'DB update failed');
+        reloadInvoices();
+      });
     } else {
       setActionError(res.error || t('فشل في تعديل الفاتورة!', 'Failed to edit invoice!'));
     }
@@ -380,7 +389,14 @@ export const InvoicesView: React.FC = () => {
     if (res.success) {
       setActionSuccess(t('تم إلغاء الفاتورة وتسجيل أثر الإلغاء في شيفت التشغيل بنجاح.', 'Invoice cancelled successfully.'));
       setCancellingInvoice(null);
-      reloadInvoices();
+      void cancelInvoiceRow({
+        tenantId: tenant?.id || '',
+        invoiceId: cancellingInvoice.id,
+        reason: cancelReason.trim(),
+      }).then((dbResult) => {
+        if (!dbResult.ok) setActionError(dbResult.error || 'DB cancel failed');
+        reloadInvoices();
+      });
     } else {
       setActionError(res.error || t('فشل في إلغاء الفاتورة!', 'Failed to cancel invoice!'));
     }

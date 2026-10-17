@@ -147,3 +147,43 @@ export async function loadInvoiceDetail(tenantId: string, invoiceId: string): Pr
     return { header: null, lines: [], error: error?.message || 'invoice_detail_failed' };
   }
 }
+
+/** تعديل فاتورة في الداتابيز (مع سبب إلزامي). */
+export async function updateInvoiceRow(params: {
+  tenantId: string;
+  invoiceId: string;
+  netAmount: number;
+  paymentMethod?: string;
+  reason: string;
+  actor?: string;
+}): Promise<{ ok: boolean; version?: number; error?: string }> {
+  const sql = client();
+  if (!sql) return { ok: false, error: 'no_database_connection' };
+  try {
+    const rows: any = await sql.query(
+      `SELECT fn_invoice_update($1,$2,$3::numeric,$4,$5,$6) AS result`,
+      [params.tenantId, params.invoiceId, params.netAmount, params.paymentMethod ?? null, params.reason, params.actor ?? 'ui']
+    );
+    const result = rows?.[0]?.result ?? {};
+    return { ok: true, version: Number(result.version) || undefined };
+  } catch (error: any) {
+    return { ok: false, error: error?.message || String(error) };
+  }
+}
+
+/** إلغاء فاتورة في الداتابيز (مع سبب إلزامي). */
+export async function cancelInvoiceRow(params: {
+  tenantId: string;
+  invoiceId: string;
+  reason: string;
+  actor?: string;
+}): Promise<{ ok: boolean; error?: string }> {
+  const sql = client();
+  if (!sql) return { ok: false, error: 'no_database_connection' };
+  try {
+    await sql.query(`SELECT fn_invoice_cancel($1,$2,$3,$4)`, [params.tenantId, params.invoiceId, params.reason, params.actor ?? 'ui']);
+    return { ok: true };
+  } catch (error: any) {
+    return { ok: false, error: error?.message || String(error) };
+  }
+}
