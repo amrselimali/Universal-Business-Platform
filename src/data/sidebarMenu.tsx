@@ -296,6 +296,14 @@ export const SIDEBAR_MENU_SECTIONS: MenuSectionDef[] = [
           highlight: true,
         },
         {
+          // مرآة حقيقية لجداول قاعدة البيانات — قراءة وكتابة محكومة.
+          id: 'database_admin',
+          labelAr: 'إدارة قاعدة البيانات',
+          labelEn: 'Database Explorer',
+          icon: Database,
+          highlight: true,
+        },
+        {
           id: 'neon',
           labelAr: 'قاعدة بيانات نيون السحابية',
           labelEn: 'Neon Cloud Database',

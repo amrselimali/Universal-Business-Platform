@@ -14,6 +14,7 @@ import {
   CompaniesBranchesView,
   CustomerRefundsView,
   DashboardView,
+  DatabaseExplorerView,
   DynamicScreenView,
   EmployeeDossierView,
   FiscalDocumentsView,
@@ -76,6 +77,9 @@ export const renderActiveView = (viewId: string, ctx: ActiveViewContext): React.
   if (viewId === 'metadata_studio') {
     return <MetadataStudioView onPreview={(code) => setCurrentView(`meta_${code}`)} />;
   }
+
+  // إدارة قاعدة البيانات من الواجهة (قراءة/كتابة/بنية) — محكومة بالصلاحيات.
+  if (viewId === 'database_admin') return <DatabaseExplorerView />;
 
   // معمارية المنظومة الجديدة: توثيق المعمارية المعتمدة + بوابات الفحص الحقيقية.
   if (viewId === 'architecture') return <ArchitectureView />;
