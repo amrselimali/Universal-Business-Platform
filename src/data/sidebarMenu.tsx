@@ -85,6 +85,14 @@ export const SIDEBAR_MENU_SECTIONS: MenuSectionDef[] = [
           alwaysShow: true,
         },
         {
+          // مسار القراءة المُرَقَّمة — لعشرات الآلاف من الصفوف.
+          id: 'invoices_stream',
+          labelAr: 'الفواتير — عرض سريع',
+          labelEn: 'Invoices — Fast View',
+          icon: Zap,
+          highlight: true,
+        },
+        {
           id: 'invoices',
           labelAr: 'سجل فواتير المبيعات',
           labelEn: 'Sales Invoices Log',
