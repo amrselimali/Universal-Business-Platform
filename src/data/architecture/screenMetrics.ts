@@ -47,7 +47,7 @@ export const SCREEN_METRICS: ScreenMetric[] = [
   { viewId: 'ClinicsView', file: 'src/views/ClinicsView.tsx', lines: 536, useState: 5, useEffect: 0, heavyLibs: [], overLimit: true },
   { viewId: 'ShiftReportsView', file: 'src/views/ShiftReportsView.tsx', lines: 533, useState: 3, useEffect: 0, heavyLibs: [], overLimit: true },
   { viewId: 'DashboardView', file: 'src/views/DashboardView.tsx', lines: 464, useState: 0, useEffect: 0, heavyLibs: [], overLimit: true },
-  { viewId: 'AuditTrailView', file: 'src/views/AuditTrailView.tsx', lines: 395, useState: 6, useEffect: 0, heavyLibs: [], overLimit: true },
+  { viewId: 'AuditTrailView', file: 'src/views/AuditTrailView.tsx', lines: 371, useState: 11, useEffect: 2, heavyLibs: [], overLimit: true },
   { viewId: 'ActivityLogsView', file: 'src/views/ActivityLogsView.tsx', lines: 348, useState: 5, useEffect: 0, heavyLibs: [], overLimit: true },
   { viewId: 'LoginView', file: 'src/views/LoginView.tsx', lines: 342, useState: 5, useEffect: 0, heavyLibs: [], overLimit: true },
   { viewId: 'MetadataStudioView', file: 'src/views/MetadataStudioView.tsx', lines: 295, useState: 6, useEffect: 1, heavyLibs: [], overLimit: false },
