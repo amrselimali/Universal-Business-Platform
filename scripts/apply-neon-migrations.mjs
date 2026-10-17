@@ -46,6 +46,7 @@ const MIGRATIONS = [
   { file: 'scripts/neon_accounting_mapping_seed.sql', title: 'ربط العمليات بالحسابات: القواعد الأساسية' },
   { file: 'scripts/neon_posting_rules_engine.sql', title: 'محرك قواعد الترحيل: المخطط والدوال' },
   { file: 'scripts/neon_posting_rules_seed.sql', title: 'محرك قواعد الترحيل: بذور تعكس السلوك الحالي' },
+  { file: 'scripts/neon_journal_edit.sql', title: 'تعديل القيود الموثّق + مزامنة المصدر' },
 ];
 
 /** استعلامات التحقق — تُشغَّل بعد التطبيق. */

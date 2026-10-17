@@ -342,6 +342,14 @@ export const SYSTEM_ACTIONS: ActionPermissionDef[] = [
     descriptionAr: 'إيقاف حساب موظف أو حذفه نهائياً من النظام',
   },
 
+  {
+    key: 'accounting.edit_journal',
+    nameAr: 'تعديل قيد محاسبي مرحّل',
+    nameEn: 'Edit a Posted Journal Entry',
+    viewId: 'accounting_mapping',
+    descriptionAr: 'تعديل قيد من شاشة القيود مع تسجيل قبل/بعد ومزامنة المصدر — صلاحية حساسة',
+  },
+
   // Accounting posting & period locks (محرك قواعد الترحيل)
   {
     key: 'accounting.post_journal',

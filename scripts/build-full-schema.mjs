@@ -31,6 +31,7 @@ const SOURCES = [
   ['scripts/neon_accounting_mapping_seed.sql', 'ربط العمليات بالحسابات: القواعد الأساسية'],
   ['scripts/neon_posting_rules_engine.sql', 'محرك قواعد الترحيل: المخطط والدوال'],
   ['scripts/neon_posting_rules_seed.sql', 'محرك قواعد الترحيل: بذور تعكس السلوك الحالي'],
+  ['scripts/neon_journal_edit.sql', 'تعديل القيود الموثّق + مزامنة المصدر'],
 ];
 
 const HEADER = `-- ============================================================================

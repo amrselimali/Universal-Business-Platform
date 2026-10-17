@@ -1163,131 +1163,522 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO ap
 -- ============================================================================
 
 -- =========================================================================
--- المرحلة 2: منطق المحاسبة على السيرفر (Server-side accounting)
+-- المرحلة 2: منظومة المحاسبة الذرّية الموحّدة (Unified Server-side Accounting)
 -- -------------------------------------------------------------------------
--- شغّل هذا السكربت مرة واحدة في Neon Console (SQL Editor).
--- هو آمن ومتكرر (idempotent): لا يحذف أي بيانات.
+-- هذا السكربت يوحّد دفتر اليومية المحاسبي في جدول واحد رسمي: `journal_entries`
+-- ويحذف الدفاتر المزدوجة القديمة (gl_journals / gl_journal_lines)،
+-- ويوفر دوال الترحيل، العكس، والتحصيل والاسترداد الذرّي في قاعدة البيانات.
 --
--- بعد تشغيله تكون كل العمليات المحاسبية ذرّية (Atomic):
---   رأس القيد + سطوره + أرصدة الحسابات إما تنجح كلها أو تفشل كلها.
+-- الخصائص:
+--   1. دفتر واحد موحّد: `journal_entries` يقرأ ويكتب فيه التطبيق والـ API معاً.
+--   2. استخراج البنود بـ SQL: عبر View تحليلي `v_journal_entry_lines`.
+--   3. دوال ذرّية كاملة: fn_post_journal, fn_reverse_journal,
+--      fn_post_customer_receipt, fn_post_customer_refund.
+--   4. قراءة حساب العميل من جدول `parties` الفعلي (لا app_records المحذوف).
 -- =========================================================================
 
--- 1) رأس القيد + سطوره -----------------------------------------------------
-CREATE TABLE IF NOT EXISTS gl_journals (
+-- 1) التأكد من وجود جدول قيود اليومية الموحّد (journal_entries) -----------------
+CREATE TABLE IF NOT EXISTS journal_entries (
   id VARCHAR(200) PRIMARY KEY,
   tenant_id VARCHAR(100) NOT NULL,
   branch_id VARCHAR(100),
-  entry_number VARCHAR(100) NOT NULL,
-  entry_date VARCHAR(20) NOT NULL,
+  entry_number VARCHAR(100),
+  entry_date VARCHAR(20),
+  date VARCHAR(50),
   description TEXT,
-  source_document TEXT,
-  is_posted BOOLEAN NOT NULL DEFAULT TRUE,
-  created_by VARCHAR(200),
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  is_posted BOOLEAN DEFAULT TRUE,
+  payload JSONB,
+  version INTEGER NOT NULL DEFAULT 1,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_by VARCHAR(150),
+  deleted_at TIMESTAMPTZ,
+  synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS gl_journals_tenant_date_idx ON gl_journals (tenant_id, entry_date DESC);
 
-CREATE TABLE IF NOT EXISTS gl_journal_lines (
-  id VARCHAR(200) PRIMARY KEY,
-  journal_id VARCHAR(200) NOT NULL REFERENCES gl_journals(id) ON DELETE CASCADE,
-  tenant_id VARCHAR(100) NOT NULL,
-  account_id VARCHAR(200),
-  account_code VARCHAR(50),
-  account_name_ar VARCHAR(255),
-  memo TEXT,
-  debit NUMERIC(15,2) NOT NULL DEFAULT 0,
-  credit NUMERIC(15,2) NOT NULL DEFAULT 0
-);
-CREATE INDEX IF NOT EXISTS gl_journal_lines_journal_idx ON gl_journal_lines (journal_id);
-CREATE INDEX IF NOT EXISTS gl_journal_lines_account_idx ON gl_journal_lines (tenant_id, account_id);
+-- فهارس الأداء للمزامنة والبحث
+CREATE INDEX IF NOT EXISTS journal_entries_tenant_date_idx ON journal_entries (tenant_id, entry_date DESC) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS journal_entries_sync_idx ON journal_entries (updated_at DESC) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS journal_entries_keyset_idx ON journal_entries (id) WHERE deleted_at IS NULL;
 
--- 2) طبيعة الحساب (مدين/دائن) ----------------------------------------------
+-- 2) View تحليلي لبنود القيود لتمكين استعلامات ميزان المراجعة وكشوف الحسابات بـ SQL --
+CREATE OR REPLACE VIEW v_journal_entry_lines AS
+SELECT 
+  j.id AS journal_id,
+  j.tenant_id,
+  j.branch_id,
+  j.entry_number,
+  COALESCE(j.entry_date, j.date) AS entry_date,
+  j.description AS journal_description,
+  j.is_posted,
+  COALESCE(l.elem->>'id', 'line-' || l.idx) AS line_id,
+  (l.elem->>'accountId') AS account_id,
+  (l.elem->>'accountCode') AS account_code,
+  (l.elem->>'accountNameAr') AS account_name_ar,
+  (l.elem->>'memo') AS memo,
+  COALESCE((l.elem->>'debit')::numeric, 0) AS debit,
+  COALESCE((l.elem->>'credit')::numeric, 0) AS credit,
+  j.updated_at
+FROM journal_entries j,
+LATERAL jsonb_array_elements(COALESCE(j.payload->'lines', '[]'::jsonb)) WITH ORDINALITY AS l(elem, idx)
+WHERE j.deleted_at IS NULL;
+
+-- 3) طبيعة الحساب (مدين/دائن) ----------------------------------------------
 CREATE OR REPLACE FUNCTION fn_is_debit_normal(p_type text) RETURNS boolean AS $$
-  SELECT p_type IN ('Asset','Expense');
+  SELECT p_type IN ('Asset', 'Expense', 'أصول', 'مصروفات');
 $$ LANGUAGE sql IMMUTABLE;
 
--- 3) الترحيل الذرّي لقيد متوازن --------------------------------------------
---    يتحقق من التوازن ومنع المدين+الدائن في سطر واحد، ثم يكتب الرأس والسطور
---    ويحدّث أرصدة الحسابات — كل ذلك داخل معاملة واحدة.
+-- 4) حساب العميل من الكود المسلسل (يقرأ من جدول parties الفعلي) -------------
+CREATE OR REPLACE FUNCTION fn_customer_account_id(p_tenant text, p_customer_code text)
+RETURNS text AS $$
+DECLARE v_id text;
+BEGIN
+  -- 1) ابحث في جدول parties مباشرة
+  SELECT (p.payload->>'accountId') INTO v_id
+    FROM parties p
+   WHERE p.tenant_id = p_tenant
+     AND (
+       p.customer_code = p_customer_code
+       OR p.payload->>'customerCode' = p_customer_code
+       OR p.payload->>'code' = p_customer_code
+       OR p.payload->>'systemCode' = p_customer_code
+     )
+     AND p.deleted_at IS NULL
+   LIMIT 1;
+
+  -- 2) احتياطي: حساب العملاء والمدينين التجاريين 1120 أو 2000
+  IF v_id IS NULL THEN
+    SELECT a.id INTO v_id FROM accounts a
+     WHERE a.tenant_id = p_tenant AND a.code = '1120' AND a.deleted_at IS NULL LIMIT 1;
+  END IF;
+
+  IF v_id IS NULL THEN
+    SELECT a.id INTO v_id FROM accounts a
+     WHERE a.tenant_id = p_tenant AND a.code = '2000' AND a.deleted_at IS NULL LIMIT 1;
+  END IF;
+
+  RETURN v_id;
+END; $$ LANGUAGE plpgsql;
+
+-- 5) الترحيل الذرّي لقيد متوازن في الدفتر الموحّد journal_entries ----------
 CREATE OR REPLACE FUNCTION fn_post_journal(
   p_tenant text, p_branch text, p_date text, p_description text,
   p_source text, p_lines jsonb, p_actor text
 ) RETURNS text AS $$
-DECLARE v_id text; v_entry text; v_dr numeric; v_cr numeric; v_line jsonb;
+DECLARE
+  v_id text;
+  v_entry text;
+  v_dr numeric;
+  v_cr numeric;
+  v_line jsonb;
+  v_payload jsonb;
+  v_acc_rec RECORD;
 BEGIN
-  SELECT COALESCE(SUM((l->>'debit')::numeric),0), COALESCE(SUM((l->>'credit')::numeric),0)
+  -- التحقق من توازن القيد
+  SELECT COALESCE(SUM((l->>'debit')::numeric), 0), COALESCE(SUM((l->>'credit')::numeric), 0)
     INTO v_dr, v_cr FROM jsonb_array_elements(p_lines) l;
-  IF v_dr <= 0 OR round(v_dr,2) <> round(v_cr,2) THEN
+
+  IF v_dr <= 0 OR round(v_dr, 2) <> round(v_cr, 2) THEN
     RAISE EXCEPTION 'unbalanced journal: debit % vs credit %', v_dr, v_cr;
   END IF;
+
   IF EXISTS (SELECT 1 FROM jsonb_array_elements(p_lines) l
              WHERE (l->>'debit')::numeric > 0 AND (l->>'credit')::numeric > 0) THEN
     RAISE EXCEPTION 'a journal line cannot be both debit and credit';
   END IF;
 
-  v_id := 'gj-' || gen_random_uuid()::text;
-  v_entry := 'JV-' || to_char(NOW(), 'YYYYMMDD-HH24MISS') || '-' || substr(gen_random_uuid()::text,1,4);
+  -- توليد معرّف القيد ورقم القيد
+  v_id := 'jv-' || extract(epoch from now())::bigint || '-' || substr(gen_random_uuid()::text, 1, 5);
+  v_entry := 'JV-' || to_char(NOW(), 'YYYYMMDD-HH24MISS') || '-' || substr(gen_random_uuid()::text, 1, 4);
 
-  INSERT INTO gl_journals (id, tenant_id, branch_id, entry_number, entry_date, description, source_document, is_posted, created_by)
-  VALUES (v_id, p_tenant, p_branch, v_entry, p_date, p_description, p_source, TRUE, p_actor);
+  -- بناء الـ payload المتوافق مع الواجهة
+  v_payload := jsonb_build_object(
+    'id', v_id,
+    'tenantId', p_tenant,
+    'branchId', p_branch,
+    'entryNumber', v_entry,
+    'date', p_date,
+    'entryDate', p_date,
+    'description', p_description,
+    'sourceDocument', COALESCE(p_source, 'API'),
+    'isPosted', TRUE,
+    'lines', p_lines,
+    'createdAt', to_char(NOW(), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+    'updatedBy', COALESCE(p_actor, 'app')
+  );
 
+  -- كتابة القيد مباشرة في journal_entries
+  INSERT INTO journal_entries (
+    id, tenant_id, branch_id, entry_number, entry_date, date,
+    description, is_posted, payload, version, updated_at, updated_by
+  ) VALUES (
+    v_id, p_tenant, p_branch, v_entry, p_date, p_date,
+    p_description, TRUE, v_payload, 1, NOW(), COALESCE(p_actor, 'app')
+  )
+  ON CONFLICT (id) DO UPDATE SET
+    payload = EXCLUDED.payload,
+    updated_at = NOW(),
+    version = journal_entries.version + 1;
+
+  -- تحديث أرصدة الحسابات
   FOR v_line IN SELECT * FROM jsonb_array_elements(p_lines) LOOP
-    INSERT INTO gl_journal_lines (id, journal_id, tenant_id, account_id, account_code, account_name_ar, memo, debit, credit)
-    VALUES ('gjl-' || gen_random_uuid()::text, v_id, p_tenant,
-            v_line->>'account_id', v_line->>'account_code', v_line->>'account_name_ar', v_line->>'memo',
-            COALESCE((v_line->>'debit')::numeric,0), COALESCE((v_line->>'credit')::numeric,0));
-
     UPDATE accounts a
-       SET balance = COALESCE(a.balance,0) +
+       SET balance = COALESCE(a.balance, 0) +
            CASE WHEN fn_is_debit_normal(a.account_type)
-                THEN COALESCE((v_line->>'debit')::numeric,0) - COALESCE((v_line->>'credit')::numeric,0)
-                ELSE COALESCE((v_line->>'credit')::numeric,0) - COALESCE((v_line->>'debit')::numeric,0)
-           END
-     WHERE a.tenant_id = p_tenant AND a.id = v_line->>'account_id';
+                THEN COALESCE((v_line->>'debit')::numeric, 0) - COALESCE((v_line->>'credit')::numeric, 0)
+                ELSE COALESCE((v_line->>'credit')::numeric, 0) - COALESCE((v_line->>'debit')::numeric, 0)
+           END,
+           updated_at = NOW()
+     WHERE a.tenant_id = p_tenant 
+       AND (a.id = v_line->>'account_id' OR a.code = v_line->>'account_code');
   END LOOP;
 
   RETURN v_id;
 END; $$ LANGUAGE plpgsql;
 
--- 4) عكس قيد (مع الاحتفاظ بالأصل) ------------------------------------------
-CREATE OR REPLACE FUNCTION fn_reverse_journal(p_tenant text, p_journal_id text, p_reason text, p_actor text)
-RETURNS text AS $$
-DECLARE v_orig gl_journals; v_lines jsonb; v_new text;
+-- 6) عكس قيد (مع حفظ القيد الأصلي والقيد العكسي في journal_entries) ---------
+CREATE OR REPLACE FUNCTION fn_reverse_journal(
+  p_tenant text, p_journal_id text, p_reason text, p_actor text
+) RETURNS text AS $$
+DECLARE
+  v_orig RECORD;
+  v_lines jsonb;
+  v_new text;
 BEGIN
-  SELECT * INTO v_orig FROM gl_journals WHERE tenant_id = p_tenant AND id = p_journal_id;
-  IF v_orig.id IS NULL THEN RAISE EXCEPTION 'journal not found'; END IF;
+  SELECT * INTO v_orig FROM journal_entries WHERE tenant_id = p_tenant AND id = p_journal_id;
+  IF v_orig.id IS NULL THEN
+    RAISE EXCEPTION 'journal not found: %', p_journal_id;
+  END IF;
+
+  -- استخراج السطور من payload وعكس المدين والدائن
   SELECT jsonb_agg(jsonb_build_object(
-           'account_id', account_id, 'account_code', account_code, 'account_name_ar', account_name_ar,
-           'memo', 'REVERSAL: ' || COALESCE(memo,''),
-           'debit', credit, 'credit', debit))
-    INTO v_lines FROM gl_journal_lines WHERE journal_id = p_journal_id;
-  v_new := fn_post_journal(p_tenant, v_orig.branch_id, v_orig.entry_date,
-            'REVERSAL_OF:' || v_orig.id || ' - ' || COALESCE(p_reason,''),
-            'REVERSAL_OF:' || v_orig.id, v_lines, p_actor);
+           'accountId', COALESCE(l->>'accountId', l->>'account_id'),
+           'account_id', COALESCE(l->>'accountId', l->>'account_id'),
+           'accountCode', COALESCE(l->>'accountCode', l->>'account_code'),
+           'account_code', COALESCE(l->>'accountCode', l->>'account_code'),
+           'accountNameAr', COALESCE(l->>'accountNameAr', l->>'account_name_ar'),
+           'account_name_ar', COALESCE(l->>'accountNameAr', l->>'account_name_ar'),
+           'memo', 'عكس: ' || COALESCE(l->>'memo', ''),
+           'debit', (l->>'credit')::numeric,
+           'credit', (l->>'debit')::numeric
+         ))
+    INTO v_lines
+    FROM jsonb_array_elements(COALESCE(v_orig.payload->'lines', '[]'::jsonb)) l;
+
+  IF v_lines IS NULL OR jsonb_array_length(v_lines) < 2 THEN
+    RAISE EXCEPTION 'cannot reverse journal without valid lines';
+  END IF;
+
+  v_new := fn_post_journal(
+    p_tenant,
+    v_orig.branch_id,
+    COALESCE(v_orig.entry_date, v_orig.date),
+    'عكس قيد: ' || COALESCE(v_orig.entry_number, v_orig.id) || ' - ' || COALESCE(p_reason, ''),
+    'REVERSAL_OF:' || v_orig.id,
+    v_lines,
+    p_actor
+  );
+
   RETURN v_new;
 END; $$ LANGUAGE plpgsql;
 
--- 5) حساب العميل من الكود المسلسل ------------------------------------------
-CREATE OR REPLACE FUNCTION fn_customer_account_id(p_tenant text, p_customer_code text)
-RETURNS text AS $$
-DECLARE v_id text;
+-- 7) إيصال تحصيل عميل ذرّي (Debit: Safe Account / Credit: Customer Account) ----
+CREATE OR REPLACE FUNCTION fn_post_customer_receipt(
+  p_tenant text,
+  p_branch text,
+  p_customer_code text,
+  p_amount numeric,
+  p_date text,
+  p_payment_account_id text,
+  p_service text,
+  p_receipt jsonb,
+  p_actor text
+) RETURNS jsonb AS $$
+DECLARE
+  v_cust_acc_id text;
+  v_pay_acc RECORD;
+  v_cust_acc RECORD;
+  v_lines jsonb;
+  v_journal_id text;
+  v_receipt_id text;
+  v_voucher_no text;
+  v_final_receipt jsonb;
 BEGIN
-  SELECT (r.payload->>'accountId') INTO v_id
-    FROM app_records r
-   WHERE r.tenant_id = p_tenant AND r.doc_key = 'erp_parties_backup'
-     AND (r.payload->>'customerCode' = p_customer_code OR r.payload->>'code' = p_customer_code)
-     AND r.deleted_at IS NULL
-   LIMIT 1;
-  IF v_id IS NULL THEN
-    SELECT a.id INTO v_id FROM accounts a
-     WHERE a.tenant_id = p_tenant AND a.code = '2000' LIMIT 1;
+  IF p_amount <= 0 THEN
+    RAISE EXCEPTION 'receipt amount must be positive';
   END IF;
-  RETURN v_id;
+
+  -- 1) التحقق من قاعدة الربط المحاسبي (المصدر الحصري للقيود)
+  DECLARE
+    v_rule_id bigint;
+    v_rule_code text;
+    v_map_debit text;
+    v_map_credit text;
+  BEGIN
+    SELECT id, code, debit_account_code, credit_account_code
+      INTO v_rule_id, v_rule_code, v_map_debit, v_map_credit
+      FROM accounting_mapping_rules
+     WHERE tenant_id = p_tenant AND transaction_type = 'customer_collection' AND is_active = TRUE
+     LIMIT 1;
+
+    -- حساب العميل
+    v_cust_acc_id := fn_customer_account_id(p_tenant, p_customer_code);
+    IF v_cust_acc_id IS NULL THEN
+      RAISE EXCEPTION 'customer account not found for code: %', p_customer_code;
+    END IF;
+
+    -- حساب السداد (الخزينة/البنك)
+    SELECT id, code, name_ar INTO v_pay_acc FROM accounts
+     WHERE tenant_id = p_tenant AND (id = p_payment_account_id OR code = p_payment_account_id OR code = v_map_debit)
+     LIMIT 1;
+
+    -- حساب العميل الدائن
+    SELECT id, code, name_ar INTO v_cust_acc FROM accounts
+     WHERE tenant_id = p_tenant AND (id = v_cust_acc_id OR code = v_map_credit)
+     LIMIT 1;
+
+    -- 2) تكوين خطوط القيد المحاسبي
+    v_lines := jsonb_build_array(
+      jsonb_build_object(
+        'accountId', COALESCE(v_pay_acc.id, p_payment_account_id),
+        'account_id', COALESCE(v_pay_acc.id, p_payment_account_id),
+        'accountCode', COALESCE(v_pay_acc.code, v_map_debit, '1111'),
+        'account_code', COALESCE(v_pay_acc.code, v_map_debit, '1111'),
+        'accountNameAr', COALESCE(v_pay_acc.name_ar, 'الخزينة الرئيسية'),
+        'account_name_ar', COALESCE(v_pay_acc.name_ar, 'الخزينة الرئيسية'),
+        'memo', 'سند تحصيل عميل كود ' || p_customer_code || ' - ' || COALESCE(p_service, ''),
+        'debit', p_amount,
+        'credit', 0
+      ),
+      jsonb_build_object(
+        'accountId', COALESCE(v_cust_acc.id, v_cust_acc_id),
+        'account_id', COALESCE(v_cust_acc.id, v_cust_acc_id),
+        'accountCode', COALESCE(v_cust_acc.code, v_map_credit, '1120'),
+        'account_code', COALESCE(v_cust_acc.code, v_map_credit, '1120'),
+        'accountNameAr', COALESCE(v_cust_acc.name_ar, 'العملاء والمدينون التجاريون'),
+        'account_name_ar', COALESCE(v_cust_acc.name_ar, 'العملاء والمدينون التجاريون'),
+        'memo', 'سند تحصيل عميل كود ' || p_customer_code || ' - ' || COALESCE(p_service, ''),
+        'debit', 0,
+        'credit', p_amount
+      )
+    );
+
+    -- 3) ترحيل القيد المحاسبي في journal_entries وتحديث أرصدة الحسابات
+    v_journal_id := fn_post_journal(
+      p_tenant,
+      p_branch,
+      p_date,
+      'سند تحصيل نقدي/بنكي من العميل كود: ' || p_customer_code,
+      'CR-' || to_char(NOW(), 'YYYYMMDD-HH24MISS'),
+      v_lines,
+      p_actor
+    );
+
+    -- 4) حفظ سند القبض في جدول cash_receipts
+    v_receipt_id := COALESCE(p_receipt->>'id', 'cr-' || extract(epoch from now())::bigint || '-' || substr(gen_random_uuid()::text, 1, 5));
+    v_voucher_no := COALESCE(p_receipt->>'voucherNumber', p_receipt->>'receiptNumber', 'CR-' || to_char(NOW(), 'YYYYMMDD-HH24MISS'));
+
+    v_final_receipt := p_receipt || jsonb_build_object(
+      'id', v_receipt_id,
+      'tenantId', p_tenant,
+      'branchId', p_branch,
+      'voucherNumber', v_voucher_no,
+      'receiptDate', p_date,
+      'amount', p_amount,
+      'journalEntryId', v_journal_id,
+      'updatedAt', to_char(NOW(), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+    );
+
+    INSERT INTO cash_receipts (
+      id, tenant_id, branch_id, voucher_number, receipt_date, amount, status, payload, version, updated_at
+    ) VALUES (
+      v_receipt_id, p_tenant, p_branch, v_voucher_no, p_date, p_amount, 'confirmed', v_final_receipt, 1, NOW()
+    ) ON CONFLICT (id) DO UPDATE SET
+      payload = EXCLUDED.payload,
+      amount = EXCLUDED.amount,
+      updated_at = NOW();
+
+    -- 5) تخفيض رصيد العميل في جدول parties
+    UPDATE parties p
+       SET balance = COALESCE(p.balance, 0) - p_amount,
+           updated_at = NOW()
+     WHERE p.tenant_id = p_tenant
+       AND (
+         p.customer_code = p_customer_code
+         OR p.payload->>'customerCode' = p_customer_code
+         OR p.payload->>'code' = p_customer_code
+         OR p.payload->>'systemCode' = p_customer_code
+       )
+       AND p.deleted_at IS NULL;
+
+    -- 6) توثيق في سجل القيود المولَّدة آلياً (للتدقيق وربط القيد بقاعدته الحصرية)
+    INSERT INTO accounting_generated_entries (
+      tenant_id, rule_id, rule_code, journal_entry_id, entry_number,
+      source_screen, source_document, debit_account_code, credit_account_code,
+      amount, is_balanced, posted_at
+    ) VALUES (
+      p_tenant, v_rule_id, COALESCE(v_rule_code, 'RULE-CUSTOMER-COLLECTION'),
+      v_journal_id, v_voucher_no, 'شاشة التحصيلات', 'CR-' || v_voucher_no,
+      COALESCE(v_pay_acc.code, v_map_debit, '1111'), COALESCE(v_cust_acc.code, v_map_credit, '1120'),
+      p_amount, TRUE, NOW()
+    );
+
+    RETURN jsonb_build_object(
+      'success', true,
+      'receiptId', v_receipt_id,
+      'journalId', v_journal_id,
+      'customerAccount', v_cust_acc_id,
+      'paymentAccount', COALESCE(v_pay_acc.id, p_payment_account_id)
+    );
+  END;
 END; $$ LANGUAGE plpgsql;
 
--- 6) إيصال تحصيل: الخزينة مدين / العميل دائن (ذرّي) -------------------------
---    fn_post_customer_receipt(...)  و  fn_post_customer_refund(...)
---    (موجودتان في قاعدة البيانات — راجع الكود المصدري src/services/accountingApi.ts)
+-- 8) استرداد مستحقات عميل ذرّي (Debit: Customer Account / Credit: Safe Account) --
+CREATE OR REPLACE FUNCTION fn_post_customer_refund(
+  p_tenant text,
+  p_branch text,
+  p_customer_code text,
+  p_amount numeric,
+  p_units numeric,
+  p_date text,
+  p_payment_account_id text,
+  p_service text,
+  p_refund jsonb,
+  p_actor text
+) RETURNS jsonb AS $$
+DECLARE
+  v_cust_acc_id text;
+  v_pay_acc RECORD;
+  v_cust_acc RECORD;
+  v_lines jsonb;
+  v_journal_id text;
+  v_refund_id text;
+  v_voucher_no text;
+  v_final_refund jsonb;
+BEGIN
+  IF p_amount <= 0 THEN
+    RAISE EXCEPTION 'refund amount must be positive';
+  END IF;
+
+  -- 1) تحديد حساب العميل
+  v_cust_acc_id := fn_customer_account_id(p_tenant, p_customer_code);
+  IF v_cust_acc_id IS NULL THEN
+    RAISE EXCEPTION 'customer account not found for code: %', p_customer_code;
+  END IF;
+
+  -- بيانات حساب السداد
+  SELECT id, code, name_ar INTO v_pay_acc FROM accounts
+   WHERE tenant_id = p_tenant AND (id = p_payment_account_id OR code = p_payment_account_id)
+   LIMIT 1;
+
+  -- بيانات حساب العميل
+  SELECT id, code, name_ar INTO v_cust_acc FROM accounts
+   WHERE tenant_id = p_tenant AND id = v_cust_acc_id
+   LIMIT 1;
+
+  -- 2) تكوين خطوط القيد المحاسبي
+  -- مدين: حساب العميل
+  -- دائن: حساب الخزينة أو وسيلة الصرف
+  v_lines := jsonb_build_array(
+    jsonb_build_object(
+      'accountId', v_cust_acc_id,
+      'account_id', v_cust_acc_id,
+      'accountCode', COALESCE(v_cust_acc.code, '1120'),
+      'account_code', COALESCE(v_cust_acc.code, '1120'),
+      'accountNameAr', COALESCE(v_cust_acc.name_ar, 'العملاء والمدينون التجاريون'),
+      'account_name_ar', COALESCE(v_cust_acc.name_ar, 'العملاء والمدينون التجاريون'),
+      'memo', 'سند استرداد مستحقات عميل كود ' || p_customer_code || ' - ' || COALESCE(p_service, ''),
+      'debit', p_amount,
+      'credit', 0
+    ),
+    jsonb_build_object(
+      'accountId', COALESCE(v_pay_acc.id, p_payment_account_id),
+      'account_id', COALESCE(v_pay_acc.id, p_payment_account_id),
+      'accountCode', COALESCE(v_pay_acc.code, '1111'),
+      'account_code', COALESCE(v_pay_acc.code, '1111'),
+      'accountNameAr', COALESCE(v_pay_acc.name_ar, 'الخزينة الرئيسية'),
+      'account_name_ar', COALESCE(v_pay_acc.name_ar, 'الخزينة الرئيسية'),
+      'memo', 'سند استرداد مستحقات عميل كود ' || p_customer_code || ' - ' || COALESCE(p_service, ''),
+      'debit', 0,
+      'credit', p_amount
+    )
+  );
+
+  -- 3) ترحيل القيد المحاسبي في journal_entries وتحديث أرصدة الحسابات
+  v_journal_id := fn_post_journal(
+    p_tenant,
+    p_branch,
+    p_date,
+    'سند استرداد مستحقات للعميل كود: ' || p_customer_code,
+    'CRF-' || to_char(NOW(), 'YYYYMMDD-HH24MISS'),
+    v_lines,
+    p_actor
+  );
+
+  -- 4) حفظ سند الاسترداد في جدول customer_refunds
+  v_refund_id := COALESCE(p_refund->>'id', 'crf-' || extract(epoch from now())::bigint || '-' || substr(gen_random_uuid()::text, 1, 5));
+  v_voucher_no := COALESCE(p_refund->>'voucherNumber', p_refund->>'refundNumber', 'CRF-' || to_char(NOW(), 'YYYYMMDD-HH24MISS'));
+
+  v_final_refund := p_refund || jsonb_build_object(
+    'id', v_refund_id,
+    'tenantId', p_tenant,
+    'branchId', p_branch,
+    'voucherNumber', v_voucher_no,
+    'refundDate', p_date,
+    'amount', p_amount,
+    'units', p_units,
+    'journalEntryId', v_journal_id,
+    'updatedAt', to_char(NOW(), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+  );
+
+  INSERT INTO customer_refunds (
+    id, tenant_id, branch_id, voucher_number, refund_date, amount, status, payload, version, updated_at
+  ) VALUES (
+    v_refund_id, p_tenant, p_branch, v_voucher_no, p_date, p_amount, 'confirmed', v_final_refund, 1, NOW()
+  ) ON CONFLICT (id) DO UPDATE SET
+    payload = EXCLUDED.payload,
+    amount = EXCLUDED.amount,
+    updated_at = NOW();
+
+  -- 5) زيادة رصيد العميل (أو إرجاعه لطبيعته) في جدول parties
+  UPDATE parties p
+     SET balance = COALESCE(p.balance, 0) + p_amount,
+         updated_at = NOW()
+   WHERE p.tenant_id = p_tenant
+     AND (
+       p.customer_code = p_customer_code
+       OR p.payload->>'customerCode' = p_customer_code
+       OR p.payload->>'code' = p_customer_code
+       OR p.payload->>'systemCode' = p_customer_code
+     )
+     AND p.deleted_at IS NULL;
+
+  RETURN jsonb_build_object(
+    'success', true,
+    'refundId', v_refund_id,
+    'journalId', v_journal_id,
+    'customerAccount', v_cust_acc_id,
+    'paymentAccount', COALESCE(v_pay_acc.id, p_payment_account_id)
+  );
+END; $$ LANGUAGE plpgsql;
+
+-- 9) حذف الدفاتر المزدوجة القديمة والجداول المهجورة نهائياً -------------------
+DROP TABLE IF EXISTS gl_journal_lines CASCADE;
+DROP TABLE IF EXISTS gl_journals CASCADE;
+DROP TABLE IF EXISTS patients CASCADE;
+
+-- 10) منح الصلاحيات لدور التطبيق المحدود app_api -----------------------------
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_api') THEN
+    EXECUTE 'GRANT EXECUTE ON FUNCTION fn_is_debit_normal(text) TO app_api';
+    EXECUTE 'GRANT EXECUTE ON FUNCTION fn_customer_account_id(text, text) TO app_api';
+    EXECUTE 'GRANT EXECUTE ON FUNCTION fn_post_journal(text, text, text, text, text, jsonb, text) TO app_api';
+    EXECUTE 'GRANT EXECUTE ON FUNCTION fn_reverse_journal(text, text, text, text) TO app_api';
+    EXECUTE 'GRANT EXECUTE ON FUNCTION fn_post_customer_receipt(text, text, text, numeric, text, text, text, jsonb, text) TO app_api';
+    EXECUTE 'GRANT EXECUTE ON FUNCTION fn_post_customer_refund(text, text, text, numeric, numeric, text, text, text, jsonb, text) TO app_api';
+    EXECUTE 'GRANT SELECT ON v_journal_entry_lines TO app_api';
+  END IF;
+END $$;
 
 
 -- ============================================================================
@@ -2308,6 +2699,700 @@ ON CONFLICT (tenant_id, code) DO UPDATE SET
 
 -- التحقق من التغطية بعد التعبئة
 SELECT * FROM fn_mapping_coverage_gaps('tenant-eg-001');
+
+
+-- ============================================================================
+-- [محرك قواعد الترحيل: المخطط والدوال]
+-- المصدر: scripts/neon_posting_rules_engine.sql
+-- ============================================================================
+
+-- =========================================================================
+-- محرك قواعد الترحيل المحاسبي (Posting Rules Engine) — المصدر الوحيد للتوجيه
+-- =========================================================================
+-- قبل هذا الملف كان القيد يُبنى من (1) حسابات مخزّنة على المنتج/طريقة الدفع،
+-- و(2) أكواد مكتوبة في الكود (1111/1120/4100…)، وشاشة «ربط العمليات بالحسابات»
+-- تُخزّن قواعد **لا يقرأها أي كود ترحيل** — أي مصدران أحدهما معطّل.
+--
+-- هنا:
+--   • accounting_posting_rules     : قاعدة لكل (عملية × خلية رقمية × مُحدِّد):
+--                                   الاتجاه (مدين/دائن) + الحساب.
+--   • accounting_posting_documents : سجل المستندات (منع ازدواج + حالات واضحة)
+--                                   ليكون الترحيل بضغطة زر ظاهرة قابلة للإعادة.
+--   • accounting_period_locks      : إقفال الفترات كمصدر وحيد تفحصه الداتابيز.
+--   • fn_post_document(...)        : يبني القيد من القواعد فقط، يرفض عند نقص
+--                                   قاعدة، يمنع الترحيل في فترة مقفلة، ويكتب
+--                                   أثراً في accounting_generated_entries.
+--
+-- متكرر بأمان (Idempotent) ولا يحذف أي بيانات.
+-- =========================================================================
+
+-- 1) قواعد الترحيل: خلية رقمية ← اتجاه واحد ← حساب واحد --------------------
+CREATE TABLE IF NOT EXISTS accounting_posting_rules (
+  id                 BIGSERIAL PRIMARY KEY,
+  tenant_id          VARCHAR(100) NOT NULL,
+  transaction_type   VARCHAR(100) NOT NULL,
+  field_key          VARCHAR(100) NOT NULL,
+  selector_key       VARCHAR(100) NOT NULL DEFAULT 'default',
+  direction          VARCHAR(10)  NOT NULL CHECK (direction IN ('debit', 'credit')),
+  account_code       VARCHAR(50)  NOT NULL,
+  account_name       VARCHAR(255) NOT NULL,
+  auto_post_enabled  BOOLEAN NOT NULL DEFAULT TRUE,
+  is_active          BOOLEAN NOT NULL DEFAULT TRUE,
+  strict_exclusive   BOOLEAN NOT NULL DEFAULT TRUE,
+  version            INTEGER NOT NULL DEFAULT 1,
+  notes              TEXT,
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at         TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by         VARCHAR(150),
+  CONSTRAINT uq_posting_rule UNIQUE (tenant_id, transaction_type, field_key, selector_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_posting_rules_lookup
+  ON accounting_posting_rules (tenant_id, transaction_type, is_active);
+
+-- 2) مستندات الترحيل: منع الازدواج + حالات واضحة ---------------------------
+CREATE TABLE IF NOT EXISTS accounting_posting_documents (
+  id                BIGSERIAL PRIMARY KEY,
+  tenant_id         VARCHAR(100) NOT NULL,
+  transaction_type  VARCHAR(100) NOT NULL,
+  source_screen     VARCHAR(150) NOT NULL,
+  source_document   VARCHAR(150) NOT NULL,
+  document_date     DATE NOT NULL,
+  branch_id         VARCHAR(100),
+  total_amount      NUMERIC(18, 2) NOT NULL DEFAULT 0,
+  status            VARCHAR(20) NOT NULL DEFAULT 'pending'
+                    CHECK (status IN ('pending', 'posted', 'failed', 'cancelled')),
+  journal_entry_id  VARCHAR(150),
+  idempotency_key   VARCHAR(200) NOT NULL,
+  attempts          INTEGER NOT NULL DEFAULT 0,
+  last_error        TEXT,
+  payload           JSONB,
+  posted_at         TIMESTAMPTZ,
+  posted_by         VARCHAR(150),
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at        TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uq_posting_document UNIQUE (tenant_id, idempotency_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_posting_documents_status
+  ON accounting_posting_documents (tenant_id, status, document_date DESC);
+
+-- 3) إقفال الفترات: المصدر الوحيد الذي تفحصه الداتابيز ----------------------
+CREATE TABLE IF NOT EXISTS accounting_period_locks (
+  id          BIGSERIAL PRIMARY KEY,
+  tenant_id   VARCHAR(100) NOT NULL,
+  lock_date   DATE NOT NULL,
+  status      VARCHAR(20) NOT NULL DEFAULT 'locked' CHECK (status IN ('locked', 'open')),
+  reason      TEXT,
+  locked_by   VARCHAR(150),
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uq_period_lock UNIQUE (tenant_id, lock_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_period_locks_tenant
+  ON accounting_period_locks (tenant_id, status, lock_date DESC);
+
+-- 4) هل التاريخ داخل فترة مقفلة؟ ------------------------------------------
+CREATE OR REPLACE FUNCTION fn_is_period_locked(p_tenant text, p_date date)
+RETURNS boolean AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM accounting_period_locks
+     WHERE tenant_id = p_tenant AND status = 'locked' AND lock_date >= p_date
+  );
+$$ LANGUAGE sql STABLE;
+
+-- 5) إقفال / فتح فترة (بأزرار من الشاشة) ----------------------------------
+CREATE OR REPLACE FUNCTION fn_lock_period(
+  p_tenant text, p_date date, p_reason text, p_actor text
+) RETURNS void AS $$
+BEGIN
+  INSERT INTO accounting_period_locks (tenant_id, lock_date, status, reason, locked_by)
+  VALUES (p_tenant, p_date, 'locked', NULLIF(p_reason, ''), p_actor)
+  ON CONFLICT (tenant_id, lock_date) DO UPDATE SET
+    status = 'locked', reason = EXCLUDED.reason,
+    locked_by = EXCLUDED.locked_by, updated_at = CURRENT_TIMESTAMP;
+END; $$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION fn_open_period(p_tenant text, p_date date)
+RETURNS void AS $$
+BEGIN
+  UPDATE accounting_period_locks
+     SET status = 'open', updated_at = CURRENT_TIMESTAMP
+   WHERE tenant_id = p_tenant AND lock_date = p_date;
+END; $$ LANGUAGE plpgsql;
+
+-- 6) حل قاعدة الترحيل بسلسلة أولوية (الطريقة ← النوع ← المجموعة ← الافتراضي)
+CREATE OR REPLACE FUNCTION fn_resolve_posting_rule_chain(
+  p_tenant text, p_type text, p_field text, p_selectors text[]
+) RETURNS TABLE (
+  rule_id BIGINT, rule_code TEXT, direction TEXT,
+  account_code TEXT, account_name TEXT
+) AS $$
+  SELECT r.id,
+         (r.transaction_type || '.' || r.field_key || '.' || r.selector_key)::TEXT,
+         r.direction::TEXT, r.account_code::TEXT, r.account_name::TEXT
+    FROM accounting_posting_rules r
+   WHERE r.tenant_id = p_tenant
+     AND r.transaction_type = p_type
+     AND r.field_key = p_field
+     AND r.is_active = TRUE
+     AND r.selector_key = ANY(p_selectors)
+   ORDER BY array_position(p_selectors, r.selector_key)
+   LIMIT 1;
+$$ LANGUAGE sql STABLE;
+
+-- 6) حل قاعدة الترحيل لخلية واحدة -----------------------------------------
+--    غياب قاعدة فعّالة = الترحيل مرفوض (لا يوجد مصدر بديل للحساب).
+CREATE OR REPLACE FUNCTION fn_resolve_posting_rule(
+  p_tenant text, p_type text, p_field text, p_selector text DEFAULT 'default'
+) RETURNS TABLE (
+  rule_id BIGINT, rule_code TEXT, direction TEXT,
+  account_code TEXT, account_name TEXT
+) AS $$
+  SELECT * FROM fn_resolve_posting_rule_chain(
+    p_tenant, p_type, p_field,
+    ARRAY[COALESCE(NULLIF(p_selector, ''), 'default'), 'default']
+  );
+$$ LANGUAGE sql STABLE;
+
+-- 7) الدالة المركزية: ترحيل مستند من القواعد فقط ---------------------------
+--    p_components: [{ field_key, amount, selector?, memo?, optional? }, …]
+--
+--    ملاحظات تصميمية:
+--      • سجل المستند يُنشأ/يُحدَّث **خارج** كتلة المحاولة، حتى لو فشل الترحيل
+--        يُسجَّل الفشل بسببه ويظهر في الشاشة لإعادة المحاولة.
+--      • كتلة المحاولة (بناء السطور + القيد + التدقيق) داخل BEGIN/EXCEPTION:
+--        فشلها يتراجع كاملاً (لا قيد جزئي ولا أرصدة ملوّثة) ويُرجع status=failed.
+CREATE OR REPLACE FUNCTION fn_post_document(
+  p_tenant text, p_branch text, p_type text, p_screen text, p_document text,
+  p_date text, p_description text, p_actor text, p_components jsonb,
+  p_idempotency text DEFAULT NULL
+) RETURNS jsonb AS $$
+DECLARE
+  v_key      text := COALESCE(NULLIF(p_idempotency, ''), p_type || ':' || p_document);
+  v_doc      accounting_posting_documents%ROWTYPE;
+  v_lines    jsonb := '[]'::jsonb;
+  v_audit    jsonb := '[]'::jsonb;
+  v_comp     jsonb;
+  v_amount   numeric;
+  v_dr       numeric := 0;
+  v_cr       numeric := 0;
+  v_missing  text[] := '{}';
+  v_lock     date;
+  v_count    integer := 0;
+  v_journal  text;
+  v_rule_id  bigint;
+  v_rule_cd  text;
+  v_dir      text;
+  v_acc_code text;
+  v_acc_name text;
+  v_acc_id   text;
+BEGIN
+  -- (1) سجل المستند: إن كان مُرحَّلاً سابقاً نُعيد نفس القيد (Idempotency)
+  SELECT * INTO v_doc FROM accounting_posting_documents
+   WHERE tenant_id = p_tenant AND idempotency_key = v_key FOR UPDATE;
+
+  IF v_doc.id IS NOT NULL AND v_doc.status = 'posted' THEN
+    RETURN jsonb_build_object('status', 'already_posted',
+                              'journalId', v_doc.journal_entry_id, 'documentId', v_doc.id);
+  END IF;
+
+  IF v_doc.id IS NULL THEN
+    INSERT INTO accounting_posting_documents
+      (tenant_id, transaction_type, source_screen, source_document, document_date,
+       branch_id, idempotency_key, status, attempts, payload)
+    VALUES (p_tenant, p_type, p_screen, p_document, p_date::date,
+            p_branch, v_key, 'pending', 1, p_components)
+    RETURNING * INTO v_doc;
+  ELSE
+    UPDATE accounting_posting_documents
+       SET status = 'pending', attempts = attempts + 1, payload = p_components,
+           updated_at = CURRENT_TIMESTAMP
+     WHERE id = v_doc.id RETURNING * INTO v_doc;
+  END IF;
+
+  -- (2) محاولة الترحيل (ذرية بالكامل): أي فشل ↦ مستند failed بسببه
+  BEGIN
+    SELECT MAX(lock_date) INTO v_lock FROM accounting_period_locks
+     WHERE tenant_id = p_tenant AND status = 'locked' AND lock_date >= p_date::date;
+    IF v_lock IS NOT NULL THEN
+      RAISE EXCEPTION 'الفترة المحاسبية مقفلة حتى % — لا يمكن الترحيل في هذا التاريخ', v_lock;
+    END IF;
+
+    -- بناء السطور من القواعد فقط
+    FOR v_comp IN SELECT * FROM jsonb_array_elements(COALESCE(p_components, '[]'::jsonb)) LOOP
+      v_amount := round(COALESCE((v_comp->>'amount')::numeric, 0), 2);
+      CONTINUE WHEN v_amount = 0;
+
+      v_rule_id := NULL; v_rule_cd := NULL; v_dir := NULL; v_acc_code := NULL; v_acc_name := NULL;
+      SELECT t.rule_id, t.rule_code, t.direction, t.account_code, t.account_name
+        INTO v_rule_id, v_rule_cd, v_dir, v_acc_code, v_acc_name
+        FROM fn_resolve_posting_rule_chain(
+          p_tenant, p_type, v_comp->>'field_key',
+          CASE
+            WHEN jsonb_typeof(v_comp->'selectors') = 'array'
+              THEN ARRAY(SELECT jsonb_array_elements_text(v_comp->'selectors'))
+            ELSE ARRAY[COALESCE(v_comp->>'selector', 'default'), 'default']
+          END) t;
+
+      IF v_acc_code IS NULL THEN
+        IF COALESCE((v_comp->>'optional')::boolean, false) THEN CONTINUE; END IF;
+        v_missing := v_missing || (v_comp->>'field_key')::text;
+        CONTINUE;
+      END IF;
+
+      SELECT a.id INTO v_acc_id FROM accounts a
+       WHERE a.tenant_id = p_tenant AND a.code = v_acc_code AND a.deleted_at IS NULL
+       LIMIT 1;
+
+      IF v_acc_id IS NULL THEN
+        RAISE EXCEPTION 'قاعدة الترحيل % تشير لحساب غير موجود في الدليل: %', v_rule_cd, v_acc_code;
+      END IF;
+
+      IF v_dir = 'debit' THEN v_dr := v_dr + v_amount;
+      ELSE v_cr := v_cr + v_amount; END IF;
+
+      v_lines := v_lines || jsonb_build_object(
+        'account_id', v_acc_id, 'account_code', v_acc_code, 'account_name_ar', v_acc_name,
+        'memo', COALESCE(v_comp->>'memo', p_description),
+        'debit', CASE WHEN v_dir = 'debit' THEN v_amount ELSE 0 END,
+        'credit', CASE WHEN v_dir = 'credit' THEN v_amount ELSE 0 END);
+
+      v_audit := v_audit || jsonb_build_object(
+        'rule_id', v_rule_id, 'rule_code', v_rule_cd,
+        'account_code', v_acc_code, 'direction', v_dir, 'amount', v_amount);
+
+      v_count := v_count + 1;
+    END LOOP;
+
+    -- لا ترحيل بلا قاعدة: القواعد هي المصدر الوحيد للحساب
+    IF array_length(v_missing, 1) > 0 THEN
+      RAISE EXCEPTION 'لا توجد قاعدة ترحيل فعّالة للخلايا: % — افتح شاشة ربط العمليات بالقيود',
+        array_to_string(v_missing, ', ');
+    END IF;
+
+    IF v_count = 0 OR v_dr = 0 OR round(v_dr, 2) <> round(v_cr, 2) THEN
+      RAISE EXCEPTION 'القواعد لا تنتج قيداً متوازناً: مدين % / دائن %', v_dr, v_cr;
+    END IF;
+
+    -- الترحيل الذري عبر دالة النظام (توازن + أرصدة + منع سطر مدين ودائن معاً)
+    v_journal := fn_post_journal(p_tenant, p_branch, p_date, p_description,
+                                 p_screen || ':' || p_document, v_lines, p_actor);
+
+    -- أثر تدقيقي: أي قاعدة أنتجت أي سطر
+    INSERT INTO accounting_generated_entries
+      (tenant_id, rule_code, journal_entry_id, entry_number, source_screen, source_document,
+       debit_account_code, credit_account_code, amount, is_balanced)
+    SELECT p_tenant, (a->>'rule_code'), v_journal, v_journal, p_screen, p_document,
+           CASE WHEN a->>'direction' = 'debit'  THEN a->>'account_code' END,
+           CASE WHEN a->>'direction' = 'credit' THEN a->>'account_code' END,
+           (a->>'amount')::numeric, TRUE
+      FROM jsonb_array_elements(v_audit) a;
+
+    UPDATE accounting_posting_documents
+       SET status = 'posted', journal_entry_id = v_journal, total_amount = v_dr,
+           posted_at = CURRENT_TIMESTAMP, posted_by = p_actor, last_error = NULL,
+           updated_at = CURRENT_TIMESTAMP
+     WHERE id = v_doc.id;
+
+    RETURN jsonb_build_object('status', 'posted', 'journalId', v_journal,
+                              'debit', v_dr, 'credit', v_cr, 'lines', v_count,
+                              'documentId', v_doc.id);
+  EXCEPTION WHEN OTHERS THEN
+    UPDATE accounting_posting_documents
+       SET status = 'failed', last_error = SQLERRM, updated_at = CURRENT_TIMESTAMP
+     WHERE id = v_doc.id;
+    RETURN jsonb_build_object('status', 'failed', 'error', SQLERRM, 'documentId', v_doc.id);
+  END;
+END; $$ LANGUAGE plpgsql;
+-- 8) الصلاحيات (إن كان دور التطبيق موجوداً) -------------------------------
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_api') THEN
+    EXECUTE 'GRANT SELECT, INSERT, UPDATE ON accounting_posting_rules TO app_api';
+    EXECUTE 'GRANT SELECT, INSERT, UPDATE ON accounting_posting_documents TO app_api';
+    EXECUTE 'GRANT SELECT, INSERT, UPDATE ON accounting_period_locks TO app_api';
+    EXECUTE 'GRANT USAGE, SELECT ON SEQUENCE accounting_posting_rules_id_seq TO app_api';
+    EXECUTE 'GRANT USAGE, SELECT ON SEQUENCE accounting_posting_documents_id_seq TO app_api';
+    EXECUTE 'GRANT USAGE, SELECT ON SEQUENCE accounting_period_locks_id_seq TO app_api';
+    EXECUTE 'GRANT EXECUTE ON FUNCTION fn_post_document(text,text,text,text,text,text,text,text,jsonb,text) TO app_api';
+    EXECUTE 'GRANT EXECUTE ON FUNCTION fn_resolve_posting_rule(text,text,text,text) TO app_api';
+    EXECUTE 'GRANT EXECUTE ON FUNCTION fn_resolve_posting_rule_chain(text,text,text,text[]) TO app_api';
+    EXECUTE 'GRANT EXECUTE ON FUNCTION fn_is_period_locked(text,date) TO app_api';
+    EXECUTE 'GRANT EXECUTE ON FUNCTION fn_lock_period(text,date,text,text) TO app_api';
+    EXECUTE 'GRANT EXECUTE ON FUNCTION fn_open_period(text,date) TO app_api';
+  END IF;
+END $$;
+
+
+-- ============================================================================
+-- [محرك قواعد الترحيل: بذور تعكس السلوك الحالي]
+-- المصدر: scripts/neon_posting_rules_seed.sql
+-- ============================================================================
+
+-- =========================================================================
+-- بذور قواعد الترحيل (Seeding) — تعكس **السلوك المحاسبي الحالي** حرفياً
+-- =========================================================================
+-- المبدأ: عند تشغيل هذا الملف أول مرة، يصبح النظام مُداراً بالقواعد بلا أي
+-- تغيير في النتيجة المحاسبية. بعد ذلك، أي تعديل يجرى من شاشة «ربط العمليات
+-- بالقيود» هو المصدر الوحيد — ولا يعود أي كود يقرأ حسابات من ملفات أخرى.
+--
+-- آمن للتشغيل المتكرر: ON CONFLICT DO NOTHING (لا يمس أي تعديل يدوي للمالك).
+-- =========================================================================
+
+INSERT INTO accounting_posting_rules (
+  tenant_id, transaction_type, field_key, selector_key, direction,
+  account_code, account_name, notes
+)
+SELECT 'tenant-eg-001', v.t_type, v.field, v.sel, v.dir, v.code,
+       (SELECT a.name_ar FROM accounts a
+         WHERE a.tenant_id = 'tenant-eg-001' AND a.code = v.code
+           AND a.deleted_at IS NULL LIMIT 1),
+       'قاعدة أساسية = السلوك المحاسبي المعتمد قبل تفعيل المصدر الوحيد'
+  FROM (VALUES
+    -- مبيعات الكاشير: نقدية/بنك مدين + ذمم مدين + إيراد دائن
+    ('pos_sale', 'collected_amount',    'cash',    'debit',  '1111'),
+    ('pos_sale', 'collected_amount',    'bank',    'debit',  '1112'),
+    ('pos_sale', 'collected_amount',    'default', 'debit',  '1111'),
+    ('pos_sale', 'receivable_amount',   'default', 'debit',  '1120'),
+    ('pos_sale', 'revenue_amount',      'default', 'credit', '4100'),
+    ('pos_sale', 'service_revenue_amount', 'default', 'credit', '4200'),
+    -- كشف التشغيل اليومي (جلسات/خدمات)
+    ('session', 'collected_amount',     'cash',    'debit',  '1111'),
+    ('session', 'collected_amount',     'bank',    'debit',  '1112'),
+    ('session', 'service_revenue_amount', 'default', 'credit', '4200'),
+    -- المصروفات
+    ('expense', 'expense_amount',       'default', 'debit',  '5200'),
+    ('expense', 'paid_amount',          'cash',    'credit', '1111'),
+    ('expense', 'paid_amount',          'bank',    'credit', '1112'),
+    -- تحصيل من العملاء
+    ('customer_collection', 'collected_amount',      'cash',    'debit',  '1111'),
+    ('customer_collection', 'collected_amount',      'bank',    'debit',  '1112'),
+    ('customer_collection', 'receivable_settlement', 'default', 'credit', '1120'),
+    -- سندات القبض النقدية
+    ('cash_receipt', 'amount',                'cash',    'debit',  '1111'),
+    ('cash_receipt', 'amount',                'bank',    'debit',  '1112'),
+    ('cash_receipt', 'receivable_settlement', 'default', 'credit', '1120'),
+    -- سندات الصرف النقدية
+    ('cash_payment', 'expense_amount', 'default', 'debit',  '5200'),
+    ('cash_payment', 'paid_amount',    'cash',    'credit', '1111'),
+    ('cash_payment', 'paid_amount',    'bank',    'credit', '1112'),
+    -- سداد الموردين
+    ('supplier_payment', 'payable_settlement', 'default', 'debit',  '2100'),
+    ('supplier_payment', 'paid_amount',        'cash',    'credit', '1111'),
+    ('supplier_payment', 'paid_amount',        'bank',    'credit', '1112'),
+    -- استلام بضاعة من مورد
+    ('purchase_receipt', 'inventory_amount', 'default', 'debit',  '1130'),
+    ('purchase_receipt', 'payable_amount',   'default', 'credit', '2100'),
+    -- صرف مخزني (تكلفة مبيعات)
+    ('goods_issue', 'cogs_amount',      'default', 'debit',  '5100'),
+    ('goods_issue', 'inventory_amount', 'default', 'credit', '1130'),
+    -- مسير الرواتب
+    ('payroll', 'salary_expense', 'default', 'debit',  '5300'),
+    ('payroll', 'net_paid',       'cash',    'credit', '1111'),
+    ('payroll', 'net_paid',       'bank',    'credit', '1112'),
+    -- تسوية الجرد
+    ('inventory_adjustment', 'shortage_expense', 'default', 'debit',  '5200'),
+    ('inventory_adjustment', 'inventory_amount', 'default', 'credit', '1130')
+    ,('pos_sale', 'collected_amount', 'pmt:cash', 'debit', '1111')
+    ,('pos_sale', 'collected_amount', 'pmt:wallet', 'debit', '1111')
+    ,('pos_sale', 'collected_amount', 'pmt:card', 'debit', '1112')
+    ,('pos_sale', 'collected_amount', 'pmt:transfer', 'debit', '1112')
+    ,('session', 'collected_amount', 'pmt:cash', 'debit', '1111')
+    ,('session', 'collected_amount', 'pmt:wallet', 'debit', '1111')
+    ,('session', 'collected_amount', 'pmt:card', 'debit', '1112')
+    ,('session', 'collected_amount', 'pmt:transfer', 'debit', '1112')
+    ,('expense', 'paid_amount', 'pmt:cash', 'credit', '1111')
+    ,('expense', 'paid_amount', 'pmt:wallet', 'credit', '1111')
+    ,('expense', 'paid_amount', 'pmt:card', 'credit', '1112')
+    ,('expense', 'paid_amount', 'pmt:transfer', 'credit', '1112')
+    ,('customer_collection', 'collected_amount', 'pmt:cash', 'debit', '1111')
+    ,('customer_collection', 'collected_amount', 'pmt:wallet', 'debit', '1111')
+    ,('customer_collection', 'collected_amount', 'pmt:card', 'debit', '1112')
+    ,('customer_collection', 'collected_amount', 'pmt:transfer', 'debit', '1112')
+    ,('cash_receipt', 'amount', 'pmt:cash', 'debit', '1111')
+    ,('cash_receipt', 'amount', 'pmt:wallet', 'debit', '1111')
+    ,('cash_receipt', 'amount', 'pmt:card', 'debit', '1112')
+    ,('cash_receipt', 'amount', 'pmt:transfer', 'debit', '1112')
+    ,('cash_payment', 'paid_amount', 'pmt:cash', 'credit', '1111')
+    ,('cash_payment', 'paid_amount', 'pmt:wallet', 'credit', '1111')
+    ,('cash_payment', 'paid_amount', 'pmt:card', 'credit', '1112')
+    ,('cash_payment', 'paid_amount', 'pmt:transfer', 'credit', '1112')
+    ,('supplier_payment', 'paid_amount', 'pmt:cash', 'credit', '1111')
+    ,('supplier_payment', 'paid_amount', 'pmt:wallet', 'credit', '1111')
+    ,('supplier_payment', 'paid_amount', 'pmt:card', 'credit', '1112')
+    ,('supplier_payment', 'paid_amount', 'pmt:transfer', 'credit', '1112')
+    ,('payroll', 'net_paid', 'pmt:cash', 'credit', '1111')
+    ,('payroll', 'net_paid', 'pmt:wallet', 'credit', '1111')
+    ,('payroll', 'net_paid', 'pmt:card', 'credit', '1112')
+    ,('payroll', 'net_paid', 'pmt:transfer', 'credit', '1112')
+    ,('session', 'collected_amount', 'default', 'debit', '1111')
+    ,('expense', 'paid_amount', 'default', 'credit', '1111')
+    ,('customer_collection', 'collected_amount', 'default', 'debit', '1111')
+    ,('cash_receipt', 'amount', 'default', 'debit', '1111')
+    ,('cash_payment', 'paid_amount', 'default', 'credit', '1111')
+    ,('supplier_payment', 'paid_amount', 'default', 'credit', '1111')
+    ,('payroll', 'net_paid', 'default', 'credit', '1111')
+  ) AS v(t_type, field, sel, dir, code)
+ WHERE EXISTS (
+   SELECT 1 FROM accounts a
+    WHERE a.tenant_id = 'tenant-eg-001' AND a.code = v.code AND a.deleted_at IS NULL
+ )
+ON CONFLICT (tenant_id, transaction_type, field_key, selector_key) DO NOTHING;
+
+
+-- ============================================================================
+-- [تعديل القيود الموثّق + مزامنة المصدر]
+-- المصدر: scripts/neon_journal_edit.sql
+-- ============================================================================
+
+-- =========================================================================
+-- تعديل قيد محاسبي من الشاشة + مزامنة المصدر (Audited Journal Edit)
+-- =========================================================================
+-- المبدأ المحاسبي: القيد المُرحَّل لا يُحذف ولا يُترك يُعدَّل بصمت. هنا:
+--   • كل تعديل يُسجَّل في `accounting_journal_edits` (قبل/بعد + السبب + المنفّذ).
+--   • أرصدة الحسابات تُعدَّل **بالفرق** (عكس القديم ثم تطبيق الجديد) داخل معاملة.
+--   • القيد يظل متوازناً وإلا رُفض التعديل.
+--   • الفترة المقفلة تمنع التعديل (نفس حارس الترحيل).
+--   • يُحدَّث **المصدر**: مستند الترحيل (payload + الإجمالي) والسندات المعروفة
+--     (cash_receipts / customer_refunds / sales_invoices) عند وجود رابط
+--     `payload->>'journalEntryId'`، مع تعليم ما يحتاج مراجعة إن تعذّر الجزم.
+-- متكرر بأمان.
+-- =========================================================================
+
+CREATE TABLE IF NOT EXISTS accounting_journal_edits (
+  id            BIGSERIAL PRIMARY KEY,
+  tenant_id     VARCHAR(100) NOT NULL,
+  journal_id    VARCHAR(200) NOT NULL,
+  entry_number  VARCHAR(100),
+  reason        TEXT NOT NULL,
+  actor         VARCHAR(150),
+  version_before INTEGER,
+  version_after  INTEGER,
+  total_before  NUMERIC(18, 2) NOT NULL DEFAULT 0,
+  total_after   NUMERIC(18, 2) NOT NULL DEFAULT 0,
+  before_payload JSONB,
+  after_payload  JSONB,
+  source_sync    JSONB,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_journal_edits_journal
+  ON accounting_journal_edits (tenant_id, journal_id, created_at DESC);
+
+-- __APPEND__
+
+-- تعديل قيد: يتحقق ثم يطبّق الفرق على الأرصدة ثم يزامن المصدر -----------------
+CREATE OR REPLACE FUNCTION fn_update_journal(
+  p_tenant text,
+  p_actor text,
+  p_journal_id text,
+  p_date text,
+  p_description text,
+  p_lines jsonb,
+  p_reason text
+) RETURNS jsonb AS $$
+DECLARE
+  v_old        RECORD;
+  v_old_lines  jsonb;
+  v_line       jsonb;
+  v_dr         numeric := 0;
+  v_cr         numeric := 0;
+  v_old_dr     numeric := 0;
+  v_old_cr     numeric := 0;
+  v_lock       date;
+  v_version    integer;
+  v_account_id text;
+  v_type       text;
+  v_payload    jsonb;
+  v_source     jsonb := '[]'::jsonb;
+  v_rows       integer;
+BEGIN
+  IF COALESCE(trim(p_reason), '') = '' THEN
+    RAISE EXCEPTION 'سبب التعديل مطلوب — لا تعديل صامت على قيد مرحّل';
+  END IF;
+
+  SELECT * INTO v_old FROM journal_entries
+   WHERE tenant_id = p_tenant AND id = p_journal_id AND deleted_at IS NULL
+   FOR UPDATE;
+
+  IF v_old.id IS NULL THEN
+    RAISE EXCEPTION 'القيد غير موجود أو محذوف: %', p_journal_id;
+  END IF;
+
+  IF to_regclass('accounting_period_locks') IS NOT NULL THEN
+    SELECT MAX(lock_date) INTO v_lock FROM accounting_period_locks
+     WHERE tenant_id = p_tenant AND status = 'locked'
+       AND lock_date >= COALESCE(p_date, v_old.entry_date, v_old.date)::date;
+    IF v_lock IS NOT NULL THEN
+      RAISE EXCEPTION 'الفترة المحاسبية مقفلة حتى % — لا يمكن تعديل القيد', v_lock;
+    END IF;
+  END IF;
+
+  -- التحقق من السطور الجديدة (توازن + سطر واحد الاتجاه + حساب موجود)
+  SELECT COALESCE(SUM(COALESCE((l->>'debit')::numeric, 0)), 0),
+         COALESCE(SUM(COALESCE((l->>'credit')::numeric, 0)), 0)
+    INTO v_dr, v_cr FROM jsonb_array_elements(COALESCE(p_lines, '[]'::jsonb)) l;
+
+  IF jsonb_array_length(COALESCE(p_lines, '[]'::jsonb)) < 2 THEN
+    RAISE EXCEPTION 'القيد يحتاج سطرين على الأقل';
+  END IF;
+  IF round(v_dr, 2) <> round(v_cr, 2) OR v_dr = 0 THEN
+    RAISE EXCEPTION 'القيد غير متوازن: مدين % / دائن %', v_dr, v_cr;
+  END IF;
+  IF EXISTS (SELECT 1 FROM jsonb_array_elements(p_lines) l
+              WHERE COALESCE((l->>'debit')::numeric, 0) > 0
+                AND COALESCE((l->>'credit')::numeric, 0) > 0) THEN
+    RAISE EXCEPTION 'السطر لا يكون مديناً ودائناً معاً';
+  END IF;
+
+  FOR v_line IN SELECT * FROM jsonb_array_elements(p_lines) LOOP
+    SELECT a.id INTO v_account_id FROM accounts a
+     WHERE a.tenant_id = p_tenant AND a.deleted_at IS NULL
+       AND (a.id = COALESCE(v_line->>'account_id', v_line->>'accountId')
+            OR a.code = COALESCE(v_line->>'account_code', v_line->>'accountCode'))
+     LIMIT 1;
+    IF v_account_id IS NULL THEN
+      RAISE EXCEPTION 'حساب غير موجود في الدليل: %',
+        COALESCE(v_line->>'account_code', v_line->>'accountCode', v_line->>'account_id');
+    END IF;
+  END LOOP;
+
+  -- عكس أثر السطور القديمة على الأرصدة
+  v_old_lines := COALESCE(v_old.payload->'lines', '[]'::jsonb);
+  SELECT COALESCE(SUM(COALESCE((l->>'debit')::numeric, 0)), 0),
+         COALESCE(SUM(COALESCE((l->>'credit')::numeric, 0)), 0)
+    INTO v_old_dr, v_old_cr FROM jsonb_array_elements(v_old_lines) l;
+
+  FOR v_line IN SELECT * FROM jsonb_array_elements(v_old_lines) LOOP
+    SELECT a.type INTO v_type FROM accounts a
+     WHERE a.tenant_id = p_tenant AND a.deleted_at IS NULL
+       AND (a.id = COALESCE(v_line->>'account_id', v_line->>'accountId')
+            OR a.code = COALESCE(v_line->>'account_code', v_line->>'accountCode'))
+     LIMIT 1;
+    IF v_type IS NULL THEN CONTINUE; END IF;
+    UPDATE accounts a
+       SET balance = COALESCE(a.balance, 0) -
+           CASE WHEN fn_is_debit_normal(v_type)
+                THEN COALESCE((v_line->>'debit')::numeric, 0) - COALESCE((v_line->>'credit')::numeric, 0)
+                ELSE COALESCE((v_line->>'credit')::numeric, 0) - COALESCE((v_line->>'debit')::numeric, 0)
+           END,
+           updated_at = NOW()
+     WHERE a.tenant_id = p_tenant AND a.deleted_at IS NULL
+       AND (a.id = COALESCE(v_line->>'account_id', v_line->>'accountId')
+            OR a.code = COALESCE(v_line->>'account_code', v_line->>'accountCode'));
+  END LOOP;
+
+  -- تطبيق أثر السطور الجديدة
+  FOR v_line IN SELECT * FROM jsonb_array_elements(p_lines) LOOP
+    SELECT a.type INTO v_type FROM accounts a
+     WHERE a.tenant_id = p_tenant AND a.deleted_at IS NULL
+       AND (a.id = COALESCE(v_line->>'account_id', v_line->>'accountId')
+            OR a.code = COALESCE(v_line->>'account_code', v_line->>'accountCode'))
+     LIMIT 1;
+    UPDATE accounts a
+       SET balance = COALESCE(a.balance, 0) +
+           CASE WHEN fn_is_debit_normal(v_type)
+                THEN COALESCE((v_line->>'debit')::numeric, 0) - COALESCE((v_line->>'credit')::numeric, 0)
+                ELSE COALESCE((v_line->>'credit')::numeric, 0) - COALESCE((v_line->>'debit')::numeric, 0)
+           END,
+           updated_at = NOW()
+     WHERE a.tenant_id = p_tenant AND a.deleted_at IS NULL
+       AND (a.id = COALESCE(v_line->>'account_id', v_line->>'accountId')
+            OR a.code = COALESCE(v_line->>'account_code', v_line->>'accountCode'));
+  END LOOP;
+
+  -- تحديث القيد نفسه (إصدار جديد + من عدّله)
+  v_version := COALESCE(v_old.version, 1) + 1;
+  v_payload := jsonb_set(
+    jsonb_set(COALESCE(v_old.payload, '{}'::jsonb), '{lines}', p_lines, true),
+    '{description}', to_jsonb(COALESCE(p_description, v_old.description)), true
+  );
+  v_payload := jsonb_set(v_payload, '{updatedBy}', to_jsonb(COALESCE(p_actor, 'ui')), true);
+  v_payload := jsonb_set(v_payload, '{editedAt}', to_jsonb(now()::text), true);
+
+  UPDATE journal_entries
+     SET payload    = v_payload,
+         description = COALESCE(p_description, description),
+         entry_date  = COALESCE(p_date, entry_date),
+         date        = COALESCE(p_date, date),
+         version     = v_version,
+         updated_at  = NOW(),
+         updated_by  = COALESCE(p_actor, 'ui')
+   WHERE tenant_id = p_tenant AND id = p_journal_id;
+
+  -- (أ) مزامنة مستند الترحيل إن كان هو المصدر (الأدق)
+  IF to_regclass('accounting_posting_documents') IS NOT NULL THEN
+    UPDATE accounting_posting_documents
+       SET payload = p_lines,
+           total_amount = v_dr,
+           updated_at = NOW()
+     WHERE tenant_id = p_tenant AND journal_entry_id = p_journal_id;
+    GET DIAGNOSTICS v_rows = ROW_COUNT;
+    IF v_rows > 0 THEN
+      v_source := v_source || jsonb_build_object('kind', 'posting_document', 'rows', v_rows);
+    END IF;
+  END IF;
+
+  -- (ب) السندات القديمة المرتبطة عبر payload->>'journalEntryId': مزامنة المبلغ
+  IF EXISTS (SELECT 1 FROM cash_receipts r
+              WHERE r.tenant_id = p_tenant AND r.payload->>'journalEntryId' = p_journal_id) THEN
+    UPDATE cash_receipts r
+       SET amount = v_dr,
+           payload = jsonb_set(jsonb_set(r.payload, '{amount}', to_jsonb(v_dr), true),
+                               '{journalEditedAt}', to_jsonb(now()::text), true),
+           updated_at = NOW(), updated_by = COALESCE(p_actor, 'ui')
+     WHERE r.tenant_id = p_tenant AND r.payload->>'journalEntryId' = p_journal_id;
+    v_source := v_source || jsonb_build_object('kind', 'cash_receipt', 'amount', v_dr);
+  END IF;
+
+  IF EXISTS (SELECT 1 FROM customer_refunds r
+              WHERE r.tenant_id = p_tenant AND r.payload->>'journalEntryId' = p_journal_id) THEN
+    UPDATE customer_refunds r
+       SET amount = v_dr,
+           payload = jsonb_set(jsonb_set(r.payload, '{amount}', to_jsonb(v_dr), true),
+                               '{journalEditedAt}', to_jsonb(now()::text), true),
+           updated_at = NOW(), updated_by = COALESCE(p_actor, 'ui')
+     WHERE r.tenant_id = p_tenant AND r.payload->>'journalEntryId' = p_journal_id;
+    v_source := v_source || jsonb_build_object('kind', 'customer_refund', 'amount', v_dr);
+  END IF;
+
+  IF EXISTS (SELECT 1 FROM sales_invoices i
+              WHERE i.tenant_id = p_tenant AND i.payload->>'journalEntryId' = p_journal_id) THEN
+    UPDATE sales_invoices i
+       SET net_amount = v_dr,
+           payload = jsonb_set(jsonb_set(i.payload, '{journalEditedAt}', to_jsonb(now()::text), true),
+                               '{journalEditedBy}', to_jsonb(COALESCE(p_actor, 'ui')), true),
+           updated_at = NOW(), updated_by = COALESCE(p_actor, 'ui')
+     WHERE i.tenant_id = p_tenant AND i.payload->>'journalEntryId' = p_journal_id;
+    v_source := v_source || jsonb_build_object('kind', 'sales_invoice', 'net_amount', v_dr);
+  END IF;
+
+  -- سجل التعديل (قبل/بعد + السبب + المصدر المتزامن)
+  INSERT INTO accounting_journal_edits
+    (tenant_id, journal_id, entry_number, reason, actor, version_before, version_after,
+     total_before, total_after, before_payload, after_payload, source_sync)
+  VALUES (p_tenant, p_journal_id, v_old.entry_number, p_reason, COALESCE(p_actor, 'ui'),
+          COALESCE(v_old.version, 1), v_version, round(v_old_dr, 2), round(v_dr, 2),
+          v_old.payload, v_payload, v_source);
+
+  RETURN jsonb_build_object(
+    'journalId', p_journal_id,
+    'version', v_version,
+    'debit', v_dr,
+    'credit', v_cr,
+    'sourceSync', v_source
+  );
+END; $$ LANGUAGE plpgsql;
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_api') THEN
+    EXECUTE 'GRANT SELECT, INSERT ON accounting_journal_edits TO app_api';
+    EXECUTE 'GRANT EXECUTE ON FUNCTION fn_update_journal(text,text,text,text,text,jsonb,text) TO app_api';
+  END IF;
+END $$;
 
 
 -- ============================================================================
