@@ -48,6 +48,7 @@ const MIGRATIONS = [
   { file: 'scripts/neon_posting_rules_seed.sql', title: 'محرك قواعد الترحيل: بذور تعكس السلوك الحالي' },
   { file: 'scripts/neon_journal_edit.sql', title: 'تعديل القيود الموثّق + مزامنة المصدر' },
   { file: 'scripts/neon_db_admin_audit.sql', title: 'تدقيق إدارة قاعدة البيانات من الواجهة' },
+  { file: 'scripts/neon_parties_performance_indexes.sql', title: 'فهارس أداء العملاء (trgm + أكواد + حالة)' },
 ];
 
 /** استعلامات التحقق — تُشغَّل بعد التطبيق. */

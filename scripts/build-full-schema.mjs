@@ -33,6 +33,7 @@ const SOURCES = [
   ['scripts/neon_posting_rules_seed.sql', 'محرك قواعد الترحيل: بذور تعكس السلوك الحالي'],
   ['scripts/neon_journal_edit.sql', 'تعديل القيود الموثّق + مزامنة المصدر'],
   ['scripts/neon_db_admin_audit.sql', 'تدقيق إدارة قاعدة البيانات من الواجهة'],
+  ['scripts/neon_parties_performance_indexes.sql', 'فهارس أداء العملاء (trgm + أكواد + حالة)'],
 ];
 
 const HEADER = `-- ============================================================================
