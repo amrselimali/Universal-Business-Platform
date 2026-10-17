@@ -2,12 +2,14 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertCircle, CheckCircle2, Database, RefreshCw, ShieldAlert, Trash2 } from 'lucide-react';
 import { usePlatform } from '../context/PlatformContext';
 import { loadDatabaseCatalog, fetchTableRows } from '../services/databaseExplorerApi';
+import { loadConnectionIdentity } from '../services/databaseIdentityApi';
 import { dropTable } from '../services/databaseSchemaApi';
 import { isProtectedTable } from '../services/databaseIdentifiers';
 import { TablesSidebar } from '../components/database/TablesSidebar';
 import { TableGrid } from '../components/database/TableGrid';
 import { TableStructure } from '../components/database/TableStructure';
-import type { DbCatalog, DbRowPage, DbTable } from '../types/databaseExplorer';
+import { ConnectionDiagnostics } from '../components/database/ConnectionDiagnostics';
+import type { DbCatalog, DbConnectionIdentity, DbRowPage, DbTable } from '../types/databaseExplorer';
 
 /**
  * إدارة قاعدة البيانات من الواجهة — مرآة حقيقية
@@ -55,11 +57,13 @@ export const DatabaseExplorerView: React.FC = () => {
   }, [t, notify]);
 
   const [pageSize, setPageSize] = useState<number>(50);
+  const [identity, setIdentity] = useState<DbConnectionIdentity | null>(null);
+  const [bypassRls, setBypassRls] = useState(false);
 
   const loadRows = useCallback(async (table: DbTable, offset = 0, limit?: number) => {
     setBusy(true);
     const effLimit = limit !== undefined ? limit : pageSize;
-    const result = await fetchTableRows({ schema: table.schema, table: table.name, offset, limit: effLimit });
+    const result = await fetchTableRows({ schema: table.schema, table: table.name, offset, limit: effLimit, bypassRls });
     setPage(result);
     if (result.columns && result.columns.length > 0) {
       table.columns = result.columns;
@@ -68,7 +72,11 @@ export const DatabaseExplorerView: React.FC = () => {
     }
     setBusy(false);
     if (result.error) notify('err', result.error);
-  }, [notify, pageSize]);
+  }, [notify, pageSize, bypassRls]);
+
+  useEffect(() => {
+    void loadConnectionIdentity().then(setIdentity);
+  }, []);
 
   useEffect(() => {
     void (async () => {
@@ -164,6 +172,17 @@ export const DatabaseExplorerView: React.FC = () => {
           >
             <RefreshCw className={`inline h-3 w-3 ${busy ? 'animate-spin' : ''}`} /> {t('تحديث', 'Refresh')}
           </button>
+          {selected && (
+            <button
+              type="button"
+              onClick={() => setBypassRls((prev) => !prev)}
+              disabled={!canDdl}
+              title={t('عرض كل الصفوف بتجاوز RLS (يتطلب دوراً مالكاً)', 'Show all rows bypassing RLS (owner role)')}
+              className={`rounded-xl px-2 py-1 ${bypassRls ? 'bg-rose-600 text-white' : 'border border-dashed border-rose-300 text-rose-600 dark:border-rose-800 dark:text-rose-300'}`}
+            >
+              {bypassRls ? t('إيقاف تجاوز RLS', 'Stop RLS bypass') : t('تجاوز RLS', 'Bypass RLS')}
+            </button>
+          )}
           {selected && canDrop && (
             <button
               type="button"
@@ -175,6 +194,8 @@ export const DatabaseExplorerView: React.FC = () => {
           )}
         </div>
       </div>
+
+      <ConnectionDiagnostics t={t} identity={identity} table={selected} page={page} />
 
       {notice && (
         <div className={`flex items-start gap-2 rounded-2xl border px-3 py-2 text-[11px] font-bold ${notice.type === 'ok' ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300' : 'border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-300'}`}>
