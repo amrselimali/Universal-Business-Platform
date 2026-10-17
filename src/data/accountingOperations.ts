@@ -10,7 +10,7 @@
  *   • `selector`         : محور تفرّع القاعدة (نوع طريقة الدفع مثلاً).
  */
 
-export type FieldSelector = 'payment_method_type' | 'product_kind';
+export type FieldSelector = 'payment_method';
 
 export interface OperationField {
   key: string;
@@ -31,21 +31,79 @@ export interface OperationDef {
   fields: OperationField[];
 }
 
-/** قيم المُحدِّد المعتمدة (تظهر كأزرار في الشاشة). */
-export const SELECTOR_OPTIONS: Record<FieldSelector, { key: string; labelAr: string; labelEn: string }[]> = {
-  payment_method_type: [
-    { key: 'default', labelAr: 'افتراضي (أي طريقة)', labelEn: 'Default (any method)' },
-    { key: 'cash', labelAr: 'نقدي / خزينة', labelEn: 'Cash / drawer' },
-    { key: 'bank', labelAr: 'بنك / بطاقة / تحويل', labelEn: 'Bank / card / transfer' },
-  ],
-  product_kind: [
-    { key: 'default', labelAr: 'افتراضي', labelEn: 'Default' },
-    { key: 'product', labelAr: 'بضاعة', labelEn: 'Goods' },
-    { key: 'service', labelAr: 'خدمة', labelEn: 'Service' },
-  ],
+/** أنواع طرق الدفع كما هي في نموذج التطبيق. */
+export const PAYMENT_METHOD_TYPE_LABELS: Record<string, { ar: string; en: string }> = {
+  cash: { ar: 'نقدي', en: 'Cash' },
+  card: { ar: 'بطاقة', en: 'Card' },
+  transfer: { ar: 'تحويل بنكي', en: 'Transfer' },
+  wallet: { ar: 'محفظة إلكترونية', en: 'Wallet' },
+  credit: { ar: 'آجل', en: 'Credit' },
+  custom: { ar: 'مخصص', en: 'Custom' },
 };
 
-const payment: Pick<OperationField, 'selector'> = { selector: 'payment_method_type' };
+/** طريقة دفع مبسطة كما تأتي من سياق التطبيق. */
+export interface PaymentMethodRef {
+  id: string;
+  nameAr: string;
+  code?: string;
+  type?: string;
+}
+
+/**
+ * سلسلة اختيار القاعدة بالترتيب (أول مطابقة تفوز):
+ *   1) الطريقة نفسها  = pm:<id>
+ *   2) نوع الطريقة     = pmt:<type>   (cash/card/transfer/wallet/credit/custom)
+ *   3) مجموعة قديمة    = cash | bank  (توافق مع البذور السابقة)
+ *   4) الافتراضي       = default
+ */
+export const paymentSelectorChain = (method?: PaymentMethodRef | null): string[] => {
+  const chain: string[] = [];
+  if (method?.id) chain.push(`pm:${method.id}`);
+  const type = (method?.type ?? '').toLowerCase();
+  if (type) chain.push(`pmt:${type}`);
+  if (type === 'cash') chain.push('cash');
+  if (['card', 'transfer', 'wallet', 'credit'].includes(type)) chain.push('bank');
+  chain.push('default');
+  return [...new Set(chain)];
+};
+
+/**
+ * مفاتيح القاعدة المعروضة في الشاشة لخلية مرتبطة بطريقة الدفع:
+ * الافتراضي + المجموعتان + أنواع الطرق الموجودة فعلاً + كل طريقة بمفردها.
+ */
+/** يحوّل اختيار المستخدم في الواجهة إلى سلسلة أولوية فعلية. */
+export const selectorChainForValue = (value: string, methods: PaymentMethodRef[]): string[] => {
+  if (value.startsWith('pm:')) {
+    const id = value.slice(3);
+    const method = methods.find((m) => m.id === id) ?? { id, nameAr: '', type: '' };
+    return paymentSelectorChain(method);
+  }
+  if (value === 'cash' || value === 'bank') return [value, 'default'];
+  return ['default'];
+};
+
+export const paymentSelectorOptions = (
+  methods: PaymentMethodRef[]
+): { key: string; labelAr: string; labelEn: string }[] => {
+  const types = [...new Set(methods.map((m) => (m.type ?? '').toLowerCase()).filter(Boolean))];
+  return [
+    { key: 'default', labelAr: 'افتراضي (أي طريقة)', labelEn: 'Default (any method)' },
+    { key: 'cash', labelAr: 'أي طريقة نقدية (مجموعة)', labelEn: 'Any cash (group)' },
+    { key: 'bank', labelAr: 'أي بطاقة/تحويل (مجموعة)', labelEn: 'Any card/transfer (group)' },
+    ...types.map((type) => ({
+      key: `pmt:${type}`,
+      labelAr: `أي ${PAYMENT_METHOD_TYPE_LABELS[type]?.ar ?? type}`,
+      labelEn: `Any ${PAYMENT_METHOD_TYPE_LABELS[type]?.en ?? type}`,
+    })),
+    ...methods.map((method) => ({
+      key: `pm:${method.id}`,
+      labelAr: `${method.nameAr} (هذه الطريقة فقط)`,
+      labelEn: `${method.nameAr} (this method only)`,
+    })),
+  ];
+};
+
+const payment: Pick<OperationField, 'selector'> = { selector: 'payment_method' };
 
 export const ACCOUNTING_OPERATIONS: OperationDef[] = [
   {

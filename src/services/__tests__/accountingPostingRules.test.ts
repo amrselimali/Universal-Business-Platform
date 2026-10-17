@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   ACCOUNTING_OPERATIONS,
   REQUIRED_FIELDS,
-  SELECTOR_OPTIONS,
+  paymentSelectorChain,
+  paymentSelectorOptions,
+  selectorChainForValue,
   computeCoverage,
   findOperation,
 } from '../../data/accountingOperations';
@@ -46,16 +48,47 @@ describe('كتالوج العمليات المحاسبية', () => {
     expect(thin).toEqual([]);
   });
 
-  it('كل مُحدِّد مستخدم له خيارات معرّفة', () => {
-    const missing: string[] = [];
-    for (const op of ACCOUNTING_OPERATIONS) {
-      for (const field of op.fields) {
-        if (field.selector && !SELECTOR_OPTIONS[field.selector]?.length) {
-          missing.push(`${op.type}.${field.key}`);
-        }
-      }
-    }
-    expect(missing).toEqual([]);
+  it('كل مُحدِّد مستخدم له نوع معروف', () => {
+    const unknown = ACCOUNTING_OPERATIONS.flatMap((op) =>
+      op.fields.filter((field) => field.selector && field.selector !== 'payment_method')
+        .map((field) => `${op.type}.${field.key}`)
+    );
+    expect(unknown).toEqual([]);
+  });
+
+  it('سلسلة أولوية طريقة الدفع: الطريقة ← نوعها ← المجموعة ← الافتراضي', () => {
+    expect(paymentSelectorChain({ id: 'pm-1', nameAr: 'خزينة', type: 'Cash' })).toEqual([
+      'pm:pm-1', 'pmt:cash', 'cash', 'default',
+    ]);
+    expect(paymentSelectorChain({ id: 'pm-2', nameAr: 'بنك', type: 'Transfer' })).toEqual([
+      'pm:pm-2', 'pmt:transfer', 'bank', 'default',
+    ]);
+    expect(paymentSelectorChain(null)).toEqual(['default']);
+  });
+
+  it('خيارات الشاشة تشمل كل طريقة فعلية + الأنواع + المجموعتين + الافتراضي', () => {
+    const options = paymentSelectorOptions([
+      { id: 'pm-1', nameAr: 'خزينة الفرع', type: 'Cash' },
+      { id: 'pm-2', nameAr: 'بنك مصر', type: 'Transfer' },
+      { id: 'pm-3', nameAr: 'محفظة', type: 'Wallet' },
+    ]).map((option) => option.key);
+
+    expect(options).toContain('default');
+    expect(options).toContain('cash');
+    expect(options).toContain('bank');
+    expect(options).toContain('pmt:cash');
+    expect(options).toContain('pmt:transfer');
+    expect(options).toContain('pmt:wallet');
+    expect(options).toContain('pm:pm-1');
+    expect(options).toContain('pm:pm-2');
+    expect(options).toContain('pm:pm-3');
+  });
+
+  it('تحويل اختيار الواجهة إلى سلسلة: طريقة محددة تُقدَّم على المجموعة', () => {
+    const methods = [{ id: 'pm-9', nameAr: 'فيزا', type: 'Card' }];
+    expect(selectorChainForValue('pm:pm-9', methods)).toEqual(['pm:pm-9', 'pmt:card', 'bank', 'default']);
+    expect(selectorChainForValue('cash', methods)).toEqual(['cash', 'default']);
+    expect(selectorChainForValue('', methods)).toEqual(['default']);
   });
 
   it('الحقول الإلزامية موجودة في الكتالوج وعددها منطقي', () => {
