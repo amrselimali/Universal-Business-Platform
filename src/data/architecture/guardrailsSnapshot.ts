@@ -12,8 +12,8 @@
 
 import type { GuardrailsFacts } from '../../services/architectureGuardrails';
 
-export const GUARDRAILS_MEASURED_AT = '2026-10-17T06:08:29.848Z';
-export const GUARDRAILS_REVISION = 'bcb92cf';
+export const GUARDRAILS_MEASURED_AT = '2026-10-17T06:16:14.358Z';
+export const GUARDRAILS_REVISION = '705aa90';
 
 export const GUARDRAILS_FACTS: GuardrailsFacts = /* GUARDRAILS_FACTS_BEGIN */
 {
@@ -86,9 +86,9 @@ export const GUARDRAILS_FACTS: GuardrailsFacts = /* GUARDRAILS_FACTS_BEGIN */
     { path: 'src/views/ArchitectureView.tsx', lines: 111 },
   ],
   actionUsages: [
-    { actionKey: 'accounting.lock_period', file: 'src/views/AccountingMappingView.tsx', line: 60 },
-    { actionKey: 'accounting.open_period', file: 'src/views/AccountingMappingView.tsx', line: 61 },
-    { actionKey: 'accounting.post_journal', file: 'src/views/AccountingMappingView.tsx', line: 59 },
+    { actionKey: 'accounting.lock_period', file: 'src/views/AccountingMappingView.tsx', line: 61 },
+    { actionKey: 'accounting.open_period', file: 'src/views/AccountingMappingView.tsx', line: 62 },
+    { actionKey: 'accounting.post_journal', file: 'src/views/AccountingMappingView.tsx', line: 60 },
     { actionKey: 'architecture.copy_snippet', file: 'src/views/ArchitectureView.tsx', line: 34 },
     { actionKey: 'architecture.run_guardrails', file: 'src/views/ArchitectureView.tsx', line: 33 },
     { actionKey: 'bookings.add_followup', file: 'src/views/BookingsFollowUpView.tsx', line: 2340 },
@@ -127,7 +127,7 @@ export const GUARDRAILS_FACTS: GuardrailsFacts = /* GUARDRAILS_FACTS_BEGIN */
     { id: 'emitted_events_pipeline', labelAr: 'معالجة الأحداث المُصدَّرة بلا تكرار', labelEn: 'Idempotent event processing', comparison: 'atLeast', expected: 1, found: 4, severity: 'advisory', evidence: ['erp-nextgen-local/db/migrations-original/0005_core_audit_outbox_infrastructure.sql', 'erp-nextgen-local/db/migrations/0005_core_audit_outbox_infrastructure.sql'] },
   ],
   legacy: {
-    scanned: 165,
+    scanned: 169,
     limit: 300,
     baseline: 58,
     violations: 58,

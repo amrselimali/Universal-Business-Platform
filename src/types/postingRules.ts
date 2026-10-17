@@ -5,6 +5,8 @@
  * لا يوجد أي مصدر آخر للحساب: من لا قاعدة له لا يُرحَّل (Default-Deny محاسبي).
  */
 
+import type { GeneratedJournalEntry } from './accountingMapping';
+
 export type PostingDirection = 'debit' | 'credit';
 
 /** قاعدة ترحيل واحدة كما تُقرأ من `accounting_posting_rules`. */
@@ -81,6 +83,8 @@ export interface PostingResult {
 
 export interface PostingRulesSnapshot {
   rules: PostingRule[];
+  /** سجل تدقيق القيود المولَّدة (يُكتب داخل معاملة الترحيل). */
+  generated: GeneratedJournalEntry[];
   documents: PostingDocument[];
   locks: PeriodLock[];
   error?: string;

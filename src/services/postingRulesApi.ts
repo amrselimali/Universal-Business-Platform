@@ -11,6 +11,7 @@
 
 import { neon } from '@neondatabase/serverless';
 import { getActiveDbConnection } from './commands';
+import { num, toDocument, toGenerated, toLock, toRule } from './postingRulesMappers';
 import type {
   PeriodLock,
   PostingComponent,
@@ -21,54 +22,6 @@ import type {
   PostingRulesSnapshot,
 } from '../types/postingRules';
 
-const num = (v: unknown, d = 0): number => (Number.isFinite(Number(v)) ? Number(v) : d);
-const str = (v: unknown, d = ''): string => (v === null || v === undefined ? d : String(v));
-const bool = (v: unknown, d = false): boolean => (v === null || v === undefined ? d : v === true);
-
-const toRule = (row: Record<string, unknown>): PostingRule => ({
-  id: num(row.id),
-  tenantId: str(row.tenant_id),
-  transactionType: str(row.transaction_type),
-  fieldKey: str(row.field_key),
-  selectorKey: str(row.selector_key, 'default'),
-  direction: str(row.direction, 'debit') === 'credit' ? 'credit' : 'debit',
-  accountCode: str(row.account_code),
-  accountName: str(row.account_name),
-  autoPostEnabled: bool(row.auto_post_enabled, true),
-  isActive: bool(row.is_active, true),
-  strictExclusive: bool(row.strict_exclusive, true),
-  version: num(row.version, 1),
-  notes: str(row.notes) || undefined,
-});
-
-const toDocument = (row: Record<string, unknown>): PostingDocument => ({
-  id: num(row.id),
-  tenantId: str(row.tenant_id),
-  transactionType: str(row.transaction_type),
-  sourceScreen: str(row.source_screen),
-  sourceDocument: str(row.source_document),
-  documentDate: str(row.document_date).slice(0, 10),
-  branchId: str(row.branch_id) || undefined,
-  totalAmount: num(row.total_amount),
-  status: str(row.status, 'pending') as PostingDocumentStatus,
-  journalEntryId: str(row.journal_entry_id) || undefined,
-  idempotencyKey: str(row.idempotency_key),
-  attempts: num(row.attempts),
-  lastError: str(row.last_error) || undefined,
-  postedAt: str(row.posted_at) || undefined,
-  postedBy: str(row.posted_by) || undefined,
-});
-
-const toLock = (row: Record<string, unknown>): PeriodLock => ({
-  id: num(row.id),
-  tenantId: str(row.tenant_id),
-  lockDate: str(row.lock_date).slice(0, 10),
-  status: str(row.status, 'locked') === 'open' ? 'open' : 'locked',
-  reason: str(row.reason) || undefined,
-  lockedBy: str(row.locked_by) || undefined,
-  updatedAt: str(row.updated_at),
-});
-
 const client = () => {
   const connection = getActiveDbConnection();
   if (!connection?.connectionString) return null;
@@ -78,10 +31,10 @@ const client = () => {
 /** يحمّل القواعد + المستندات + أقفال الفترات. */
 export async function loadPostingSnapshot(tenantId: string): Promise<PostingRulesSnapshot> {
   const ctx = client();
-  if (!ctx) return { rules: [], documents: [], locks: [], error: 'no_database_connection' };
+  if (!ctx) return { rules: [], documents: [], locks: [], generated: [], error: 'no_database_connection' };
 
   try {
-    const [rules, documents, locks] = await Promise.all([
+    const [rules, documents, locks, generated] = await Promise.all([
       ctx.sql.query(
         `SELECT * FROM accounting_posting_rules
           WHERE tenant_id = $1 ORDER BY transaction_type, field_key, selector_key`,
@@ -97,17 +50,27 @@ export async function loadPostingSnapshot(tenantId: string): Promise<PostingRule
           WHERE tenant_id = $1 ORDER BY lock_date DESC`,
         [tenantId]
       ),
+      ctx.sql.query(
+        `SELECT id, rule_code, journal_entry_id, entry_number, source_screen, source_document,
+                debit_account_code, credit_account_code, amount, is_balanced, posted_at
+           FROM accounting_generated_entries
+          WHERE tenant_id = $1 ORDER BY posted_at DESC LIMIT 100`,
+        [tenantId]
+      ),
     ]);
 
     return {
       rules: (Array.isArray(rules) ? rules : []).map((r) => toRule(r as Record<string, unknown>)),
+      generated: (Array.isArray(generated) ? generated : []).map((row) =>
+        toGenerated(row as Record<string, unknown>)
+      ),
       documents: (Array.isArray(documents) ? documents : []).map((r) =>
         toDocument(r as Record<string, unknown>)
       ),
       locks: (Array.isArray(locks) ? locks : []).map((r) => toLock(r as Record<string, unknown>)),
     };
   } catch (error: any) {
-    return { rules: [], documents: [], locks: [], error: error?.message || 'load_failed' };
+    return { rules: [], documents: [], locks: [], generated: [], error: error?.message || 'load_failed' };
   }
 }
 

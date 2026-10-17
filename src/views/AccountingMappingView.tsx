@@ -8,6 +8,7 @@ import { PostingRulesPanel } from '../components/accounting/PostingRulesPanel';
 import { PostingDocumentsPanel } from '../components/accounting/PostingDocumentsPanel';
 import { PeriodLocksPanel } from '../components/accounting/PeriodLocksPanel';
 import { PostingCoveragePanel } from '../components/accounting/PostingCoveragePanel';
+import { GeneratedEntriesTable } from './accounting-mapping/GeneratedEntriesTable';
 
 /**
  * شاشة ربط العمليات بالقيود المحاسبية — المصدر الوحيد للتوجيه
@@ -24,7 +25,7 @@ import { PostingCoveragePanel } from '../components/accounting/PostingCoveragePa
 
 type TabId = 'rules' | 'posting' | 'locks' | 'coverage';
 
-const EMPTY: PostingRulesSnapshot = { rules: [], documents: [], locks: [] };
+const EMPTY: PostingRulesSnapshot = { rules: [], documents: [], locks: [], generated: [] };
 
 export const AccountingMappingView: React.FC = () => {
   const { t, language, tenant, accounts, currentUser, canPerformAction, formatMoney, activeBranch } =
@@ -191,7 +192,14 @@ export const AccountingMappingView: React.FC = () => {
         />
       )}
       {tab === 'coverage' && (
-        <PostingCoveragePanel t={t} isArabic={isArabic} coverage={coverage} documents={snapshot.documents} />
+        <PostingCoveragePanel
+          t={t}
+          isArabic={isArabic}
+          coverage={coverage}
+          documents={snapshot.documents}
+          generated={snapshot.generated}
+          formatMoney={formatMoney}
+        />
       )}
     </div>
   );

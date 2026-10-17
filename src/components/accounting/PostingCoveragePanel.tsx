@@ -9,15 +9,19 @@ import React from 'react';
 import { AlertTriangle, CheckCircle2, Gauge } from 'lucide-react';
 import type { CoverageGapRow } from '../../data/accountingOperations';
 import type { PostingDocument } from '../../types/postingRules';
+import type { GeneratedJournalEntry } from '../../types/accountingMapping';
+import { GeneratedEntriesTable } from '../../views/accounting-mapping/GeneratedEntriesTable';
 
 interface Props {
   t: (ar: string, en: string) => string;
   isArabic: boolean;
   coverage: { total: number; covered: number; gaps: CoverageGapRow[] };
   documents: PostingDocument[];
+  generated: GeneratedJournalEntry[];
+  formatMoney: (value: number) => string;
 }
 
-export const PostingCoveragePanel: React.FC<Props> = ({ t, isArabic, coverage, documents }) => {
+export const PostingCoveragePanel: React.FC<Props> = ({ t, isArabic, coverage, documents, generated, formatMoney }) => {
   const percent = coverage.total === 0 ? 100 : Math.round((coverage.covered / coverage.total) * 100);
   const counts = documents.reduce<Record<string, number>>((acc, doc) => {
     acc[doc.status] = (acc[doc.status] ?? 0) + 1;
@@ -89,6 +93,8 @@ export const PostingCoveragePanel: React.FC<Props> = ({ t, isArabic, coverage, d
           </div>
         ))}
       </div>
+
+      <GeneratedEntriesTable entries={generated} formatMoney={formatMoney} t={t} isArabic={isArabic} />
     </div>
   );
 };
