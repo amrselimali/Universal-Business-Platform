@@ -32,8 +32,8 @@ interface Props {
 
 const cellText = (value: unknown): string => {
   if (value === null || value === undefined) return 'NULL';
-  if (typeof value === 'object') return JSON.stringify(value).slice(0, 80);
-  return String(value).slice(0, 120);
+  if (typeof value === 'object') return JSON.stringify(value).slice(0, 400);
+  return String(value).slice(0, 300);
 };
 
 const pkOf = (table: DbTable, row: Record<string, unknown>): Record<string, unknown> =>
@@ -64,7 +64,7 @@ export const TableGrid: React.FC<Props> = ({
 
   const hasPk = table.primaryKey.length > 0;
   const isView = table.kind === 'view';
-  const isAll = page.limit === 0 || page.limit >= 50000;
+  const isAll = page.limit === 0;
 
   const hasPayload = useMemo(() => {
     return (
@@ -218,6 +218,12 @@ export const TableGrid: React.FC<Props> = ({
         onPage={onPage}
         onNewRow={() => setEditor({ mode: 'insert' })}
       />
+
+      {page.truncated && (
+        <p className="rounded-xl bg-amber-50 px-2 py-1 text-[10px] font-bold text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+          {t('عُرض أول 5000 صف فقط — استخدم التصفية أو اختر حجماً أصغر لرؤية الباقي.', 'Showing the first 5000 rows only — use the filter or a smaller page size.')}
+        </p>
+      )}
 
       {page.error && (
         <p className="flex items-center gap-1 rounded-xl bg-rose-50 px-2 py-1 text-[10px] text-rose-700 dark:bg-rose-950/30 dark:text-rose-300">

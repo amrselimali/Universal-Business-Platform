@@ -51,6 +51,8 @@ export interface DbRowPage {
   /** true إذا قرأنا مع تجاوز RLS. */
   bypassed?: boolean;
   bypassError?: string;
+  /** true إذا وصلنا لحد العرض الأقصى (5000) وهناك صفوف أخرى. */
+  truncated?: boolean;
   error?: string;
 }
 

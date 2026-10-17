@@ -58,7 +58,7 @@ export const GridToolbar: React.FC<Props> = ({
               <option value={100}>100</option>
               <option value={200}>200</option>
               <option value={500}>500</option>
-              <option value={0}>{t('كل الصفوف', 'All rows')}</option>
+              <option value={0}>{t('كل الصفوف (حتى 5000)', 'All rows (up to 5000)')}</option>
             </select>
           </div>
 

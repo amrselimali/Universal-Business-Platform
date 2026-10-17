@@ -102,7 +102,7 @@ export const GridTable: React.FC<Props> = ({
                         key={column.name}
                         title={fullText}
                         onClick={() => setCellModal({ col: column.name, type: column.dataType, val })}
-                        className="max-w-[220px] cursor-pointer truncate px-2 py-1 font-mono hover:text-indigo-600 dark:hover:text-indigo-400"
+                        className="max-w-[340px] cursor-pointer truncate px-2 py-1 font-mono hover:text-indigo-600 dark:hover:text-indigo-400 [content-visibility:auto]"
                       >
                         {cellText(val)}
                       </td>
