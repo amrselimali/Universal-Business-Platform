@@ -10,6 +10,7 @@ import { neon } from '@neondatabase/serverless';
 import { getActiveDbConnection } from './commands';
 import { toJournalEntryView } from './journalExplorerHelpers';
 import type { JournalEntryView } from '../types/journalExplorer';
+import type { JournalEditResult } from './journalEditHelpers';
 
 export interface JournalLoadResult {
   entries: JournalEntryView[];
@@ -72,5 +73,53 @@ export async function loadJournalEntries(tenantId: string): Promise<JournalLoadR
     };
   } catch (error: any) {
     return { entries: [], error: error?.message || 'load_failed' };
+  }
+}
+
+/**
+ * تعديل قيد محاسبي من الشاشة (يُطبّق الفرق على الأرصدة ويزامن المصدر).
+ * يُرجع الإصدار الجديد وما تمت مزامنته؛ ويرفض إن كانت الفترة مقفلة أو القيد
+ * غير متوازن أو الحساب غير موجود (كل ذلك داخل الدالة في قاعدة البيانات).
+ */
+export async function updateJournalEntry(params: {
+  tenantId: string;
+  journalId: string;
+  date: string;
+  description: string;
+  reason: string;
+  actor?: string;
+  lines: { accountCode: string; accountName?: string; memo: string; debit: number; credit: number }[];
+}): Promise<JournalEditResult> {
+  const connection = getActiveDbConnection();
+  if (!connection?.connectionString) return { ok: false, error: 'no_database_connection' };
+
+  const sql = neon(connection.connectionString.trim());
+
+  try {
+    const payload = params.lines.map((line) => ({
+      account_code: line.accountCode,
+      accountCode: line.accountCode,
+      account_name_ar: line.accountName ?? line.accountCode,
+      memo: line.memo,
+      debit: Number(line.debit) || 0,
+      credit: Number(line.credit) || 0,
+    }));
+
+    const rows: any = await sql.query(
+      `SELECT fn_update_journal($1,$2,$3,$4,$5,$6::jsonb,$7) AS result`,
+      [params.tenantId, params.actor ?? 'ui', params.journalId, params.date,
+       params.description, JSON.stringify(payload), params.reason]
+    );
+
+    const result = rows?.[0]?.result ?? rows?.result ?? {};
+    return {
+      ok: true,
+      version: Number(result.version) || undefined,
+      debit: Number(result.debit) || undefined,
+      credit: Number(result.credit) || undefined,
+      sourceSync: Array.isArray(result.sourceSync) ? result.sourceSync : [],
+    };
+  } catch (error: any) {
+    return { ok: false, error: error?.message || String(error) };
   }
 }

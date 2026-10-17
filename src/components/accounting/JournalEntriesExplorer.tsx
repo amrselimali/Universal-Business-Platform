@@ -11,6 +11,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
+  Pencil,
   RefreshCw,
   Search,
 } from 'lucide-react';
@@ -25,11 +26,13 @@ interface Props {
   error?: string;
   rulesUnavailable?: boolean;
   formatMoney: (value: number) => string;
+  canEdit: boolean;
+  onEdit: (entry: JournalEntryView) => void;
   onReload: () => void | Promise<void>;
 }
 
 export const JournalEntriesExplorer: React.FC<Props> = ({
-  t, isArabic, entries, busy, error, rulesUnavailable, formatMoney, onReload,
+  t, isArabic, entries, busy, error, rulesUnavailable, formatMoney, canEdit, onEdit, onReload,
 }) => {
   const [search, setSearch] = useState('');
   const [dateFrom, setDateFrom] = useState('');
@@ -127,12 +130,13 @@ export const JournalEntriesExplorer: React.FC<Props> = ({
                 <th className="px-2 py-2">{t('دائن', 'Credit')}</th>
                 <th className="px-2 py-2">{t('الحالة', 'Status')}</th>
                 <th className="px-2 py-2">{t('السطور', 'Lines')}</th>
+                <th className="px-2 py-2">{t('تعديل', 'Edit')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-3 py-8 text-center text-[11px] text-slate-400">
+                  <td colSpan={8} className="px-3 py-8 text-center text-[11px] text-slate-400">
                     {t('لا توجد قيود مطابقة.', 'No matching entries.')}
                   </td>
                 </tr>
@@ -171,11 +175,23 @@ export const JournalEntriesExplorer: React.FC<Props> = ({
                           {entry.lines.length}
                         </button>
                       </td>
+                      <td className="px-2 py-2 align-top">
+                        <button
+                          type="button"
+                          onClick={() => onEdit(entry)}
+                          disabled={!canEdit}
+                          title={canEdit ? t('تعديل القيد ومزامنة المصدر', 'Edit the entry and sync its source') : t('تحتاج صلاحية accounting.edit_journal', 'Requires accounting.edit_journal')}
+                          className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-1.5 py-0.5 text-[9px] font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-40 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                        >
+                          <Pencil className="h-3 w-3" />
+                          {t('تعديل', 'Edit')}
+                        </button>
+                      </td>
                     </tr>
 
                     {isOpen && (
                       <tr>
-                        <td colSpan={7} className="bg-slate-50/70 px-3 py-2 dark:bg-slate-800/40">
+                        <td colSpan={8} className="bg-slate-50/70 px-3 py-2 dark:bg-slate-800/40">
                           <table className="w-full text-[10px]">
                             <thead className="text-slate-400">
                               <tr>

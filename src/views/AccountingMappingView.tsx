@@ -16,14 +16,10 @@ import { computeCoverage } from '../data/accountingOperations';
 import type { JournalEntryView } from '../types/journalExplorer';
 import type { PostingRulesSnapshot } from '../types/postingRules';
 import { JournalEntriesExplorer } from '../components/accounting/JournalEntriesExplorer';
+import { JournalEntryEditor } from '../components/accounting/JournalEntryEditor';
+import { AccountingAdminTools } from '../components/accounting/AccountingAdminTools';
 import { PostingRulesReadOnly } from '../components/accounting/PostingRulesReadOnly';
 import { PostingStatusReadOnly } from '../components/accounting/PostingStatusReadOnly';
-import { SeedDefaultsCard } from '../components/accounting/SeedDefaultsCard';
-import { PostingRulesPanel } from '../components/accounting/PostingRulesPanel';
-import { PostingDocumentsPanel } from '../components/accounting/PostingDocumentsPanel';
-import { PeriodLocksPanel } from '../components/accounting/PeriodLocksPanel';
-import { PostingCoveragePanel } from '../components/accounting/PostingCoveragePanel';
-import { GeneratedEntriesTable } from './accounting-mapping/GeneratedEntriesTable';
 
 /**
  * شاشة ربط العمليات بالقيود المحاسبية — **للعرض فقط**
@@ -84,6 +80,8 @@ export const AccountingMappingView: React.FC = () => {
 
   const coverage = useMemo(() => computeCoverage(snapshot.rules), [snapshot.rules]);
   const canPost = canPerformAction('accounting.post_journal');
+  const canEditJournal = canPerformAction('accounting.edit_journal');
+  const [editing, setEditing] = useState<JournalEntryView | null>(null);
   const canLock = canPerformAction('accounting.lock_period');
   const canOpen = canPerformAction('accounting.open_period');
   const canManage = canPost || canLock;
@@ -198,7 +196,21 @@ export const AccountingMappingView: React.FC = () => {
           ))}
       </div>
 
-      {!adminMode && tab === 'journals' && (
+      {!adminMode && tab === 'journals' && editing && (
+        <JournalEntryEditor
+          t={t}
+          isArabic={isArabic}
+          tenantId={tenantId}
+          actor={currentUser?.name}
+          entry={editing}
+          accounts={accountOptions}
+          canEdit={canEditJournal}
+          notify={notify}
+          onCancel={() => setEditing(null)}
+          onSaved={async () => { setEditing(null); await reload(); }}
+        />
+      )}
+      {!adminMode && tab === 'journals' && !editing && (
         <JournalEntriesExplorer
           t={t}
           isArabic={isArabic}
@@ -207,6 +219,8 @@ export const AccountingMappingView: React.FC = () => {
           error={journalError}
           rulesUnavailable={rulesUnavailable}
           formatMoney={formatMoney}
+          canEdit={canEditJournal}
+          onEdit={setEditing}
           onReload={reload}
         />
       )}
@@ -231,63 +245,25 @@ export const AccountingMappingView: React.FC = () => {
         />
       )}
 
-      {adminMode && adminTab === 'edit-rules' && (
-        <div className="space-y-3">
-          <SeedDefaultsCard
-            t={t}
-            tenantId={tenantId}
-            canEdit={canPost}
-            hasRules={snapshot.rules.length > 0}
-            notify={notify}
-            onSeeded={reload}
-          />
-        <PostingRulesPanel
-          t={t}
-          isArabic={isArabic}
-          tenantId={tenantId}
-          rules={snapshot.rules}
-          accounts={accountOptions}
-          paymentMethods={paymentMethodRefs}
-          canEdit={canPost}
-          actor={currentUser?.name}
-          notify={notify}
-          onSaved={reload}
-          />
-        </div>
-      )}
-      {adminMode && adminTab === 'posting' && (
-        <PostingDocumentsPanel
+      {adminMode && (
+        <AccountingAdminTools
           t={t}
           isArabic={isArabic}
           tenantId={tenantId}
           branchId={activeBranch?.id}
-          documents={snapshot.documents}
-          paymentMethods={paymentMethodRefs}
-          canPost={canPost}
           actor={currentUser?.name}
+          adminTab={adminTab}
+          snapshot={snapshot}
+          accounts={accountOptions}
+          paymentMethods={paymentMethodRefs}
+          coverage={coverage}
+          canPost={canPost}
+          canLock={canLock}
+          canOpen={canOpen}
           formatMoney={formatMoney}
           notify={notify}
           onChanged={reload}
         />
-      )}
-      {adminMode && adminTab === 'locks' && (
-        <PeriodLocksPanel
-          t={t}
-          isArabic={isArabic}
-          tenantId={tenantId}
-          locks={snapshot.locks}
-          canLock={canLock}
-          canOpen={canOpen}
-          actor={currentUser?.name}
-          notify={notify}
-          onChanged={reload}
-        />
-      )}
-      {adminMode && adminTab === 'coverage' && (
-        <div className="space-y-3">
-          <PostingCoveragePanel t={t} isArabic={isArabic} coverage={coverage} documents={snapshot.documents} generated={snapshot.generated} formatMoney={formatMoney} />
-          <GeneratedEntriesTable entries={snapshot.generated} formatMoney={formatMoney} t={t} isArabic={isArabic} />
-        </div>
       )}
     </div>
   );
