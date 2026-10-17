@@ -12,8 +12,8 @@
 
 import type { GuardrailsFacts } from '../../services/architectureGuardrails';
 
-export const GUARDRAILS_MEASURED_AT = '2026-10-17T07:05:50.033Z';
-export const GUARDRAILS_REVISION = '52b34a6';
+export const GUARDRAILS_MEASURED_AT = '2026-10-17T08:04:15.966Z';
+export const GUARDRAILS_REVISION = '597e11f';
 
 export const GUARDRAILS_FACTS: GuardrailsFacts = /* GUARDRAILS_FACTS_BEGIN */
 {
@@ -96,9 +96,9 @@ export const GUARDRAILS_FACTS: GuardrailsFacts = /* GUARDRAILS_FACTS_BEGIN */
     { actionKey: 'bookings.create_booking', file: 'src/views/BookingsFollowUpView.tsx', line: 2350 },
     { actionKey: 'bookings.manage_staff_schedule', file: 'src/views/BookingsFollowUpView.tsx', line: 3694 },
     { actionKey: 'bookings.manage_staff_schedule', file: 'src/views/BookingsFollowUpView.tsx', line: 3815 },
-    { actionKey: 'database.ddl', file: 'src/views/DatabaseExplorerView.tsx', line: 39 },
-    { actionKey: 'database.drop', file: 'src/views/DatabaseExplorerView.tsx', line: 40 },
-    { actionKey: 'database.write', file: 'src/views/DatabaseExplorerView.tsx', line: 38 },
+    { actionKey: 'database.ddl', file: 'src/views/DatabaseExplorerView.tsx', line: 42 },
+    { actionKey: 'database.drop', file: 'src/views/DatabaseExplorerView.tsx', line: 43 },
+    { actionKey: 'database.write', file: 'src/views/DatabaseExplorerView.tsx', line: 41 },
     { actionKey: 'pos.checkout', file: 'src/views/PosView.tsx', line: 830 },
     { actionKey: 'pos.checkout', file: 'src/views/PosView.tsx', line: 833 },
     { actionKey: 'pos.discount', file: 'src/views/PosView.tsx', line: 672 },
@@ -131,7 +131,7 @@ export const GUARDRAILS_FACTS: GuardrailsFacts = /* GUARDRAILS_FACTS_BEGIN */
     { id: 'emitted_events_pipeline', labelAr: 'معالجة الأحداث المُصدَّرة بلا تكرار', labelEn: 'Idempotent event processing', comparison: 'atLeast', expected: 1, found: 4, severity: 'advisory', evidence: ['erp-nextgen-local/db/migrations-original/0005_core_audit_outbox_infrastructure.sql', 'erp-nextgen-local/db/migrations/0005_core_audit_outbox_infrastructure.sql'] },
   ],
   legacy: {
-    scanned: 193,
+    scanned: 194,
     limit: 300,
     baseline: 58,
     violations: 58,

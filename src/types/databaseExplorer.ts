@@ -22,8 +22,17 @@ export interface DbTable {
   kind: 'table' | 'view';
   /** تقدير عدد الصفوف من pg_class (سريع، ليس دقيقاً). */
   estimatedRows: number;
+  /** هل RLS مفعّل على هذا الجدول؟ (يفسّر فرق عدد الصفوف عن نيون). */
+  rlsEnabled: boolean;
   columns: DbColumn[];
   primaryKey: string[];
+}
+
+export interface DbConnectionIdentity {
+  user: string;
+  database: string;
+  host: string;
+  searchPath: string;
 }
 
 export interface DbCatalog {
@@ -37,6 +46,10 @@ export interface DbRowPage {
   total: number;
   limit: number;
   offset: number;
+  /** true إذا قُرئت الصفوف مع تجاوز RLS. */
+  bypassed?: boolean;
+  /** سبب فشل تجاوز RLS (الدور لا يملك الصلاحية). */
+  bypassError?: string;
   error?: string;
 }
 

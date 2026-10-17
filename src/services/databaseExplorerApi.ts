@@ -42,7 +42,8 @@ export async function loadDatabaseCatalog(): Promise<DbCatalog> {
   try {
     const [tableRows, columnRows, pkRows] = await Promise.all([
       ctx.sql.query(
-        `SELECT n.nspname AS schema, c.relname AS name, c.relkind, c.reltuples::bigint AS rows
+        `SELECT n.nspname AS schema, c.relname AS name, c.relkind, c.relrowsecurity AS rls,
+                c.reltuples::bigint AS rows
            FROM pg_class c
            JOIN pg_namespace n ON n.oid = c.relnamespace
           WHERE c.relkind IN ('r','p','v')
@@ -50,12 +51,22 @@ export async function loadDatabaseCatalog(): Promise<DbCatalog> {
           ORDER BY n.nspname, c.relname`
       ),
       ctx.sql.query(
-        `SELECT table_schema AS schema, table_name AS name, column_name, data_type,
-                is_nullable, column_default, is_identity, character_maximum_length,
-                ordinal_position
-           FROM information_schema.columns
-          WHERE table_schema NOT IN ${EXCLUDED_SCHEMAS}
-          ORDER BY table_schema, table_name, ordinal_position`
+        // pg_attribute غير مفلتر بالصلاحيات — يعرض كل الأعمدة كما في نيون
+        `SELECT n.nspname AS schema, c.relname AS name, a.attname AS column_name,
+                format_type(a.atttypid, a.atttypmod) AS data_type,
+                NOT a.attnotnull AS is_nullable,
+                pg_get_expr(d.adbin, d.adrelid) AS column_default,
+                (a.attidentity <> '') AS is_identity,
+                information_schema._pg_char_max_length(a.atttypid, a.atttypmod) AS character_maximum_length,
+                a.attnum AS ordinal_position
+           FROM pg_attribute a
+           JOIN pg_class c ON c.oid = a.attrelid
+           JOIN pg_namespace n ON n.oid = c.relnamespace
+           LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+          WHERE a.attnum > 0 AND NOT a.attisdropped
+            AND c.relkind IN ('r','p','v')
+            AND n.nspname NOT IN ${EXCLUDED_SCHEMAS}
+          ORDER BY n.nspname, c.relname, a.attnum`
       ),
       ctx.sql.query(
         `SELECT tc.table_schema AS schema, tc.table_name AS name, kcu.column_name
@@ -76,6 +87,7 @@ export async function loadDatabaseCatalog(): Promise<DbCatalog> {
         name: str(row.name),
         kind: row.relkind === 'v' ? 'view' : 'table',
         estimatedRows: num(row.rows),
+        rlsEnabled: Boolean(row.rls),
         columns: [],
         primaryKey: [],
       });
@@ -87,10 +99,10 @@ export async function loadDatabaseCatalog(): Promise<DbCatalog> {
       table.columns.push({
         name: str(row.column_name),
         dataType: str(row.data_type),
-        nullable: str(row.is_nullable).toUpperCase() === 'YES',
+        nullable: row.is_nullable === true || str(row.is_nullable).toUpperCase() === 'YES',
         defaultValue: str(row.column_default) || undefined,
         isPrimaryKey: false,
-        isIdentity: str(row.is_identity).toUpperCase() === 'YES',
+        isIdentity: row.is_identity === true || str(row.is_identity).toUpperCase() === 'YES',
         maxLength: row.character_maximum_length ? num(row.character_maximum_length) : undefined,
         ordinal: num(row.ordinal_position),
       } as DbColumn);
@@ -121,18 +133,37 @@ export async function fetchTableRows(params: {
   table: string;
   limit?: number;
   offset?: number;
+  /** تجاوز RLS لعرض كل الصفوف — يعمل فقط لدور يملك BYPASSRLS أو مالك الجدول. */
+  bypassRls?: boolean;
 }): Promise<DbRowPage> {
   const ctx = client();
   if (!ctx) return { rows: [], total: 0, limit: 0, offset: 0, error: 'no_database_connection' };
 
-  const limit = Math.min(Math.max(params.limit ?? 50, 1), 200);
+  const limit = Math.min(Math.max(params.limit ?? 100, 1), 500);
   const offset = Math.max(params.offset ?? 0, 0);
+  const table = quoteTable(params.schema, params.table);
+
+  if (params.bypassRls) {
+    try {
+      const [rowsResult, countResult] = await ctx.sql.transaction((tx) => [
+        tx.query('SET LOCAL row_security = off'),
+        tx.query(`SELECT * FROM ${table} LIMIT ${limit} OFFSET ${offset}`),
+        tx.query(`SELECT count(*)::bigint AS total FROM ${table}`),
+      ]);
+      const rows = Array.isArray(rowsResult) ? rowsResult : [];
+      const totalRows: any = Array.isArray(countResult) ? countResult[0] : countResult;
+      return { rows, total: num(totalRows?.total), limit, offset, bypassed: true };
+    } catch (error: any) {
+      return {
+        rows: [], total: 0, limit, offset,
+        bypassError: error?.message || 'rls_bypass_failed',
+        error: error?.message || 'rls_bypass_failed',
+      };
+    }
+  }
 
   try {
-    const table = quoteTable(params.schema, params.table);
-    const rows: any = await ctx.sql.query(
-      `SELECT * FROM ${table} LIMIT ${limit} OFFSET ${offset}`
-    );
+    const rows: any = await ctx.sql.query(`SELECT * FROM ${table} LIMIT ${limit} OFFSET ${offset}`);
     const totalRows: any = await ctx.sql.query(`SELECT count(*)::bigint AS total FROM ${table}`);
     return {
       rows: Array.isArray(rows) ? rows : [],

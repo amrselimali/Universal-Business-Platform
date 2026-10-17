@@ -2,12 +2,13 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertCircle, CheckCircle2, Database, RefreshCw, ShieldAlert, Trash2 } from 'lucide-react';
 import { usePlatform } from '../context/PlatformContext';
 import { loadDatabaseCatalog, fetchTableRows } from '../services/databaseExplorerApi';
+import { loadConnectionIdentity } from '../services/databaseIdentityApi';
 import { dropTable } from '../services/databaseSchemaApi';
 import { isProtectedTable } from '../services/databaseIdentifiers';
 import { TablesSidebar } from '../components/database/TablesSidebar';
 import { TableGrid } from '../components/database/TableGrid';
 import { TableStructure } from '../components/database/TableStructure';
-import type { DbCatalog, DbRowPage, DbTable } from '../types/databaseExplorer';
+import type { DbCatalog, DbConnectionIdentity, DbRowPage, DbTable } from '../types/databaseExplorer';
 
 /**
  * إدارة قاعدة البيانات من الواجهة — مرآة حقيقية
@@ -32,6 +33,8 @@ export const DatabaseExplorerView: React.FC = () => {
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+  const [identity, setIdentity] = useState<DbConnectionIdentity | null>(null);
+  const [bypassRls, setBypassRls] = useState(false);
   const [dropConfirm, setDropConfirm] = useState('');
   const [dropOpen, setDropOpen] = useState(false);
 
@@ -56,11 +59,15 @@ export const DatabaseExplorerView: React.FC = () => {
 
   const loadRows = useCallback(async (table: DbTable, offset = 0) => {
     setBusy(true);
-    const result = await fetchTableRows({ schema: table.schema, table: table.name, offset });
+    const result = await fetchTableRows({ schema: table.schema, table: table.name, offset, bypassRls });
     setPage(result);
     setBusy(false);
     if (result.error) notify('err', result.error);
-  }, [notify]);
+  }, [notify, bypassRls]);
+
+  useEffect(() => {
+    void loadConnectionIdentity().then(setIdentity);
+  }, []);
 
   useEffect(() => {
     void (async () => {
@@ -149,6 +156,17 @@ export const DatabaseExplorerView: React.FC = () => {
           >
             <RefreshCw className={`inline h-3 w-3 ${busy ? 'animate-spin' : ''}`} /> {t('تحديث', 'Refresh')}
           </button>
+          {selected && (
+            <button
+              type="button"
+              onClick={() => setBypassRls((prev) => !prev)}
+              disabled={!canDdl}
+              title={t('عرض كل الصفوف بتجاوز RLS (يتطلب دوراً مالكاً أو BYPASSRLS)', 'Show all rows by bypassing RLS (owner or BYPASSRLS role)')}
+              className={`rounded-xl px-2 py-1 ${bypassRls ? 'bg-rose-600 text-white' : 'border border-dashed border-rose-300 text-rose-600 dark:border-rose-800 dark:text-rose-300'}`}
+            >
+              {bypassRls ? t('إخفاء تجاوز RLS', 'Disable RLS bypass') : t('تجاوز RLS', 'Bypass RLS')}
+            </button>
+          )}
           {selected && canDrop && (
             <button
               type="button"
@@ -159,6 +177,23 @@ export const DatabaseExplorerView: React.FC = () => {
             </button>
           )}
         </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-[10px] text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+        <span className="font-bold">{t('الاتصال:', 'Connection:')}</span>
+        <span className="font-mono" dir="ltr">{identity ? `${identity.user} @ ${identity.database}${identity.host ? ` (${identity.host})` : ''}` : '—'}</span>
+        {selected && (
+          <span className={`rounded px-1.5 py-0.5 font-bold ${selected.rlsEnabled ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300' : 'bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}>
+            {selected.rlsEnabled ? t('RLS مفعّل', 'RLS enabled') : t('بلا RLS', 'no RLS')}
+          </span>
+        )}
+        {selected && <span>{selected.columns.length} {t('عمود', 'columns')}</span>}
+        {selected && selected.rlsEnabled && page.total < selected.estimatedRows && (
+          <span className="font-bold text-amber-700 dark:text-amber-300">
+            {t(`هذا الدور يرى ${page.total} من ~${selected.estimatedRows} صفاً — الباقي لمستأجرين/صلاحيات أخرى (RLS).`, `This role sees ${page.total} of ~${selected.estimatedRows} rows — the rest belong to other tenants/grants (RLS).`)}
+          </span>
+        )}
+        {page.bypassed && <span className="font-bold text-rose-600 dark:text-rose-300">{t('مُعروض بتجاوز RLS', 'shown bypassing RLS')}</span>}
       </div>
 
       {notice && (
