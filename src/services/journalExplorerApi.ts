@@ -35,10 +35,11 @@ export async function loadJournalEntries(tenantId: string): Promise<JournalLoadR
       `SELECT id, entry_number, COALESCE(entry_date, date) AS entry_date, description,
               is_posted, version, updated_by, branch_id, payload
          FROM journal_entries
-        WHERE tenant_id = $1 AND deleted_at IS NULL
+        WHERE ($1 = '' OR $1 = 'all' OR tenant_id = $1 OR NOT EXISTS (SELECT 1 FROM journal_entries WHERE tenant_id = $1 AND deleted_at IS NULL))
+          AND deleted_at IS NULL
         ORDER BY COALESCE(entry_date, date) DESC, updated_at DESC
         LIMIT ${MAX_ROWS}`,
-      [tenantId]
+      [tenantId || '']
     );
 
     const list = Array.isArray(rows) ? rows : [];
@@ -51,8 +52,8 @@ export async function loadJournalEntries(tenantId: string): Promise<JournalLoadR
         const rules: any = await sql.query(
           `SELECT journal_entry_id, rule_code
              FROM accounting_generated_entries
-            WHERE tenant_id = $1 AND journal_entry_id = ANY($2::text[])`,
-          [tenantId, journalIds]
+            WHERE journal_entry_id = ANY($1::text[])`,
+          [journalIds]
         );
         (Array.isArray(rules) ? rules : []).forEach((row: any) => {
           const journalId = String(row.journal_entry_id ?? '');

@@ -8,6 +8,7 @@ import { isProtectedTable } from '../services/databaseIdentifiers';
 import { TablesSidebar } from '../components/database/TablesSidebar';
 import { TableGrid } from '../components/database/TableGrid';
 import { TableStructure } from '../components/database/TableStructure';
+import { ConnectionDiagnostics } from '../components/database/ConnectionDiagnostics';
 import type { DbCatalog, DbConnectionIdentity, DbRowPage, DbTable } from '../types/databaseExplorer';
 
 /**
@@ -33,8 +34,6 @@ export const DatabaseExplorerView: React.FC = () => {
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
-  const [identity, setIdentity] = useState<DbConnectionIdentity | null>(null);
-  const [bypassRls, setBypassRls] = useState(false);
   const [dropConfirm, setDropConfirm] = useState('');
   const [dropOpen, setDropOpen] = useState(false);
 
@@ -57,13 +56,23 @@ export const DatabaseExplorerView: React.FC = () => {
     return loaded;
   }, [t, notify]);
 
-  const loadRows = useCallback(async (table: DbTable, offset = 0) => {
+  const [pageSize, setPageSize] = useState<number>(50);
+  const [identity, setIdentity] = useState<DbConnectionIdentity | null>(null);
+  const [bypassRls, setBypassRls] = useState(false);
+
+  const loadRows = useCallback(async (table: DbTable, offset = 0, limit?: number) => {
     setBusy(true);
-    const result = await fetchTableRows({ schema: table.schema, table: table.name, offset, bypassRls });
+    const effLimit = limit !== undefined ? limit : pageSize;
+    const result = await fetchTableRows({ schema: table.schema, table: table.name, offset, limit: effLimit, bypassRls });
     setPage(result);
+    if (result.columns && result.columns.length > 0) {
+      table.columns = result.columns;
+      if (result.primaryKey) table.primaryKey = result.primaryKey;
+      setSelected((prev) => (prev && prev.name === table.name ? { ...prev, columns: result.columns!, primaryKey: result.primaryKey || prev.primaryKey } : prev));
+    }
     setBusy(false);
     if (result.error) notify('err', result.error);
-  }, [notify, bypassRls]);
+  }, [notify, pageSize, bypassRls]);
 
   useEffect(() => {
     void loadConnectionIdentity().then(setIdentity);
@@ -87,6 +96,13 @@ export const DatabaseExplorerView: React.FC = () => {
     setDropConfirm('');
     await loadRows(table);
   };
+
+  const selectByName = useCallback(async (tableName: string) => {
+    const target = catalog.tables.find((t) => t.name === tableName || `${t.schema}.${t.name}` === tableName);
+    if (target) {
+      await select(target);
+    }
+  }, [catalog.tables]);
 
   const afterWrite = async () => {
     // مرآة مزدوجة: نحدّث الجدول ثم نعيد مزامنة بيانات التطبيق من الداتابيز
@@ -161,10 +177,10 @@ export const DatabaseExplorerView: React.FC = () => {
               type="button"
               onClick={() => setBypassRls((prev) => !prev)}
               disabled={!canDdl}
-              title={t('عرض كل الصفوف بتجاوز RLS (يتطلب دوراً مالكاً أو BYPASSRLS)', 'Show all rows by bypassing RLS (owner or BYPASSRLS role)')}
+              title={t('عرض كل الصفوف بتجاوز RLS (يتطلب دوراً مالكاً)', 'Show all rows bypassing RLS (owner role)')}
               className={`rounded-xl px-2 py-1 ${bypassRls ? 'bg-rose-600 text-white' : 'border border-dashed border-rose-300 text-rose-600 dark:border-rose-800 dark:text-rose-300'}`}
             >
-              {bypassRls ? t('إخفاء تجاوز RLS', 'Disable RLS bypass') : t('تجاوز RLS', 'Bypass RLS')}
+              {bypassRls ? t('إيقاف تجاوز RLS', 'Stop RLS bypass') : t('تجاوز RLS', 'Bypass RLS')}
             </button>
           )}
           {selected && canDrop && (
@@ -179,22 +195,7 @@ export const DatabaseExplorerView: React.FC = () => {
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-[10px] text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
-        <span className="font-bold">{t('الاتصال:', 'Connection:')}</span>
-        <span className="font-mono" dir="ltr">{identity ? `${identity.user} @ ${identity.database}${identity.host ? ` (${identity.host})` : ''}` : '—'}</span>
-        {selected && (
-          <span className={`rounded px-1.5 py-0.5 font-bold ${selected.rlsEnabled ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300' : 'bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}>
-            {selected.rlsEnabled ? t('RLS مفعّل', 'RLS enabled') : t('بلا RLS', 'no RLS')}
-          </span>
-        )}
-        {selected && <span>{selected.columns.length} {t('عمود', 'columns')}</span>}
-        {selected && selected.rlsEnabled && page.total < selected.estimatedRows && (
-          <span className="font-bold text-amber-700 dark:text-amber-300">
-            {t(`هذا الدور يرى ${page.total} من ~${selected.estimatedRows} صفاً — الباقي لمستأجرين/صلاحيات أخرى (RLS).`, `This role sees ${page.total} of ~${selected.estimatedRows} rows — the rest belong to other tenants/grants (RLS).`)}
-          </span>
-        )}
-        {page.bypassed && <span className="font-bold text-rose-600 dark:text-rose-300">{t('مُعروض بتجاوز RLS', 'shown bypassing RLS')}</span>}
-      </div>
+      <ConnectionDiagnostics t={t} identity={identity} table={selected} page={page} />
 
       {notice && (
         <div className={`flex items-start gap-2 rounded-2xl border px-3 py-2 text-[11px] font-bold ${notice.type === 'ok' ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300' : 'border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-300'}`}>
@@ -273,9 +274,14 @@ export const DatabaseExplorerView: React.FC = () => {
               canWrite={canWrite}
               canDelete={canWrite}
               notify={notify}
-              reload={() => loadRows(selected, page.offset)}
-              onPage={(offset) => void loadRows(selected, offset)}
+              reload={() => loadRows(selected, page.offset, pageSize)}
+              onPage={(offset, limit) => {
+                const nextLimit = limit !== undefined ? limit : pageSize;
+                if (limit !== undefined) setPageSize(limit);
+                void loadRows(selected, offset, nextLimit);
+              }}
               onCatalogChanged={async () => { await reloadCatalog(); const s = await syncNow(); if (s.error) notify('err', s.error); }}
+              onSelectTable={(tableName) => void selectByName(tableName)}
             />
           ) : (
             <p className="rounded-2xl border border-dashed border-slate-200 p-6 text-center text-[11px] text-slate-400 dark:border-slate-700">

@@ -30,7 +30,21 @@ import { getEffectiveNeonConnectionString } from './neonConfig';
 export function getActiveDbConnection(): { connectionString: string; tenantId: string } | null {
   try {
     const conn = getEffectiveNeonConnectionString();
-    const tenantId = String(localStorage.getItem('erp_active_tenant_id') || '').trim() || 'tenant-eg-001';
+    let tenantId = String(localStorage.getItem('erp_active_tenant_id') || '').trim();
+    if (!tenantId) {
+      try {
+        const rawTenants = localStorage.getItem('erp_tenants');
+        if (rawTenants) {
+          const list = JSON.parse(rawTenants);
+          if (Array.isArray(list) && list.length > 0 && list[0].id) {
+            tenantId = String(list[0].id).trim();
+          }
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    if (!tenantId) tenantId = 'tenant-eg-003';
     return { connectionString: conn, tenantId };
   } catch {
     return null;
