@@ -692,6 +692,37 @@ export async function buildApp(deps: AppDeps) {
     }
   });
 
+  const refundSchema = z.object({
+    branchId: z.string().min(1),
+    customerCode: z.string().min(1),
+    amount: z.number().positive(),
+    units: z.number().nonnegative(),
+    date: z.string().min(8),
+    paymentAccountId: z.string().min(1),
+    service: z.string().optional(),
+    refund: z.record(z.any()),
+  });
+
+  /** يسجّل استرداداً لعميل ويُرحّل قيده ذكياً داخل الداتابيز. */
+  app.post('/accounting/refund', async (request, reply) => {
+    const tenantId = assertTenant(request);
+    assertAction(request, 'receipt.create');
+    const parsed = refundSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: 'invalid_payload', details: parsed.error.issues });
+    const b = parsed.data;
+    try {
+      const rows = await one<any[]>(
+        tenantId,
+        `SELECT fn_post_customer_refund($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10) AS result`,
+        [tenantId, b.branchId, b.customerCode, b.amount, b.units, b.date, b.paymentAccountId,
+         b.service || '', JSON.stringify(b.refund), String(request.auth?.sub || 'api')]
+      );
+      return { result: rows?.[0]?.result };
+    } catch (error: any) {
+      return reply.code(400).send({ error: 'refund_rejected', message: error?.message });
+    }
+  });
+
   /** Reverses a journal atomically (the original is kept). */
   app.post('/accounting/journal/:id/reverse', async (request, reply) => {
     const { id } = request.params as { id: string };

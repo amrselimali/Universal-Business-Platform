@@ -1,21 +1,18 @@
-import { neon } from '@neondatabase/serverless';
-
 /**
- * Server-side accounting API (المرحلة 2).
+ * عميل واجهة المحاسبة (Accounting API client)
+ * ---------------------------------------------------------------------------
+ * **لا يتصل بقاعدة البيانات إطلاقاً.** كل ترحيل/عكس/تحصيل/استرداد يمرّ عبر الـ API:
+ *   POST /accounting/journal            → fn_post_journal
+ *   POST /accounting/journal/:id/reverse→ fn_reverse_journal
+ *   POST /accounting/receipt            → fn_post_customer_receipt
+ *   POST /accounting/refund             → fn_post_customer_refund
+ *   GET  /accounting/balances           → أرصدة الحسابات (المرجع النهائي)
  *
- * Posting now happens INSIDE the database in a single atomic PL/pgSQL call, so the
- * journal header, its lines and the account balances are always consistent - even if
- * the client crashes half-way or two users post at the same time. The browser no longer
- * builds or writes journal entries itself for these operations.
- *
- * Database functions:
- *   fn_post_journal           - validates balance + line rules, writes header/lines, updates balances
- *   fn_reverse_journal        - atomic reversal that keeps the original
- *   fn_post_customer_receipt  - debit payment account / credit customer account + record
- *   fn_post_customer_refund   - debit customer account / credit payment account + record
+ * tenant_id يأتي من التوكن داخل السيرفر، ويُضبط `app.tenant_id` في نفس المعاملة
+ * فتسري سياسات RLS. لا يوجد أي مسار بديل يكتب في الداتابيز من المتصفح.
  */
 
-const getClient = (connectionString: string) => neon(connectionString.trim());
+import { apiFetchBalances, apiPostJournal, apiPostReceipt, apiReverseJournal, apiRequest } from './apiClient';
 
 export interface PostedResult {
   success: boolean;
@@ -36,9 +33,9 @@ export interface JournalLineInput {
   credit: number;
 }
 
-/** Posts a balanced journal atomically in the database. */
+/** يُرحّل قيداً متوازناً عبر الـ API (السيرفر يستدعي fn_post_journal داخل معاملة RLS). */
 export async function postJournal(params: {
-  connectionString: string;
+  connectionString?: string;
   tenantId: string;
   branchId?: string;
   date: string;
@@ -47,42 +44,33 @@ export async function postJournal(params: {
   lines: JournalLineInput[];
   actor?: string;
 }): Promise<PostedResult> {
-  try {
-    const sql = getClient(params.connectionString);
-    const rows: any = await sql.query(
-      `SELECT fn_post_journal($1, $2, $3, $4, $5, $6::jsonb, $7) AS journal_id`,
-      [params.tenantId, params.branchId || null, params.date, params.description,
-       params.sourceDocument, JSON.stringify(params.lines), params.actor || 'app']
-    );
-    return { success: true, journalId: String(rows?.[0]?.journal_id) };
-  } catch (error: any) {
-    return { success: false, error: error?.message || String(error) };
-  }
+  const result = await apiPostJournal({
+    branchId: params.branchId,
+    date: params.date,
+    description: params.description,
+    sourceDocument: params.sourceDocument,
+    lines: params.lines,
+  });
+  if (!result.ok) return { success: false, error: result.error };
+  return { success: true, journalId: result.data?.journalId };
 }
 
-/** Reverses a journal atomically (the original is preserved). */
+/** يعكس قيداً مع حفظ الأصل. */
 export async function reverseJournal(params: {
-  connectionString: string;
+  connectionString?: string;
   tenantId: string;
   journalId: string;
   reason: string;
   actor?: string;
 }): Promise<PostedResult> {
-  try {
-    const sql = getClient(params.connectionString);
-    const rows: any = await sql.query(
-      `SELECT fn_reverse_journal($1, $2, $3, $4) AS journal_id`,
-      [params.tenantId, params.journalId, params.reason, params.actor || 'app']
-    );
-    return { success: true, journalId: String(rows?.[0]?.journal_id) };
-  } catch (error: any) {
-    return { success: false, error: error?.message || String(error) };
-  }
+  const result = await apiReverseJournal(params.journalId, params.reason);
+  if (!result.ok) return { success: false, error: result.error };
+  return { success: true, journalId: result.data?.journalId };
 }
 
-/** Records a customer collection receipt and posts its journal atomically. */
+/** يسجّل إيصال تحصيل من عميل ويُرحّل قيده ذرّياً. */
 export async function postCustomerReceipt(params: {
-  connectionString: string;
+  connectionString?: string;
   tenantId: string;
   branchId: string;
   customerCode: string;
@@ -93,24 +81,29 @@ export async function postCustomerReceipt(params: {
   receipt: Record<string, unknown>;
   actor?: string;
 }): Promise<PostedResult> {
-  try {
-    const sql = getClient(params.connectionString);
-    const rows: any = await sql.query(
-      `SELECT fn_post_customer_receipt($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9) AS result`,
-      [params.tenantId, params.branchId, params.customerCode, params.amount, params.date,
-       params.paymentAccountId, params.service || '', JSON.stringify(params.receipt), params.actor || 'app']
-    );
-    const result = rows?.[0]?.result || {};
-    return { success: true, receiptId: result.receiptId, journalId: result.journalId,
-             customerAccount: result.customerAccount, paymentAccount: result.paymentAccount };
-  } catch (error: any) {
-    return { success: false, error: error?.message || String(error) };
-  }
+  const result = await apiPostReceipt({
+    branchId: params.branchId,
+    customerCode: params.customerCode,
+    amount: params.amount,
+    date: params.date,
+    paymentAccountId: params.paymentAccountId,
+    service: params.service,
+    receipt: params.receipt,
+  });
+  if (!result.ok) return { success: false, error: result.error };
+  const payload = (result.data?.result ?? {}) as Record<string, unknown>;
+  return {
+    success: true,
+    receiptId: payload.receiptId ? String(payload.receiptId) : undefined,
+    journalId: payload.journalId ? String(payload.journalId) : undefined,
+    customerAccount: payload.customerAccount ? String(payload.customerAccount) : undefined,
+    paymentAccount: payload.paymentAccount ? String(payload.paymentAccount) : undefined,
+  };
 }
 
-/** Records a customer refund and posts its journal atomically. */
+/** يسجّل استرداداً لعميل ويُرحّل قيده ذرّياً. */
 export async function postCustomerRefund(params: {
-  connectionString: string;
+  connectionString?: string;
   tenantId: string;
   branchId: string;
   customerCode: string;
@@ -122,41 +115,42 @@ export async function postCustomerRefund(params: {
   refund: Record<string, unknown>;
   actor?: string;
 }): Promise<PostedResult> {
-  try {
-    const sql = getClient(params.connectionString);
-    const rows: any = await sql.query(
-      `SELECT fn_post_customer_refund($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10) AS result`,
-      [params.tenantId, params.branchId, params.customerCode, params.amount, params.units,
-       params.date, params.paymentAccountId, params.service || '',
-       JSON.stringify(params.refund), params.actor || 'app']
-    );
-    const result = rows?.[0]?.result || {};
-    return { success: true, refundId: result.refundId, journalId: result.journalId,
-             customerAccount: result.customerAccount, paymentAccount: result.paymentAccount };
-  } catch (error: any) {
-    return { success: false, error: error?.message || String(error) };
-  }
+  const result = await apiRequest<{ result: Record<string, unknown> }>('/accounting/refund', {
+    method: 'POST',
+    body: {
+      branchId: params.branchId,
+      customerCode: params.customerCode,
+      amount: params.amount,
+      units: params.units,
+      date: params.date,
+      paymentAccountId: params.paymentAccountId,
+      service: params.service,
+      refund: params.refund,
+    },
+  });
+  if (!result.ok) return { success: false, error: result.error };
+  const payload = (result.data?.result ?? {}) as Record<string, unknown>;
+  return {
+    success: true,
+    refundId: payload.refundId ? String(payload.refundId) : undefined,
+    journalId: payload.journalId ? String(payload.journalId) : undefined,
+    customerAccount: payload.customerAccount ? String(payload.customerAccount) : undefined,
+    paymentAccount: payload.paymentAccount ? String(payload.paymentAccount) : undefined,
+  };
 }
 
-/** Reads the authoritative account balances straight from the database. */
-export async function fetchAccountBalances(params: {
-  connectionString: string;
-  tenantId: string;
+/** أرصدة الحسابات من الدفتر (المرجع النهائي) — عبر الـ API. */
+export async function fetchAccountBalances(_params?: {
+  connectionString?: string;
+  tenantId?: string;
 }): Promise<{ code: string; name: string; type: string; balance: number }[]> {
-  try {
-    const sql = getClient(params.connectionString);
-    const rows: any = await sql.query(
-      `SELECT code, name_ar, account_type, balance FROM accounts WHERE tenant_id = $1 ORDER BY code`,
-      [params.tenantId]
-    );
-    return (rows as { code: unknown; name_ar: unknown; account_type: unknown; balance: unknown }[]).map((row) => ({
-      code: String(row.code),
-      name: String(row.name_ar),
-      type: String(row.account_type),
-      balance: Number(row.balance || 0),
-    }));
-  } catch (error) {
-    console.warn('fetchAccountBalances failed:', error);
-    return [];
-  }
+  const result = await apiFetchBalances();
+  if (!result.ok) return [];
+  const balances = Array.isArray(result.data?.balances) ? result.data!.balances : [];
+  return balances.map((row) => ({
+    code: String(row.code ?? ''),
+    name: String(row.name_ar ?? ''),
+    type: String(row.account_type ?? ''),
+    balance: Number(row.balance ?? 0),
+  }));
 }

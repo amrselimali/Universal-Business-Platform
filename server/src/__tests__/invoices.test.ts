@@ -199,3 +199,58 @@ describe('الفواتير: الإصدار (If-Match)', () => {
     await app.close();
   });
 });
+
+describe('المحاسبة: مسار الاسترداد', () => {
+  it('يتطلب صلاحية receipt.create (403 بلا فعل)', async () => {
+    const db: AppDeps['db'] = {
+      one: async () => [] as never,
+      withTenant: async () => [],
+      rawQuery: async () => [] as never,
+    };
+    const app = await buildApp({ db, jwtSecret: JWT_SECRET, logger: false, disableRateLimit: true });
+    await app.ready();
+
+    const token = makeToken({ allowedActions: ['generic.record.read'] });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/accounting/refund',
+      headers: auth(token),
+      payload: {
+        branchId: 'b1', customerCode: 'C1', amount: 50, units: 1,
+        date: '2026-10-17', paymentAccountId: 'acc-1111', refund: {},
+      },
+    });
+    expect(response.statusCode).toBe(403);
+    await app.close();
+  });
+
+  it('يمرّر tenant من التوكن لدالة الاسترداد', async () => {
+    const calls: { tenantId: string; params?: unknown[] }[] = [];
+    const db: AppDeps['db'] = {
+      one: async (tenantId, text, params) => {
+        if (text.includes('fn_post_customer_refund')) calls.push({ tenantId, params });
+        return [{ result: { refundId: 'r-1', journalId: 'j-1' } }] as never;
+      },
+      withTenant: async () => [],
+      rawQuery: async () => [] as never,
+    };
+    const app = await buildApp({ db, jwtSecret: JWT_SECRET, logger: false, disableRateLimit: true });
+    await app.ready();
+
+    const token = makeToken({ allowedActions: ['receipt.create'] });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/accounting/refund',
+      headers: auth(token),
+      payload: {
+        branchId: 'b1', customerCode: 'C1', amount: 50, units: 1,
+        date: '2026-10-17', paymentAccountId: 'acc-1111', refund: {},
+        tenantId: 'tenant-attacker',
+      },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(calls[0]?.tenantId).toBe('tenant-1');
+    expect(calls[0]?.params?.[0]).toBe('tenant-1');
+    await app.close();
+  });
+});

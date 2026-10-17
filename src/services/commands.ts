@@ -294,24 +294,9 @@ export async function createCollectionReceipt(params: {
     return { success: true, data: result.data };
   }
 
-  const directDb = getActiveDbConnection();
-  if (directDb) {
-    const outcome = await postCustomerReceipt({
-      connectionString: directDb.connectionString,
-      tenantId: directDb.tenantId,
-      branchId: params.branchId,
-      customerCode: params.customerCode,
-      amount: params.amount,
-      date: params.date,
-      paymentAccountId: params.paymentAccountId,
-      service: params.service,
-      receipt: params.receipt,
-      actor: params.actor,
-    });
-    if (!outcome.success) return { success: false, error: outcome.error };
-    params.applyLocal(params.receipt);
-    return { success: true, data: outcome };
-  }
+  // لا يوجد مسار كتابة مباشر من المتصفح إلى الداتابيز (قرار معماري).
+  // إن لم يكن الـ API مُهيّأً نُعيد خطأً صريحاً بدل كتابة صامتة من العميل.
+  return { success: false, error: 'api_not_configured: اضبط عنوان الـ API من شاشة Neon Hub لتسجيل القيود.' };
 
   // Offline / standalone fallback
   params.applyLocal(params.receipt);
@@ -334,25 +319,9 @@ export async function createCustomerRefund(params: {
   applyLocal: (refund: Record<string, unknown>) => void;
   actor?: string;
 }): Promise<CommandResult> {
-  const directDb = getActiveDbConnection();
-  if (directDb) {
-    const outcome = await postCustomerRefund({
-      connectionString: directDb.connectionString,
-      tenantId: directDb.tenantId,
-      branchId: params.branchId,
-      customerCode: params.customerCode,
-      amount: params.amount,
-      units: params.units,
-      date: params.date,
-      paymentAccountId: params.paymentAccountId,
-      service: params.service,
-      refund: params.refund,
-      actor: params.actor,
-    });
-    if (!outcome.success) return { success: false, error: outcome.error };
-    params.applyLocal(params.refund);
-    return { success: true, data: outcome };
-  }
+  // لا يوجد مسار كتابة مباشر من المتصفح إلى الداتابيز (قرار معماري).
+  // إن لم يكن الـ API مُهيّأً نُعيد خطأً صريحاً بدل كتابة صامتة من العميل.
+  return { success: false, error: 'api_not_configured: اضبط عنوان الـ API من شاشة Neon Hub لتسجيل القيود.' };
 
   // Offline / standalone fallback
   params.applyLocal(params.refund);
