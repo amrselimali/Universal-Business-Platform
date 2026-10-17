@@ -13,6 +13,26 @@
 | `scripts/neon_revenue_invoices_view.sql` | **View موحّد `v_revenue_invoices`**: فواتير `sales_invoices` + إيرادات الورديات المشتقة بنفس قواعد الاستثناء، مع إعادة تعريف دوال القائمة/الملخص/التفاصيل لتقرأ منه |
 | `scripts/check-context-freeze.mjs` | بوابة CI: تفشل عند أي dataset جديد في `neonSchema.ts` (34 dataset مجمّدة) |
 
+## طبقة الـ API (تحديث مهم)
+كل قراءة/كتابة الفواتير تمرّ الآن عبر **Fastify** (`server/src/routes/invoices.ts`):
+
+| المسار | الوظيفة | الصلاحية |
+|---|---|---|
+| `GET /sales/invoices` | قائمة Keyset بفلاتر | `generic.record.read` |
+| `GET /sales/invoices/summary` | عدّاد + صافي + ضريبة | `generic.record.read` |
+| `GET /sales/invoices/:id` | رأس + سطور `invoice_lines` | `generic.record.read` |
+| `PUT /sales/invoices/:id` | تعديل (سبب إلزامي) | `record.save` |
+| `POST /sales/invoices/:id/cancel` | إلغاء (سبب إلزامي) | `record.save` |
+
+- **tenant_id من التوكن فقط** ولا يُقبل من الجسم/الاستعلام (مُختبَر).
+- كل استدعاء يمرّ بـ `db.one(tenantId, ...)` الذي يضبط `app.tenant_id` داخل نفس
+  المعاملة فتسري سياسات RLS.
+- `src/services/invoiceQueryApi.ts` أصبح **عميل API فعلياً** (بلا أي اتصال مباشر
+  بقاعدة البيانات من المتصفح)؛ وإن لم يُضبط عنوان الـ API تُعاد رسالة صريحة بلا
+  مسار بديل.
+- اختبارات: `server/src/__tests__/invoices.test.ts` (8 اختبارات: 401/403، تجاهل
+  `tenantId` القادم من العميل، فرض سبب التعديل/الإلغاء).
+
 ## خطوات التشغيل
 ```bash
 # 1) طبّق المخطط (أعمدة/سطور/فهارس/دوال) — متكرر بأمان

@@ -1,16 +1,19 @@
 /**
- * قراءة الفواتير عبر دوال قاعدة البيانات (مسار واحد للشاشة)
+ * عميل واجهة الفواتير (Invoices API client)
  * ---------------------------------------------------------------------------
- * يستدعي:
- *   • fn_invoice_list    → صفحة Keyset + حمولة كل صف (payload)
- *   • fn_invoice_summary → العدّاد والمجاميع المطابقة للفلاتر
- *   • fn_invoice_detail  → رأس الفاتورة + سطورها من invoice_lines
+ * **لا يتصل بقاعدة البيانات إطلاقاً.** كل قراءة/كتابة تمرّ عبر الـ API (Fastify):
+ *   GET  /sales/invoices            → قائمة Keyset بفلاتر
+ *   GET  /sales/invoices/summary    → عدّاد + صافي + ضريبة
+ *   GET  /sales/invoices/:id        → رأس + سطور invoice_lines
+ *   PUT  /sales/invoices/:id        → تعديل (سبب إلزامي)
+ *   POST /sales/invoices/:id/cancel → إلغاء (سبب إلزامي)
  *
- * المصدر داخل القاعدة: `v_revenue_invoices` (فواتير محفوظة + إيرادات ورديات).
+ * tenant_id يأتي من التوكن داخل السيرفر (لا يُرسل من العميل)، وRLS يُطبَّق هناك.
+ * إن لم يكن عنوان الـ API مُهيّأً في الإعدادات تُعاد رسالة صريحة، ولا يوجد أي
+ * مسار بديل يكتب في الداتابيز من المتصفح.
  */
 
-import { neon } from '@neondatabase/serverless';
-import { getActiveDbConnection } from './commands';
+import { apiRequest } from './apiClient';
 import type { SalesInvoice } from '../types';
 
 export interface InvoiceFilters {
@@ -43,31 +46,39 @@ export interface InvoiceDetail {
   error?: string;
 }
 
-const client = () => {
-  const connection = getActiveDbConnection();
-  if (!connection?.connectionString) return null;
-  return neon(connection.connectionString.trim());
+interface ServerLine {
+  invoice_number?: string;
+  invoice_date?: string;
+  status?: string;
+  customer_name?: string;
+  net_amount?: number | string;
+  tax_amount?: number | string;
+  created_at?: string;
+  source?: string;
+  payload?: Record<string, any>;
+  [key: string]: unknown;
+}
+
+const query = (filters: InvoiceFilters): string => {
+  const params = new URLSearchParams();
+  if (filters.search?.trim()) params.set('search', filters.search.trim());
+  if (filters.from) params.set('from', filters.from);
+  if (filters.to) params.set('to', filters.to);
+  if (filters.status && filters.status !== 'all') params.set('status', filters.status);
+  if (filters.source && filters.source !== 'all') params.set('source', filters.source);
+  if (filters.customerId && filters.customerId !== 'all') params.set('customerId', filters.customerId);
+  if (filters.branchId) params.set('branchId', filters.branchId);
+  return params.toString();
 };
 
-const params = (tenantId: string, filters: InvoiceFilters) => [
-  tenantId,
-  filters.search || null,
-  filters.from || null,
-  filters.to || null,
-  filters.status || null,
-  filters.source && filters.source !== 'all' ? filters.source : null,
-  filters.customerId && filters.customerId !== 'all' ? filters.customerId : null,
-  filters.branchId || null,
-];
-
-const toInvoice = (row: Record<string, any>): SalesInvoice => {
+/** يحوّل صف السيرفر إلى كائن الفاتورة المتوقع في الشاشة. */
+export const toInvoice = (row: ServerLine): SalesInvoice => {
   const payload = (row.payload ?? {}) as Partial<SalesInvoice>;
   return {
     ...payload,
     id: String(row.id ?? payload.id ?? ''),
-    tenantId: String(payload.tenantId ?? ''),
     invoiceNumber: String(row.invoice_number ?? payload.invoiceNumber ?? ''),
-    customerId: String(row.customer_id ?? payload.customerId ?? ''),
+    customerId: String(payload.customerId ?? ''),
     customerName: String(row.customer_name ?? payload.customerName ?? ''),
     items: Array.isArray(payload.items) ? payload.items : [],
     subtotal: Number(payload.subtotal ?? row.net_amount ?? 0),
@@ -75,80 +86,67 @@ const toInvoice = (row: Record<string, any>): SalesInvoice => {
     discountAmount: Number(payload.discountAmount ?? 0),
     netAmount: Number(row.net_amount ?? payload.netAmount ?? 0),
     paymentMethod: String(payload.paymentMethod ?? ''),
-    status: String(row.status ?? payload.status ?? 'Posted') as SalesInvoice['status'],
+    status: String(row.status ?? payload.status ?? 'Posted'),
     createdAt: String(row.created_at ?? payload.createdAt ?? ''),
-    source: String(row.source ?? payload.source ?? 'pos') as SalesInvoice['source'],
+    source: String(row.source ?? payload.source ?? 'pos'),
   } as SalesInvoice;
 };
 
-export async function loadInvoicePage(paramsInput: {
+export async function loadInvoicePage(params: {
+  /** يبقى للتوقيع المتوافق فقط — السيرفر يستخرج الـ tenant من التوكن. */
   tenantId: string;
   filters: InvoiceFilters;
   limit?: number;
   afterDate?: string | null;
   afterId?: string | null;
 }): Promise<InvoicePage> {
-  const sql = client();
-  if (!sql || !paramsInput.tenantId) return { invoices: [], nextAfterDate: null, nextAfterId: null, error: 'no_database_connection' };
+  const search = query(params.filters);
+  const tail = [
+    `limit=${encodeURIComponent(String(params.limit ?? 50))}`,
+    params.afterDate ? `afterDate=${encodeURIComponent(params.afterDate)}` : '',
+    params.afterId ? `afterId=${encodeURIComponent(params.afterId)}` : '',
+  ].filter(Boolean).join('&');
 
-  try {
-    const rows: any = await sql.query(
-      `SELECT fn_invoice_list($1,$2,$3::date,$4::date,$5,$6,$7::date,$8,$9,$10,$11) AS page`,
-      [...params(paramsInput.tenantId, paramsInput.filters), paramsInput.limit ?? 50,
-       paramsInput.afterDate ?? null, paramsInput.afterId ?? null]
-    );
-    const page = rows?.[0]?.page ?? {};
-    const items = Array.isArray(page.items) ? page.items : [];
-    return {
-      invoices: items.map((item: Record<string, unknown>) => toInvoice(item)),
-      nextAfterDate: page.nextAfterDate ? String(page.nextAfterDate).slice(0, 10) : null,
-      nextAfterId: page.nextAfterId ? String(page.nextAfterId) : null,
-    };
-  } catch (error: any) {
-    return { invoices: [], nextAfterDate: null, nextAfterId: null, error: error?.message || 'invoice_page_failed' };
-  }
+  const result = await apiRequest<{ items?: ServerLine[]; nextAfterDate?: string; nextAfterId?: string }>(
+    `/sales/invoices?${[search, tail].filter(Boolean).join('&')}`
+  );
+  if (!result.ok) return { invoices: [], nextAfterDate: null, nextAfterId: null, error: result.error };
+
+  const items = Array.isArray(result.data?.items) ? result.data!.items! : [];
+  return {
+    invoices: items.map(toInvoice),
+    nextAfterDate: result.data?.nextAfterDate ? String(result.data.nextAfterDate).slice(0, 10) : null,
+    nextAfterId: result.data?.nextAfterId ? String(result.data.nextAfterId) : null,
+  };
 }
 
-export async function loadInvoiceSummary(paramsInput: {
+export async function loadInvoiceSummary(params: {
   tenantId: string;
   filters: InvoiceFilters;
 }): Promise<InvoiceSummary> {
-  const sql = client();
-  if (!sql || !paramsInput.tenantId) return { count: 0, netTotal: 0, taxTotal: 0, error: 'no_database_connection' };
-
-  try {
-    const rows: any = await sql.query(
-      `SELECT fn_invoice_summary($1,$2,$3::date,$4::date,$5,$6,$7,$8) AS summary`,
-      params(paramsInput.tenantId, paramsInput.filters)
-    );
-    const summary = rows?.[0]?.summary ?? {};
-    return {
-      count: Number(summary.count ?? 0),
-      netTotal: Number(summary.netTotal ?? 0),
-      taxTotal: Number(summary.taxTotal ?? 0),
-    };
-  } catch (error: any) {
-    return { count: 0, netTotal: 0, taxTotal: 0, error: error?.message || 'invoice_summary_failed' };
-  }
+  const result = await apiRequest<{ count?: number; netTotal?: number; taxTotal?: number }>(
+    `/sales/invoices/summary?${query(params.filters)}`
+  );
+  if (!result.ok) return { count: 0, netTotal: 0, taxTotal: 0, error: result.error };
+  return {
+    count: Number(result.data?.count ?? 0),
+    netTotal: Number(result.data?.netTotal ?? 0),
+    taxTotal: Number(result.data?.taxTotal ?? 0),
+  };
 }
 
 export async function loadInvoiceDetail(tenantId: string, invoiceId: string): Promise<InvoiceDetail> {
-  const sql = client();
-  if (!sql || !tenantId) return { header: null, lines: [], error: 'no_database_connection' };
-
-  try {
-    const rows: any = await sql.query(`SELECT fn_invoice_detail($1,$2) AS detail`, [tenantId, invoiceId]);
-    const detail = rows?.[0]?.detail ?? {};
-    return {
-      header: detail.header ? toInvoice({ id: invoiceId, ...detail.header }) : null,
-      lines: Array.isArray(detail.lines) ? detail.lines : [],
-    };
-  } catch (error: any) {
-    return { header: null, lines: [], error: error?.message || 'invoice_detail_failed' };
-  }
+  const result = await apiRequest<{ header?: ServerLine; lines?: Array<Record<string, unknown>> }>(
+    `/sales/invoices/${encodeURIComponent(invoiceId)}`
+  );
+  if (!result.ok) return { header: null, lines: [], error: result.error };
+  return {
+    header: result.data?.header ? toInvoice(result.data.header) : null,
+    lines: Array.isArray(result.data?.lines) ? result.data!.lines! : [],
+  };
 }
 
-/** تعديل فاتورة في الداتابيز (مع سبب إلزامي). */
+/** تعديل فاتورة عبر الـ API (tenant من التوكن على السيرفر). */
 export async function updateInvoiceRow(params: {
   tenantId: string;
   invoiceId: string;
@@ -157,33 +155,24 @@ export async function updateInvoiceRow(params: {
   reason: string;
   actor?: string;
 }): Promise<{ ok: boolean; version?: number; error?: string }> {
-  const sql = client();
-  if (!sql) return { ok: false, error: 'no_database_connection' };
-  try {
-    const rows: any = await sql.query(
-      `SELECT fn_invoice_update($1,$2,$3::numeric,$4,$5,$6) AS result`,
-      [params.tenantId, params.invoiceId, params.netAmount, params.paymentMethod ?? null, params.reason, params.actor ?? 'ui']
-    );
-    const result = rows?.[0]?.result ?? {};
-    return { ok: true, version: Number(result.version) || undefined };
-  } catch (error: any) {
-    return { ok: false, error: error?.message || String(error) };
-  }
+  const result = await apiRequest<{ version?: number }>(
+    `/sales/invoices/${encodeURIComponent(params.invoiceId)}`,
+    { method: 'PUT', body: { netAmount: params.netAmount, paymentMethod: params.paymentMethod, reason: params.reason } }
+  );
+  if (!result.ok) return { ok: false, error: result.error };
+  return { ok: true, version: Number(result.data?.version) || undefined };
 }
 
-/** إلغاء فاتورة في الداتابيز (مع سبب إلزامي). */
+/** إلغاء فاتورة عبر الـ API. */
 export async function cancelInvoiceRow(params: {
   tenantId: string;
   invoiceId: string;
   reason: string;
   actor?: string;
 }): Promise<{ ok: boolean; error?: string }> {
-  const sql = client();
-  if (!sql) return { ok: false, error: 'no_database_connection' };
-  try {
-    await sql.query(`SELECT fn_invoice_cancel($1,$2,$3,$4)`, [params.tenantId, params.invoiceId, params.reason, params.actor ?? 'ui']);
-    return { ok: true };
-  } catch (error: any) {
-    return { ok: false, error: error?.message || String(error) };
-  }
+  const result = await apiRequest(
+    `/sales/invoices/${encodeURIComponent(params.invoiceId)}/cancel`,
+    { method: 'POST', body: { reason: params.reason } }
+  );
+  return result.ok ? { ok: true } : { ok: false, error: result.error };
 }
