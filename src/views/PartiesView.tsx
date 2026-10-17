@@ -49,8 +49,8 @@ import {
 } from '../components/ExcelDataTransferModal';
 import { partyExcelColumns } from './parties/partiesExcelColumns';
 import { MultiSelectFilter } from './parties/MultiSelectFilter';
-import { loadPartiesPage } from '../services/partiesPaged';
-import { buildCodingCodeOptions, filterCodingResults } from './parties/codingSearch';
+import { loadPartiesPage, loadPartyCodeOptions } from '../services/partiesPaged';
+import { filterCodingResults } from './parties/codingSearch';
 
 export const PartiesView: React.FC = () => {
   const {
@@ -245,10 +245,25 @@ export const PartiesView: React.FC = () => {
     setMergePrimaryId('');
   };
 
-  const codingPartyOptions = useMemo(
-    () => buildCodingCodeOptions(parties, branches, codingFilters.branchIds, codingFilters.statuses, language),
-    [parties, branches, codingFilters.branchIds, codingFilters.statuses, language]
-  );
+  // خيارات الأكواد من السيرفر (DISTINCT) بدل مسح كل العملاء
+  const [codingPartyOptions, setCodingPartyOptions] = useState<{
+    customerCodes: Array<{ value: string; label: string }>;
+    systemCodes: Array<{ value: string; label: string }>;
+    fileCodes: Array<{ value: string; label: string }>;
+  }>({ customerCodes: [], systemCodes: [], fileCodes: [] });
+
+  useEffect(() => {
+    let cancelled = false;
+    loadPartyCodeOptions({
+      tenantId: tenant?.id || '',
+      statuses: codingFilters.statuses,
+      branchIds: codingFilters.branchIds,
+      language: language === 'en' ? 'en' : 'ar',
+    }).then((options) => {
+      if (!cancelled) setCodingPartyOptions(options);
+    });
+    return () => { cancelled = true; };
+  }, [tenant?.id, codingFilters.branchIds, codingFilters.statuses, language]);
 
   const selectedCodingIdSet = useMemo(() => new Set(selectedCodingPartyIds), [selectedCodingPartyIds]);
   const selectedCodingParties = parties.filter((party) => selectedCodingIdSet.has(party.id));

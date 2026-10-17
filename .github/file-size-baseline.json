@@ -10,7 +10,7 @@
     "src/views/ProductManagementView.tsx": 2504,
     "src/views/CompaniesBranchesView.tsx": 2351,
     "src/views/EmployeeDossierView.tsx": 2216,
-    "src/views/PartiesView.tsx": 2094,
+    "src/views/PartiesView.tsx": 2101,
     "src/components/PartyStatementModal.tsx": 2076,
     "src/views/CollectionReceiptsView.tsx": 1951,
     "src/views/InvoicesView.tsx": 1779,
