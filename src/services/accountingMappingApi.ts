@@ -150,6 +150,133 @@ export async function fetchMappingGaps(tenantId: string): Promise<MappingCoverag
   return loaded.gaps;
 }
 
+/**
+ * يُنشئ قاعدة ربط جديدة في النظام.
+ */
+export async function createAccountingMappingRule(
+  rule: Omit<AccountingMappingRule, 'id'>
+): Promise<{ ok: boolean; error?: string }> {
+  const connection = getActiveDbConnection();
+  if (!connection?.connectionString) return { ok: false, error: 'no_database_connection' };
+
+  try {
+    const sql = neon(connection.connectionString.trim());
+    await sql.query(
+      `INSERT INTO accounting_mapping_rules (
+         tenant_id, code, name_ar, name_en, transaction_type, source_screen,
+         debit_account_code, debit_account_name,
+         credit_account_code, credit_account_name,
+         is_strict_exclusive, auto_post_enabled, is_active, description
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+       ON CONFLICT (tenant_id, code) DO UPDATE SET
+         name_ar = EXCLUDED.name_ar,
+         debit_account_code = EXCLUDED.debit_account_code,
+         debit_account_name = EXCLUDED.debit_account_name,
+         credit_account_code = EXCLUDED.credit_account_code,
+         credit_account_name = EXCLUDED.credit_account_name,
+         is_strict_exclusive = EXCLUDED.is_strict_exclusive,
+         auto_post_enabled = EXCLUDED.auto_post_enabled,
+         is_active = EXCLUDED.is_active,
+         updated_at = CURRENT_TIMESTAMP`,
+      [
+        rule.tenantId, rule.code, rule.nameAr, rule.nameEn, rule.transactionType, rule.sourceScreen,
+        rule.debitAccountCode, rule.debitAccountName,
+        rule.creditAccountCode, rule.creditAccountName,
+        rule.isStrictExclusive, rule.autoPostEnabled, rule.isActive, rule.description ?? null,
+      ]
+    );
+    return { ok: true };
+  } catch (error: any) {
+    return { ok: false, error: error?.message || 'create_failed' };
+  }
+}
+
+/**
+ * تهيئة القواعد القياسية لكيان معين إن لم تكن موجودة.
+ */
+export async function seedDefaultMappingRules(tenantId: string): Promise<{ ok: boolean; count: number; error?: string }> {
+  const connection = getActiveDbConnection();
+  if (!connection?.connectionString) return { ok: false, count: 0, error: 'no_database_connection' };
+  try {
+    const sql = neon(connection.connectionString.trim());
+    await sql.query(
+      `INSERT INTO accounting_mapping_rules (tenant_id, code, name_ar, name_en, transaction_type, source_screen, debit_account_code, debit_account_name, credit_account_code, credit_account_name, is_strict_exclusive, auto_post_enabled, is_active, description) VALUES
+       ($1, 'RULE-POS-CASH', 'مبيعات الكاشير النقدية', 'POS Cash Sales', 'pos_sale', 'شاشة الكاشير (POS)', '1111', 'الخزينة الرئيسية', '4100', 'إيرادات المبيعات', TRUE, TRUE, TRUE, 'إيصال كاشير نقدي'),
+       ($1, 'RULE-POS-CARD', 'مبيعات الكاشير بالبطاقة والتحويل', 'POS Card Sales', 'pos_sale', 'شاشة الكاشير (POS)', '1112', 'البنك الأهلي المصري', '4100', 'إيرادات المبيعات', TRUE, TRUE, TRUE, 'مبيعات بطاقة وتحويل بنكي'),
+       ($1, 'RULE-SESSION-RUN', 'إيراد جلسة تشغيل يومية', 'Daily Session Revenue', 'session', 'شاشة التشغيل (الريسيبشن)', '1111', 'الخزينة الرئيسية', '4200', 'إيرادات الخدمات والعيادات', TRUE, TRUE, TRUE, 'كشف تشغيل الوردية'),
+       ($1, 'RULE-EXP-VOUCHER', 'سند صرف مصروف تشغيلي', 'Operating Expense Voucher', 'expense', 'شاشة المصروفات / الوردية', '5200', 'مصروفات تشغيلية', '1111', 'الخزينة الرئيسية', TRUE, TRUE, TRUE, 'مصروفات تشغيلية عامة'),
+       ($1, 'RULE-SUPP-PAY', 'سند سداد مديونية مورد', 'Supplier Payment', 'supplier_payment', 'شاشة المشتريات / الموردين', '2100', 'الموردون والدائنون التجاريون', '1112', 'البنك الأهلي المصري', TRUE, TRUE, TRUE, 'سداد مديونية مورد'),
+       ($1, 'RULE-PURCHASE-RECEIPT', 'استلام بضاعة من مورد', 'Purchase Receipt', 'purchase_receipt', 'شاشة المشتريات', '1130', 'مخزون البضائع ومستلزمات العيادة', '2100', 'الموردون والدائنون التجاريون', TRUE, TRUE, TRUE, 'استلام فاتورة توريد'),
+       ($1, 'RULE-CUSTOMER-COLLECTION', 'تحصيل نقدية من عميل', 'Customer Collection', 'customer_collection', 'شاشة التحصيلات', '1111', 'الخزينة الرئيسية', '1120', 'العملاء والمدينون التجاريون', TRUE, TRUE, TRUE, 'سند قبض وتحصيل عميل'),
+       ($1, 'RULE-PAYROLL', 'صرف مسير الرواتب', 'Payroll Disbursement', 'payroll', 'شاشة الرواتب', '5300', 'الرواتب والأجور', '1112', 'البنك الأهلي المصري', TRUE, TRUE, TRUE, 'مسير رواتب الكادر الطبي والموظفين'),
+       ($1, 'RULE-GOODS-ISSUE', 'صرف مخزني للاستهلاك', 'Goods Issue', 'goods_issue', 'شاشة المخازن', '5100', 'تكلفة البضاعة المباعة', '1130', 'مخزون البضائع', TRUE, TRUE, TRUE, 'صرف مستلزمات للجلسات'),
+       ($1, 'RULE-INVENTORY-ADJ', 'تسوية عجز الجرد المخزني', 'Inventory Adjustment', 'inventory_adjustment', 'شاشة الجرد', '5100', 'تكلفة البضاعة المباعة', '1130', 'مخزون البضائع', TRUE, TRUE, TRUE, 'تسوية فروقات الجرد'),
+       ($1, 'RULE-ASSET-DEP', 'إهلاك الأصول الثابتة والأجهزة', 'Asset Depreciation', 'asset_depreciation', 'شاشة الأصول والأجهزة', '5250', 'مصروف إهلاك أصول وأجهزة', '1150', 'مجمع إهلاك الأصول', TRUE, TRUE, TRUE, 'إهلاك أجهزة الليزر والمعدات')
+       ON CONFLICT (tenant_id, code) DO NOTHING`,
+      [tenantId]
+    );
+    const countRows: any = await sql.query(`SELECT count(*)::int as c FROM accounting_mapping_rules WHERE tenant_id = $1`, [tenantId]);
+    return { ok: true, count: Number(countRows?.[0]?.c || 0) };
+  } catch (error: any) {
+    return { ok: false, count: 0, error: error?.message || 'seed_failed' };
+  }
+}
+
+/**
+ * تسجيل قيد مولَّد في سجل التدقيق accounting_generated_entries.
+ */
+export async function logGeneratedAccountingEntry(params: {
+  tenantId: string;
+  ruleCode: string;
+  journalEntryId: string;
+  entryNumber: string;
+  sourceScreen: string;
+  sourceDocument: string;
+  debitAccountCode: string;
+  creditAccountCode: string;
+  amount: number;
+}): Promise<void> {
+  const connection = getActiveDbConnection();
+  if (!connection?.connectionString) return;
+
+  try {
+    const sql = neon(connection.connectionString.trim());
+    await sql.query(
+      `INSERT INTO accounting_generated_entries (
+         tenant_id, rule_code, journal_entry_id, entry_number,
+         source_screen, source_document, debit_account_code, credit_account_code,
+         amount, is_balanced, posted_at
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, TRUE, CURRENT_TIMESTAMP)`,
+      [
+        params.tenantId, params.ruleCode, params.journalEntryId, params.entryNumber,
+        params.sourceScreen, params.sourceDocument, params.debitAccountCode, params.creditAccountCode,
+        params.amount,
+      ]
+    );
+  } catch (e) {
+    console.warn('Failed to log generated accounting entry:', e);
+  }
+}
+
+/**
+ * استخراج قاعدة الربط المناسبة للعملية.
+ */
+export function resolveMappingRule(
+  rules: AccountingMappingRule[],
+  transactionType: AccountingTransactionType,
+  subtype?: string
+): AccountingMappingRule | undefined {
+  const matching = rules.filter((r) => r.transactionType === transactionType && r.isActive);
+  if (matching.length === 0) return undefined;
+  if (subtype) {
+    const bySubtype = matching.find(
+      (r) => r.code.toLowerCase().includes(subtype.toLowerCase()) || r.nameEn.toLowerCase().includes(subtype.toLowerCase())
+    );
+    if (bySubtype) return bySubtype;
+  }
+  return matching[0];
+}
+
 /** أسماء أنواع العمليات بالعربية — للعرض في الشاشة. */
 export const TRANSACTION_TYPE_LABELS: Record<string, { ar: string; en: string }> = {
   pos_sale: { ar: 'مبيعات الكاشير (POS)', en: 'POS Sales' },
@@ -163,3 +290,4 @@ export const TRANSACTION_TYPE_LABELS: Record<string, { ar: string; en: string }>
   inventory_adjustment: { ar: 'تسوية جرد مخزني', en: 'Inventory Adjustment' },
   goods_issue: { ar: 'صرف مخزني', en: 'Goods Issue' },
 };
+

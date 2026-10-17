@@ -37,9 +37,13 @@ export interface ActivityInput {
   details: string;
 }
 
-/** معرّف فريد مقروء — الطابع الزمني + عشوائي يمنع التصادم عند التسجيل المتوازي. */
-export const makeLogId = (prefix: string, seed: number = Date.now()): string =>
-  `${prefix}-${seed}-${Math.random().toString(36).substring(2, 6)}`;
+let logSeq = 0;
+
+/** معرّف فريد مقروء — الطابع الزمني + عدّاد تزايدي + عشوائي يمنع التصادم عند التسجيل المتوازي. */
+export const makeLogId = (prefix: string, seed: number = Date.now()): string => {
+  logSeq = (logSeq + 1) & 0xffffff;
+  return `${prefix}-${seed}-${logSeq.toString(36)}-${Math.random().toString(36).substring(2, 7)}`;
+};
 
 /** يُسجّل حركة تدقيق كاملة السياق (لا يقبل حقولاً ناقصة). */
 export const buildAuditRecord = (input: AuditInput, ctx: AuditContext): AuditRecord => ({
