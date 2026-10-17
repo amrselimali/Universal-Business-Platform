@@ -1,6 +1,17 @@
 # CHANGELOG
 # CHANGELOG
 
+## 2026-10-17 — فواتير: فلتر المصدر + حمولة الصف + خدمة قراءة واحدة
+
+- `neon_invoice_source_filter.sql`: فلتر `p_source` في `fn_invoice_list`/`fn_invoice_summary`
+  (لأن الشاشة تفلتر بالمصدر ويجب أن تبقى العدادات صحيحة).
+- `neon_invoice_rows_payload.sql`: `v_revenue_invoices` تُرجع `payload` لكل صف،
+  ومُصنَّع بالكامل لإيرادات الورديات (عميل/كاشير/طريقة دفع/أصناف/شيفت/مبالغ)
+  → نفس أعمدة شاشة الفواتير بلا فقد بيانات.
+- `src/services/invoiceQueryApi.ts`: مسار قراءة واحد (قائمة/ملخص/تفاصيل) يعيد
+  كائنات SalesInvoice جاهزة للشاشة.
+- مُسجَّل في الترحيل؛ SQL مقسَّم صحيحاً.
+
 ## 2026-10-17 — توحيد مصدر الفواتير في قاعدة البيانات (View واحد)
 
 - `scripts/neon_revenue_invoices_view.sql`: عرض `v_revenue_invoices` يجمع

@@ -36,6 +36,8 @@ const SOURCES = [
   ['scripts/neon_parties_performance_indexes.sql', 'فهارس أداء العملاء (trgm + أكواد + حالة)'],
   ['scripts/neon_invoice_slice.sql', 'شريحة الفواتير: أعمدة/سطور/فهارس/دوال'],
   ['scripts/neon_revenue_invoices_view.sql', 'توحيد مصدر الفواتير: View موحّد + دوال محدّثة'],
+  ['scripts/neon_invoice_source_filter.sql', 'فواتير: فلتر المصدر في الدوال'],
+  ['scripts/neon_invoice_rows_payload.sql', 'فواتير: حمولة الصف الكاملة في القائمة'],
 ];
 
 const HEADER = `-- ============================================================================
