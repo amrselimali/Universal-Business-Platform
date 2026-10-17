@@ -13,7 +13,7 @@ export interface WindowColumn<T> {
   width?: string;
   align?: 'start' | 'end';
   mono?: boolean;
-  render?: (row: T) => React.ReactNode;
+  render?: (row: T, index: number) => React.ReactNode;
 }
 
 interface Props<T> {
@@ -77,7 +77,7 @@ export function WindowedTable<T>({
                 className={`truncate ${column.align === 'end' ? 'text-end' : 'text-start'} ${column.mono ? 'font-mono' : ''}`}
                 title={column.render ? undefined : String((row as Record<string, unknown>)[column.key] ?? '')}
               >
-                {column.render ? column.render(row) : String((row as Record<string, unknown>)[column.key] ?? '—')}
+                {column.render ? column.render(row, start + index) : String((row as Record<string, unknown>)[column.key] ?? '—')}
               </span>
             ))}
           </div>
