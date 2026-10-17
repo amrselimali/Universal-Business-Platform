@@ -12,8 +12,8 @@
 
 import type { GuardrailsFacts } from '../../services/architectureGuardrails';
 
-export const GUARDRAILS_MEASURED_AT = '2026-10-17T09:49:48.957Z';
-export const GUARDRAILS_REVISION = 'df1f3e7';
+export const GUARDRAILS_MEASURED_AT = '2026-10-17T09:55:01.986Z';
+export const GUARDRAILS_REVISION = '7cdbf2c';
 
 export const GUARDRAILS_FACTS: GuardrailsFacts = /* GUARDRAILS_FACTS_BEGIN */
 {
@@ -94,10 +94,10 @@ export const GUARDRAILS_FACTS: GuardrailsFacts = /* GUARDRAILS_FACTS_BEGIN */
     { actionKey: 'accounting.post_journal', file: 'src/views/AccountingMappingView.tsx', line: 82 },
     { actionKey: 'architecture.copy_snippet', file: 'src/views/ArchitectureView.tsx', line: 35 },
     { actionKey: 'architecture.run_guardrails', file: 'src/views/ArchitectureView.tsx', line: 34 },
-    { actionKey: 'bookings.add_followup', file: 'src/views/BookingsFollowUpView.tsx', line: 2345 },
-    { actionKey: 'bookings.create_booking', file: 'src/views/BookingsFollowUpView.tsx', line: 2355 },
-    { actionKey: 'bookings.manage_staff_schedule', file: 'src/views/BookingsFollowUpView.tsx', line: 3699 },
-    { actionKey: 'bookings.manage_staff_schedule', file: 'src/views/BookingsFollowUpView.tsx', line: 3820 },
+    { actionKey: 'bookings.add_followup', file: 'src/views/BookingsFollowUpView.tsx', line: 2344 },
+    { actionKey: 'bookings.create_booking', file: 'src/views/BookingsFollowUpView.tsx', line: 2354 },
+    { actionKey: 'bookings.manage_staff_schedule', file: 'src/views/BookingsFollowUpView.tsx', line: 3698 },
+    { actionKey: 'bookings.manage_staff_schedule', file: 'src/views/BookingsFollowUpView.tsx', line: 3819 },
     { actionKey: 'database.ddl', file: 'src/views/DatabaseExplorerView.tsx', line: 41 },
     { actionKey: 'database.drop', file: 'src/views/DatabaseExplorerView.tsx', line: 42 },
     { actionKey: 'database.write', file: 'src/views/DatabaseExplorerView.tsx', line: 40 },
