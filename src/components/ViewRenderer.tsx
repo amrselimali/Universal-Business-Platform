@@ -22,7 +22,6 @@ import {
   GoodsReceiptsView,
   InventoryManagementView,
   InvoicesView,
-  InvoicesStreamView,
   LaserDevicesView,
   MetadataStudioView,
   ModulesConfigView,
@@ -82,8 +81,6 @@ export const renderActiveView = (viewId: string, ctx: ActiveViewContext): React.
   // إدارة قاعدة البيانات من الواجهة (قراءة/كتابة/بنية) — محكومة بالصلاحيات.
   if (viewId === 'database_admin') return <DatabaseExplorerView />;
 
-  // الفواتير — مسار القراءة المُرَقَّمة (Keyset + جدول بنوافذ) للبيانات الكبيرة.
-  if (viewId === 'invoices_stream') return <InvoicesStreamView />;
 
   // معمارية المنظومة الجديدة: توثيق المعمارية المعتمدة + بوابات الفحص الحقيقية.
   if (viewId === 'architecture') return <ArchitectureView />;

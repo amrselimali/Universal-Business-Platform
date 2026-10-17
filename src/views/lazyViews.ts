@@ -133,6 +133,3 @@ export const ArchitectureView = lazy(() =>
 export const DatabaseExplorerView = lazy(() =>
   import('./DatabaseExplorerView').then((m) => ({ default: m.DatabaseExplorerView }))
 );
-export const InvoicesStreamView = lazy(() =>
-  import('./InvoicesStreamView').then((m) => ({ default: m.InvoicesStreamView }))
-);

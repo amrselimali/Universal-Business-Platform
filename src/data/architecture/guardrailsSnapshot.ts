@@ -12,8 +12,8 @@
 
 import type { GuardrailsFacts } from '../../services/architectureGuardrails';
 
-export const GUARDRAILS_MEASURED_AT = '2026-10-17T08:47:06.995Z';
-export const GUARDRAILS_REVISION = 'cdc06a7';
+export const GUARDRAILS_MEASURED_AT = '2026-10-17T08:51:08.855Z';
+export const GUARDRAILS_REVISION = '7527699';
 
 export const GUARDRAILS_FACTS: GuardrailsFacts = /* GUARDRAILS_FACTS_BEGIN */
 {
@@ -77,13 +77,13 @@ export const GUARDRAILS_FACTS: GuardrailsFacts = /* GUARDRAILS_FACTS_BEGIN */
     { path: 'src/components/architecture/ArchitectureScreenProfile.tsx', lines: 216 },
     { path: 'src/components/architecture/ArchitectureSnippets.tsx', lines: 93 },
     { path: 'src/components/architecture/ArchitectureTopology.tsx', lines: 102 },
-    { path: 'src/components/ViewRenderer.tsx', lines: 176 },
+    { path: 'src/components/ViewRenderer.tsx', lines: 173 },
     { path: 'src/data/architecture/architectureDecisions.ts', lines: 125 },
     { path: 'src/data/architecture/architectureGuardrailsContent.ts', lines: 163 },
     { path: 'src/data/architecture/architectureSnippets.ts', lines: 206 },
     { path: 'src/data/architecture/architectureSpec.ts', lines: 241 },
     { path: 'src/data/architecture/guardrailsSnapshot.ts', lines: 144 },
-    { path: 'src/data/architecture/screenMetrics.ts', lines: 67 },
+    { path: 'src/data/architecture/screenMetrics.ts', lines: 66 },
     { path: 'src/services/architectureGuardrails.ts', lines: 293 },
     { path: 'src/views/ArchitectureView.tsx', lines: 114 },
   ],
@@ -133,7 +133,7 @@ export const GUARDRAILS_FACTS: GuardrailsFacts = /* GUARDRAILS_FACTS_BEGIN */
     { id: 'emitted_events_pipeline', labelAr: 'معالجة الأحداث المُصدَّرة بلا تكرار', labelEn: 'Idempotent event processing', comparison: 'atLeast', expected: 1, found: 4, severity: 'advisory', evidence: ['erp-nextgen-local/db/migrations-original/0005_core_audit_outbox_infrastructure.sql', 'erp-nextgen-local/db/migrations/0005_core_audit_outbox_infrastructure.sql'] },
   ],
   legacy: {
-    scanned: 217,
+    scanned: 214,
     limit: 300,
     baseline: 58,
     violations: 58,

@@ -228,15 +228,6 @@ export const SYSTEM_VIEWS: SystemViewDef[] = [
     category: 'admin',
   },
   {
-    id: 'invoices_stream',
-    nameAr: 'الفواتير — عرض سريع (مُرقَّم من السيرفر)',
-    nameEn: 'Invoices — Fast Paged View',
-    descriptionAr: 'قراءة صفحة واحدة (100 صف) بمفاتيح Keyset من قاعدة البيانات مع بحث وتاريخ وجدول بنوافذ افتراضية',
-    descriptionEn: 'Keyset page reads (100 rows) with search/date filters and a windowed table for large datasets',
-    iconName: 'Zap',
-    category: 'operations',
-  },
-  {
     id: 'architecture',
     nameAr: 'معمارية المنظومة الجديدة (Clean Micro-Engine)',
     nameEn: 'New System Architecture (Clean Micro-Engine)',
