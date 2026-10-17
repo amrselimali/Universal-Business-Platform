@@ -350,6 +350,29 @@ export const SYSTEM_ACTIONS: ActionPermissionDef[] = [
     descriptionAr: 'تعديل قيد من شاشة القيود مع تسجيل قبل/بعد ومزامنة المصدر — صلاحية حساسة',
   },
 
+  // Database explorer (إدارة قاعدة البيانات من الواجهة)
+  {
+    key: 'database.write',
+    nameAr: 'إضافة/تعديل/حذف صفوف في قاعدة البيانات',
+    nameEn: 'Insert, Update and Delete Rows',
+    viewId: 'database_admin',
+    descriptionAr: 'كتابة مباشرة في جداول قاعدة البيانات من شاشة الإدارة — صلاحية حساسة',
+  },
+  {
+    key: 'database.ddl',
+    nameAr: 'تغيير بنية الجداول (إنشاء جدول/إضافة/حذف عمود)',
+    nameEn: 'Schema Changes (Create Table / Add or Drop Column)',
+    viewId: 'database_admin',
+    descriptionAr: 'تعديل بنية قاعدة البيانات من الواجهة — صلاحية حرجة',
+  },
+  {
+    key: 'database.drop',
+    nameAr: 'حذف جدول من قاعدة البيانات',
+    nameEn: 'Drop a Database Table',
+    viewId: 'database_admin',
+    descriptionAr: 'حذف جدول نهائياً (يتطلب كتابة اسم العملية للتأكيد) — أخطر صلاحية في النظام',
+  },
+
   // Accounting posting & period locks (محرك قواعد الترحيل)
   {
     key: 'accounting.post_journal',

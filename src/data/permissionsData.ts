@@ -219,6 +219,15 @@ export const SYSTEM_VIEWS: SystemViewDef[] = [
     category: 'admin',
   },
   {
+    id: 'database_admin',
+    nameAr: 'إدارة قاعدة البيانات (جداول وبيانات)',
+    nameEn: 'Database Explorer (tables & rows)',
+    descriptionAr: 'مرآة حقيقية لجداول قاعدة البيانات: عرض/إضافة/تعديل/حذف الصفوف وبنية الجداول والأعمدة',
+    descriptionEn: 'A true mirror of database tables: browse/write rows and manage tables and columns',
+    iconName: 'Database',
+    category: 'admin',
+  },
+  {
     id: 'architecture',
     nameAr: 'معمارية المنظومة الجديدة (Clean Micro-Engine)',
     nameEn: 'New System Architecture (Clean Micro-Engine)',

@@ -130,3 +130,6 @@ export const AccountingMappingView = lazy(() =>
 export const ArchitectureView = lazy(() =>
   import('./ArchitectureView').then((m) => ({ default: m.ArchitectureView }))
 );
+export const DatabaseExplorerView = lazy(() =>
+  import('./DatabaseExplorerView').then((m) => ({ default: m.DatabaseExplorerView }))
+);

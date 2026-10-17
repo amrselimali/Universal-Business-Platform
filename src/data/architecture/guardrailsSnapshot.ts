@@ -12,8 +12,8 @@
 
 import type { GuardrailsFacts } from '../../services/architectureGuardrails';
 
-export const GUARDRAILS_MEASURED_AT = '2026-10-17T06:56:09.752Z';
-export const GUARDRAILS_REVISION = 'b2a416c';
+export const GUARDRAILS_MEASURED_AT = '2026-10-17T07:05:50.033Z';
+export const GUARDRAILS_REVISION = '52b34a6';
 
 export const GUARDRAILS_FACTS: GuardrailsFacts = /* GUARDRAILS_FACTS_BEGIN */
 {
@@ -76,12 +76,12 @@ export const GUARDRAILS_FACTS: GuardrailsFacts = /* GUARDRAILS_FACTS_BEGIN */
     { path: 'src/components/architecture/ArchitectureGuardrails.tsx', lines: 259 },
     { path: 'src/components/architecture/ArchitectureSnippets.tsx', lines: 93 },
     { path: 'src/components/architecture/ArchitectureTopology.tsx', lines: 102 },
-    { path: 'src/components/ViewRenderer.tsx', lines: 168 },
+    { path: 'src/components/ViewRenderer.tsx', lines: 172 },
     { path: 'src/data/architecture/architectureDecisions.ts', lines: 125 },
     { path: 'src/data/architecture/architectureGuardrailsContent.ts', lines: 163 },
     { path: 'src/data/architecture/architectureSnippets.ts', lines: 206 },
     { path: 'src/data/architecture/architectureSpec.ts', lines: 241 },
-    { path: 'src/data/architecture/guardrailsSnapshot.ts', lines: 139 },
+    { path: 'src/data/architecture/guardrailsSnapshot.ts', lines: 142 },
     { path: 'src/services/architectureGuardrails.ts', lines: 293 },
     { path: 'src/views/ArchitectureView.tsx', lines: 111 },
   ],
@@ -96,6 +96,9 @@ export const GUARDRAILS_FACTS: GuardrailsFacts = /* GUARDRAILS_FACTS_BEGIN */
     { actionKey: 'bookings.create_booking', file: 'src/views/BookingsFollowUpView.tsx', line: 2350 },
     { actionKey: 'bookings.manage_staff_schedule', file: 'src/views/BookingsFollowUpView.tsx', line: 3694 },
     { actionKey: 'bookings.manage_staff_schedule', file: 'src/views/BookingsFollowUpView.tsx', line: 3815 },
+    { actionKey: 'database.ddl', file: 'src/views/DatabaseExplorerView.tsx', line: 39 },
+    { actionKey: 'database.drop', file: 'src/views/DatabaseExplorerView.tsx', line: 40 },
+    { actionKey: 'database.write', file: 'src/views/DatabaseExplorerView.tsx', line: 38 },
     { actionKey: 'pos.checkout', file: 'src/views/PosView.tsx', line: 830 },
     { actionKey: 'pos.checkout', file: 'src/views/PosView.tsx', line: 833 },
     { actionKey: 'pos.discount', file: 'src/views/PosView.tsx', line: 672 },
@@ -128,7 +131,7 @@ export const GUARDRAILS_FACTS: GuardrailsFacts = /* GUARDRAILS_FACTS_BEGIN */
     { id: 'emitted_events_pipeline', labelAr: 'معالجة الأحداث المُصدَّرة بلا تكرار', labelEn: 'Idempotent event processing', comparison: 'atLeast', expected: 1, found: 4, severity: 'advisory', evidence: ['erp-nextgen-local/db/migrations-original/0005_core_audit_outbox_infrastructure.sql', 'erp-nextgen-local/db/migrations/0005_core_audit_outbox_infrastructure.sql'] },
   ],
   legacy: {
-    scanned: 183,
+    scanned: 193,
     limit: 300,
     baseline: 58,
     violations: 58,
