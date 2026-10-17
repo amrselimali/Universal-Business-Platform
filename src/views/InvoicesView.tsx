@@ -1,6 +1,7 @@
-import React, { useState, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePlatform } from '../context/PlatformContext';
 import { SalesInvoice, SalesInvoiceItem } from '../types';
+import { loadInvoicePage, loadInvoiceSummary } from '../services/invoiceQueryApi';
 import {
   Receipt,
   Search,
@@ -73,6 +74,12 @@ export const InvoicesView: React.FC = () => {
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
 
+
+
+
+
+
+
   // Edit Form State
   const [editAmount, setEditAmount] = useState<number>(0);
   const [editPaymentMethod, setEditPaymentMethod] = useState<string>('');
@@ -110,6 +117,73 @@ export const InvoicesView: React.FC = () => {
   ]);
 
   const currentBranchId = activeBranch?.id || (branches.length > 0 ? branches[0].id : 'branch-cairo');
+
+  // ── القراءة من السيرفر (مصدر واحد) ────────────────────────────────────
+  const [serverInvoices, setServerInvoices] = useState<SalesInvoice[]>([]);
+  const [serverStats, setServerStats] = useState({ count: 0, net: 0, tax: 0, cancelled: 0 });
+  const [serverLoading, setServerLoading] = useState(false);
+  const [serverHasMore, setServerHasMore] = useState(false);
+  const cursorRef = useRef<{ date: string | null; id: string | null }>({ date: null, id: null });
+
+  const invoiceFilters = useMemo(() => {
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const from =
+      periodFilter === 'today' ? todayStr
+      : periodFilter === 'week' ? new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10)
+      : periodFilter === 'month' ? `${new Date().toISOString().slice(0, 7)}-01`
+      : periodFilter === 'custom' ? (dateFrom || undefined)
+      : undefined;
+    const to = periodFilter === 'today' ? todayStr : periodFilter === 'custom' ? (dateTo || undefined) : undefined;
+    return {
+      search: searchQuery.trim() || undefined,
+      from,
+      to,
+      source: sourceFilter,
+      customerId: selectedCustomerFilter,
+      branchId: currentBranchId,
+    };
+  }, [searchQuery, periodFilter, dateFrom, dateTo, sourceFilter, selectedCustomerFilter, currentBranchId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!tenant?.id) return;
+    setServerLoading(true);
+    cursorRef.current = { date: null, id: null };
+    Promise.all([
+      loadInvoicePage({ tenantId: tenant.id, filters: invoiceFilters, limit: 100 }),
+      loadInvoiceSummary({ tenantId: tenant.id, filters: invoiceFilters }),
+      loadInvoiceSummary({ tenantId: tenant.id, filters: { ...invoiceFilters, status: 'Cancelled' } }),
+    ]).then(([page, all, cancelledSummary]) => {
+      if (cancelled) return;
+      setServerInvoices(page.invoices);
+      cursorRef.current = { date: page.nextAfterDate, id: page.nextAfterId };
+      setServerHasMore(Boolean(page.nextAfterId));
+      setServerStats({
+        count: all.count,
+        net: Math.max(all.netTotal - cancelledSummary.netTotal, 0),
+        tax: Math.max(all.taxTotal - cancelledSummary.taxTotal, 0),
+        cancelled: cancelledSummary.count,
+      });
+      setServerLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [tenant?.id, invoiceFilters]);
+
+  const loadMoreInvoices = useCallback(async () => {
+    if (!tenant?.id || !cursorRef.current.id) return;
+    setServerLoading(true);
+    const page = await loadInvoicePage({
+      tenantId: tenant.id,
+      filters: invoiceFilters,
+      limit: 100,
+      afterDate: cursorRef.current.date,
+      afterId: cursorRef.current.id,
+    });
+    cursorRef.current = { date: page.nextAfterDate, id: page.nextAfterId };
+    setServerHasMore(Boolean(page.nextAfterId));
+    setServerInvoices((prev) => [...prev, ...page.invoices]);
+    setServerLoading(false);
+  }, [tenant?.id, invoiceFilters]);
   const activeBranchObj = branches.find((b) => b.id === currentBranchId) || activeBranch;
 
   // Branch Customers only
@@ -216,65 +290,11 @@ export const InvoicesView: React.FC = () => {
     return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }, [invoices, allReceptionShifts, tenant?.id, currentBranchId, branches]);
 
-  // Filtered invoices by period, customer, source, and search
-  const filteredInvoices = useMemo(() => {
-    const today = new Date().toISOString().split('T')[0];
-
-    return unifiedInvoices.filter((inv) => {
-      // 1. Source filter
-      if (sourceFilter !== 'all' && inv.source !== sourceFilter) return false;
-
-      // 2. Customer filter
-      if (selectedCustomerFilter !== 'all') {
-        const matchesCust =
-          inv.customerId === selectedCustomerFilter ||
-          inv.customerName === selectedCustomerFilter;
-        if (!matchesCust) return false;
-      }
-
-      // 3. Period filter
-      const invDate = inv.createdAt.split('T')[0];
-      if (periodFilter === 'today') {
-        if (invDate !== today) return false;
-      } else if (periodFilter === 'week') {
-        const d = new Date(invDate);
-        const now = new Date();
-        const diffDays = (now.getTime() - d.getTime()) / (1000 * 3600 * 24);
-        if (diffDays > 7 || diffDays < 0) return false;
-      } else if (periodFilter === 'month') {
-        const currentMonth = new Date().toISOString().slice(0, 7);
-        if (!invDate.startsWith(currentMonth)) return false;
-      } else if (periodFilter === 'custom') {
-        if (dateFrom && invDate < dateFrom) return false;
-        if (dateTo && invDate > dateTo) return false;
-      }
-
-      // 4. Search query
-      if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase().trim();
-        const matchInvoiceNo = inv.invoiceNumber.toLowerCase().includes(q);
-        const matchCustomer = inv.customerName.toLowerCase().includes(q);
-        const matchCashier = inv.cashierName?.toLowerCase().includes(q);
-        const matchMethod = inv.paymentMethod.toLowerCase().includes(q);
-        const matchItems = inv.items?.some((it) => it.productNameAr.toLowerCase().includes(q));
-        if (!matchInvoiceNo && !matchCustomer && !matchCashier && !matchMethod && !matchItems) {
-          return false;
-        }
-      }
-
-      return true;
-    });
-  }, [unifiedInvoices, sourceFilter, selectedCustomerFilter, periodFilter, dateFrom, dateTo, searchQuery]);
-
-  // Statistics
-  const totalNetRevenue = filteredInvoices
-    .filter((i) => i.status !== 'Cancelled')
-    .reduce((sum, i) => sum + i.netAmount, 0);
-  const totalTaxAmount = filteredInvoices
-    .filter((i) => i.status !== 'Cancelled')
-    .reduce((sum, i) => sum + (i.taxAmount || 0), 0);
-  const validInvoicesCount = filteredInvoices.filter((i) => i.status !== 'Cancelled').length;
-  const cancelledInvoicesCount = filteredInvoices.filter((i) => i.status === 'Cancelled').length;
+  // Statistics — من ملخص السيرفر (مطابق للفلاتر)
+  const totalNetRevenue = serverStats.net;
+  const totalTaxAmount = serverStats.tax;
+  const validInvoicesCount = Math.max(serverStats.count - serverStats.cancelled, 0);
+  const cancelledInvoicesCount = serverStats.cancelled;
 
   // Handlers for Creating Official Tax Invoice
   const handleAddItemRow = () => {
@@ -975,7 +995,7 @@ export const InvoicesView: React.FC = () => {
 
       {/* Invoices Table */}
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs dark:border-slate-800 dark:bg-slate-900 overflow-hidden">
-        {filteredInvoices.length === 0 ? (
+        {serverStats.count === 0 && !serverLoading ? (
           <div className="text-center py-16 text-slate-400">
             <Receipt className="h-12 w-12 mx-auto mb-2 text-slate-300 dark:text-slate-600 stroke-1" />
             <p className="text-xs font-bold text-slate-700 dark:text-slate-300">
@@ -1005,7 +1025,7 @@ export const InvoicesView: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-medium">
-                {filteredInvoices.map((inv) => {
+                {serverInvoices.map((inv) => {
                   const isCancelled = inv.status === 'Cancelled' || inv.status === 'Refunded';
 
                   // Source badge styling
@@ -1161,6 +1181,18 @@ export const InvoicesView: React.FC = () => {
             </table>
           </div>
         )}
+
+        <div className="mt-3 flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400">
+          <span>{t(`عُرض ${serverInvoices.length} من ${serverStats.count}`, `Showing ${serverInvoices.length} of ${serverStats.count}`)}{serverLoading ? t(' — جارٍ التحميل…', ' — loading…') : ''}</span>
+          <button
+            type="button"
+            onClick={() => void loadMoreInvoices()}
+            disabled={!serverHasMore || serverLoading}
+            className="rounded-xl bg-indigo-600 px-3 py-1.5 font-bold text-white hover:bg-indigo-700 disabled:opacity-40"
+          >
+            {serverHasMore ? t('تحميل المزيد', 'Load more') : t('وصلت للنهاية', 'End reached')}
+          </button>
+        </div>
       </div>
 
       {/* MODAL 1: CREATE OFFICIAL TAX INVOICE */}

@@ -1,6 +1,18 @@
 # CHANGELOG
 # CHANGELOG
 
+## 2026-10-17 — شاشة الفواتير تقرأ من السيرفر (List/Summary) — مسار واحد
+
+- `InvoicesView`: الجدول والإحصاءات والحالة الفارغة تعتمد الآن على
+  `loadInvoicePage` + `loadInvoiceSummary` (مصدر `v_revenue_invoices`).
+  حُذفت الفلترة المحلية `filteredInvoices` بالكامل.
+- الفلاتر تُنفَّذ في SQL: بحث · مدى تاريخ · المصدر · العميل · الفرع.
+- الإحصاءات: إجمالي/صافي/ضريبة صحيحة عبر ملخصين (الكل + الملغاة) بدل حساب محلي.
+- **تحميل المزيد** (Keyset) بدل تحميل كل الفواتير.
+- خط الأساس: +32 سطراً لهذه الشاشة (منطق القراءة من السيرفر) — مسجَّل ولا نمو بعده.
+- **لم يُحذف dataset `erp_invoices` بعد**: ما زال مستخدماً في Dashboard/POS/Bookings/
+  Inventory/PartyStatement، وإزالته الآن تكسر تلك الشاشات. يُزال بعد نقلها.
+
 ## 2026-10-17 — فواتير: فلتر المصدر + حمولة الصف + خدمة قراءة واحدة
 
 - `neon_invoice_source_filter.sql`: فلتر `p_source` في `fn_invoice_list`/`fn_invoice_summary`

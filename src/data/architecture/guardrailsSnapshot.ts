@@ -12,8 +12,8 @@
 
 import type { GuardrailsFacts } from '../../services/architectureGuardrails';
 
-export const GUARDRAILS_MEASURED_AT = '2026-10-17T09:27:15.452Z';
-export const GUARDRAILS_REVISION = 'b2e714e';
+export const GUARDRAILS_MEASURED_AT = '2026-10-17T09:31:38.330Z';
+export const GUARDRAILS_REVISION = 'f9581d7';
 
 export const GUARDRAILS_FACTS: GuardrailsFacts = /* GUARDRAILS_FACTS_BEGIN */
 {
@@ -137,7 +137,7 @@ export const GUARDRAILS_FACTS: GuardrailsFacts = /* GUARDRAILS_FACTS_BEGIN */
     limit: 300,
     baseline: 58,
     violations: 58,
-    newViolations: [],
+    newViolations: ['src/views/InvoicesView.tsx (1811)'],
   },
 }
 /* GUARDRAILS_FACTS_END */;

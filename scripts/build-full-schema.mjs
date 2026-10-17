@@ -38,6 +38,7 @@ const SOURCES = [
   ['scripts/neon_revenue_invoices_view.sql', 'توحيد مصدر الفواتير: View موحّد + دوال محدّثة'],
   ['scripts/neon_invoice_source_filter.sql', 'فواتير: فلتر المصدر في الدوال'],
   ['scripts/neon_invoice_rows_payload.sql', 'فواتير: حمولة الصف الكاملة في القائمة'],
+  ['scripts/neon_invoice_scope_filters.sql', 'فواتير: فلاتر المصدر/العميل/الفرع'],
 ];
 
 const HEADER = `-- ============================================================================
