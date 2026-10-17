@@ -91,13 +91,9 @@ export const NEON_SCHEMA_TABLES: NeonTableSchema[] = [
     { name: 'account_type', type: 'VARCHAR(40)', create: true },
     { name: 'balance', type: 'NUMERIC(15, 2)', create: true },
   ] },
-  { table: 'journal_entries', sourceKey: 'erp_journals', columns: [
-    ...common(),
-    { name: 'entry_number', type: 'VARCHAR(100)', create: true },
-    { name: 'entry_date', type: 'VARCHAR(20)', create: true },
-    { name: 'description', type: 'TEXT', create: true },
-    { name: 'is_posted', type: 'BOOLEAN', create: true },
-  ] },
+  // ملاحظة معمارية: أُخرج `erp_journals` من حِزمة الإقلاع.
+  // دفتر اليومية يُقرأ من قاعدة البيانات (fn_journal_list / fn_journal_summary)،
+  // والترحيل يكتبه ذرّياً في الداتابيز (fn_post_journal).
   { table: 'parties', sourceKey: 'erp_parties_backup', columns: [
     ...common(),
     { name: 'name', type: 'VARCHAR(255)', create: true },

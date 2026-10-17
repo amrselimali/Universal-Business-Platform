@@ -57,7 +57,6 @@ export const NeonHubView: React.FC = () => {
     allStockMovements,
     accounts,
     allAccounts,
-    journalEntries,
     allJournals,
     invoices,
     allInvoices,
@@ -150,8 +149,8 @@ export const NeonHubView: React.FC = () => {
         stockLevels: fromNeon('erp_stock_levels', stockLevels),
         stockMovements: fromNeon('erp_stock_movements', allStockMovements || stockMovements),
         accounts: fromNeon('erp_accounts', allAccounts || accounts),
-        journalEntries: fromNeon('erp_journals', allJournals || journalEntries),
-        invoices: fromNeon('erp_invoices', allInvoices || invoices),
+        journalEntries: fromNeon('erp_journals', allJournals || []),  // أُخرج من الإقلاع: لا يُحمَّل تاريخ الدفتر
+        invoices: fromNeon('erp_invoices', allInvoices || []),  // أُخرج من الإقلاع
         cashReceipts: fromNeon('erp_cash_receipts', allCashReceipts || cashReceipts),
         cashPayments: fromNeon('erp_cash_payments', allCashPayments || cashPayments),
         goodsReceipts: fromNeon('erp_goods_receipts', allGoodsReceipts || goodsReceipts),
@@ -233,7 +232,7 @@ export const NeonHubView: React.FC = () => {
     { name: 'products', descAr: 'دليل الأصناف والخدمات الطبية والتسعير', count: products.length },
     { name: 'stock_levels', descAr: 'أرصدة الأصناف بكل مخزن بدقة', count: products.length * 2 },
     { name: 'accounts', descAr: 'شجرة الحسابات العامة (Chart of Accounts)', count: accounts.length },
-    { name: 'journal_entries', descAr: 'دفتر اليومية العامة والقيود المتوازنة', count: 0 },
+    { name: 'journal_entries', descAr: 'دفتر اليومية العامة والقيود المتوازنة', count: 0 },  // من DB (fn_journal_summary)
     { name: 'sales_invoices', descAr: 'فواتير المبيعات ونقاط البيع السريعة', count: 0 },
     { name: 'parties', descAr: 'العملاء والمرضى والموردون (الجدول الموحّد)', count: parties.length },
     { name: 'appointments', descAr: 'مواعيد الأطباء وحجوزات الكشوفات', count: 2 },

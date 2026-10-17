@@ -15,7 +15,6 @@
     "erp_goods_issues",
     "erp_goods_receipts",
     "erp_inventory_audits",
-    "erp_journals",
     "erp_notifications_history",
     "erp_parties_backup",
     "erp_patient_followups",

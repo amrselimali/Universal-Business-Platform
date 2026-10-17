@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { usePlatform } from '../context/PlatformContext';
-import { Account, AccountType } from '../types';
+import { loadJournalPage } from '../services/journalQueryApi';
+import { Account, AccountType, JournalEntry } from '../types';
 import { resolveJournalLineAccount } from '../services/accountingEngine';
 import { autoTranslateArabic } from '../utils/translator';
 import { exportRowsToExcel } from '../utils/excelExport';
@@ -34,7 +35,6 @@ export const AccountingView: React.FC = () => {
     t,
     formatMoney,
     accounts,
-    journalEntries,
     allCashReceipts,
     allCashPayments,
     allInvoices,
@@ -59,6 +59,17 @@ export const AccountingView: React.FC = () => {
     branches,
     activeBranch,
   } = usePlatform();
+  // القيود من قاعدة البيانات (بدل تحميل كل الدفتر في الإقلاع)
+  const [journalEntries, setJournalEntries] = useState<JournalEntry[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    if (!tenant?.id) return;
+    loadJournalPage({ tenantId: tenant.id, filters: {}, limit: 300 }).then((page) => {
+      if (!cancelled) setJournalEntries(page.entries);
+    });
+    return () => { cancelled = true; };
+  }, [tenant?.id]);
+
 
   const [activeTab, setActiveTab] = useState<'coa' | 'general_ledger' | 'journal' | 'trial_balance' | 'statements'>('coa');
   const [selectedType, setSelectedType] = useState<string>('ALL');
