@@ -224,12 +224,7 @@ export const NEON_SCHEMA_TABLES: NeonTableSchema[] = [
     { name: 'name', type: 'VARCHAR(255)', create: true },
     { name: 'serial_number', type: 'VARCHAR(150)' },
   ] },
-  { table: 'period_locks', sourceKey: 'erp_period_locks', columns: [
-    { name: 'id', type: 'VARCHAR(200)', create: true },
-    { name: 'tenant_id', type: 'VARCHAR(100)', create: true },
-    { name: 'lock_date', type: 'VARCHAR(20)', create: true },
-    { name: 'status', type: 'VARCHAR(40)' },
-  ] },
+  // أُخرج `erp_period_locks` من الإقلاع: يُقرأ من accounting_period_locks في الداتابيز.
   { table: 'audit_records', sourceKey: 'erp_audit_records', columns: [
     { name: 'id', type: 'VARCHAR(200)', create: true },
     { name: 'tenant_id', type: 'VARCHAR(100)', create: true },
@@ -237,13 +232,7 @@ export const NEON_SCHEMA_TABLES: NeonTableSchema[] = [
     { name: 'action_type', type: 'VARCHAR(40)' },
     { name: 'performed_at', type: 'VARCHAR(40)' },
   ] },
-  { table: 'activity_logs', sourceKey: 'erp_activity_logs', columns: [
-    { name: 'id', type: 'VARCHAR(200)', create: true },
-    { name: 'tenant_id', type: 'VARCHAR(100)', create: true },
-    { name: 'screen_name_ar', type: 'VARCHAR(255)' },
-    { name: 'action_name_ar', type: 'VARCHAR(255)' },
-    { name: 'logged_at', type: 'VARCHAR(40)' },
-  ] },
+  // أُخرج `erp_activity_logs` من الإقلاع: يُقرأ من الداتابيز بالصفحات (loadActivityPage).
   { table: 'notifications_history', sourceKey: 'erp_notifications_history', columns: [
     { name: 'id', type: 'VARCHAR(200)', create: true },
     { name: 'tenant_id', type: 'VARCHAR(100)', create: true },

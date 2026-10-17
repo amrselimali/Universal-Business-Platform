@@ -2,7 +2,6 @@
   "datasets": [
     "clinic_laser_devices",
     "erp_accounts",
-    "erp_activity_logs",
     "erp_appointments",
     "erp_attendance_records",
     "erp_audit_records",
@@ -20,7 +19,6 @@
     "erp_patient_followups",
     "erp_payment_methods",
     "erp_payroll_runs",
-    "erp_period_locks",
     "erp_pos_shifts",
     "erp_products",
     "erp_reception_shifts",
