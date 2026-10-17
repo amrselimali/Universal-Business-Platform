@@ -12,8 +12,8 @@
 
 import type { GuardrailsFacts } from '../../services/architectureGuardrails';
 
-export const GUARDRAILS_MEASURED_AT = '2026-10-17T10:20:49.457Z';
-export const GUARDRAILS_REVISION = 'c421d24';
+export const GUARDRAILS_MEASURED_AT = '2026-10-17T10:22:12.317Z';
+export const GUARDRAILS_REVISION = 'd3f9151';
 
 export const GUARDRAILS_FACTS: GuardrailsFacts = /* GUARDRAILS_FACTS_BEGIN */
 {
@@ -137,7 +137,7 @@ export const GUARDRAILS_FACTS: GuardrailsFacts = /* GUARDRAILS_FACTS_BEGIN */
     limit: 300,
     baseline: 58,
     violations: 58,
-    newViolations: ['src/components/PartyStatementModal.tsx (2099)', 'src/views/AccountingView.tsx (3331)'],
+    newViolations: [],
   },
 }
 /* GUARDRAILS_FACTS_END */;
