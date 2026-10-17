@@ -1,7 +1,7 @@
 {
   "limit": 300,
   "files": {
-    "src/context/PlatformContext.tsx": 12228,
+    "src/context/PlatformContext.tsx": 12240,
     "src/views/BookingsFollowUpView.tsx": 6061,
     "src/views/AccountingView.tsx": 3320,
     "src/views/ReceptionOpsView.tsx": 3054,
@@ -13,7 +13,7 @@
     "src/views/PartiesView.tsx": 2101,
     "src/components/PartyStatementModal.tsx": 2087,
     "src/views/CollectionReceiptsView.tsx": 1951,
-    "src/views/InvoicesView.tsx": 1749,
+    "src/views/InvoicesView.tsx": 1751,
     "src/services/neonService.ts": 1683,
     "src/views/UsersRolesView.tsx": 1605,
     "src/views/InventoryView.tsx": 1509,

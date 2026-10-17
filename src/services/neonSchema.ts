@@ -106,13 +106,9 @@ export const NEON_SCHEMA_TABLES: NeonTableSchema[] = [
     { name: 'customer_code', type: 'VARCHAR(50)' },
     { name: 'balance', type: 'NUMERIC(15, 2)', create: true },
   ] },
-  { table: 'sales_invoices', sourceKey: 'erp_invoices', columns: [
-    ...common(),
-    { name: 'invoice_number', type: 'VARCHAR(100)', create: true },
-    { name: 'customer_id', type: 'VARCHAR(100)' },
-    { name: 'net_amount', type: 'NUMERIC(15, 2)', create: true },
-    { name: 'invoice_date', type: 'VARCHAR(20)' },
-  ] },
+  // ملاحظة معمارية: أُخرج `erp_invoices` من حِزمة الإقلاع.
+  // كل مستهلكي الفواتير يقرأون من دوال قاعدة البيانات (fn_invoice_list / summary / detail)،
+  // والكتابة تتم عبر commands/API مع تمرير لقطة الفاتورة من الشاشة.
   { table: 'appointments', sourceKey: 'erp_appointments', columns: [
     ...common(),
     { name: 'patient_name', type: 'VARCHAR(255)', create: true },
