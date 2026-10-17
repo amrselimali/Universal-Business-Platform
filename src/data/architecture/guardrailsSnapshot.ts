@@ -12,8 +12,8 @@
 
 import type { GuardrailsFacts } from '../../services/architectureGuardrails';
 
-export const GUARDRAILS_MEASURED_AT = '2026-10-17T08:15:06.369Z';
-export const GUARDRAILS_REVISION = '040b570';
+export const GUARDRAILS_MEASURED_AT = '2026-10-17T08:27:06.419Z';
+export const GUARDRAILS_REVISION = 'e67fb37';
 
 export const GUARDRAILS_FACTS: GuardrailsFacts = /* GUARDRAILS_FACTS_BEGIN */
 {
@@ -74,6 +74,7 @@ export const GUARDRAILS_FACTS: GuardrailsFacts = /* GUARDRAILS_FACTS_BEGIN */
     { path: 'src/components/architecture/ArchitectureCompanionGates.tsx', lines: 108 },
     { path: 'src/components/architecture/ArchitectureDecisions.tsx', lines: 78 },
     { path: 'src/components/architecture/ArchitectureGuardrails.tsx', lines: 259 },
+    { path: 'src/components/architecture/ArchitectureScreenProfile.tsx', lines: 216 },
     { path: 'src/components/architecture/ArchitectureSnippets.tsx', lines: 93 },
     { path: 'src/components/architecture/ArchitectureTopology.tsx', lines: 102 },
     { path: 'src/components/ViewRenderer.tsx', lines: 172 },
@@ -81,17 +82,18 @@ export const GUARDRAILS_FACTS: GuardrailsFacts = /* GUARDRAILS_FACTS_BEGIN */
     { path: 'src/data/architecture/architectureGuardrailsContent.ts', lines: 163 },
     { path: 'src/data/architecture/architectureSnippets.ts', lines: 206 },
     { path: 'src/data/architecture/architectureSpec.ts', lines: 241 },
-    { path: 'src/data/architecture/guardrailsSnapshot.ts', lines: 142 },
+    { path: 'src/data/architecture/guardrailsSnapshot.ts', lines: 144 },
+    { path: 'src/data/architecture/screenMetrics.ts', lines: 66 },
     { path: 'src/services/architectureGuardrails.ts', lines: 293 },
-    { path: 'src/views/ArchitectureView.tsx', lines: 111 },
+    { path: 'src/views/ArchitectureView.tsx', lines: 114 },
   ],
   actionUsages: [
     { actionKey: 'accounting.edit_journal', file: 'src/views/AccountingMappingView.tsx', line: 83 },
     { actionKey: 'accounting.lock_period', file: 'src/views/AccountingMappingView.tsx', line: 85 },
     { actionKey: 'accounting.open_period', file: 'src/views/AccountingMappingView.tsx', line: 86 },
     { actionKey: 'accounting.post_journal', file: 'src/views/AccountingMappingView.tsx', line: 82 },
-    { actionKey: 'architecture.copy_snippet', file: 'src/views/ArchitectureView.tsx', line: 34 },
-    { actionKey: 'architecture.run_guardrails', file: 'src/views/ArchitectureView.tsx', line: 33 },
+    { actionKey: 'architecture.copy_snippet', file: 'src/views/ArchitectureView.tsx', line: 35 },
+    { actionKey: 'architecture.run_guardrails', file: 'src/views/ArchitectureView.tsx', line: 34 },
     { actionKey: 'bookings.add_followup', file: 'src/views/BookingsFollowUpView.tsx', line: 2340 },
     { actionKey: 'bookings.create_booking', file: 'src/views/BookingsFollowUpView.tsx', line: 2350 },
     { actionKey: 'bookings.manage_staff_schedule', file: 'src/views/BookingsFollowUpView.tsx', line: 3694 },
@@ -131,7 +133,7 @@ export const GUARDRAILS_FACTS: GuardrailsFacts = /* GUARDRAILS_FACTS_BEGIN */
     { id: 'emitted_events_pipeline', labelAr: 'معالجة الأحداث المُصدَّرة بلا تكرار', labelEn: 'Idempotent event processing', comparison: 'atLeast', expected: 1, found: 4, severity: 'advisory', evidence: ['erp-nextgen-local/db/migrations-original/0005_core_audit_outbox_infrastructure.sql', 'erp-nextgen-local/db/migrations/0005_core_audit_outbox_infrastructure.sql'] },
   ],
   legacy: {
-    scanned: 199,
+    scanned: 201,
     limit: 300,
     baseline: 58,
     violations: 58,

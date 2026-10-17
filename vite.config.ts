@@ -26,6 +26,8 @@ export default defineConfig(() => {
       // أي شاشة. التقسيم أدناه يفصل المكتبات الكبيرة عن كود التطبيق حتى
       // يستطيع المتصفح تخزينها مؤقتاً وتحميلها بالتوازي.
       chunkSizeWarningLimit: 900,
+      // manifest: لقياس حجم حزمة كل شاشة بدقة (screen-budget.json)
+      manifest: true,
       rollupOptions: {
         output: {
           manualChunks(id) {

@@ -93,3 +93,7 @@ jobs:
       # يفشل أيضاً إذا كانت لقطة القياس `guardrailsSnapshot.ts` قديمة.
       - name: Architecture guardrails (engine + actions + invariants)
         run: node scripts/architecture-guardrails.mjs --check
+
+      # مقياس موارد الشاشات (أسطر/خطافات/مكتبات ثقيلة) — يفشل إذا كان الملف المولَّد قديماً
+      - name: Screen resource metrics (static scan)
+        run: node scripts/screen-metrics.mjs --check
