@@ -49,6 +49,7 @@ const MIGRATIONS = [
   { file: 'scripts/neon_journal_edit.sql', title: 'تعديل القيود الموثّق + مزامنة المصدر' },
   { file: 'scripts/neon_db_admin_audit.sql', title: 'تدقيق إدارة قاعدة البيانات من الواجهة' },
   { file: 'scripts/neon_parties_performance_indexes.sql', title: 'فهارس أداء العملاء (trgm + أكواد + حالة)' },
+  { file: 'scripts/neon_invoice_slice.sql', title: 'شريحة الفواتير: أعمدة/سطور/فهارس/دوال' },
 ];
 
 /** استعلامات التحقق — تُشغَّل بعد التطبيق. */

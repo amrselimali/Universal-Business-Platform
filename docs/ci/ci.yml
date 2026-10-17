@@ -97,3 +97,7 @@ jobs:
       # مقياس موارد الشاشات (أسطر/خطافات/مكتبات ثقيلة) — يفشل إذا كان الملف المولَّد قديماً
       - name: Screen resource metrics (static scan)
         run: node scripts/screen-metrics.mjs --check
+
+      # تجميد PlatformContext: ممنوع إضافة dataset جديد إلى حِزمة الإقلاع
+      - name: Context dataset freeze (no new datasets)
+        run: node scripts/check-context-freeze.mjs
