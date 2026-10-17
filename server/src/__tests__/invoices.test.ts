@@ -158,3 +158,44 @@ describe('الفواتير: الكتابة', () => {
     await app.close();
   });
 });
+
+describe('الفواتير: الإصدار (If-Match)', () => {
+  it('يمرّر الإصدار المتوقع إلى الدالة عند إرساله', async () => {
+    const calls: { params?: unknown[] }[] = [];
+    const db: AppDeps['db'] = {
+      one: async (_tenantId, text, params) => {
+        if (text.includes('fn_invoice_update')) calls.push({ params });
+        return [{ result: { invoiceId: 'inv-1', version: 4 } }] as never;
+      },
+      withTenant: async () => [],
+      rawQuery: async () => [] as never,
+    };
+    const app = await buildApp({ db, jwtSecret: JWT_SECRET, logger: false, disableRateLimit: true });
+    await app.ready();
+
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/sales/invoices/inv-1',
+      headers: auth(makeToken()),
+      payload: { netAmount: 75, reason: 'تصحيح المبلغ', version: 3 },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ version: 4 });
+    // المعامل السابع هو الإصدار المتوقع
+    expect(calls[0]?.params?.[6]).toBe(3);
+    await app.close();
+  });
+
+  it('يرفض إصداراً غير رقمي (400)', async () => {
+    const { app } = await buildTestApp({});
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/sales/invoices/inv-1',
+      headers: auth(makeToken()),
+      payload: { netAmount: 75, reason: 'تصحيح المبلغ', version: 'abc' },
+    });
+    expect(response.statusCode).toBe(400);
+    await app.close();
+  });
+});
