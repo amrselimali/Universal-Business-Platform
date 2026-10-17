@@ -41,6 +41,7 @@ const SOURCES = [
   ['scripts/neon_invoice_scope_filters.sql', 'فواتير: فلاتر المصدر/العميل/الفرع'],
   ['scripts/neon_invoice_write.sql', 'فواتير: دوال التعديل والإلغاء'],
   ['scripts/neon_journal_read.sql', 'القيود: دوال القراءة (قائمة/ملخص)'],
+  ['scripts/neon_materialize_shift_revenue.sql', 'ترسيب إيرادات الورديات كفواتير + FK/version/trigram'],
 ];
 
 const HEADER = `-- ============================================================================

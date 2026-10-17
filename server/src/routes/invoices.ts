@@ -41,6 +41,8 @@ const updateBody = z.object({
   netAmount: z.number(),
   paymentMethod: z.string().max(120).optional(),
   reason: z.string().min(3).max(500),
+  /** الإصدار المتوقع (If-Match) — عند تمريره يُرفض التعديل إن عُدّلت الفاتورة. */
+  version: z.number().int().positive().optional(),
 });
 
 const cancelBody = z.object({ reason: z.string().min(3).max(500) });
@@ -136,9 +138,9 @@ export async function registerInvoiceRoutes(app: FastifyInstance, options: Invoi
     try {
       const rows = await db.one<any[]>(
         tenantId,
-        `SELECT fn_invoice_update($1,$2,$3::numeric,$4,$5,$6) AS result`,
+        `SELECT fn_invoice_update($1,$2,$3::numeric,$4,$5,$6,$7) AS result`,
         [tenantId, id, parsed.data.netAmount, parsed.data.paymentMethod ?? null,
-         parsed.data.reason, String(request.auth?.sub || 'api')]
+         parsed.data.reason, String(request.auth?.sub || 'api'), parsed.data.version ?? null]
       );
       return (rows?.[0]?.result as Record<string, unknown>) ?? { invoiceId: id };
     } catch (error: any) {

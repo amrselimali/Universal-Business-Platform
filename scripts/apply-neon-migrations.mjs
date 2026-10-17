@@ -56,6 +56,7 @@ const MIGRATIONS = [
   { file: 'scripts/neon_invoice_scope_filters.sql', title: 'فواتير: فلاتر المصدر/العميل/الفرع' },
   { file: 'scripts/neon_invoice_write.sql', title: 'فواتير: دوال التعديل والإلغاء' },
   { file: 'scripts/neon_journal_read.sql', title: 'القيود: دوال القراءة (قائمة/ملخص)' },
+  { file: 'scripts/neon_materialize_shift_revenue.sql', title: 'ترسيب إيرادات الورديات كفواتير + FK/version/trigram' },
 ];
 
 /** استعلامات التحقق — تُشغَّل بعد التطبيق. */

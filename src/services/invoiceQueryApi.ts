@@ -154,10 +154,20 @@ export async function updateInvoiceRow(params: {
   paymentMethod?: string;
   reason: string;
   actor?: string;
+  /** الإصدار المتوقع (If-Match) لرفض الكتابة فوق تعديل آخر. */
+  version?: number;
 }): Promise<{ ok: boolean; version?: number; error?: string }> {
   const result = await apiRequest<{ version?: number }>(
     `/sales/invoices/${encodeURIComponent(params.invoiceId)}`,
-    { method: 'PUT', body: { netAmount: params.netAmount, paymentMethod: params.paymentMethod, reason: params.reason } }
+    {
+      method: 'PUT',
+      body: {
+        netAmount: params.netAmount,
+        paymentMethod: params.paymentMethod,
+        reason: params.reason,
+        ...(params.version ? { version: params.version } : {}),
+      },
+    }
   );
   if (!result.ok) return { ok: false, error: result.error };
   return { ok: true, version: Number(result.data?.version) || undefined };
