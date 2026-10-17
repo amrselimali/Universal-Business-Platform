@@ -472,7 +472,7 @@ interface PlatformContextType {
   invoices: SalesInvoice[];
   allInvoices: SalesInvoice[];
   processCheckout: (payload: CheckoutPayload) => { success: boolean; invoice?: SalesInvoice; error?: string };
-  refundInvoice: (invoiceId: string, reason: string, restockItems?: boolean) => { success: boolean; error?: string };
+  refundInvoice: (invoiceId: string, reason: string, restockItems?: boolean, invoiceSnapshot?: SalesInvoice) => { success: boolean; error?: string };
   createOfficialTaxInvoice: (payload: {
     customerId: string;
     customerName: string;
@@ -497,10 +497,12 @@ interface PlatformContextType {
     reason: string;
     newPaymentMethod?: string;
     newItems?: SalesInvoiceItem[];
+    invoiceSnapshot?: SalesInvoice;
   }) => { success: boolean; error?: string };
   cancelSalesInvoice: (params: {
     invoiceId: string;
     reason: string;
+    invoiceSnapshot?: SalesInvoice;
   }) => { success: boolean; error?: string };
   importSalesInvoices: (importedList: SalesInvoice[]) => void;
   closeShift: (actualCash: number, notes?: string, shiftIdParam?: string) => void;
@@ -6841,8 +6843,14 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   // Refund & Void Invoice - Exclusively reflected into reception shift with reversed signs
-  const refundInvoice = (invoiceId: string, reason: string, _restockItems: boolean = true): { success: boolean; error?: string } => {
-    const inv = allInvoices.find((i) => i.id === invoiceId);
+  const refundInvoice = (
+    invoiceId: string,
+    reason: string,
+    _restockItems: boolean = true,
+    /** الفاتورة كاملّة من الشاشة (بعد إخراج erp_invoices من حِزمة الإقلاع). */
+    invoiceSnapshot?: SalesInvoice
+  ): { success: boolean; error?: string } => {
+    const inv = invoiceSnapshot ?? allInvoices.find((i) => i.id === invoiceId);
     if (!inv) return { success: false, error: 'الفاتورة غير موجودة' };
     if (inv.status === 'Refunded' || inv.status === 'Cancelled') {
       return { success: false, error: 'تم ارتجاع أو إلغاء هذه الفاتورة مسبقاً!' };
@@ -7167,6 +7175,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     newNetAmount: number;
     reason: string;
     newPaymentMethod?: string;
+    /** لقطة الفاتورة من الشاشة بدل البحث في المصفوفة المحلية. */
+    invoiceSnapshot?: SalesInvoice;
     newItems?: SalesInvoiceItem[];
   }): { success: boolean; error?: string } => {
     const targetBranchId = activeBranch?.id;
@@ -7280,7 +7290,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
 
     // Standard invoice in allInvoices
-    const inv = allInvoices.find((i) => i.id === params.invoiceId);
+    const inv = params.invoiceSnapshot ?? allInvoices.find((i) => i.id === params.invoiceId);
     if (!inv) {
       return { success: false, error: 'الفاتورة المطلوبة غير موجودة!' };
     }
@@ -7392,6 +7402,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const cancelSalesInvoice = (params: {
     invoiceId: string;
     reason: string;
+    /** لقطة الفاتورة من الشاشة بدل البحث في المصفوفة المحلية. */
+    invoiceSnapshot?: SalesInvoice;
   }): { success: boolean; error?: string } => {
     const targetBranchId = activeBranch?.id;
     const currentOpenShift = allReceptionShifts.find(
@@ -7499,7 +7511,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
 
     // Standard invoice in allInvoices
-    const inv = allInvoices.find((i) => i.id === params.invoiceId);
+    const inv = params.invoiceSnapshot ?? allInvoices.find((i) => i.id === params.invoiceId);
     if (!inv) {
       return { success: false, error: 'الفاتورة المطلوبة غير موجودة!' };
     }

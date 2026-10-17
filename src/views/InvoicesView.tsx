@@ -341,6 +341,7 @@ export const InvoicesView: React.FC = () => {
 
     const res = editSalesInvoice({
       invoiceId: editingInvoice.id,
+      invoiceSnapshot: editingInvoice,
       newNetAmount: Number(editAmount),
       reason: editReason.trim(),
       newPaymentMethod: editPaymentMethod,
@@ -383,6 +384,7 @@ export const InvoicesView: React.FC = () => {
 
     const res = cancelSalesInvoice({
       invoiceId: cancellingInvoice.id,
+      invoiceSnapshot: cancellingInvoice,
       reason: cancelReason.trim(),
     });
 

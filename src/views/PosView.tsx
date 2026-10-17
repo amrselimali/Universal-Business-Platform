@@ -358,7 +358,7 @@ ${itemsText}
       alert(t('يرجى كتابة سبب الإلغاء/الارتجاع', 'Please enter refund reason'));
       return;
     }
-    const res = refundInvoice(invoice.id, refundReason, restockOnRefund);
+    const res = refundInvoice(invoice.id, refundReason, restockOnRefund, invoice);
     if (res.success) {
       alert(t('تم ارتجاع وإلغاء الفاتورة بنجاح!', 'Invoice refunded successfully!'));
       setRefundModalInvoice(null);
