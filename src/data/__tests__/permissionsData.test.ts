@@ -120,7 +120,7 @@ describe('اتساق الموديولات', () => {
      */
     const VIEWS_WITHOUT_ACTIONS = [
       // شاشات عرض/تقارير — لا تحتاج أفعالاً
-      'dashboard', 'audit_trail', 'activity_logs', 'system_manual', 'neon',
+      'dashboard', 'audit_trail', 'activity_logs', 'system_manual', 'neon', 'invoices_stream',
       // 🔴 تحتاج تسجيل أفعال (فجوة)
       'invoices', 'suppliers', 'attendance', 'modules', 'accounting_mapping', 'metadata_studio',
     ];

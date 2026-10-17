@@ -56,6 +56,7 @@ export const SCREEN_METRICS: ScreenMetric[] = [
   { viewId: 'ModulesConfigView', file: 'src/views/ModulesConfigView.tsx', lines: 261, useState: 0, useEffect: 0, heavyLibs: [], overLimit: false },
   { viewId: 'DynamicScreenView', file: 'src/views/DynamicScreenView.tsx', lines: 226, useState: 2, useEffect: 0, heavyLibs: [], overLimit: false },
   { viewId: 'FiscalDocumentsView', file: 'src/views/FiscalDocumentsView.tsx', lines: 203, useState: 2, useEffect: 0, heavyLibs: [], overLimit: false },
+  { viewId: 'InvoicesStreamView', file: 'src/views/InvoicesStreamView.tsx', lines: 171, useState: 5, useEffect: 1, heavyLibs: [], overLimit: false },
   { viewId: 'ArchitectureView', file: 'src/views/ArchitectureView.tsx', lines: 114, useState: 1, useEffect: 0, heavyLibs: [], overLimit: false },
   { viewId: 'SpecializedTaxInvoicesView', file: 'src/views/SpecializedTaxInvoicesView.tsx', lines: 73, useState: 1, useEffect: 0, heavyLibs: [], overLimit: false },
   { viewId: 'CashPaymentsView', file: 'src/views/CashPaymentsView.tsx', lines: 66, useState: 1, useEffect: 0, heavyLibs: [], overLimit: false },
