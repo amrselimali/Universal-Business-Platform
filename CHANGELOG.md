@@ -1,5 +1,30 @@
 # CHANGELOG
 # CHANGELOG
+## 2026-10-19 — مشروع منفصل جديد `platform-v2` (.NET 10 + PostgreSQL)
+
+### ما نُفِّذ
+- **مشروع مستقل** داخل `platform-v2/`: `Ubp.Core` · `Ubp.Infrastructure` · `Ubp.Application` ·
+  `Ubp.Web` (Blazor Server + MudBlazor 9) + `Ubp.Tests` (xUnit).
+- **قاعدة البيانات:** 10 سكريبتات DbUp (21 جدولاً) — إعدادات صف واحد، فروع/مخازن/ربط، عملات
+  بعملة أساسية واحدة، حقول مخصصة jsonb، مستخدمون/جلسات/Refresh Tokens، أدوار وصلاحيات فردية،
+  Audit غير قابل للتعديل، وجداول QA. دوال تطبيع عربي + Triggers نسخ/حماية/تناسق مخازن.
+- **الأمان:** Cookie + JWT + Refresh Hash، قفل حساب، Default-Deny، عزل فروع على السيرفر،
+  Antiforgery، Serilog + Trace ID، وصفحة خطأ عامة.
+- **الشاشات:** Login · Dashboard · Settings (General/Branches/Warehouses/Currencies/Custom Fields) ·
+  Users (فروع/مخازن/أدوار/صلاحيات/فك قفل/إعادة تعيين) · Roles · Audit · QA · Database Admin.
+- **الأداء:** 25 صفاً كحد أقصى في طبقة البيانات، Keyset لسجل الأنشطة، فهارس GIN/trigram،
+  وكاش قصير للسيرفر.
+- **التشغيل:** Dockerfile + docker-compose + CI + توثيق عربي + `.env.example`.
+
+### التحقق
+`dotnet build` ناجح · **24/25 اختباراً** · اختبار واجهة حقيقي (Chromium) لسطح المكتب والموبايل ·
+API login/me/refresh · QA suite 9/9 على قاعدة منفصلة.
+
+### المتبقي
+`tenant_id` + RLS، شاشات ERP التشغيلية، محرك الترحيل المحاسبي، Playwright/CI gates،
+تقسيم audit_log، MFA، وRate limiting على الـ Proxy.
+
+
 
 ## 2026-10-17 — نقل مسار records والقراءات المُرقَّمة إلى الـ API
 
