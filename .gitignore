@@ -12,3 +12,9 @@ test-results/
 playwright-report/
 blob-report/
 playwright/.cache/
+
+# Local sandbox tooling (not part of the app)
+.dotnet/
+.mamba/
+.pgdata/
+.tools/
