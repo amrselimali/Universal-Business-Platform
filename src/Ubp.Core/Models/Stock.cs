@@ -154,6 +154,8 @@ public sealed class StockMovement
     public Guid DocumentId { get; set; }
     public string? DocNo { get; set; }
     public string? DocType { get; set; }
+    /// <summary>DRAFT لسطور تحويل لم تُرحَّل بعد (تظهر في كارت الصنف فقط) — وإلا POSTED.</summary>
+    public string Status { get; set; } = StockStatuses.Posted;
     public Guid ItemId { get; set; }
     public string? ItemCode { get; set; }
     public string? ItemName { get; set; }

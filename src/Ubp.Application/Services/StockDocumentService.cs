@@ -51,6 +51,28 @@ public sealed partial class StockDocumentService
     {
         await _permissions.RequireAsync(actor, ScreenCodes.StockDocuments,
             id.HasValue ? ActionCodes.Edit : ActionCodes.Add, ct: ct);
+        return await SaveCoreAsync(actor, id, version, input, ct);
+    }
+
+    /// <summary>
+    /// مسودة تحويل صنف من فرع إلى فرع آخر من شاشة المصروفات التشغيلية: يكفي فيها
+    /// امتلاك صلاحية الإضافة على شاشة المصروفات، وتُسجَّل كمسودة مخزون تظهر في
+    /// كارت الصنف بالفرعين قبل الترحيل. مكان الإنشاء والاستلام نفسه في شاشة المخزون.
+    /// </summary>
+    public async Task<StockDocumentDetail> CreateBranchTransferDraftAsync(ActorContext actor,
+        StockDocumentInput input, CancellationToken ct = default)
+    {
+        await _permissions.RequireAsync(actor, ScreenCodes.OperatingExpenses,
+            ActionCodes.Create, ct: ct);
+        input.DocType = StockDocumentTypes.Transfer;
+        if (input.ToBranchId is null || input.ToBranchId == input.BranchId)
+            throw new ValidationAppException("validation.transfer_same_branch");
+        return await SaveCoreAsync(actor, null, 0, input, ct);
+    }
+
+    private async Task<StockDocumentDetail> SaveCoreAsync(ActorContext actor, Guid? id, int version,
+        StockDocumentInput input, CancellationToken ct)
+    {
         await ValidateAsync(actor, input, ct);
 
         try
@@ -71,7 +93,7 @@ public sealed partial class StockDocumentService
                 id.HasValue ? "UPDATE" : "INSERT", null, new
                 {
                     document.DocType, document.DocDate, document.BranchId, document.WarehouseId,
-                    document.ToWarehouseId, Lines = input.Lines.Count
+                    document.ToBranchId, document.ToWarehouseId, Lines = input.Lines.Count
                 }, ct);
             return await LoadAsync(actor, document.Id, ct);
         }
