@@ -44,22 +44,22 @@ else
                                   Variant="Variant.Outlined" Margin="Margin.Dense" Class="ubp-search" />
                 </div>
 
+                <div class="pos-cats">
+                    <button class="pos-cat @(_categoryFilter is null ? "active" : "")"
+                            @onclick="@(() => SelectCategory(null))">@T.T("common.all")</button>
+                    @foreach (var cat in Categories)
+                    {
+                        <button class="pos-cat @(_categoryFilter == cat.Id ? "active" : "")"
+                                @onclick="@(() => SelectCategory(cat.Id))">@cat.NameAr</button>
+                    }
+                </div>
+
                 @if (_products.Count == 0)
                 {
                     <MudAlert Severity="Severity.Info" Dense="true">@T.T("pos.no_products")</MudAlert>
                 }
                 else
                 {
-                    <div class="pos-cats">
-                        <button class="pos-cat @(_categoryFilter is null ? "active" : "")"
-                                @onclick="@(() => SelectCategory(null))">@T.T("common.all")</button>
-                        @foreach (var cat in Categories)
-                        {
-                            <button class="pos-cat @(_categoryFilter == cat.Key ? "active" : "")"
-                                    @onclick="@(() => SelectCategory(cat.Key))">@cat.Value</button>
-                        }
-                    </div>
-
                     <div class="pos-grid">
                         @foreach (var product in VisibleProducts)
                         {

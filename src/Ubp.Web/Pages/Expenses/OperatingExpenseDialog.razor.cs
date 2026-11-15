@@ -102,7 +102,7 @@ public partial class OperatingExpenseDialog : ComponentBase
         LoadAsync(search, (actor, text) => Lookup.PartnersAsync(actor, PartnerKind.Supplier, text, ct));
 
     private Task<IEnumerable<ItemOption>> SearchItems(string? search, CancellationToken ct) =>
-        LoadAsync(search, (actor, text) => Lookup.ItemsAsync(actor, text, 50, false, ct));
+        LoadAsync(search, (actor, text) => Lookup.ItemsAsync(actor, text, 50, false, ct: ct));
 
     private async Task<IEnumerable<T>> LoadAsync<T>(string? search,
         Func<ActorContext, string?, Task<IReadOnlyList<T>>> load)
