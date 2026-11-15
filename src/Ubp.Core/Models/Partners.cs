@@ -50,6 +50,22 @@ public sealed class PartnerInput
     public string? Notes { get; set; }
     public bool IsActive { get; set; } = true;
     public Dictionary<string, object?> CustomFields { get; set; } = new();
+    /// <summary>أرصدة افتتاحية لخدمات العميل تُسجَّل مع إنشائه كحجوزات مؤكدة — 0104.</summary>
+    public List<ServiceOpeningBalanceInput> OpeningBalances { get; set; } = new();
+}
+
+/// <summary>
+/// رصيد افتتاحي لخدمة عند تكويد عميل جديد: كمية وسعر وحدة ومبلغ مسدد سابقًا،
+/// يُحوَّل إلى حجز خدمة مؤكد (للتنفيذ) ويظهر مستحقه في تحصيلات الخدمات المحجوزة.
+/// </summary>
+public sealed class ServiceOpeningBalanceInput
+{
+    public Guid ServiceId { get; set; }
+    public decimal Quantity { get; set; }
+    public decimal UnitPrice { get; set; }
+    public decimal PaidAmount { get; set; }
+    public decimal TotalAmount => Math.Round(Quantity * UnitPrice, 2, MidpointRounding.AwayFromZero);
+    public decimal RemainingAmount => Math.Max(TotalAmount - PaidAmount, 0);
 }
 
 public sealed class PartnerCategory

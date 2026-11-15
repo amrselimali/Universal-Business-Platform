@@ -15,6 +15,7 @@ public partial class PartnerDialog
     [Parameter] public Partner? Model { get; set; }
     [Inject] private PartnerService Partners { get; set; } = default!;
     [Inject] private BranchService Branches { get; set; } = default!;
+    [Inject] private LookupService Lookup { get; set; } = default!;
     [Inject] private CustomFieldService CustomFields { get; set; } = default!;
     [Inject] private UserContext UserContext { get; set; } = default!;
     [Inject] private UiCulture T { get; set; } = default!;
@@ -26,10 +27,23 @@ public partial class PartnerDialog
     private IReadOnlyList<Branch> _branches = Array.Empty<Branch>();
     private IReadOnlyList<CustomFieldDefinition> _fields = Array.Empty<CustomFieldDefinition>();
     private readonly Dictionary<string, string?> _values = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<BalanceRow> _balances = new();
     private bool _busy;
     private bool _canUseCompanyScope;
     private string? _nextCode;
     private bool IsEdit => Model is not null;
+
+    /// <summary>صف رصيد افتتاحي لخدمة داخل شاشة إضافة العميل — 0104.</summary>
+    private sealed class BalanceRow
+    {
+        public ItemOption? Service { get; set; }
+        public decimal Quantity { get; set; } = 1;
+        public decimal UnitPrice { get; set; }
+        public decimal Paid { get; set; }
+        public decimal Total => Math.Round(Quantity * UnitPrice, 2, MidpointRounding.AwayFromZero);
+        public decimal Remaining => Math.Max(Math.Round(Total - Paid, 2,
+            MidpointRounding.AwayFromZero), 0);
+    }
 
     /// <summary>كود العميل يُولَّد آليًا لكل فرع (بداية من 1) ولا يُعدَّل.</summary>
     private string CodeDisplay => IsEdit ? Model!.Code : _nextCode ?? "";
@@ -103,15 +117,72 @@ public partial class PartnerDialog
 
     private void Cancel() => MudDialog.Cancel();
 
+    private Task AddBalanceAsync()
+    {
+        _balances.Add(new BalanceRow());
+        return Task.CompletedTask;
+    }
+
+    private void RemoveBalance(BalanceRow row) => _balances.Remove(row);
+
+    private async Task<IEnumerable<ItemOption>> SearchServices(string? search, CancellationToken ct)
+    {
+        var actor = await UserContext.RequireAsync();
+        return await Lookup.ServiceItemsAsync(actor, search, 100, ct);
+    }
+
+    private string ServiceLabel(ItemOption? service) => service is null ? "" :
+        (T.Language == "en" && !string.IsNullOrWhiteSpace(service.NameEn)
+            ? $"{service.Code} — {service.NameEn}"
+            : $"{service.Code} — {service.NameAr}");
+
+    private void OnServiceChanged(BalanceRow row, ItemOption? service)
+    {
+        row.Service = service;
+        if (service is not null && row.UnitPrice == 0)
+            row.UnitPrice = service.DefaultPrice;
+        StateHasChanged();
+    }
+
+    /// <summary>التحقق من صفوف الأرصدة الافتتاحية قبل الحفظ (نفس قواعد الخادم) — 0104.</summary>
+    private bool ValidateBalances()
+    {
+        for (var i = 0; i < _balances.Count; i++)
+        {
+            var row = _balances[i];
+            var prefix = $"{T.T("partners.opening_balance_row")} {i + 1}";
+            if (row.Service is null || row.Quantity <= 0 || row.UnitPrice < 0 || row.Paid < 0)
+            {
+                Snackbar.Add($"{prefix}: {T.T("validation.required_fields")}", Severity.Warning);
+                return false;
+            }
+            if (row.Paid > row.Total)
+            {
+                Snackbar.Add($"{prefix}: {T.T("validation.paid_exceeds_total")}", Severity.Warning);
+                return false;
+            }
+        }
+        return true;
+    }
+
     private async Task SaveAsync()
     {
         await _form.Validate();
         if (!_form.IsValid) return;
+        var withBalances = Kind == PartnerKind.Customer && !IsEdit;
+        if (withBalances && !ValidateBalances()) return;
         _busy = true;
         try
         {
             var actor = await UserContext.RequireAsync();
             _input.CustomFields = _values.ToDictionary(p => p.Key, p => (object?)p.Value);
+            _input.OpeningBalances = withBalances
+                ? _balances.Select(r => new ServiceOpeningBalanceInput
+                {
+                    ServiceId = r.Service!.Id, Quantity = r.Quantity,
+                    UnitPrice = r.UnitPrice, PaidAmount = r.Paid
+                }).ToList()
+                : new List<ServiceOpeningBalanceInput>();
             var saved = Model is null
                 ? await Partners.CreateAsync(actor, Kind, _input)
                 : await Partners.UpdateAsync(actor, Kind, Model.Id, Model.Version, _input);

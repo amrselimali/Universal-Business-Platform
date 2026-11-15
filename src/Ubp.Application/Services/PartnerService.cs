@@ -7,7 +7,7 @@ using Ubp.Infrastructure.Repositories;
 
 namespace Ubp.Application.Services;
 
-public sealed class PartnerService
+public sealed partial class PartnerService
 {
     private readonly IPartnerRepository _repository;
     private readonly CustomFieldService _customFields;
@@ -46,6 +46,9 @@ public sealed class PartnerService
     {
         await _permissions.RequireAsync(actor, Screen(kind), ActionCodes.Add, ct: ct);
         await NormalizeAndValidateAsync(actor, kind, input, null, ct);
+        // الأرصدة الافتتاحية للخدمات تُسجَّل مع العميل في معاملة واحدة — 0104.
+        if (kind == PartnerKind.Customer && input.OpeningBalances.Count > 0)
+            return await CreateWithOpeningBalancesAsync(actor, input, ct);
         try
         {
             var created = await _repository.CreateAsync(kind, input, ct);

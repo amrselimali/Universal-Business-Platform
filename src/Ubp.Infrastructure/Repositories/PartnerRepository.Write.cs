@@ -24,26 +24,8 @@ public sealed partial class PartnerRepository
     public async Task<Partner> CreateAsync(PartnerKind kind, PartnerInput input,
         CancellationToken ct = default)
     {
-        var sql = $"""
-            INSERT INTO {Table(kind)}
-                (code, name_ar, name_en, category_id, scope_type, branch_id, phone, phone2,
-                 whatsapp_phone, email, address, tax_number, credit_limit, notes, is_active,
-                 custom_fields)
-            VALUES
-                (@Code, @NameAr, @NameEn, @CategoryId, @ScopeType, @BranchId, @Phone, @Phone2,
-                 @WhatsAppPhone, @Email, @Address, @TaxNumber, @CreditLimit, @Notes, @IsActive,
-                  CAST(@CustomFields AS jsonb))
-            RETURNING id
-            """;
         await using var connection = await _factory.OpenAsync(ct);
-        var id = await connection.ExecuteScalarAsync<Guid>(new CommandDefinition(sql, new
-        {
-            input.Code, input.NameAr, input.NameEn, input.CategoryId, input.ScopeType,
-            input.BranchId, input.Phone, input.Phone2, input.WhatsAppPhone, input.Email,
-            input.Address, input.TaxNumber,
-            input.CreditLimit, input.Notes, input.IsActive,
-            CustomFields = JsonSerializer.Serialize(input.CustomFields)
-        }, cancellationToken: ct));
+        var id = await InsertPartnerAsync(connection, null, kind, input, ct);
         return (await GetAsync(kind, id, ct))!;
     }
 
