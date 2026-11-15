@@ -16,7 +16,7 @@ public interface IPartnerRepository
     /// إنشاء عميل مع أرصدة افتتاحية لخدماته في معاملة واحدة: تُسجَّل كل خدمة كحجز
     /// مؤكد (صادر/متبقي للتنفيذ) مع المدفوع سابقًا في deposit_amount — 0104.
     /// </summary>
-    Task<Partner> CreateWithOpeningBalancesAsync(PartnerInput input,
+    Task<PartnerOpeningBalancesResult> CreateWithOpeningBalancesAsync(PartnerInput input,
         IReadOnlyList<ServiceOpeningBalanceInput> balances, Guid branchId, Guid userId,
         CancellationToken ct = default);
     /// <summary>الكود التسلسلي التالي للطرف داخل نطاق/فرع، بدءًا من 1 — 0094.</summary>

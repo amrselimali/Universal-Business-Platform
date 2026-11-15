@@ -17,6 +17,11 @@ public interface IWarehouseRepository
     /// </summary>
     Task<IReadOnlyList<Warehouse>> ListOptionsForUserAsync(Guid userId,
         IReadOnlyCollection<Guid> branchIds, bool isAdmin, CancellationToken ct = default);
+    /// <summary>
+    /// أول مخزن نشط لفرع محدد على مستوى الشركة (بدون قصر نطاق المستخدم) — لاختيار
+    /// مخزن التحويل تلقائيًا بين الفروع — 0104.
+    /// </summary>
+    Task<Guid?> FirstActiveIdForBranchAsync(Guid branchId, CancellationToken ct = default);
     Task<Warehouse?> GetAsync(Guid id, CancellationToken ct = default);
     Task<Warehouse> CreateAsync(WarehouseInput input, CancellationToken ct = default);
     Task<Warehouse?> UpdateAsync(Guid id, int version, WarehouseInput input, CancellationToken ct = default);
@@ -141,5 +146,18 @@ public sealed partial class WarehouseRepository : IWarehouseRepository
             userId, branchIds = branchIds.ToArray(), isAdmin
         }, cancellationToken: ct));
         return rows.Select(Map).ToList();
+    }
+
+    /// <summary>أول مخزن نشط لفرع محدد بغض النظر عن نطاق المستخدم — للتحويل بين الفروع.</summary>
+    public async Task<Guid?> FirstActiveIdForBranchAsync(Guid branchId,
+        CancellationToken ct = default)
+    {
+        await using var connection = await _factory.OpenAsync(ct);
+        return await connection.ExecuteScalarAsync<Guid?>(new CommandDefinition("""
+            SELECT w.id FROM warehouses w
+            JOIN warehouse_branches wb ON wb.warehouse_id = w.id
+            WHERE wb.branch_id = @branchId AND w.is_active
+            ORDER BY w.code LIMIT 1
+            """, new { branchId }, cancellationToken: ct));
     }
 }

@@ -11,6 +11,8 @@ public interface IBranchRepository
         IReadOnlyCollection<Guid> branchIds, bool isAdmin, CancellationToken ct = default);
     Task<IReadOnlyList<Branch>> ListOptionsAsync(IReadOnlyCollection<Guid> branchIds, bool isAdmin,
         CancellationToken ct = default);
+    /// <summary>كل الفروع النشطة في الشركة (بدون قصر نطاق المستخدم) — لاختيار فرع التحويل.</summary>
+    Task<IReadOnlyList<Branch>> ListAllActiveAsync(CancellationToken ct = default);
     Task<Branch?> GetAsync(Guid id, CancellationToken ct = default);
     Task<Branch> CreateAsync(BranchInput input, CancellationToken ct = default);
     Task<Branch?> UpdateAsync(Guid id, int version, BranchInput input, CancellationToken ct = default);
@@ -85,6 +87,16 @@ public sealed partial class BranchRepository : IBranchRepository
         await using var connection = await _factory.OpenAsync(ct);
         var rows = await connection.QueryAsync<BranchRow>(
             new CommandDefinition(sql, new { branchIds = branchIds.ToArray() }, cancellationToken: ct));
+        return rows.Select(Map).ToList();
+    }
+
+    /// <summary>كل الفروع النشطة في الشركة بغض النظر عن نطاق المستخدم — للتحويل بين الفروع.</summary>
+    public async Task<IReadOnlyList<Branch>> ListAllActiveAsync(CancellationToken ct = default)
+    {
+        var sql = $"SELECT {SelectColumns} FROM branches b WHERE b.is_active ORDER BY b.name_ar";
+        await using var connection = await _factory.OpenAsync(ct);
+        var rows = await connection.QueryAsync<BranchRow>(
+            new CommandDefinition(sql, cancellationToken: ct));
         return rows.Select(Map).ToList();
     }
 }

@@ -16,6 +16,7 @@ public partial class PartnerDialog
     [Inject] private PartnerService Partners { get; set; } = default!;
     [Inject] private BranchService Branches { get; set; } = default!;
     [Inject] private LookupService Lookup { get; set; } = default!;
+    [Inject] private PermissionService Permissions { get; set; } = default!;
     [Inject] private CustomFieldService CustomFields { get; set; } = default!;
     [Inject] private UserContext UserContext { get; set; } = default!;
     [Inject] private UiCulture T { get; set; } = default!;
@@ -30,6 +31,7 @@ public partial class PartnerDialog
     private readonly List<BalanceRow> _balances = new();
     private bool _busy;
     private bool _canUseCompanyScope;
+    private bool _canAddOpeningBalances;
     private string? _nextCode;
     private bool IsEdit => Model is not null;
 
@@ -58,6 +60,10 @@ public partial class PartnerDialog
 
         // نطاق «الشركة» متاح فقط لمن يملك كل الفروع؛ غيره يُقيَّد بفرع من فروعه.
         _canUseCompanyScope = actor.IsSuperAdmin;
+        // صلاحية مستقلة: قسم الأرصدة الافتتاحية يظهر فقط لمن يملكها — 0104.
+        _canAddOpeningBalances = Kind == PartnerKind.Customer && !IsEdit &&
+            await Permissions.HasAsync(actor, ScreenCodes.Customers,
+                ActionCodes.AddOpeningBalances);
 
         if (Model is null)
         {
@@ -169,7 +175,7 @@ public partial class PartnerDialog
     {
         await _form.Validate();
         if (!_form.IsValid) return;
-        var withBalances = Kind == PartnerKind.Customer && !IsEdit;
+        var withBalances = Kind == PartnerKind.Customer && !IsEdit && _canAddOpeningBalances;
         if (withBalances && !ValidateBalances()) return;
         _busy = true;
         try

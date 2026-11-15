@@ -57,7 +57,8 @@ public sealed partial class StockDocumentService
     /// <summary>
     /// مسودة تحويل صنف من فرع إلى فرع آخر من شاشة المصروفات التشغيلية: يكفي فيها
     /// امتلاك صلاحية الإضافة على شاشة المصروفات، وتُسجَّل كمسودة مخزون تظهر في
-    /// كارت الصنف بالفرعين قبل الترحيل. مكان الإنشاء والاستلام نفسه في شاشة المخزون.
+    /// كارت الصنف بالفرعين قبل الترحيل. الوجهة يمكن أن تكون أي فرع في الشركة،
+    /// ومخزن كل فرع يُختار تلقائيًا (أول مخزن نشط) — 0104.
     /// </summary>
     public async Task<StockDocumentDetail> CreateBranchTransferDraftAsync(ActorContext actor,
         StockDocumentInput input, CancellationToken ct = default)
@@ -67,13 +68,26 @@ public sealed partial class StockDocumentService
         input.DocType = StockDocumentTypes.Transfer;
         if (input.ToBranchId is null || input.ToBranchId == input.BranchId)
             throw new ValidationAppException("validation.transfer_same_branch");
-        return await SaveCoreAsync(actor, null, 0, input, ct);
+        BranchScope.Ensure(actor, input.BranchId);
+
+        // المخازن تُستنتج من الفرعين على مستوى الشركة (لا يشترط ربط المستخدم بها).
+        if (input.WarehouseId == Guid.Empty)
+            input.WarehouseId = await FirstWarehouseAsync(input.BranchId, ct);
+        if (input.ToWarehouseId is null || input.ToWarehouseId == Guid.Empty)
+            input.ToWarehouseId = await FirstWarehouseAsync(input.ToBranchId.Value, ct);
+
+        return await SaveCoreAsync(actor, null, 0, input, ct,
+            allowForeignDestinationBranch: true);
     }
 
+    private async Task<Guid> FirstWarehouseAsync(Guid branchId, CancellationToken ct) =>
+        await _warehouses.FirstActiveIdForBranchAsync(branchId, ct)
+        ?? throw new ValidationAppException("validation.warehouse_required");
+
     private async Task<StockDocumentDetail> SaveCoreAsync(ActorContext actor, Guid? id, int version,
-        StockDocumentInput input, CancellationToken ct)
+        StockDocumentInput input, CancellationToken ct, bool allowForeignDestinationBranch = false)
     {
-        await ValidateAsync(actor, input, ct);
+        await ValidateAsync(actor, input, ct, allowForeignDestinationBranch);
 
         try
         {
@@ -81,7 +95,8 @@ public sealed partial class StockDocumentService
             {
                 var replayed = await _docs.GetByIdempotencyKeyAsync(input.BranchId,
                     input.IdempotencyKey.Trim(), ct);
-                if (replayed is not null) return await LoadAsync(actor, replayed.Value, ct);
+                if (replayed is not null)
+                    return await LoadAsync(actor, replayed.Value, ct, allowForeignDestinationBranch);
             }
 
             var document = id.HasValue
@@ -95,7 +110,7 @@ public sealed partial class StockDocumentService
                     document.DocType, document.DocDate, document.BranchId, document.WarehouseId,
                     document.ToBranchId, document.ToWarehouseId, Lines = input.Lines.Count
                 }, ct);
-            return await LoadAsync(actor, document.Id, ct);
+            return await LoadAsync(actor, document.Id, ct, allowForeignDestinationBranch);
         }
         catch (PostgresException ex) { throw DbErrorMapper.Map(ex); }
     }
@@ -130,22 +145,26 @@ public sealed partial class StockDocumentService
         return document;
     }
 
-    internal static void EnsureAccess(ActorContext actor, StockDocument document)
+    internal static void EnsureAccess(ActorContext actor, StockDocument document,
+        bool allowForeignDestinationBranch = false)
     {
         if (!actor.CanAccessBranch(document.BranchId))
             throw new ForbiddenException("error.branch_not_allowed");
-        if (document.ToBranchId.HasValue && !actor.CanAccessBranch(document.ToBranchId.Value))
+        if (!allowForeignDestinationBranch && document.ToBranchId.HasValue &&
+            !actor.CanAccessBranch(document.ToBranchId.Value))
             throw new ForbiddenException("error.branch_not_allowed");
     }
 
-    private async Task<StockDocumentDetail> LoadAsync(ActorContext actor, Guid id, CancellationToken ct)
+    private async Task<StockDocumentDetail> LoadAsync(ActorContext actor, Guid id,
+        CancellationToken ct, bool allowForeignDestinationBranch = false)
     {
         var detail = await _docs.GetDetailAsync(id, ct) ?? throw new NotFoundAppException();
-        EnsureAccess(actor, detail.Document);
+        EnsureAccess(actor, detail.Document, allowForeignDestinationBranch);
         return detail;
     }
 
-    private async Task ValidateAsync(ActorContext actor, StockDocumentInput input, CancellationToken ct)
+    private async Task ValidateAsync(ActorContext actor, StockDocumentInput input,
+        CancellationToken ct, bool allowForeignDestinationBranch = false)
     {
         input.DocType = (input.DocType ?? "").Trim().ToUpperInvariant();
         if (!EditableTypes.Contains(input.DocType, StringComparer.Ordinal))
@@ -171,7 +190,7 @@ public sealed partial class StockDocumentService
                 throw new ValidationAppException("validation.transfer_destination_required");
             if (input.ToWarehouseId == input.WarehouseId)
                 throw new ValidationAppException("validation.transfer_same_warehouse");
-            if (!actor.CanAccessBranch(input.ToBranchId.Value))
+            if (!allowForeignDestinationBranch && !actor.CanAccessBranch(input.ToBranchId.Value))
                 throw new ForbiddenException("error.branch_not_allowed");
             var destination = await _warehouses.GetAsync(input.ToWarehouseId.Value, ct)
                 ?? throw new ValidationAppException("validation.warehouse_required");

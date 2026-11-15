@@ -1,6 +1,9 @@
+using Dapper;
+using Ubp.Application.Services;
 using Ubp.Core.Models;
 using Ubp.Core.Paging;
 using Ubp.Core.Results;
+using Ubp.Core.Security;
 using Ubp.Infrastructure.Repositories;
 using Xunit;
 
@@ -54,6 +57,25 @@ public sealed class CustomerOpeningBalanceTests : IClassFixture<TestDb>
         NameAr = name, CategoryId = category.Id, ScopeType = "BRANCH", BranchId = branch,
         Phone = phone, WhatsAppPhone = phone
     };
+
+    private static ActorContext LimitedActor(Guid userId, string username, Guid branch) => new()
+    {
+        UserId = userId, Username = username, IsAdmin = false, IsSuperAdmin = false,
+        Language = "ar", AllowedBranchIds = new[] { branch }, CurrentBranchId = branch,
+        TraceId = "opening-balance-test"
+    };
+
+    /// <summary>يضبط صلاحيات المستخدم الفردية ويمسح كاش الصلاحيات.</summary>
+    private async Task SetPermissionsAsync(Guid userId, params string[] actions)
+    {
+        await _db.PermissionRepo.ReplaceUserPermissionsAsync(userId, actions.Select(action =>
+            new PermissionEntry
+            {
+                ScreenCode = ScreenCodes.Customers, ActionCode = action, IsAllowed = true,
+                Scope = PermissionScope.All
+            }));
+        PermissionService.InvalidateAll();
+    }
 
     [Fact]
     public async Task Opening_balances_show_as_reserved_services_and_outstanding_collections()
@@ -161,5 +183,83 @@ public sealed class CustomerOpeningBalanceTests : IClassFixture<TestDb>
             new BookingFilter { CustomerId = customer.Id }, new PageRequest { PageSize = 10 })).Items
             .Single();
         Assert.Equal(40m, booking.DepositAmount);
+    }
+
+    [Fact]
+    public async Task Customer_add_permission_alone_hides_and_rejects_opening_balances()
+    {
+        var suffix = Unique();
+        var (branch, category, serviceA, _) = await SetupAsync(suffix);
+        var username = "ob-add-" + suffix;
+        var userId = await _db.CreateUserAsync(username, "Passw0rd!2026", new[] { branch });
+        await SetPermissionsAsync(userId, ActionCodes.View, ActionCodes.Add);
+        var actor = LimitedActor(userId, username, branch);
+
+        // صلاحية إضافة العميل وحدها: الحفظ بدون أرصدة يعمل.
+        var plain = await _db.Partners().CreateAsync(actor, PartnerKind.Customer,
+            CustomerInput("عميل إضافة فقط " + suffix, category, branch, Phone("016")));
+        Assert.NotEqual(Guid.Empty, plain.Id);
+
+        // ونفس المستخدم لا يستطيع تمرير أرصدة افتتاحية إلى الخادم.
+        var withBalances = CustomerInput("عميل أرصدة ممنوعة " + suffix, category, branch,
+            Phone("017"));
+        withBalances.OpeningBalances.Add(new ServiceOpeningBalanceInput
+        { ServiceId = serviceA.Id, Quantity = 1, UnitPrice = 100, PaidAmount = 0 });
+        await Assert.ThrowsAsync<ForbiddenException>(() =>
+            _db.Partners().CreateAsync(actor, PartnerKind.Customer, withBalances));
+    }
+
+    [Fact]
+    public async Task Opening_balances_permission_enables_saving_and_records_audit()
+    {
+        var suffix = Unique();
+        var (branch, category, serviceA, serviceB) = await SetupAsync(suffix);
+        var username = "ob-full-" + suffix;
+        var userId = await _db.CreateUserAsync(username, "Passw0rd!2026", new[] { branch });
+        await SetPermissionsAsync(userId, ActionCodes.View, ActionCodes.Add,
+            ActionCodes.AddOpeningBalances);
+        var actor = LimitedActor(userId, username, branch);
+
+        var input = CustomerInput("عميل صلاحية كاملة " + suffix, category, branch, Phone("018"));
+        input.OpeningBalances.Add(new ServiceOpeningBalanceInput
+        { ServiceId = serviceA.Id, Quantity = 2, UnitPrice = 100, PaidAmount = 50 });
+        input.OpeningBalances.Add(new ServiceOpeningBalanceInput
+        { ServiceId = serviceB.Id, Quantity = 1, UnitPrice = 200, PaidAmount = 0 });
+
+        var customer = await _db.Partners().CreateAsync(actor, PartnerKind.Customer, input);
+        var bookings = await _db.BookingRepo.ListAsync(
+            new BookingFilter { CustomerId = customer.Id }, new PageRequest { PageSize = 10 });
+        Assert.Equal(2, bookings.Total);
+
+        // سجل المراجعة: سطر للعميل + سطر لكل رصيد افتتاحي (حجز خدمة).
+        await using var connection = await _db.Factory.OpenAsync();
+        var auditRows = await connection.ExecuteScalarAsync<int>("""
+            SELECT count(*)::int FROM audit_log
+            WHERE (table_name = 'customers' AND record_id = @customerId)
+               OR (table_name = 'bookings' AND record_id = ANY(@bookingIds))
+            """, new
+        {
+            customerId = customer.Id.ToString(),
+            bookingIds = bookings.Items.Select(b => b.Id.ToString()).ToArray()
+        });
+        Assert.Equal(3, auditRows);
+    }
+
+    [Fact]
+    public async Task Opening_balances_permission_alone_cannot_create_a_customer()
+    {
+        var suffix = Unique();
+        var (branch, category, serviceA, _) = await SetupAsync(suffix);
+        var username = "ob-bal-" + suffix;
+        var userId = await _db.CreateUserAsync(username, "Passw0rd!2026", new[] { branch });
+        await SetPermissionsAsync(userId, ActionCodes.View, ActionCodes.AddOpeningBalances);
+        var actor = LimitedActor(userId, username, branch);
+
+        var input = CustomerInput("عميل أرصدة فقط " + suffix, category, branch, Phone("019"));
+        input.OpeningBalances.Add(new ServiceOpeningBalanceInput
+        { ServiceId = serviceA.Id, Quantity = 1, UnitPrice = 100, PaidAmount = 0 });
+
+        await Assert.ThrowsAsync<ForbiddenException>(() =>
+            _db.Partners().CreateAsync(actor, PartnerKind.Customer, input));
     }
 }

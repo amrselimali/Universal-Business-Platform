@@ -30,33 +30,11 @@
                         <MudSelectItem T="Guid" Value="@branch.Id">@branch.NameAr</MudSelectItem>
                     }
                 </MudSelect>
-                <MudSelect T="Guid" Value="_fromWarehouseId"
-                           Label="@T.T("expenses.transfer_from_warehouse")"
-                           Variant="Variant.Outlined" ValueChanged="OnFromWarehouseChanged">
-                    @foreach (var warehouse in FromWarehouses)
-                    {
-                        <MudSelectItem T="Guid" Value="@warehouse.Id">@warehouse.NameAr</MudSelectItem>
-                    }
-                </MudSelect>
-                <MudSelect T="Guid" Value="_toWarehouseId"
-                           Label="@T.T("expenses.transfer_to_warehouse")"
-                           Variant="Variant.Outlined" ValueChanged="OnToWarehouseChanged">
-                    @foreach (var warehouse in ToWarehouses)
-                    {
-                        <MudSelectItem T="Guid" Value="@warehouse.Id">@warehouse.NameAr</MudSelectItem>
-                    }
-                </MudSelect>
             </div>
             @if (NoTargetBranch)
             {
                 <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2">
                     @T.T("expenses.transfer_no_branch")
-                </MudAlert>
-            }
-            else if (MissingWarehouse)
-            {
-                <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2">
-                    @T.T("expenses.transfer_no_warehouse")
                 </MudAlert>
             }
             <MudText Typo="Typo.caption" Class="ubp-muted d-block mt-2">
@@ -67,7 +45,7 @@
     <DialogActions>
         <MudButton OnClick="Cancel" Disabled="_busy">@T.T("common.cancel")</MudButton>
         <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync"
-                   Disabled="@(_busy || NoTargetBranch || MissingWarehouse)">
+                   Disabled="@(_busy || NoTargetBranch)">
             @T.T("expenses.save_draft")
         </MudButton>
     </DialogActions>
@@ -80,30 +58,20 @@
     private MudForm _form = default!;
     private IReadOnlyList<Branch> _branches = Array.Empty<Branch>();
     private IReadOnlyList<Branch> _toBranches = Array.Empty<Branch>();
-    private IReadOnlyList<Warehouse> _warehouses = Array.Empty<Warehouse>();
     private ItemOption? _item;
     private decimal _quantity;
     private Guid _toBranchId;
-    private Guid _fromWarehouseId;
-    private Guid _toWarehouseId;
     private bool _busy;
 
     private string SourceBranchName =>
-        _branches.FirstOrDefault(b => b.Id == BranchId)?.NameAr ?? "—";
+        _branches.FirstOrDefault(b => b.Id == BranchId)?.NameAr
+        ?? _toBranches.FirstOrDefault(b => b.Id == BranchId)?.NameAr ?? "—";
 
     private string ToBranchName =>
-        _branches.FirstOrDefault(b => b.Id == _toBranchId)?.NameAr ?? "—";
-
-    private IEnumerable<Warehouse> FromWarehouses =>
-        _warehouses.Where(w => w.BranchIds.Contains(BranchId));
-
-    private IEnumerable<Warehouse> ToWarehouses =>
-        _warehouses.Where(w => w.BranchIds.Contains(_toBranchId) && w.Id != _fromWarehouseId);
+        _toBranches.FirstOrDefault(b => b.Id == _toBranchId)?.NameAr
+        ?? _branches.FirstOrDefault(b => b.Id == _toBranchId)?.NameAr ?? "—";
 
     private bool NoTargetBranch => _toBranches.Count == 0;
-
-    private bool MissingWarehouse =>
-        _toBranchId != Guid.Empty && (!FromWarehouses.Any() || !ToWarehouses.Any());
 
     protected override async Task OnInitializedAsync()
     {
@@ -111,29 +79,15 @@
         {
             var actor = await UserContext.RequireAsync();
             _branches = await Branches.OptionsAsync(actor);
-            _warehouses = await Lookup.WarehousesAsync(actor);
-            _toBranches = _branches.Where(b => b.Id != BranchId).ToList();
+            // كل فروع الشركة النشطة، مع استبعاد الفرع المحوَّل منه — 0104.
+            _toBranches = (await Branches.CompanyOptionsAsync(actor))
+                .Where(b => b.Id != BranchId).ToList();
             _toBranchId = _toBranches.FirstOrDefault()?.Id ?? Guid.Empty;
-            _fromWarehouseId = FromWarehouses.FirstOrDefault()?.Id ?? Guid.Empty;
-            _toWarehouseId = ToWarehouses.FirstOrDefault()?.Id ?? Guid.Empty;
         }
         catch (AppException ex) { Snackbar.Add(T.T(ex.Code), Severity.Error); }
     }
 
-    private void OnToBranchChanged(Guid value)
-    {
-        _toBranchId = value;
-        _toWarehouseId = ToWarehouses.FirstOrDefault()?.Id ?? Guid.Empty;
-    }
-
-    private void OnFromWarehouseChanged(Guid value)
-    {
-        _fromWarehouseId = value;
-        if (_toWarehouseId == Guid.Empty || _toWarehouseId == _fromWarehouseId)
-            _toWarehouseId = ToWarehouses.FirstOrDefault()?.Id ?? Guid.Empty;
-    }
-
-    private void OnToWarehouseChanged(Guid value) => _toWarehouseId = value;
+    private void OnToBranchChanged(Guid value) => _toBranchId = value;
 
     private async Task<IEnumerable<ItemOption>> SearchItems(string? search, CancellationToken ct) =>
         await Lookup.ItemsAsync(await UserContext.RequireAsync(), search, 50, false, ct: ct);
@@ -148,9 +102,7 @@
     private async Task SaveAsync()
     {
         await _form.Validate();
-        if (!_form.IsValid || _item is null || _quantity <= 0 || _toBranchId == Guid.Empty ||
-            _fromWarehouseId == Guid.Empty || _toWarehouseId == Guid.Empty ||
-            _fromWarehouseId == _toWarehouseId)
+        if (!_form.IsValid || _item is null || _quantity <= 0 || _toBranchId == Guid.Empty)
         {
             Snackbar.Add(T.T("validation.required_fields"), Severity.Warning);
             return;
@@ -160,11 +112,11 @@
         try
         {
             var actor = await UserContext.RequireAsync();
+            // مخزن كل فرع يُحدَّد تلقائيًا داخل الخدمة (أول مخزن نشط بالفرع).
             var detail = await Documents.CreateBranchTransferDraftAsync(actor, new StockDocumentInput
             {
                 DocType = StockDocumentTypes.Transfer, DocDate = DateTime.Today,
-                BranchId = BranchId, WarehouseId = _fromWarehouseId,
-                ToBranchId = _toBranchId, ToWarehouseId = _toWarehouseId,
+                BranchId = BranchId, ToBranchId = _toBranchId,
                 Notes = $"{T.T("expenses.item_transfer")} — {ToBranchName}",
                 Lines =
                 {

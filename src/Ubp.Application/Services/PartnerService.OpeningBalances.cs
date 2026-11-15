@@ -15,6 +15,9 @@ public sealed partial class PartnerService
     private async Task<Partner> CreateWithOpeningBalancesAsync(ActorContext actor,
         PartnerInput input, CancellationToken ct)
     {
+        // صلاحية مستقلة عن إضافة العميل: بدونها يُرفض الحفظ من الخادم — 0104.
+        await _permissions.RequireAsync(actor, ScreenCodes.Customers,
+            ActionCodes.AddOpeningBalances, ct: ct);
         if (input.OpeningBalances.Any(b => b.ServiceId == Guid.Empty))
             throw new ValidationAppException("validation.required_fields");
 
@@ -24,22 +27,36 @@ public sealed partial class PartnerService
             throw new ValidationAppException("validation.branch_required");
         BranchScope.Ensure(actor, branchId);
 
+        PartnerOpeningBalancesResult result;
         try
         {
-            var created = await _repository.CreateWithOpeningBalancesAsync(input,
+            result = await _repository.CreateWithOpeningBalancesAsync(input,
                 input.OpeningBalances, branchId, actor.UserId, ct);
-            await _audit.WriteAsync(actor, "customers", created.Id.ToString(), "INSERT", null,
-                new
-                {
-                    Partner = created,
-                    OpeningBalances = input.OpeningBalances.Select(b => new
-                    {
-                        b.ServiceId, b.Quantity, b.UnitPrice, Total = b.TotalAmount,
-                        b.PaidAmount, Remaining = b.RemainingAmount
-                    }).ToArray()
-                }, ct);
-            return created;
         }
         catch (PostgresException ex) { throw DbErrorMapper.Map(ex); }
+
+        // كل رصيد افتتاحي حجز خدمة مستقل: يُسجَّل فى المراجعة بسجل العميل وبسجل الحجز — 0104.
+        foreach (var booking in result.Bookings)
+            await _audit.WriteAsync(actor, "bookings", booking.BookingId.ToString(), "INSERT", null,
+                new
+                {
+                    CustomerId = result.Partner.Id, booking.DocNo, booking.ServiceId,
+                    booking.Quantity, booking.UnitPrice, booking.TotalAmount, booking.PaidAmount,
+                    Remaining = Math.Max(booking.TotalAmount - booking.PaidAmount, 0),
+                    Source = "opening_balance"
+                }, ct);
+
+        await _audit.WriteAsync(actor, "customers", result.Partner.Id.ToString(), "INSERT", null,
+            new
+            {
+                Partner = result.Partner,
+                OpeningBalances = result.Bookings.Select(b => new
+                {
+                    b.BookingId, b.DocNo, b.ServiceId, b.Quantity, b.UnitPrice,
+                    b.TotalAmount, b.PaidAmount,
+                    Remaining = Math.Max(b.TotalAmount - b.PaidAmount, 0)
+                }).ToArray()
+            }, ct);
+        return result.Partner;
     }
 }

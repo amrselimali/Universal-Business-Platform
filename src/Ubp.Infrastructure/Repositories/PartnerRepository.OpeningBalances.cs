@@ -47,7 +47,7 @@ public sealed partial class PartnerRepository
         }, tx, cancellationToken: ct));
     }
 
-    public async Task<Partner> CreateWithOpeningBalancesAsync(PartnerInput input,
+    public async Task<PartnerOpeningBalancesResult> CreateWithOpeningBalancesAsync(PartnerInput input,
         IReadOnlyList<ServiceOpeningBalanceInput> balances, Guid branchId, Guid userId,
         CancellationToken ct = default)
     {
@@ -73,6 +73,7 @@ public sealed partial class PartnerRepository
             throw new ValidationAppException("validation.item_not_found");
 
         var docDate = DateTime.UtcNow.Date;
+        var createdBookings = new List<PartnerOpeningBalanceBooking>();
         foreach (var balance in balances)
         {
             var service = services[balance.ServiceId];
@@ -109,9 +110,19 @@ public sealed partial class PartnerRepository
                 """, new { bookingId, itemId = balance.ServiceId, unitId = service.BaseUnitId,
                     warehouseId, quantity = balance.Quantity, unitPrice = balance.UnitPrice,
                     total }, tx, cancellationToken: ct));
+            createdBookings.Add(new PartnerOpeningBalanceBooking
+            {
+                BookingId = bookingId, DocNo = docNo, ServiceId = balance.ServiceId,
+                Quantity = balance.Quantity, UnitPrice = balance.UnitPrice,
+                TotalAmount = total, PaidAmount = balance.PaidAmount
+            });
         }
 
         await tx.CommitAsync(ct);
-        return (await GetAsync(PartnerKind.Customer, customerId, ct))!;
+        return new PartnerOpeningBalancesResult
+        {
+            Partner = (await GetAsync(PartnerKind.Customer, customerId, ct))!,
+            Bookings = createdBookings
+        };
     }
 }
