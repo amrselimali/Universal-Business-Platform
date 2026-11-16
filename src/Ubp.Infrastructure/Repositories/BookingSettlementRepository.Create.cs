@@ -42,7 +42,7 @@ public sealed partial class BookingSettlementRepository
             throw new NotFoundAppException("validation.customer_not_found");
 
         TreasuryRow? treasury = null;
-        if (!isNewBooking)
+        if (input.TreasuryId != Guid.Empty)
         {
             treasury = await connection.QuerySingleOrDefaultAsync<TreasuryRow>(new CommandDefinition("""
                 SELECT t.id AS Id, t.branch_id AS BranchId, t.account_id AS AccountId,
@@ -128,10 +128,18 @@ public sealed partial class BookingSettlementRepository
         decimal newBookingTotal = 0;
         if (isNewBooking)
         {
-            (newBookingId, newBookingNo, newBookingTotal) = await CreateNewBookingAsync(connection, tx, input,
-                newBookingLines, totalRefund, customer.Name, userId, ct);
+            (newBookingId, newBookingNo, newBookingTotal) = await CreateNewBookingAsync(connection,
+                tx, input, newBookingLines, totalRefund, customer.Name, userId, ct);
         }
-        else
+
+        // سطر تسوية الخزينة: إجمالي العروض الجديدة + سطر الخزينة = المستحق للعميل.
+        var cashAmount = isNewBooking
+            ? Math.Round(totalRefund - newBookingTotal, 2, MidpointRounding.AwayFromZero)
+            : totalRefund;
+        if (cashAmount != 0 && input.TreasuryId == Guid.Empty)
+            throw new ValidationAppException("validation.required_fields");
+
+        if (cashAmount != 0)
         {
             await connection.ExecuteAsync(new CommandDefinition("""
                 INSERT INTO vouchers
@@ -143,7 +151,7 @@ public sealed partial class BookingSettlementRepository
             {
                 voucherId, branchId = input.BranchId, docDate = input.DocDate.Date,
                 customerId = input.CustomerId, customerName = customer.Name,
-                treasuryId = input.TreasuryId, total = totalRefund,
+                treasuryId = input.TreasuryId, total = Math.Abs(cashAmount),
                 notes = "ايصال تسوية حساب عميل" +
                         (string.IsNullOrWhiteSpace(input.Notes) ? "" : " — " + input.Notes.Trim()),
                 userId
@@ -152,8 +160,8 @@ public sealed partial class BookingSettlementRepository
             await connection.ExecuteAsync(new CommandDefinition("""
                 INSERT INTO voucher_lines (voucher_id, line_no, treasury_method_id, amount, fee_amount)
                 VALUES (@voucherId, 1, @methodId, @total, 0)
-                """, new { voucherId, methodId = treasury!.MethodId, total = totalRefund }, tx,
-                cancellationToken: ct));
+                """, new { voucherId, methodId = treasury!.MethodId, total = Math.Abs(cashAmount) },
+                tx, cancellationToken: ct));
             settlementVoucherId = voucherId;
         }
 
@@ -174,19 +182,16 @@ public sealed partial class BookingSettlementRepository
             total = totalRefund, totalQty, notes = input.Notes, userId
         }, tx, cancellationToken: ct));
 
-        if (isNewBooking && input.TreasuryId != Guid.Empty &&
-            Math.Round(newBookingTotal - totalRefund, 2) != 0)
+        if (cashAmount != 0)
         {
-            var difference = Math.Round(newBookingTotal - totalRefund, 2,
-                MidpointRounding.AwayFromZero);
             await connection.ExecuteAsync(new CommandDefinition("""
                 INSERT INTO customer_account_settlement_cash_lines
                     (settlement_id, line_no, treasury_id, amount, direction)
                 VALUES (@settlementId, 1, @treasuryId, @amount, @direction)
                 """, new
             {
-                settlementId, treasuryId = input.TreasuryId, amount = Math.Abs(difference),
-                direction = difference > 0 ? "collect" : "refund"
+                settlementId, treasuryId = input.TreasuryId, amount = Math.Abs(cashAmount),
+                direction = cashAmount > 0 ? "refund" : "collect"
             }, tx, cancellationToken: ct));
         }
 
@@ -240,9 +245,9 @@ public sealed partial class BookingSettlementRepository
                 tx, cancellationToken: ct));
 
         await CreateDraftJournalAsync(connection, tx, settlementId,
-            isNewBooking ? settlementId : voucherId,
-            isNewBooking ? "manual" : "voucher", input, customer.Name, treasury, calcs,
-            totalRefund, includeRefund: !isNewBooking, userId, ct);
+            settlementVoucherId ?? settlementId,
+            settlementVoucherId.HasValue ? "voucher" : "manual", input, customer.Name, treasury,
+            calcs, cashAmount, userId, ct);
 
         await tx.CommitAsync(ct);
         return new BookingSettlementResult

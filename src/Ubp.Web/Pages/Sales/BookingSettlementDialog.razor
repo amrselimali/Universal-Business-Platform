@@ -53,53 +53,99 @@
 
             @if (_settlementType == BookingSettlementTypes.NewBooking)
             {
-                @foreach (var offer in _newOffers)
-                {
-                    <MudPaper Elevation="0" Class="pa-2 mb-2" Style="border:1px solid var(--ubp-line)">
-                        <div class="ubp-inline">
-                            <div style="display:flex;flex-direction:column;gap:2px;min-width:260px">
-                                <MudText Typo="Typo.caption">@T.T("settlement.service")</MudText>
-                                <MudAutocomplete T="ItemOption" Value="offer.Service"
-                                                 ValueChanged="@(v => OnNewItemChanged(offer, v))"
-                                                 SearchFunc="SearchServices"
-                                                 ToStringFunc="@ServiceLabel"
-                                                 Variant="Variant.Outlined" Margin="Margin.Dense"
-                                                 ResetValueOnEmptyText="true" CoalesceText="true"
-                                                 DebounceInterval="250" MinCharacters="0" />
-                            </div>
-                            <div style="display:flex;flex-direction:column;gap:2px;max-width:130px">
-                                <MudText Typo="Typo.caption">@T.T("common.quantity")</MudText>
-                                <MudNumericField T="decimal" Value="offer.Quantity"
-                                                 ValueChanged="@(v => offer.Quantity = v)"
-                                                 Min="0.01m" Variant="Variant.Outlined"
-                                                 Margin="Margin.Dense" />
-                            </div>
-                            <div style="display:flex;flex-direction:column;gap:2px;max-width:150px">
-                                <MudText Typo="Typo.caption">@T.T("settlement.unit_price")</MudText>
-                                <MudNumericField T="decimal" Value="offer.UnitPrice"
-                                                 ValueChanged="@(v => offer.UnitPrice = v)"
-                                                 Min="0m" Variant="Variant.Outlined"
-                                                 Margin="Margin.Dense" />
-                            </div>
-                            <div style="display:flex;flex-direction:column;gap:2px;max-width:150px">
-                                <MudText Typo="Typo.caption">@T.T("settlement.total_value")</MudText>
-                                <MudNumericField T="decimal"
-                                                 Value="@(offer.Quantity * offer.UnitPrice)"
-                                                 ReadOnly="true" Variant="Variant.Outlined"
-                                                 Margin="Margin.Dense" Format="N2" />
-                            </div>
-                            <div style="display:flex;flex-direction:column;gap:2px;min-width:230px">
-                                <MudText Typo="Typo.caption">@T.T("settlement.new_booking_notes")</MudText>
-                                <MudTextField T="string" Value="offer.Notes"
-                                              ValueChanged="@(v => offer.Notes = v)"
-                                              Variant="Variant.Outlined" Margin="Margin.Dense" />
-                            </div>
-                            <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small"
-                                           Color="Color.Error" Disabled="@(_newOffers.Count <= 1)"
-                                           OnClick="@(() => RemoveOffer(offer))" />
-                        </div>
-                    </MudPaper>
-                }
+                <div style="overflow-x:auto">
+                    <table class="ubp-table" style="width:100%">
+                        <thead>
+                            <tr>
+                                <th>@T.T("settlement.service")</th>
+                                <th>@T.T("common.quantity")</th>
+                                <th>@T.T("settlement.unit_price")</th>
+                                <th>@T.T("settlement.total_value")</th>
+                                <th>@T.T("settlement.new_booking_notes")</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var offer in _newOffers)
+                            {
+                                <tr>
+                                    <td style="min-width:260px">
+                                        <MudAutocomplete T="ItemOption" Value="offer.Service"
+                                                         ValueChanged="@(v => OnNewItemChanged(offer, v))"
+                                                         SearchFunc="SearchServices"
+                                                         ToStringFunc="@ServiceLabel"
+                                                         Variant="Variant.Outlined"
+                                                         Margin="Margin.Dense"
+                                                         ResetValueOnEmptyText="true"
+                                                         CoalesceText="true"
+                                                         DebounceInterval="250"
+                                                         MinCharacters="0" />
+                                    </td>
+                                    <td style="max-width:120px">
+                                        <MudNumericField T="decimal" Value="offer.Quantity"
+                                                         ValueChanged="@(v => offer.Quantity = v)"
+                                                         Min="0.01m" Variant="Variant.Outlined"
+                                                         Margin="Margin.Dense" />
+                                    </td>
+                                    <td style="max-width:140px">
+                                        <MudNumericField T="decimal" Value="offer.UnitPrice"
+                                                         ValueChanged="@(v => offer.UnitPrice = v)"
+                                                         Min="0m" Variant="Variant.Outlined"
+                                                         Margin="Margin.Dense" />
+                                    </td>
+                                    <td style="max-width:140px">
+                                        <MudNumericField T="decimal"
+                                                         Value="@(offer.Quantity * offer.UnitPrice)"
+                                                         ReadOnly="true" Variant="Variant.Outlined"
+                                                         Margin="Margin.Dense" Format="N2" />
+                                    </td>
+                                    <td style="min-width:220px">
+                                        <MudTextField T="string" Value="offer.Notes"
+                                                      ValueChanged="@(v => offer.Notes = v)"
+                                                      Variant="Variant.Outlined"
+                                                      Margin="Margin.Dense" />
+                                    </td>
+                                    <td>
+                                        <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                                       Size="Size.Small" Color="Color.Error"
+                                                       Disabled="@(_newOffers.Count <= 1)"
+                                                       OnClick="@(() => RemoveOffer(offer))" />
+                                    </td>
+                                </tr>
+                            }
+                            @if (CashSettlement != 0)
+                            {
+                                <tr>
+                                    <td style="min-width:240px">
+                                        <MudSelect T="Guid" Value="_cashTreasuryId"
+                                                   ValueChanged="@(v => _cashTreasuryId = v)"
+                                                   ToStringFunc="@(id => TreasuryLabel(id))"
+                                                   Variant="Variant.Outlined"
+                                                   Margin="Margin.Dense"
+                                                   Label="@T.T("settlement.cash_difference")">
+                                            @foreach (var treasury in _treasuries)
+                                            {
+                                                <MudSelectItem T="Guid" Value="@treasury.Id">
+                                                    @treasury.Code — @treasury.NameAr
+                                                </MudSelectItem>
+                                            }
+                                        </MudSelect>
+                                    </td>
+                                    <td>@T.T("settlement.cash_line_qty")</td>
+                                    <td>@T.T("settlement.cash_line_price")</td>
+                                    <td><b>@CashSettlement.ToString("N2")</b></td>
+                                    <td>
+                                        @(CashSettlement > 0
+                                            ? T.T("settlement.refund")
+                                            : T.T("settlement.collect"))
+                                    </td>
+                                    <td></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+
                 <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary"
                            StartIcon="@Icons.Material.Filled.Add" OnClick="AddOffer">
                     @T.T("settlement.add_offer")
@@ -108,7 +154,7 @@
                     @T.T("settlement.new_booking_hint")
                 </MudText>
 
-                <div class="ubp-inline mb-3">
+                <div class="ubp-inline mb-2">
                     <MudText Typo="Typo.body2">
                         @T.T("settlement.new_services_total"): <b>@NewServicesTotal.ToString("N2")</b>
                     </MudText>
@@ -116,31 +162,6 @@
                         @T.T("settlement.customer_due"): <b>@SelectedTotal.ToString("N2")</b>
                     </MudText>
                 </div>
-                @if (CashDifference != 0)
-                {
-                    <div class="ubp-inline mb-3">
-                        <div style="display:flex;flex-direction:column;gap:2px;min-width:300px">
-                            <MudText Typo="Typo.caption">
-                                @T.T("settlement.cash_difference")
-                                (@(CashDifference > 0 ? T.T("settlement.collect") : T.T("settlement.refund")))
-                            </MudText>
-                            <MudSelect T="Guid" Value="_cashTreasuryId"
-                                       ValueChanged="@(v => _cashTreasuryId = v)"
-                                       ToStringFunc="@(id => TreasuryLabel(id))"
-                                       Variant="Variant.Outlined" Margin="Margin.Dense">
-                                @foreach (var treasury in _treasuries)
-                                {
-                                    <MudSelectItem T="Guid" Value="@treasury.Id">
-                                        @treasury.Code — @treasury.NameAr
-                                    </MudSelectItem>
-                                }
-                            </MudSelect>
-                        </div>
-                        <MudText Typo="Typo.body2">
-                            @T.T("settlement.cash_difference_value"): <b>@Math.Abs(CashDifference).ToString("N2")</b>
-                        </MudText>
-                    </div>
-                }
             }
 
             @if (_sheet.Lines.Count == 0)

@@ -1863,6 +1863,8 @@
   "settlement.total_value": "إجمالي القيمة",
   "settlement.new_services_total": "إجمالي الخدمات الجديدة",
   "settlement.customer_due": "إجمالي المستحق للعميل",
+  "settlement.cash_line_qty": "—",
+  "settlement.cash_line_price": "—",
   "settlement.cash_difference": "سطر تسوية الفرق بالخزينة",
   "settlement.cash_difference_value": "قيمة الفرق",
   "settlement.collect": "تحصيل من العميل",

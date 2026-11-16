@@ -101,21 +101,19 @@ public sealed class ReservationRepository : IReservationRepository
             "customer" => "c.name_ar, r.booking_date DESC, r.item_code",
             _ => "r.booking_date DESC, r.booking_no DESC NULLS LAST, r.item_code"
         };
+        // المتبقي غير المحصل = قيمة الخدمة وقت الحجز − المسدد المنسوب للخدمة.
+        var paidSql = """
+            CASE WHEN tot.booked_value > 0
+                 THEN LEAST(r.booked_qty * r.unit_price,
+                      ROUND((bk.deposit_amount + COALESCE(paid.paid_amount, 0)
+                             - COALESCE(settled.paid_amount, 0))
+                            * (r.booked_qty * r.unit_price) / tot.booked_value, 2))
+                 ELSE 0 END
+            """;
         var sql = $"""
             SELECT {Columns}, b.name_ar AS BranchName, c.code AS CustomerCode,
-                   CASE WHEN tot.booked_value > 0
-                        THEN LEAST(r.booked_qty * r.unit_price,
-                             ROUND((bk.deposit_amount + COALESCE(paid.paid_amount, 0)
-                                    - COALESCE(settled.paid_amount, 0))
-                                   * (r.booked_qty * r.unit_price) / tot.booked_value, 2))
-                        ELSE 0 END AS PaidAmount,
-                   GREATEST(r.booked_qty * r.unit_price -
-                     CASE WHEN tot.booked_value > 0
-                          THEN LEAST(r.booked_qty * r.unit_price,
-                               ROUND((bk.deposit_amount + COALESCE(paid.paid_amount, 0)
-                                      - COALESCE(settled.paid_amount, 0))
-                                     * (r.booked_qty * r.unit_price) / tot.booked_value, 2))
-                          ELSE 0 END, 0) AS UncollectedValue
+                   {paidSql} AS PaidAmount,
+                   GREATEST(r.booked_qty * r.unit_price - ({paidSql}), 0) AS UncollectedValue
             FROM v_customer_reservations r
             JOIN branches b ON b.id = r.branch_id
             JOIN customers c ON c.id = r.customer_id
@@ -133,6 +131,7 @@ public sealed class ReservationRepository : IReservationRepository
                 FROM booking_lines l2 WHERE l2.booking_id = r.booking_id
             ) tot ON true
             WHERE {string.Join(" AND ", where)}
+              AND GREATEST(r.booked_qty * r.unit_price - ({paidSql}), 0) <> 0
             ORDER BY {order}
             LIMIT 5000
             """;

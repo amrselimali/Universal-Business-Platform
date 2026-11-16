@@ -75,6 +75,49 @@ public sealed partial class BookingSettlementTests
     }
 
     [Fact]
+    public async Task Partial_new_booking_leaves_a_treasury_settlement_line_and_draft_receipt()
+    {
+        var actor = await _db.AdminActorAsync();
+        var f = await SetupAsync("CASH", pay: 200);
+
+        var result = await _db.BookingSettlements().SettleAsync(actor, new BookingSettlementInput
+        {
+            BranchId = f.Branch, CustomerId = f.Customer.Id, TreasuryId = f.TreasuryId,
+            SettlementType = BookingSettlementTypes.NewBooking,
+            NewBookingLines =
+            {
+                new NewBookingLineInput { ItemId = f.ServiceId, Quantity = 1, UnitPrice = 50 }
+            },
+            DocDate = DateTime.Today,
+            Lines =
+            {
+                new BookingSettlementLineInput
+                {
+                    BookingId = f.Booking.Id, BookingLineId = f.LineId, ExternalUnitPrice = 50
+                }
+            }
+        });
+
+        // المستحق 100 والعروض 50 => سطر خزينة 50 استرداد للعميل.
+        Assert.NotEqual(Guid.Empty, result.VoucherId);
+        var voucher = await _db.TreasuryRepo.GetVoucherAsync(result.VoucherId);
+        Assert.Equal(VoucherStatuses.Draft, voucher!.Status);
+        Assert.Equal(50, voucher.TotalAmount);
+
+        await using var connection = new NpgsqlConnection(TestDb.AdminConnection);
+        await connection.OpenAsync();
+        var cash = await connection.QuerySingleAsync<(decimal Amount, string Direction)>(
+            "SELECT amount, direction FROM customer_account_settlement_cash_lines WHERE settlement_id=@id",
+            new { id = result.SettlementId });
+        Assert.Equal(50, cash.Amount);
+        Assert.Equal("refund", cash.Direction);
+
+        var entry = await _db.JournalEntryRepo.GetBySourceAsync(EntrySources.Voucher,
+            result.VoucherId);
+        Assert.Equal(EntryStatuses.Draft, entry!.Status);
+    }
+
+    [Fact]
     public async Task Uncollected_services_list_filters_and_sorts_for_all_customers()
     {
         var actor = await _db.AdminActorAsync();

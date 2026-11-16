@@ -14,12 +14,12 @@ public sealed partial class BookingSettlementRepository
     private static async Task<Guid?> CreateDraftJournalAsync(NpgsqlConnection connection,
         NpgsqlTransaction tx, Guid settlementId, Guid sourceId, string sourceType,
         BookingSettlementInput input, string customerName, TreasuryRow? treasury,
-        IReadOnlyList<SettlementCalc> calcs, decimal totalRefund, bool includeRefund,
-        Guid userId, CancellationToken ct)
+        IReadOnlyList<SettlementCalc> calcs, decimal cashAmount, Guid userId,
+        CancellationToken ct)
     {
         var revenueAdjustment = Math.Round(calcs.Sum(c => c.RevenueAdjustment), 2,
             MidpointRounding.AwayFromZero);
-        if (!includeRefund && revenueAdjustment == 0) return null;
+        if (cashAmount == 0 && revenueAdjustment == 0) return null;
 
         var defaults = (await connection.QueryAsync<(string Key, Guid? AccountId)>(
             new CommandDefinition("SELECT setting_key, account_id FROM posting_defaults",
@@ -46,13 +46,24 @@ public sealed partial class BookingSettlementRepository
             gl.Add(new JournalLeg(receivable, 0, -revenueAdjustment, input.CustomerId));
         }
 
-        if (includeRefund && totalRefund > 0)
+        if (cashAmount != 0)
         {
             if (treasury is null)
                 throw new ValidationAppException("validation.treasury_not_found");
             var advances = Need(PostingKeys.CustomerAdvances);
-            gl.Add(new JournalLeg(advances, totalRefund, 0, input.CustomerId));
-            gl.Add(new JournalLeg(treasury.AccountId, 0, totalRefund, null));
+            var amount = Math.Abs(cashAmount);
+            if (cashAmount > 0)
+            {
+                // رصيد متبقٍ للعميل: استرداد نقدي من الخزينة.
+                gl.Add(new JournalLeg(advances, amount, 0, input.CustomerId));
+                gl.Add(new JournalLeg(treasury.AccountId, 0, amount, null));
+            }
+            else
+            {
+                // العروض الجديدة أكبر من المستحق: تحصيل الفرق للخزينة.
+                gl.Add(new JournalLeg(treasury.AccountId, amount, 0, null));
+                gl.Add(new JournalLeg(advances, 0, amount, input.CustomerId));
+            }
         }
 
         gl = gl.Where(l => l.Debit != 0 || l.Credit != 0).ToList();

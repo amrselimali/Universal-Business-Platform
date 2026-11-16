@@ -1863,6 +1863,8 @@
   "settlement.total_value": "Total value",
   "settlement.new_services_total": "New services total",
   "settlement.customer_due": "Total due to customer",
+  "settlement.cash_line_qty": "—",
+  "settlement.cash_line_price": "—",
   "settlement.cash_difference": "Treasury difference settlement line",
   "settlement.cash_difference_value": "Difference value",
   "settlement.collect": "Collect from customer",

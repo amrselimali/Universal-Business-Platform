@@ -42,14 +42,15 @@ public partial class BookingSettlementDialog
                                  (_settlementType == BookingSettlementTypes.NewBooking &&
                                   (_newOffers.Count == 0 || _newOffers.Any(o =>
                                       o.Service is null || o.Quantity <= 0 || o.UnitPrice < 0) ||
-                                   (CashDifference != 0 && _cashTreasuryId == Guid.Empty)));
+                                   (CashSettlement != 0 && _cashTreasuryId == Guid.Empty)));
 
     private int SelectedCount => _rows.Count(r => r.Selected);
     private decimal SelectedTotal => Math.Round(_rows.Where(r => r.Selected).Sum(r => r.Due), 2,
         MidpointRounding.AwayFromZero);
     private decimal NewServicesTotal => Math.Round(
         _newOffers.Sum(o => o.Quantity * o.UnitPrice), 2, MidpointRounding.AwayFromZero);
-    private decimal CashDifference => Math.Round(NewServicesTotal - SelectedTotal, 2,
+    /// <summary>سطر تسوية الخزينة = المستحق للعميل − إجمالي العروض الجديدة.</summary>
+    private decimal CashSettlement => Math.Round(SelectedTotal - NewServicesTotal, 2,
         MidpointRounding.AwayFromZero);
 
     protected override async Task OnInitializedAsync()
