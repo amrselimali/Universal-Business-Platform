@@ -59,6 +59,72 @@
                 <MudSwitch @bind-Value="_input.IsActive" Label="@T.T("common.active")" Color="Color.Success" />
             </div>
 
+            @if (Kind == PartnerKind.Customer && !IsEdit && _canAddOpeningBalances)
+            {
+                <MudDivider Class="my-4" />
+                <div class="d-flex align-center justify-space-between mb-2">
+                    <MudText Typo="Typo.subtitle2">@T.T("partners.opening_balances")</MudText>
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.Add" OnClick="AddBalanceAsync">
+                        @T.T("partners.add_opening_balance")
+                    </MudButton>
+                </div>
+                <MudText Typo="Typo.caption" Class="ubp-muted d-block mb-2">
+                    @T.T("partners.opening_balances_hint")
+                </MudText>
+                @if (_balances.Count == 0)
+                {
+                    <MudText Typo="Typo.body2" Class="ubp-muted">
+                        @T.T("partners.no_opening_balances")
+                    </MudText>
+                }
+                else
+                {
+                    <MudTable Items="_balances" Dense="true" Elevation="0" Class="ubp-table">
+                        <HeaderContent>
+                            <MudTh>@T.T("partners.service")</MudTh>
+                            <MudTh Align="Right">@T.T("common.quantity")</MudTh>
+                            <MudTh Align="Right">@T.T("inventory.unit_price")</MudTh>
+                            <MudTh Align="Right">@T.T("accounting.total")</MudTh>
+                            <MudTh Align="Right">@T.T("partners.paid")</MudTh>
+                            <MudTh Align="Right">@T.T("partners.remaining")</MudTh>
+                            <MudTh></MudTh>
+                        </HeaderContent>
+                        <RowTemplate>
+                            <MudTd>
+                                <MudAutocomplete T="ItemOption" Value="context.Service"
+                                                 SearchFunc="SearchServices" ToStringFunc="ServiceLabel"
+                                                 ValueChanged="@(v => OnServiceChanged(context, v))"
+                                                 Variant="Variant.Outlined" Margin="Margin.Dense"
+                                                 ResetValueOnEmptyText="true" CoerceValue="true"
+                                                 Placeholder="@T.T("partners.service")" />
+                            </MudTd>
+                            <MudTd Align="Right">
+                                <MudNumericField T="decimal" @bind-Value="context.Quantity" Min="0.01m"
+                                                 Format="N2" Margin="Margin.Dense"
+                                                 Variant="Variant.Outlined" />
+                            </MudTd>
+                            <MudTd Align="Right">
+                                <MudNumericField T="decimal" @bind-Value="context.UnitPrice" Min="0m"
+                                                 Format="N2" Margin="Margin.Dense"
+                                                 Variant="Variant.Outlined" />
+                            </MudTd>
+                            <MudTd Align="Right">@context.Total.ToString("N2")</MudTd>
+                            <MudTd Align="Right">
+                                <MudNumericField T="decimal" @bind-Value="context.Paid" Min="0m"
+                                                 Format="N2" Margin="Margin.Dense"
+                                                 Variant="Variant.Outlined" />
+                            </MudTd>
+                            <MudTd Align="Right">@context.Remaining.ToString("N2")</MudTd>
+                            <MudTd>
+                                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small"
+                                               OnClick="@(() => RemoveBalance(context))" />
+                            </MudTd>
+                        </RowTemplate>
+                    </MudTable>
+                }
+            }
+
             @if (_fields.Count > 0)
             {
                 <MudDivider Class="my-4" />

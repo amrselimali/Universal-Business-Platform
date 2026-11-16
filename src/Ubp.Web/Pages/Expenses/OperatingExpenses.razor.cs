@@ -89,6 +89,21 @@ public partial class OperatingExpenses
             ShowSuccess("common.saved");
     }
 
+    /// <summary>
+    /// تحويل صنف من الفرع المحدد إلى فرع آخر كمسودة مخزون، فتظهر حركته في
+    /// كارت الصنف بفرع المصدر (صادر) وفرع الوجهة (داخل) قبل الترحيل.
+    /// </summary>
+    private async Task TransferAsync()
+    {
+        var branchId = _branchId ?? Actor!.CurrentBranchId;
+        if (branchId is null) return;
+        var dialog = await Dialogs.ShowAsync<BranchItemTransferDialog>(
+            T.T("expenses.item_transfer"), new DialogParameters { ["BranchId"] = branchId.Value },
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
+        if ((await dialog.Result) is { Canceled: false })
+            ShowSuccess("expenses.transfer_saved");
+    }
+
     private async Task PostAsync(OperatingExpense expense) => await RunAsync(async () =>
     {
         _busy = true;

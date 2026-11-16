@@ -24,7 +24,7 @@ public sealed class StockReportRepository : IStockReportRepository
     public async Task<PagedResult<StockBalance>> ListBalancesAsync(PageRequest request, Guid? warehouseId,
         bool includeZero, bool isAdmin, IReadOnlyCollection<Guid> branchIds, CancellationToken ct = default)
     {
-        var where = new List<string> { "(@warehouseId IS NULL OR b.warehouse_id = @warehouseId)" };
+        var where = new List<string> { "(@warehouseId::uuid IS NULL OR b.warehouse_id = @warehouseId)" };
         if (!includeZero) where.Add("b.on_hand <> 0");
         if (!string.IsNullOrWhiteSpace(request.Search))
             where.Add("i.search_text LIKE '%' || normalize_search(@search) || '%'");
@@ -70,27 +70,75 @@ public sealed class StockReportRepository : IStockReportRepository
     public async Task<PagedResult<StockMovement>> ListMovementsAsync(PageRequest request, Guid itemId,
         Guid? warehouseId, DateTime? from, DateTime? to, CancellationToken ct = default)
     {
-        var where = new List<string> { "m.item_id = @itemId" };
-        if (warehouseId.HasValue) where.Add("m.warehouse_id = @warehouseId");
-        if (from.HasValue) where.Add("m.movement_date >= @from");
-        if (to.HasValue) where.Add("m.movement_date <= @to");
-        var whereSql = "WHERE " + string.Join(" AND ", where);
+        // الحركات المرحَّلة من stock_movements + مسودات التحويل بين الفروع، فتظهر
+        // المسودة كصادر من مخزن فرع المصدر وداخل إلى مخزن فرع الوجهة قبل الترحيل.
+        const string rows = """
+            WITH rows AS (
+                SELECT m.id AS Id, m.document_id AS DocumentId, d.doc_no AS DocNo,
+                       d.doc_type AS DocType, m.item_id AS ItemId, i.code AS ItemCode,
+                       i.name_ar AS ItemName, m.warehouse_id AS WarehouseId,
+                       w.name_ar AS WarehouseName,
+                       (SELECT b.name_ar FROM branches b WHERE b.id = m.branch_id) AS BranchName,
+                       m.direction AS Direction, m.quantity AS Quantity, m.unit_cost AS UnitCost,
+                       m.total_cost AS TotalCost, m.movement_date AS MovementDate,
+                       d.status AS Status, m.created_at AS CreatedAt
+                FROM stock_movements m
+                JOIN stock_documents d ON d.id = m.document_id
+                JOIN items i ON i.id = m.item_id
+                JOIN warehouses w ON w.id = m.warehouse_id
+                WHERE m.item_id = @itemId
+                  AND (@warehouseId::uuid IS NULL OR m.warehouse_id = @warehouseId)
+                  AND (@from::date IS NULL OR m.movement_date >= @from)
+                  AND (@to::date IS NULL OR m.movement_date <= @to)
+
+                UNION ALL
+
+                SELECT 0::bigint, d.id, d.doc_no, d.doc_type, l.item_id, i.code, i.name_ar,
+                       d.warehouse_id, w.name_ar,
+                       (SELECT b.name_ar FROM branches b WHERE b.id = d.branch_id),
+                       'OUT', l.base_quantity, l.unit_cost, l.base_quantity * l.unit_cost,
+                       d.doc_date, d.status, d.created_at
+                FROM stock_document_lines l
+                JOIN stock_documents d ON d.id = l.document_id
+                JOIN items i ON i.id = l.item_id
+                JOIN warehouses w ON w.id = d.warehouse_id
+                WHERE d.doc_type = 'TRANSFER' AND d.status = 'DRAFT'
+                  AND l.item_id = @itemId
+                  AND (@warehouseId::uuid IS NULL OR d.warehouse_id = @warehouseId)
+                  AND (@from::date IS NULL OR d.doc_date >= @from)
+                  AND (@to::date IS NULL OR d.doc_date <= @to)
+
+                UNION ALL
+
+                SELECT 0::bigint, d.id, d.doc_no, d.doc_type, l.item_id, i.code, i.name_ar,
+                       d.to_warehouse_id, w.name_ar,
+                       (SELECT b.name_ar FROM branches b WHERE b.id = d.to_branch_id),
+                       'IN', l.base_quantity, l.unit_cost, l.base_quantity * l.unit_cost,
+                       d.doc_date, d.status, d.created_at
+                FROM stock_document_lines l
+                JOIN stock_documents d ON d.id = l.document_id
+                JOIN items i ON i.id = l.item_id
+                JOIN warehouses w ON w.id = d.to_warehouse_id
+                WHERE d.doc_type = 'TRANSFER' AND d.status = 'DRAFT'
+                  AND d.to_warehouse_id IS NOT NULL
+                  AND l.item_id = @itemId
+                  AND (@warehouseId::uuid IS NULL OR d.to_warehouse_id = @warehouseId)
+                  AND (@from::date IS NULL OR d.doc_date >= @from)
+                  AND (@to::date IS NULL OR d.doc_date <= @to)
+            )
+            """;
 
         var sql = $"""
-            SELECT m.id AS Id, m.document_id AS DocumentId, d.doc_no AS DocNo, d.doc_type AS DocType,
-                   m.item_id AS ItemId, i.code AS ItemCode, i.name_ar AS ItemName,
-                   m.warehouse_id AS WarehouseId, w.name_ar AS WarehouseName,
-                   (SELECT b.name_ar FROM branches b WHERE b.id = m.branch_id) AS BranchName,
-                   m.direction AS Direction, m.quantity AS Quantity, m.unit_cost AS UnitCost,
-                   m.total_cost AS TotalCost, m.movement_date AS MovementDate,
-                   m.created_at AS CreatedAt
-            FROM stock_movements m
-            JOIN stock_documents d ON d.id = m.document_id
-            JOIN items i ON i.id = m.item_id
-            JOIN warehouses w ON w.id = m.warehouse_id
-            {whereSql}
-            ORDER BY m.id DESC LIMIT @take OFFSET @offset;
-            SELECT count(*) FROM stock_movements m {whereSql};
+            {rows}
+            SELECT Id, DocumentId, DocNo, DocType, ItemId, ItemCode, ItemName, WarehouseId,
+                   WarehouseName, BranchName, Direction, Quantity, UnitCost, TotalCost,
+                   MovementDate, Status, CreatedAt
+            FROM rows
+            ORDER BY CreatedAt DESC, Id DESC
+            LIMIT @take OFFSET @offset;
+
+            {rows}
+            SELECT count(*) FROM rows;
             """;
 
         await using var connection = await _factory.OpenAsync(ct);

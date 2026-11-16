@@ -35,7 +35,7 @@ public sealed class ItemService
         bool sellableOnly = false, CancellationToken ct = default)
     {
         await _permissions.RequireAsync(actor, ScreenCodes.Items, ActionCodes.View, ct: ct);
-        return await _items.ListOptionsAsync(search, 25, sellableOnly, ct);
+        return await _items.ListOptionsAsync(search, 25, sellableOnly, null, ct);
     }
 
     public async Task<ItemDetail> GetDetailAsync(ActorContext actor, Guid id, CancellationToken ct = default)

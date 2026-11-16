@@ -12,6 +12,13 @@ public interface IPartnerRepository
     Task<Partner?> GetAsync(PartnerKind kind, Guid id, CancellationToken ct = default);
     Task<Partner?> GetByCodeAsync(PartnerKind kind, string code, CancellationToken ct = default);
     Task<Partner> CreateAsync(PartnerKind kind, PartnerInput input, CancellationToken ct = default);
+    /// <summary>
+    /// إنشاء عميل مع أرصدة افتتاحية لخدماته في معاملة واحدة: تُسجَّل كل خدمة كحجز
+    /// مؤكد (صادر/متبقي للتنفيذ) مع المدفوع سابقًا في deposit_amount — 0104.
+    /// </summary>
+    Task<PartnerOpeningBalancesResult> CreateWithOpeningBalancesAsync(PartnerInput input,
+        IReadOnlyList<ServiceOpeningBalanceInput> balances, Guid branchId, Guid userId,
+        CancellationToken ct = default);
     /// <summary>الكود التسلسلي التالي للطرف داخل نطاق/فرع، بدءًا من 1 — 0094.</summary>
     Task<string> NextCodeAsync(PartnerKind kind, string scopeType, Guid? branchId,
         CancellationToken ct = default);

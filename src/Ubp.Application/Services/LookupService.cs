@@ -42,12 +42,21 @@ public sealed class LookupService
         return page.Items;
     }
 
-    /// <summary>أصناف للاختيار (حد أقصى آمن داخل المستودع).</summary>
+    /// <summary>أصناف للاختيار (حد أقصى آمن داخل المستودع)، مع فلتر تصنيف اختياري.</summary>
     public Task<IReadOnlyList<ItemOption>> ItemsAsync(ActorContext actor, string? search,
-        int take = 50, bool sellableOnly = false, CancellationToken ct = default)
+        int take = 50, bool sellableOnly = false, Guid? categoryId = null,
+        CancellationToken ct = default)
     {
         EnsureActor(actor);
-        return _items.ListOptionsAsync(search, take, sellableOnly, ct);
+        return _items.ListOptionsAsync(search, take, sellableOnly, categoryId, ct);
+    }
+
+    /// <summary>خدمات نشِطة للاختيار (للأرصدة الافتتاحية/الحجوزات) — 0104.</summary>
+    public Task<IReadOnlyList<ItemOption>> ServiceItemsAsync(ActorContext actor, string? search,
+        int take = 100, CancellationToken ct = default)
+    {
+        EnsureActor(actor);
+        return _items.ListServiceOptionsAsync(search, take, ct);
     }
 
     /// <summary>مخازن المستخدم المصرح بها (user_warehouses) أو مخازن فروعه عند عدم الربط.</summary>

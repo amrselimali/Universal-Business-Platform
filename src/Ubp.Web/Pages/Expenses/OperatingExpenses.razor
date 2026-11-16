@@ -21,6 +21,9 @@ else
                 <MudButton Variant="Variant.Outlined" Color="Color.Tertiary"
                            StartIcon="@Icons.Material.Filled.AccountBalanceWallet"
                            OnClick="AdvanceAsync">صرف سلفة</MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Info"
+                           StartIcon="@Icons.Material.Filled.SwapHoriz"
+                           OnClick="TransferAsync">@T.T("expenses.item_transfer")</MudButton>
             }
         </Actions>
     </PageHeader>

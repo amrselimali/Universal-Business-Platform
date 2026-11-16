@@ -1,0 +1,134 @@
+@inject StockDocumentService Documents
+@inject BranchService Branches
+@inject LookupService Lookup
+@inject UserContext UserContext
+@inject UiCulture T
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">@T.T("expenses.item_transfer")</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudForm @ref="_form">
+            <div class="ubp-form-grid">
+                <MudText Typo="Typo.body2" Class="ubp-muted">
+                    @T.T("common.from"): @SourceBranchName
+                </MudText>
+                <MudAutocomplete T="ItemOption" @bind-Value="_item" SearchFunc="SearchItems"
+                                 ToStringFunc="ItemLabel" Label="@T.T("stock.item")"
+                                 Variant="Variant.Outlined" ResetValueOnEmptyText="true"
+                                 CoerceValue="true" Required="true" />
+                <MudNumericField @bind-Value="_quantity" Label="@T.T("common.quantity")"
+                                 Variant="Variant.Outlined" Min="0.01m" Format="N2"
+                                 Required="true" />
+                <MudSelect T="Guid" Value="_toBranchId" Label="@T.T("expenses.transfer_to_branch")"
+                           Variant="Variant.Outlined" Required="true"
+                           ValueChanged="OnToBranchChanged">
+                    @foreach (var branch in _toBranches)
+                    {
+                        <MudSelectItem T="Guid" Value="@branch.Id">@branch.NameAr</MudSelectItem>
+                    }
+                </MudSelect>
+            </div>
+            @if (NoTargetBranch)
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2">
+                    @T.T("expenses.transfer_no_branch")
+                </MudAlert>
+            }
+            <MudText Typo="Typo.caption" Class="ubp-muted d-block mt-2">
+                @T.T("expenses.transfer_draft_hint")
+            </MudText>
+        </MudForm>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel" Disabled="_busy">@T.T("common.cancel")</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync"
+                   Disabled="@(_busy || NoTargetBranch)">
+            @T.T("expenses.save_draft")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public Guid BranchId { get; set; }
+
+    private MudForm _form = default!;
+    private IReadOnlyList<Branch> _branches = Array.Empty<Branch>();
+    private IReadOnlyList<Branch> _toBranches = Array.Empty<Branch>();
+    private ItemOption? _item;
+    private decimal _quantity;
+    private Guid _toBranchId;
+    private bool _busy;
+
+    private string SourceBranchName =>
+        _branches.FirstOrDefault(b => b.Id == BranchId)?.NameAr
+        ?? _toBranches.FirstOrDefault(b => b.Id == BranchId)?.NameAr ?? "—";
+
+    private string ToBranchName =>
+        _toBranches.FirstOrDefault(b => b.Id == _toBranchId)?.NameAr
+        ?? _branches.FirstOrDefault(b => b.Id == _toBranchId)?.NameAr ?? "—";
+
+    private bool NoTargetBranch => _toBranches.Count == 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var actor = await UserContext.RequireAsync();
+            _branches = await Branches.OptionsAsync(actor);
+            // كل فروع الشركة النشطة، مع استبعاد الفرع المحوَّل منه — 0104.
+            _toBranches = (await Branches.CompanyOptionsAsync(actor))
+                .Where(b => b.Id != BranchId).ToList();
+            _toBranchId = _toBranches.FirstOrDefault()?.Id ?? Guid.Empty;
+        }
+        catch (AppException ex) { Snackbar.Add(T.T(ex.Code), Severity.Error); }
+    }
+
+    private void OnToBranchChanged(Guid value) => _toBranchId = value;
+
+    private async Task<IEnumerable<ItemOption>> SearchItems(string? search, CancellationToken ct) =>
+        await Lookup.ItemsAsync(await UserContext.RequireAsync(), search, 50, false, ct: ct);
+
+    private string ItemLabel(ItemOption? item) => item is null ? "" :
+        (T.Language == "en" && !string.IsNullOrWhiteSpace(item.NameEn)
+            ? $"{item.Code} — {item.NameEn}"
+            : $"{item.Code} — {item.NameAr}");
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private async Task SaveAsync()
+    {
+        await _form.Validate();
+        if (!_form.IsValid || _item is null || _quantity <= 0 || _toBranchId == Guid.Empty)
+        {
+            Snackbar.Add(T.T("validation.required_fields"), Severity.Warning);
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            var actor = await UserContext.RequireAsync();
+            // مخزن كل فرع يُحدَّد تلقائيًا داخل الخدمة (أول مخزن نشط بالفرع).
+            var detail = await Documents.CreateBranchTransferDraftAsync(actor, new StockDocumentInput
+            {
+                DocType = StockDocumentTypes.Transfer, DocDate = DateTime.Today,
+                BranchId = BranchId, ToBranchId = _toBranchId,
+                Notes = $"{T.T("expenses.item_transfer")} — {ToBranchName}",
+                Lines =
+                {
+                    new StockDocumentLineInput
+                    {
+                        ItemId = _item.Id, UnitId = _item.BaseUnitId, Quantity = _quantity
+                    }
+                }
+            });
+            MudDialog.Close(DialogResult.Ok(detail));
+        }
+        catch (AppException ex) { Snackbar.Add(T.T(ex.Code), Severity.Error); }
+        finally { _busy = false; }
+    }
+}

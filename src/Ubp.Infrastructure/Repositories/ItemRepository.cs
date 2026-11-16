@@ -10,7 +10,10 @@ public interface IItemRepository
     Task<PagedResult<Item>> ListAsync(PageRequest request, Guid? categoryId, string? itemType,
         CancellationToken ct = default);
     Task<IReadOnlyList<ItemOption>> ListOptionsAsync(string? search, int take = 25,
-        bool sellableOnly = false, CancellationToken ct = default);
+        bool sellableOnly = false, Guid? categoryId = null, CancellationToken ct = default);
+    /// <summary>خدمات نشِطة للاختيار (أرصدة افتتاحية/حجوزات) — 0104.</summary>
+    Task<IReadOnlyList<ItemOption>> ListServiceOptionsAsync(string? search, int take = 100,
+        CancellationToken ct = default);
     Task<Item?> GetAsync(Guid id, CancellationToken ct = default);
     Task<ItemDetail?> GetDetailAsync(Guid id, CancellationToken ct = default);
     Task<Item> CreateAsync(ItemInput input, CancellationToken ct = default);
@@ -83,9 +86,10 @@ public sealed partial class ItemRepository : IItemRepository
     }
 
     public async Task<IReadOnlyList<ItemOption>> ListOptionsAsync(string? search, int take = 25,
-        bool sellableOnly = false, CancellationToken ct = default)
+        bool sellableOnly = false, Guid? categoryId = null, CancellationToken ct = default)
     {
-        take = take is < 1 or > 50 ? 25 : take;
+        // نقطة البيع تطلب دفعة كبيرة (500) لعرض أصناف التصنيفات كاملة — لا تُقصّ إلى 25.
+        take = take is < 1 or > 500 ? 25 : take;
         const string sql = """
             SELECT i.id AS Id, i.code AS Code, i.name_ar AS NameAr, i.name_en AS NameEn,
                    i.base_unit_id AS BaseUnitId,
@@ -104,6 +108,7 @@ public sealed partial class ItemRepository : IItemRepository
               AND ((@sellableOnly = false AND i.item_type = 'GOODS')
                    OR (@sellableOnly = true AND i.item_type IN ('GOODS', 'SERVICE')
                        AND NOT i.is_consumable))
+              AND (@categoryId::uuid IS NULL OR i.category_id = @categoryId::uuid)
               AND (@search IS NULL OR @search = '' OR i.search_text LIKE '%' || normalize_search(@search) || '%')
             ORDER BY (SELECT c.name_ar FROM item_categories c WHERE c.id = i.category_id) NULLS LAST,
                      i.name_ar
@@ -111,7 +116,35 @@ public sealed partial class ItemRepository : IItemRepository
             """;
         await using var connection = await _factory.OpenAsync(ct);
         var rows = await connection.QueryAsync<ItemOption>(new CommandDefinition(sql,
-            new { search, take, sellableOnly }, cancellationToken: ct));
+            new { search, take, sellableOnly, categoryId }, cancellationToken: ct));
+        return rows.ToList();
+    }
+
+    public async Task<IReadOnlyList<ItemOption>> ListServiceOptionsAsync(string? search,
+        int take = 100, CancellationToken ct = default)
+    {
+        take = take is < 1 or > 500 ? 100 : take;
+        const string sql = """
+            SELECT i.id AS Id, i.code AS Code, i.name_ar AS NameAr, i.name_en AS NameEn,
+                   i.base_unit_id AS BaseUnitId,
+                   (SELECT u.name_ar FROM units u WHERE u.id = i.base_unit_id) AS BaseUnitName,
+                   i.category_id AS CategoryId,
+                   (SELECT c.name_ar FROM item_categories c WHERE c.id = i.category_id) AS CategoryName,
+                   i.item_type AS ItemType, i.execution_mode AS ExecutionMode, i.tax_id AS TaxId,
+                   COALESCE((SELECT t.rate FROM taxes t WHERE t.id = i.tax_id), 0) AS TaxRate,
+                   COALESCE(i.default_price,
+                            (SELECT iu.sale_price FROM item_units iu
+                             WHERE iu.item_id = i.id AND iu.unit_id = i.base_unit_id), 0) AS DefaultPrice,
+                   i.price_includes_tax AS PriceIncludesTax
+            FROM items i
+            WHERE i.is_active AND i.item_type = 'SERVICE'
+              AND (@search IS NULL OR @search = '' OR i.search_text LIKE '%' || normalize_search(@search) || '%')
+            ORDER BY i.name_ar
+            LIMIT @take
+            """;
+        await using var connection = await _factory.OpenAsync(ct);
+        var rows = await connection.QueryAsync<ItemOption>(new CommandDefinition(sql,
+            new { search, take }, cancellationToken: ct));
         return rows.ToList();
     }
 

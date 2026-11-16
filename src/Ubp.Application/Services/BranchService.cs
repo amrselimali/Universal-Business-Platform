@@ -34,6 +34,18 @@ public sealed partial class BranchService
         CancellationToken ct = default) =>
         await _repository.ListOptionsAsync(actor.AllowedBranchIds, actor.IsSuperAdmin, ct);
 
+    /// <summary>
+    /// كل فروع الشركة النشطة (وليس فروع المستخدم فقط) لاختيار الفرع المحوَّل إليه
+    /// في تحويل الأصناف بين الفروع — 0104.
+    /// </summary>
+    public async Task<IReadOnlyList<Branch>> CompanyOptionsAsync(ActorContext actor,
+        CancellationToken ct = default)
+    {
+        if (actor.UserId == Guid.Empty)
+            throw new UnauthorizedAccessException("SESSION_REQUIRED");
+        return await _repository.ListAllActiveAsync(ct);
+    }
+
     public async Task<Branch?> GetAsync(ActorContext actor, Guid id, CancellationToken ct = default)
     {
         await _permissions.RequireAsync(actor, ScreenCodes.Branches, ActionCodes.View, ct: ct);

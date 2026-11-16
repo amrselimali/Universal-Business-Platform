@@ -50,6 +50,41 @@ public sealed class PartnerInput
     public string? Notes { get; set; }
     public bool IsActive { get; set; } = true;
     public Dictionary<string, object?> CustomFields { get; set; } = new();
+    /// <summary>أرصدة افتتاحية لخدمات العميل تُسجَّل مع إنشائه كحجوزات مؤكدة — 0104.</summary>
+    public List<ServiceOpeningBalanceInput> OpeningBalances { get; set; } = new();
+}
+
+/// <summary>
+/// رصيد افتتاحي لخدمة عند تكويد عميل جديد: كمية وسعر وحدة ومبلغ مسدد سابقًا،
+/// يُحوَّل إلى حجز خدمة مؤكد (للتنفيذ) ويظهر مستحقه في تحصيلات الخدمات المحجوزة.
+/// </summary>
+public sealed class ServiceOpeningBalanceInput
+{
+    public Guid ServiceId { get; set; }
+    public decimal Quantity { get; set; }
+    public decimal UnitPrice { get; set; }
+    public decimal PaidAmount { get; set; }
+    public decimal TotalAmount => Math.Round(Quantity * UnitPrice, 2, MidpointRounding.AwayFromZero);
+    public decimal RemainingAmount => Math.Max(TotalAmount - PaidAmount, 0);
+}
+
+/// <summary>نتيجة تكويد عميل مع أرصدة افتتاحية: العميل والحجوزات المنشأة لسجل المراجعة.</summary>
+public sealed class PartnerOpeningBalancesResult
+{
+    public Partner Partner { get; set; } = new();
+    public IReadOnlyList<PartnerOpeningBalanceBooking> Bookings { get; set; } =
+        Array.Empty<PartnerOpeningBalanceBooking>();
+}
+
+public sealed class PartnerOpeningBalanceBooking
+{
+    public Guid BookingId { get; set; }
+    public string? DocNo { get; set; }
+    public Guid ServiceId { get; set; }
+    public decimal Quantity { get; set; }
+    public decimal UnitPrice { get; set; }
+    public decimal TotalAmount { get; set; }
+    public decimal PaidAmount { get; set; }
 }
 
 public sealed class PartnerCategory

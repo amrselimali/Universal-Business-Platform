@@ -91,6 +91,8 @@ public static class ActionCodes
     public const string ClearAll = "CLEAR_ALL";
     public const string Add = "ADD";
     public const string Create = "CREATE";
+    /// <summary>صلاحية مستقلة: إضافة الأرصدة الافتتاحية للعملاء — 0104.</summary>
+    public const string AddOpeningBalances = "ADD_OPENING_BALANCES";
     public const string Edit = "EDIT";
     public const string Delete = "DELETE";
     public const string ToggleActive = "TOGGLE_ACTIVE";

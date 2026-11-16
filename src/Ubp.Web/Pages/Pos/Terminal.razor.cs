@@ -71,26 +71,27 @@ public partial class Terminal : SecurePageBase
     private IReadOnlyList<Partner> _customers = Array.Empty<Partner>();
     private IReadOnlyList<Warehouse> _warehouses = Array.Empty<Warehouse>();
     private IReadOnlyList<ItemOption> _products = Array.Empty<ItemOption>();
+    private IReadOnlyList<ItemCategory> _itemCategories = Array.Empty<ItemCategory>();
     private Guid? _categoryFilter;
 
     private string BranchLabel(Guid id) =>
         _branches.FirstOrDefault(b => b.Id == id)?.NameAr ?? "—";
 
-    private List<KeyValuePair<Guid?, string>> Categories => _products
-        .GroupBy(p => p.CategoryId)
-        .Select(g => new KeyValuePair<Guid?, string>(g.Key,
-            g.Key is null ? "بدون تصنيف" : g.First().CategoryName ?? "بدون تصنيف"))
-        .OrderBy(c => c.Value).ToList();
+    /// <summary>
+    /// تصنيفات الأصناف كما هي مكوَّدة في شاشة تصنيفات الأصناف (النشِطة)، وليس
+    /// مستخلصةً من الأصناف المحمَّلة — وإلا اختفت تصنيفات أصنافها خارج أول دفعة تحميل.
+    /// </summary>
+    private IReadOnlyList<ItemCategory> Categories => _itemCategories;
 
     /// <summary>الأصناف المعروضة كبوكسات: كل الأصناف أو أصناف التصنيف المحدد فقط.</summary>
     private IReadOnlyList<ItemOption> VisibleProducts => _products
         .Where(p => _categoryFilter is null || p.CategoryId == _categoryFilter)
         .OrderBy(p => p.CategoryId).ThenBy(p => p.NameAr).ToList();
 
-    private void SelectCategory(Guid? categoryId)
+    private async Task SelectCategory(Guid? categoryId)
     {
         _categoryFilter = categoryId;
-        StateHasChanged();
+        await SearchAsync();
     }
     private IReadOnlyList<TreasuryModel> _treasuries = Array.Empty<TreasuryModel>();
     private IReadOnlyList<TreasuryMethod> _methods = Array.Empty<TreasuryMethod>();
@@ -134,8 +135,17 @@ public partial class Terminal : SecurePageBase
         _branches = await Branches.OptionsAsync(Actor!);
         _branchId = Actor!.CurrentBranchId ?? _branches.FirstOrDefault()?.Id ?? Guid.Empty;
         _employees = await MasterData.EmployeeOptionsAsync(Actor!);
+        await LoadCategoriesAsync();
         await SearchCustomersAsync();
         await LoadBranchAsync();
+    }
+
+    /// <summary>تحميل كل تصنيفات الأصناف النشِطة من شاشة التصنيفات لعرضها كأزرار في نقطة البيع.</summary>
+    private async Task LoadCategoriesAsync()
+    {
+        _itemCategories = await Lookup.ItemCategoriesAsync(Actor!);
+        if (_categoryFilter is { } selected && _itemCategories.All(c => c.Id != selected))
+            _categoryFilter = null;
     }
 
     private async Task LoadBranchAsync()
@@ -152,8 +162,8 @@ public partial class Terminal : SecurePageBase
 
     private async Task SearchAsync()
     {
-        // عرض كل أصناف التصنيفات كاملة (حتى 500) مجمّعة بعناوين تصنيفاتها.
-        _products = await Lookup.ItemsAsync(Actor!, _search, 500, true);
+        // أصناف التصنيف المحدد (أو الكل) تُحمَّل من الخادم؛ حتى 500 صنف لكل عرض.
+        _products = await Lookup.ItemsAsync(Actor!, _search, 500, true, _categoryFilter);
     }
 
     private static decimal PriceOf(ItemOption product) => product.DefaultPrice;
