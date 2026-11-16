@@ -166,6 +166,9 @@ public sealed partial class TestDb
             new CustomFieldService(CustomFieldRepo, Permissions(), new AuditService(AuditRepo)),
             new AuditService(AuditRepo));
 
+    public LookupService LookupService() => new(PartnerRepo, ItemRepo, WarehouseRepo,
+        ItemCategoryRepo, TreasuryRepo, AccountRepo, CostCenterRepo);
+
     public UserService UserService() => new(
         UserRepo, BranchRepo, WarehouseRepo, RoleRepo, PermissionRepo, SessionRepo, RefreshRepo,
         Permissions(), Settings(), new PasswordHasher(), new AuditService(AuditRepo));

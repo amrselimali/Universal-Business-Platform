@@ -61,7 +61,8 @@ public sealed partial class BookingCollectionRepository
                     ORDER BY (mm.code = 'DEFAULT') DESC, mm.code
                     LIMIT 1
                 ) m ON true
-                WHERE t.id = @treasuryId AND t.branch_id = @branchId AND t.is_active
+                WHERE t.id = @treasuryId AND (t.is_company_wide OR t.branch_id = @branchId)
+                  AND t.is_active
                 """, new
                 {
                     methodId = payment.TreasuryMethodId == Guid.Empty

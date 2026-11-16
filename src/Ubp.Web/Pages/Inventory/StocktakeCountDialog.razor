@@ -50,6 +50,14 @@
         {
             <MudProgressLinear Indeterminate="true" />
         }
+        else if (_branchId == Guid.Empty)
+        {
+            <div class="ubp-empty">@T.T("stocktake.no_branch")</div>
+        }
+        else if (_warehouseId == Guid.Empty)
+        {
+            <div class="ubp-empty">@T.T("stocktake.no_warehouse")</div>
+        }
         else if (_rows.Count == 0)
         {
             <div class="ubp-empty">@T.T("stocktake.no_items")</div>

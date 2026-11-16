@@ -186,7 +186,7 @@ public partial class Terminal : SecurePageBase
     private async Task SearchAsync()
     {
         // أصناف التصنيف المحدد (أو الكل) تُحمَّل من الخادم؛ حتى 500 صنف لكل عرض.
-        _products = await Lookup.ItemsAsync(Actor!, _search, 500, true, _categoryFilter);
+        _products = await Lookup.ItemsAsync(Actor!, _search, 500, true, _categoryFilter, _branchId);
     }
 
     private static decimal PriceOf(ItemOption product) => product.DefaultPrice;

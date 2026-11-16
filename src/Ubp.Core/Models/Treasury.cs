@@ -54,7 +54,10 @@ public static class ShiftStatuses
 public sealed class Treasury
 {
     public Guid Id { get; set; }
+    /// <summary>الفرع المالك (يُستخدم للمحاسبة والوردية) — 0093/0107.</summary>
     public Guid BranchId { get; set; }
+    /// <summary>true = خزينة الشركة تظهر وتُستخدم في كل الفروع — 0107.</summary>
+    public bool IsCompanyWide { get; set; }
     public string Code { get; set; } = "";
     public string NameAr { get; set; } = "";
     public string? NameEn { get; set; }
@@ -88,7 +91,10 @@ public sealed class Treasury
 
 public sealed class TreasuryInput
 {
+    /// <summary>الفرع المالك (إلزامي حتى للخزينة العامة لأغراض المحاسبة).</summary>
     public Guid BranchId { get; set; }
+    /// <summary>true = خزينة الشركة تظهر وتُستخدم في كل الفروع — 0107.</summary>
+    public bool IsCompanyWide { get; set; }
     public string Code { get; set; } = "";
     public string NameAr { get; set; } = "";
     public string? NameEn { get; set; }

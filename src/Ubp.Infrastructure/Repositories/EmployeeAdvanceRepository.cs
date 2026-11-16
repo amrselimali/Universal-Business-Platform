@@ -46,8 +46,9 @@ public sealed class EmployeeAdvanceRepository : IEmployeeAdvanceRepository
                 input.TreasuryId, ct);
 
         var treasury = await connection.QuerySingleOrDefaultAsync<(Guid AccountId, Guid BranchId,
-            Guid? ClearingAccountId)>(new CommandDefinition("""
+            bool IsCompanyWide, Guid? ClearingAccountId)>(new CommandDefinition("""
             SELECT t.account_id AS AccountId, t.branch_id AS BranchId,
+                   t.is_company_wide AS IsCompanyWide,
                    m.clearing_account_id AS ClearingAccountId
             FROM treasuries t
             LEFT JOIN treasury_methods m ON m.id = @methodId AND m.treasury_id = t.id
@@ -56,7 +57,7 @@ public sealed class EmployeeAdvanceRepository : IEmployeeAdvanceRepository
             cancellationToken: ct));
         if (treasury.AccountId == Guid.Empty)
             throw new ValidationAppException("validation.treasury_not_found");
-        if (treasury.BranchId != input.BranchId)
+        if (!treasury.IsCompanyWide && treasury.BranchId != input.BranchId)
             throw new ValidationAppException("validation.treasury_branch_mismatch");
 
         var chargeAccount = input.ChargeAccountId is { } c && c != Guid.Empty ? c : (Guid?)null;

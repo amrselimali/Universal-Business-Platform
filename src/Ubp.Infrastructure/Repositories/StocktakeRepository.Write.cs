@@ -21,6 +21,7 @@ public sealed partial class StocktakeRepository
             LEFT JOIN stock_balances b
                    ON b.item_id = i.id AND b.warehouse_id = @warehouseId
             WHERE i.is_active AND i.item_type = 'GOODS'
+              AND (i.branch_id IS NULL OR i.branch_id = @BranchId)
             ORDER BY i.code
             """;
 
@@ -31,7 +32,7 @@ public sealed partial class StocktakeRepository
             code, input.BranchId, input.WarehouseId, input.Notes, userId
         }, tx, cancellationToken: ct));
         await connection.ExecuteAsync(new CommandDefinition(linesSql,
-            new { id, input.WarehouseId }, tx, cancellationToken: ct));
+            new { id, input.WarehouseId, input.BranchId }, tx, cancellationToken: ct));
         await tx.CommitAsync(ct);
         return (await GetAsync(id, ct))!;
     }

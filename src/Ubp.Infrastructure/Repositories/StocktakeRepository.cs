@@ -16,8 +16,8 @@ public interface IStocktakeRepository
     Task<Stocktake?> GetAsync(Guid id, CancellationToken ct = default);
     Task<StocktakeDetail?> GetDetailAsync(Guid id, CancellationToken ct = default);
     /// <summary>أصناف شاشة الإدخال قبل إنشاء الجلسة: الأصناف النشطة ورصيد المخزن وتكلفتها.</summary>
-    Task<IReadOnlyList<StocktakeCountSheetRow>> GetCountSheetAsync(Guid warehouseId,
-        CancellationToken ct = default);
+    Task<IReadOnlyList<StocktakeCountSheetRow>> GetCountSheetAsync(Guid branchId,
+        Guid warehouseId, CancellationToken ct = default);
     Task<string> NextCodeAsync(Guid branchId, DateTime date, CancellationToken ct = default);
     Task<Stocktake> CreateAsync(StocktakeInput input, string code, Guid userId, CancellationToken ct = default);
     Task UpdateLinesAsync(Guid id, IReadOnlyList<StocktakeLineInput> lines, CancellationToken ct = default);
@@ -147,8 +147,8 @@ public sealed partial class StocktakeRepository : IStocktakeRepository
         return new StocktakeDetail { Header = header, Lines = lines };
     }
 
-    public async Task<IReadOnlyList<StocktakeCountSheetRow>> GetCountSheetAsync(Guid warehouseId,
-        CancellationToken ct = default)
+    public async Task<IReadOnlyList<StocktakeCountSheetRow>> GetCountSheetAsync(Guid branchId,
+        Guid warehouseId, CancellationToken ct = default)
     {
         const string sql = """
             SELECT i.id AS ItemId, i.code AS ItemCode, i.name_ar AS ItemName,
@@ -157,11 +157,12 @@ public sealed partial class StocktakeRepository : IStocktakeRepository
             LEFT JOIN stock_balances b
                    ON b.item_id = i.id AND b.warehouse_id = @warehouseId
             WHERE i.is_active AND i.item_type = 'GOODS'
+              AND (i.branch_id IS NULL OR i.branch_id = @branchId)
             ORDER BY i.code
             """;
         await using var connection = await _factory.OpenAsync(ct);
         var rows = await connection.QueryAsync<StocktakeCountSheetRow>(
-            new CommandDefinition(sql, new { warehouseId }, cancellationToken: ct));
+            new CommandDefinition(sql, new { branchId, warehouseId }, cancellationToken: ct));
         return rows.ToList();
     }
 }

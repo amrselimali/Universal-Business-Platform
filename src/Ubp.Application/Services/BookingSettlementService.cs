@@ -31,7 +31,8 @@ public sealed class BookingSettlementService
     {
         await _permissions.RequireAsync(actor, ScreenCodes.Reservations,
             ActionCodes.SettleAccount, ct: ct);
-        return (await _items.ListServiceOptionsAsync(null, 500, ct)).ToList();
+        return (await _items.ListServiceOptionsAsync(null, 500,
+            BranchScope.Effective(actor, null), ct)).ToList();
     }
 
     public async Task<BookingSettlementSheet?> GetSheetAsync(ActorContext actor, Guid branchId,

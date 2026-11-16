@@ -7,13 +7,20 @@
     <DialogContent>
         <MudForm @ref="_form">
             <div class="ubp-form-grid">
-                <MudSelect T="Guid" @bind-Value="_input.BranchId" Label="@T.T("common.branch")"
+                <MudSwitch T="bool" @bind-Value="_input.IsCompanyWide"
+                           Label="@T.T("treasury.company_wide")" Color="Color.Primary"
+                           Disabled="@(!_canCompanyWide)" />
+                <MudSelect T="Guid" @bind-Value="_input.BranchId"
+                           Label="@T.T("treasury.owner_branch")"
                            Variant="Variant.Outlined" Required="true" Disabled="IsEdit">
                     @foreach (var branch in Branches)
                     {
                         <MudSelectItem T="Guid" Value="@branch.Id">@branch.NameAr</MudSelectItem>
                     }
                 </MudSelect>
+                <MudText Typo="Typo.caption" Class="ubp-muted ubp-span-2">
+                    @T.T("treasury.company_wide_hint")
+                </MudText>
                 <MudTextField @bind-Value="_input.Code" Label="@T.T("common.code")" Required="true"
                               Variant="Variant.Outlined" MaxLength="30" />
                 <MudTextField @bind-Value="_input.NameAr" Label="@T.T("common.name_ar")"
@@ -78,6 +85,7 @@
     private IReadOnlyList<Account> _accounts = Array.Empty<Account>();
     private bool _busy;
     private bool _english;
+    private bool _canCompanyWide;
 
     private bool IsEdit => Model is not null;
 
@@ -92,7 +100,8 @@
         {
             _input = new TreasuryInput
             {
-                BranchId = Model.BranchId, Code = Model.Code, NameAr = Model.NameAr,
+                BranchId = Model.BranchId, IsCompanyWide = Model.IsCompanyWide,
+                Code = Model.Code, NameAr = Model.NameAr,
                 NameEn = Model.NameEn, TreasuryType = Model.TreasuryType,
                 AccountId = Model.AccountId, OpeningBalance = Model.OpeningBalance,
                 OverShortAccountId = Model.OverShortAccountId,
@@ -106,6 +115,7 @@
         }
 
         var actor = await UserContext.GetAsync();
+        _canCompanyWide = actor?.IsAdmin ?? false;
         if (actor is not null) _accounts = await Treasury.PostableAccountsAsync(actor);
     }
 

@@ -22,6 +22,7 @@ public sealed partial class TreasuryRepository
     {
         public Guid Id { get; set; }
         public Guid BranchId { get; set; }
+        public bool IsCompanyWide { get; set; }
         public Guid AccountId { get; set; }
         public string TreasuryType { get; set; } = TreasuryTypes.Cash;
     }
@@ -68,8 +69,8 @@ public sealed partial class TreasuryRepository
     private static async Task<TreasuryRow?> GetTreasuryRowAsync(NpgsqlConnection connection,
         NpgsqlTransaction tx, Guid treasuryId, CancellationToken ct) =>
         await connection.QuerySingleOrDefaultAsync<TreasuryRow>(new CommandDefinition("""
-            SELECT id AS Id, branch_id AS BranchId, account_id AS AccountId,
-                   treasury_type AS TreasuryType
+            SELECT id AS Id, branch_id AS BranchId, is_company_wide AS IsCompanyWide,
+                   account_id AS AccountId, treasury_type AS TreasuryType
             FROM treasuries WHERE id = @treasuryId AND is_active
             """, new { treasuryId }, tx, cancellationToken: ct));
 

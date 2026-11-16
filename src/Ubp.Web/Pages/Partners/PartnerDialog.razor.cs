@@ -134,7 +134,7 @@ public partial class PartnerDialog
     private async Task<IEnumerable<ItemOption>> SearchServices(string? search, CancellationToken ct)
     {
         var actor = await UserContext.RequireAsync();
-        return await Lookup.ServiceItemsAsync(actor, search, 100, ct);
+        return await Lookup.ServiceItemsAsync(actor, search, 100, ct: ct);
     }
 
     private string ServiceLabel(ItemOption? service) => service is null ? "" :

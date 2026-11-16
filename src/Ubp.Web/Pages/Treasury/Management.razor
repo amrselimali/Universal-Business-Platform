@@ -25,6 +25,7 @@ else
             <MudSelect ToStringFunc="@BranchLabel" T="Guid?" Value="_branchId" Label="@T.T("common.branch")"
                        Variant="Variant.Outlined" Margin="Margin.Dense"
                        ValueChanged="OnBranchChanged">
+                <MudSelectItem T="Guid?" Value="@((Guid?)null)">@T.T("common.all_scopes")</MudSelectItem>
                 @foreach (var branch in _branches)
                 {
                     <MudSelectItem T="Guid?" Value="@((Guid?)branch.Id)">@branch.NameAr</MudSelectItem>
@@ -39,6 +40,7 @@ else
                   RowsPerPage="25" Class="ubp-table">
             <HeaderContent>
                 <MudTh>@T.T("common.code")</MudTh>
+                <MudTh>@T.T("common.branch")</MudTh>
                 <MudTh>@T.T("common.name_ar")</MudTh>
                 <MudTh>@T.T("treasury.type")</MudTh>
                 <MudTh>@T.T("treasury.account")</MudTh>
@@ -48,6 +50,7 @@ else
             </HeaderContent>
             <RowTemplate>
                 <MudTd><span class="ubp-code">@context.Code</span></MudTd>
+                <MudTd>@ScopeLabel(context)</MudTd>
                 <MudTd>
                     @context.DisplayName(IsEnglish)
                     @if (!context.IsActive)
@@ -210,4 +213,7 @@ else
 
     private string BranchLabel(Guid? id) =>
         id is null ? "—" : _branches.FirstOrDefault(b => b.Id == id)?.NameAr ?? "—";
+
+    private string ScopeLabel(Treasury treasury) =>
+        treasury.IsCompanyWide ? T.T("common.company_wide") : BranchLabel(treasury.BranchId);
 }

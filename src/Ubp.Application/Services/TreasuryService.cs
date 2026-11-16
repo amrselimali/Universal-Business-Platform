@@ -35,14 +35,33 @@ public sealed partial class TreasuryService
         Guid? branchId, bool includeArchived = false, CancellationToken ct = default)
     {
         await _permissions.RequireAsync(actor, ScreenCodes.Treasuries, ActionCodes.View, ct: ct);
-        return await _treasury.ListTreasuriesAsync(branchId, includeArchived, ct);
+        if (branchId is { } selected)
+        {
+            BranchScope.Ensure(actor, selected);
+            return await _treasury.ListTreasuriesAsync(selected, includeArchived, ct);
+        }
+        if (actor.IsAdmin) return await _treasury.ListTreasuriesAsync(null, includeArchived, ct);
+
+        // غير المدير بلا فلتر: كل فروعه المصرح بها + خزائن الشركة (بلا تكرار).
+        var scoped = new Dictionary<Guid, Treasury>();
+        foreach (var allowed in actor.AllowedBranchIds)
+            foreach (var treasury in await _treasury.ListTreasuriesAsync(allowed, includeArchived, ct))
+                scoped[treasury.Id] = treasury;
+        return scoped.Values
+            .OrderByDescending(t => t.IsCompanyWide)
+            .ThenBy(t => t.Code)
+            .ToList();
     }
 
     public async Task<Treasury> CreateTreasuryAsync(ActorContext actor, TreasuryInput input,
         CancellationToken ct = default)
     {
         await _permissions.RequireAsync(actor, ScreenCodes.Treasuries, ActionCodes.Create, ct: ct);
+        if (input.BranchId == Guid.Empty)
+            throw new ValidationAppException("validation.branch_required");
         BranchScope.Ensure(actor, input.BranchId);
+        if (input.IsCompanyWide && !actor.IsAdmin)
+            throw new ForbiddenException("error.company_scope_admin_only");
         if (string.IsNullOrWhiteSpace(input.Code) || string.IsNullOrWhiteSpace(input.NameAr) ||
             input.AccountId == Guid.Empty)
             throw new ValidationAppException("validation.required_fields");

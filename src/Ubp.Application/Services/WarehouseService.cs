@@ -31,12 +31,18 @@ public sealed partial class WarehouseService
             actor.AllowedBranchIds, actor.IsSuperAdmin, ct);
     }
 
-    public async Task<IReadOnlyList<Warehouse>> OptionsAsync(ActorContext actor,
+    /// <summary>
+    /// قائمة اختيار المخازن لا تشترط صلاحية شاشة المخازن؛ تُقيَّد بمخازن المستخدم
+    /// المربوطة (user_warehouses) أو مخازن فروعه المصرح بها — مثل بقية قوائم الاختيار
+    /// في <see cref="LookupService"/> — حتى يستطيع مستخدم الجرد/المستندات المخزنية
+    /// العمل دون صلاحية عرض شاشة المخازن.
+    /// </summary>
+    public Task<IReadOnlyList<Warehouse>> OptionsAsync(ActorContext actor,
         CancellationToken ct = default)
     {
-        var scope = await _permissions.GetScopeAsync(actor, ScreenCodes.Warehouses, ActionCodes.View, ct);
-        if (scope < 0) return Array.Empty<Warehouse>();
-        return await _repository.ListOptionsAsync(scope, actor.UserId, actor.AllowedBranchIds,
+        if (actor.UserId == Guid.Empty)
+            throw new UnauthorizedAccessException("SESSION_REQUIRED");
+        return _repository.ListOptionsForUserAsync(actor.UserId, actor.AllowedBranchIds,
             actor.IsSuperAdmin, ct);
     }
 

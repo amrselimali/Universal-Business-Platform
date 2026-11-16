@@ -68,7 +68,8 @@ public sealed partial class PartnerRepository
         var services = (await connection.QueryAsync<OpeningServiceRow>(new CommandDefinition("""
             SELECT id AS Id, base_unit_id AS BaseUnitId, item_type AS ItemType, is_active AS IsActive
             FROM items WHERE id = ANY(@serviceIds)
-            """, new { serviceIds }, tx, cancellationToken: ct))).ToDictionary(s => s.Id);
+              AND (branch_id IS NULL OR branch_id = @branchId)
+            """, new { serviceIds, branchId }, tx, cancellationToken: ct))).ToDictionary(s => s.Id);
         if (services.Count != serviceIds.Length)
             throw new ValidationAppException("validation.item_not_found");
 

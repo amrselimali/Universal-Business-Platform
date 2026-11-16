@@ -10,22 +10,23 @@ public sealed partial class ItemRepository
     public async Task<Item> CreateAsync(ItemInput input, CancellationToken ct = default)
     {
         const string sql = """
-            INSERT INTO items (code, name_ar, name_en, category_id, base_unit_id, item_type, notes,
-                               is_active, custom_fields, tax_id, price_includes_tax, track_expiry,
-                               is_consumable, is_metered, metered_asset_id, default_price,
-                               execution_mode)
-            VALUES (@Code, @NameAr, @NameEn, @CategoryId, @BaseUnitId, @ItemType, @Notes,
-                    @IsActive, CAST(@CustomFields AS jsonb), @TaxId, @PriceIncludesTax,
-                    @TrackExpiry, @IsConsumable, @IsMetered, @MeteredAssetId, @DefaultPrice,
-                    @ExecutionMode)
+            INSERT INTO items (branch_id, code, name_ar, name_en, category_id, base_unit_id,
+                               item_type, notes, is_active, custom_fields, tax_id,
+                               price_includes_tax, track_expiry, is_consumable, is_metered,
+                               metered_asset_id, default_price, execution_mode)
+            VALUES (@BranchId, @Code, @NameAr, @NameEn, @CategoryId, @BaseUnitId,
+                    @ItemType, @Notes, @IsActive, CAST(@CustomFields AS jsonb), @TaxId,
+                    @PriceIncludesTax, @TrackExpiry, @IsConsumable, @IsMetered,
+                    @MeteredAssetId, @DefaultPrice, @ExecutionMode)
             RETURNING id
             """;
         await using var connection = await _factory.OpenAsync(ct);
         await using var tx = await connection.BeginTransactionAsync(ct);
         var id = await connection.ExecuteScalarAsync<Guid>(new CommandDefinition(sql, new
         {
-            input.Code, input.NameAr, input.NameEn, input.CategoryId, input.BaseUnitId,
-            input.ItemType, input.Notes, input.IsActive, input.TaxId, input.PriceIncludesTax,
+            input.BranchId, input.Code, input.NameAr, input.NameEn, input.CategoryId,
+            input.BaseUnitId, input.ItemType, input.Notes, input.IsActive, input.TaxId,
+            input.PriceIncludesTax,
             input.TrackExpiry, input.IsConsumable, input.IsMetered, input.MeteredAssetId,
             input.DefaultPrice, input.ExecutionMode,
             CustomFields = JsonSerializer.Serialize(input.CustomFields)
@@ -40,7 +41,8 @@ public sealed partial class ItemRepository
     public async Task<Item?> UpdateAsync(Guid id, int version, ItemInput input, CancellationToken ct = default)
     {
         const string sql = """
-            UPDATE items SET code = @Code, name_ar = @NameAr, name_en = @NameEn,
+            UPDATE items SET branch_id = @BranchId,
+                             code = @Code, name_ar = @NameAr, name_en = @NameEn,
                              category_id = @CategoryId, base_unit_id = @BaseUnitId,
                              item_type = @ItemType, notes = @Notes, is_active = @IsActive,
                              custom_fields = CAST(@CustomFields AS jsonb), tax_id = @TaxId,
@@ -55,8 +57,9 @@ public sealed partial class ItemRepository
         await using var tx = await connection.BeginTransactionAsync(ct);
         var updated = await connection.ExecuteScalarAsync<Guid?>(new CommandDefinition(sql, new
         {
-            id, version, input.Code, input.NameAr, input.NameEn, input.CategoryId,
-            input.BaseUnitId, input.ItemType, input.Notes, input.IsActive, input.TaxId,
+            id, version, input.BranchId, input.Code, input.NameAr, input.NameEn,
+            input.CategoryId, input.BaseUnitId, input.ItemType, input.Notes, input.IsActive,
+            input.TaxId,
             input.PriceIncludesTax, input.TrackExpiry, input.IsConsumable, input.IsMetered,
             input.MeteredAssetId, input.DefaultPrice, input.ExecutionMode,
             CustomFields = JsonSerializer.Serialize(input.CustomFields)

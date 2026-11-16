@@ -35,7 +35,7 @@ public sealed partial class TreasuryRepository
 
         var treasury = await GetTreasuryRowAsync(connection, tx, input.TreasuryId, ct)
             ?? throw new ValidationAppException("validation.treasury_not_found");
-        if (treasury.BranchId != input.BranchId)
+        if (!treasury.IsCompanyWide && treasury.BranchId != input.BranchId)
             throw new ValidationAppException("validation.treasury_branch_mismatch");
 
         if (isTransfer)

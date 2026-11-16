@@ -28,8 +28,11 @@ public sealed partial class BookingSettlementRepository
         {
             var item = await connection.QuerySingleOrDefaultAsync<(Guid Id, Guid UnitId,
                 bool IsActive)>(new CommandDefinition("""
-                SELECT id, base_unit_id, is_active FROM items WHERE id = @id
-                """, new { id = line.ItemId }, tx, cancellationToken: ct));
+                SELECT id, base_unit_id, is_active FROM items
+                WHERE id = @id
+                  AND (branch_id IS NULL OR branch_id = @branchId)
+                """, new { id = line.ItemId, branchId = input.BranchId }, tx,
+                cancellationToken: ct));
             if (item.Id == Guid.Empty || !item.IsActive)
                 throw new ValidationAppException("validation.item_not_found");
             var total = Math.Round(line.Quantity * line.UnitPrice, 2, MidpointRounding.AwayFromZero);

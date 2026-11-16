@@ -88,4 +88,35 @@ public sealed class LookupScopeTests : IClassFixture<TestDb>
         var accounts = await _lookup.PostableAccountsAsync(actor);
         Assert.NotEmpty(accounts);
     }
+
+    /// <summary>
+    /// الخزائن مخصّصة لكل فرع (treasuries.branch_id إلزامي)، بخلاف الأصناف التي
+    /// تُعرَّف على مستوى الشركة؛ لذلك فرع بلا خزينة نشطة لا يعرض خزائن فرع آخر.
+    /// </summary>
+    [Fact]
+    public async Task Treasuries_are_scoped_to_the_selected_branch_only()
+    {
+        var admin = await _db.AdminActorAsync();
+        var chart = await _db.SeedAccountingAsync();
+        var branchA = await _db.CreateBranchAsync("LK-TB-A", "فرع خزينة أ");
+        var branchB = await _db.CreateBranchAsync("LK-TB-B", "فرع خزينة ب");
+        var treasuryId = Guid.CreateVersion7();
+        await _db.TreasuryRepo.CreateTreasuryAsync(treasuryId, new TreasuryInput
+        {
+            BranchId = branchA, Code = "LK-TB-1", NameAr = "خزينة فرع أ",
+            TreasuryType = TreasuryTypes.Cash, AccountId = chart["1101"].Id
+        }, admin.UserId);
+
+        var actor = new ActorContext
+        {
+            UserId = Guid.NewGuid(), Username = "two-branches", IsAdmin = false,
+            CurrentBranchId = branchB,
+            AllowedBranchIds = new[] { branchA, branchB },
+            AllBranchIds = new[] { branchA, branchB }, TraceId = "test"
+        };
+
+        Assert.Empty(await _lookup.TreasuriesAsync(actor, branchB));
+        Assert.Contains(await _lookup.TreasuriesAsync(actor, branchA),
+            t => t.Id == treasuryId);
+    }
 }

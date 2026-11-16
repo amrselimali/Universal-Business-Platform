@@ -167,6 +167,32 @@ public sealed class PosTests : IClassFixture<TestDb>
     }
 
     [Fact]
+    public async Task Pos_accepts_a_company_wide_treasury_owned_by_another_branch()
+    {
+        var f = await SetupAsync("CW");
+        var actor = await _db.AdminActorAsync();
+        var chart = await _db.SeedAccountingAsync();
+        var ownerBranch = await _db.CreateBranchAsync("POS-CW-B", "فرع مالك الخزينة العامة");
+
+        var companyTreasury = Guid.CreateVersion7();
+        await _db.TreasuryRepo.CreateTreasuryAsync(companyTreasury, new TreasuryInput
+        {
+            BranchId = ownerBranch, IsCompanyWide = true, Code = "POS-CW-T",
+            NameAr = "خزينة الشركة", TreasuryType = TreasuryTypes.Cash,
+            AccountId = chart["1101"].Id
+        }, actor.UserId);
+
+        var receipt = await CheckoutAsync(f, 1, new PosPaymentInput
+        {
+            TreasuryId = companyTreasury, TreasuryMethodId = Guid.Empty, Amount = 100
+        });
+
+        Assert.Equal(100m, receipt.Paid);
+        Assert.Single(receipt.Vouchers);
+        Assert.Equal(companyTreasury, receipt.Vouchers[0].TreasuryId);
+    }
+
+    [Fact]
     public async Task Pos_checkout_accepts_multiple_treasuries_with_fees()
     {
         var f = await SetupAsync("2");

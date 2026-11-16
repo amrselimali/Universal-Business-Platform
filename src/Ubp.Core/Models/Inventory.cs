@@ -66,6 +66,9 @@ public static class ItemExecutionModes
 public sealed class Item
 {
     public Guid Id { get; set; }
+    /// <summary>NULL = صنف على مستوى الشركة، أو الفرع الذي يخصه الصنف — 0107.</summary>
+    public Guid? BranchId { get; set; }
+    public string? BranchName { get; set; }
     public string Code { get; set; } = "";
     public string NameAr { get; set; } = "";
     public string? NameEn { get; set; }
@@ -94,6 +97,8 @@ public sealed class Item
 
 public sealed class ItemInput
 {
+    /// <summary>NULL = الشركة كلها، أو الفرع الذي يخصه الصنف — 0107.</summary>
+    public Guid? BranchId { get; set; }
     public string Code { get; set; } = "";
     public string NameAr { get; set; } = "";
     public string? NameEn { get; set; }

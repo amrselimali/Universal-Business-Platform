@@ -8,12 +8,13 @@ namespace Ubp.Infrastructure.Repositories;
 public interface IItemRepository
 {
     Task<PagedResult<Item>> ListAsync(PageRequest request, Guid? categoryId, string? itemType,
-        CancellationToken ct = default);
+        Guid? branchId = null, CancellationToken ct = default);
     Task<IReadOnlyList<ItemOption>> ListOptionsAsync(string? search, int take = 25,
-        bool sellableOnly = false, Guid? categoryId = null, CancellationToken ct = default);
+        bool sellableOnly = false, Guid? categoryId = null, Guid? branchId = null,
+        CancellationToken ct = default);
     /// <summary>خدمات نشِطة للاختيار (أرصدة افتتاحية/حجوزات) — 0104.</summary>
     Task<IReadOnlyList<ItemOption>> ListServiceOptionsAsync(string? search, int take = 100,
-        CancellationToken ct = default);
+        Guid? branchId = null, CancellationToken ct = default);
     Task<Item?> GetAsync(Guid id, CancellationToken ct = default);
     Task<ItemDetail?> GetDetailAsync(Guid id, CancellationToken ct = default);
     Task<Item> CreateAsync(ItemInput input, CancellationToken ct = default);
@@ -26,7 +27,9 @@ public interface IItemRepository
 public sealed partial class ItemRepository : IItemRepository
 {
     private const string Columns = """
-        i.id AS Id, i.code AS Code, i.name_ar AS NameAr, i.name_en AS NameEn,
+        i.id AS Id, i.branch_id AS BranchId,
+        (SELECT b.name_ar FROM branches b WHERE b.id = i.branch_id) AS BranchName,
+        i.code AS Code, i.name_ar AS NameAr, i.name_en AS NameEn,
         i.category_id AS CategoryId,
         (SELECT c.name_ar FROM item_categories c WHERE c.id = i.category_id) AS CategoryName,
         i.base_unit_id AS BaseUnitId,
@@ -54,12 +57,14 @@ public sealed partial class ItemRepository : IItemRepository
     public ItemRepository(IDbConnectionFactory factory) => _factory = factory;
 
     public async Task<PagedResult<Item>> ListAsync(PageRequest request, Guid? categoryId,
-        string? itemType, CancellationToken ct = default)
+        string? itemType, Guid? branchId = null, CancellationToken ct = default)
     {
         var where = new List<string>();
         if (!request.IncludeInactive) where.Add("i.is_active");
         if (categoryId.HasValue) where.Add("i.category_id = @categoryId");
         if (!string.IsNullOrWhiteSpace(itemType)) where.Add("i.item_type = @itemType");
+        if (branchId.HasValue)
+            where.Add("(i.branch_id IS NULL OR i.branch_id = @branchId)");
         if (!string.IsNullOrWhiteSpace(request.Search))
             where.Add("i.search_text LIKE '%' || normalize_search(@search) || '%'");
 
@@ -74,7 +79,7 @@ public sealed partial class ItemRepository : IItemRepository
         await using var connection = await _factory.OpenAsync(ct);
         using var multi = await connection.QueryMultipleAsync(new CommandDefinition(sql, new
         {
-            search = request.Search, categoryId, itemType,
+            search = request.Search, categoryId, itemType, branchId,
             take = request.SafePageSize, offset = request.Offset
         }, cancellationToken: ct));
         var items = (await multi.ReadAsync<ItemRow>()).Select(Map).ToList();
@@ -86,7 +91,8 @@ public sealed partial class ItemRepository : IItemRepository
     }
 
     public async Task<IReadOnlyList<ItemOption>> ListOptionsAsync(string? search, int take = 25,
-        bool sellableOnly = false, Guid? categoryId = null, CancellationToken ct = default)
+        bool sellableOnly = false, Guid? categoryId = null, Guid? branchId = null,
+        CancellationToken ct = default)
     {
         // نقطة البيع تطلب دفعة كبيرة (500) لعرض أصناف التصنيفات كاملة — لا تُقصّ إلى 25.
         take = take is < 1 or > 500 ? 25 : take;
@@ -109,6 +115,8 @@ public sealed partial class ItemRepository : IItemRepository
                    OR (@sellableOnly = true AND i.item_type IN ('GOODS', 'SERVICE')
                        AND NOT i.is_consumable))
               AND (@categoryId::uuid IS NULL OR i.category_id = @categoryId::uuid)
+              AND (@branchId::uuid IS NULL OR i.branch_id IS NULL
+                   OR i.branch_id = @branchId::uuid)
               AND (@search IS NULL OR @search = '' OR i.search_text LIKE '%' || normalize_search(@search) || '%')
             ORDER BY (SELECT c.name_ar FROM item_categories c WHERE c.id = i.category_id) NULLS LAST,
                      i.name_ar
@@ -116,12 +124,12 @@ public sealed partial class ItemRepository : IItemRepository
             """;
         await using var connection = await _factory.OpenAsync(ct);
         var rows = await connection.QueryAsync<ItemOption>(new CommandDefinition(sql,
-            new { search, take, sellableOnly, categoryId }, cancellationToken: ct));
+            new { search, take, sellableOnly, categoryId, branchId }, cancellationToken: ct));
         return rows.ToList();
     }
 
     public async Task<IReadOnlyList<ItemOption>> ListServiceOptionsAsync(string? search,
-        int take = 100, CancellationToken ct = default)
+        int take = 100, Guid? branchId = null, CancellationToken ct = default)
     {
         take = take is < 1 or > 500 ? 100 : take;
         const string sql = """
@@ -138,13 +146,15 @@ public sealed partial class ItemRepository : IItemRepository
                    i.price_includes_tax AS PriceIncludesTax
             FROM items i
             WHERE i.is_active AND i.item_type = 'SERVICE'
+              AND (@branchId::uuid IS NULL OR i.branch_id IS NULL
+                   OR i.branch_id = @branchId::uuid)
               AND (@search IS NULL OR @search = '' OR i.search_text LIKE '%' || normalize_search(@search) || '%')
             ORDER BY i.name_ar
             LIMIT @take
             """;
         await using var connection = await _factory.OpenAsync(ct);
         var rows = await connection.QueryAsync<ItemOption>(new CommandDefinition(sql,
-            new { search, take }, cancellationToken: ct));
+            new { search, take, branchId }, cancellationToken: ct));
         return rows.ToList();
     }
 
@@ -158,7 +168,8 @@ public sealed partial class ItemRepository : IItemRepository
 
     private static Item Map(ItemRow row) => new()
     {
-        Id = row.Id, Code = row.Code, NameAr = row.NameAr, NameEn = row.NameEn,
+        Id = row.Id, BranchId = row.BranchId, BranchName = row.BranchName,
+        Code = row.Code, NameAr = row.NameAr, NameEn = row.NameEn,
         CategoryId = row.CategoryId, CategoryName = row.CategoryName,
         BaseUnitId = row.BaseUnitId, BaseUnitName = row.BaseUnitName,
         ItemType = row.ItemType, Notes = row.Notes, IsActive = row.IsActive,
@@ -175,6 +186,8 @@ public sealed partial class ItemRepository : IItemRepository
     private sealed class ItemRow
     {
         public Guid Id { get; set; }
+        public Guid? BranchId { get; set; }
+        public string? BranchName { get; set; }
         public string Code { get; set; } = "";
         public string NameAr { get; set; } = "";
         public string? NameEn { get; set; }

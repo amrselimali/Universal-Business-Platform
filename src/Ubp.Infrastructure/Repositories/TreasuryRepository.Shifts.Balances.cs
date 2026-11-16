@@ -34,6 +34,7 @@ public sealed partial class TreasuryRepository
                 JOIN cashier_shifts s2 ON s2.id = c2.shift_id
                 WHERE c2.treasury_id = t.id AND s2.status = 'closed'
                   AND c2.counted_cash IS NOT NULL
+                  AND (NOT t.is_company_wide OR s2.branch_id = @branchId)
                 ORDER BY s2.closed_at DESC NULLS LAST
                 LIMIT 1
             ) prev ON true
@@ -42,11 +43,14 @@ public sealed partial class TreasuryRepository
                 SELECT COALESCE((SELECT SUM(l.debit - l.credit)
                                  FROM journal_entry_lines l
                                  JOIN journal_entries e ON e.id = l.entry_id
-                                                        AND e.branch_id = t.branch_id
+                                                        AND e.branch_id = CASE
+                                                            WHEN t.is_company_wide THEN @branchId
+                                                            ELSE t.branch_id END
                                  WHERE e.status = 'posted' AND l.account_id = t.account_id), 0)
                        AS balance
             ) gl ON true
-            WHERE t.branch_id = @branchId AND t.is_active AND t.follow_in_shift
+            WHERE (t.is_company_wide OR t.branch_id = @branchId)
+              AND t.is_active AND t.follow_in_shift
             ORDER BY t.code
             """, new { branchId }, tx, cancellationToken: ct))).ToList();
 
@@ -62,8 +66,9 @@ public sealed partial class TreasuryRepository
             SELECT COALESCE(SUM(l.debit - l.credit), 0)
             FROM journal_entry_lines l
             JOIN journal_entries e ON e.id = l.entry_id
-            JOIN treasuries t ON t.account_id = l.account_id AND t.branch_id = e.branch_id
-            WHERE e.status = 'posted' AND t.branch_id = @branchId
+            JOIN treasuries t ON t.account_id = l.account_id
+                              AND (t.is_company_wide OR t.branch_id = e.branch_id)
+            WHERE e.status = 'posted' AND e.branch_id = @branchId
             """, new { branchId }, tx, cancellationToken: ct));
 
         var review = await connection.QuerySingleAsync<(decimal Total, int Count)>(new CommandDefinition("""

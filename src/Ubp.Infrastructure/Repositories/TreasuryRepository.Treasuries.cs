@@ -16,15 +16,15 @@ public sealed partial class TreasuryRepository
         await using var tx = await connection.BeginTransactionAsync(ct);
 
         await connection.ExecuteAsync(new CommandDefinition("""
-            INSERT INTO treasuries (id, branch_id, code, name_ar, name_en, treasury_type, account_id,
-                opening_balance, over_short_account_id, collection_fee_percent,
-                collection_fee_account_id, provider_fee_percent, provider_fee_amount,
-                provider_fee_account_id, follow_in_shift, created_by)
-            VALUES (@id, @BranchId, @Code, @NameAr, @NameEn, @TreasuryType, @AccountId,
-                    @OpeningBalance, @OverShortAccountId, @CollectionFeePercent,
+            INSERT INTO treasuries (id, branch_id, is_company_wide, code, name_ar, name_en,
+                treasury_type, account_id, opening_balance, over_short_account_id,
+                collection_fee_percent, collection_fee_account_id, provider_fee_percent,
+                provider_fee_amount, provider_fee_account_id, follow_in_shift, created_by)
+            VALUES (@id, @BranchId, @IsCompanyWide, @Code, @NameAr, @NameEn, @TreasuryType,
+                    @AccountId, @OpeningBalance, @OverShortAccountId, @CollectionFeePercent,
                     @CollectionFeeAccountId, @ProviderFeePercent, @ProviderFeeAmount,
                     @ProviderFeeAccountId, @FollowInShift, @userId)
-            """, new { id, input.BranchId, input.Code, input.NameAr, input.NameEn,
+            """, new { id, input.BranchId, input.IsCompanyWide, input.Code, input.NameAr, input.NameEn,
                 input.TreasuryType, input.AccountId, input.OpeningBalance,
                 input.OverShortAccountId, input.CollectionFeePercent,
                 input.CollectionFeeAccountId, input.ProviderFeePercent,
@@ -44,7 +44,8 @@ public sealed partial class TreasuryRepository
         await using var tx = await connection.BeginTransactionAsync(ct);
 
         var updated = await connection.ExecuteAsync(new CommandDefinition("""
-            UPDATE treasuries SET code = @Code, name_ar = @NameAr, name_en = @NameEn,
+            UPDATE treasuries SET is_company_wide = @IsCompanyWide,
+                code = @Code, name_ar = @NameAr, name_en = @NameEn,
                 treasury_type = @TreasuryType, account_id = @AccountId,
                 opening_balance = @OpeningBalance,
                 over_short_account_id = @OverShortAccountId,
@@ -56,8 +57,8 @@ public sealed partial class TreasuryRepository
                 follow_in_shift = @FollowInShift,
                 updated_by = @userId, updated_at = now()
             WHERE id = @id AND is_active
-            """, new { id, input.Code, input.NameAr, input.NameEn, input.TreasuryType,
-                input.AccountId, input.OpeningBalance, input.OverShortAccountId,
+            """, new { id, input.IsCompanyWide, input.Code, input.NameAr, input.NameEn,
+                input.TreasuryType, input.AccountId, input.OpeningBalance, input.OverShortAccountId,
                 input.CollectionFeePercent, input.CollectionFeeAccountId,
                 input.ProviderFeePercent, input.ProviderFeeAmount,
                 input.ProviderFeeAccountId, input.FollowInShift, userId }, tx,

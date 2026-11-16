@@ -161,6 +161,7 @@ public sealed partial class TreasuryRepository
                 WHERE c2.treasury_id = t.id AND s2.status = 'closed'
                   AND c2.counted_cash IS NOT NULL
                   AND s2.closed_at < @openedAt
+                  AND (NOT t.is_company_wide OR s2.branch_id = @branchId)
                 ORDER BY s2.closed_at DESC NULLS LAST
                 LIMIT 1
             ) prev ON true
@@ -168,11 +169,13 @@ public sealed partial class TreasuryRepository
                 SELECT COALESCE((SELECT SUM(l.debit - l.credit)
                                  FROM journal_entry_lines l
                                  JOIN journal_entries e ON e.id = l.entry_id
-                                                        AND e.branch_id = t.branch_id
+                                                        AND e.branch_id = CASE
+                                                            WHEN t.is_company_wide THEN @branchId
+                                                            ELSE t.branch_id END
                                  WHERE e.status = 'posted' AND l.account_id = t.account_id), 0)
                        AS balance
             ) gl ON true
-            WHERE t.branch_id = @branchId AND t.is_active
+            WHERE (t.is_company_wide OR t.branch_id = @branchId) AND t.is_active
             ON CONFLICT (shift_id, treasury_id) DO NOTHING
             """, new { shiftId, branchId = shift.BranchId, isOpen = shift.IsOpen,
                 openedAt = shift.OpenedAt },
@@ -194,6 +197,7 @@ public sealed partial class TreasuryRepository
                     WHERE c2.treasury_id = t.id AND s2.status = 'closed'
                       AND c2.counted_cash IS NOT NULL
                       AND s2.closed_at < @openedAt
+                      AND (NOT t.is_company_wide OR s2.branch_id = @branchId)
                     ORDER BY s2.closed_at DESC NULLS LAST
                     LIMIT 1
                 ) prev ON true
@@ -201,11 +205,13 @@ public sealed partial class TreasuryRepository
                     SELECT COALESCE((SELECT SUM(l.debit - l.credit)
                                      FROM journal_entry_lines l
                                      JOIN journal_entries e ON e.id = l.entry_id
-                                                            AND e.branch_id = t.branch_id
+                                                            AND e.branch_id = CASE
+                                                                WHEN t.is_company_wide THEN @branchId
+                                                                ELSE t.branch_id END
                                      WHERE e.status = 'posted' AND l.account_id = t.account_id), 0)
                            AS balance
                 ) gl ON true
-                WHERE t.branch_id = @branchId AND t.is_active
+                WHERE (t.is_company_wide OR t.branch_id = @branchId) AND t.is_active
             ) x
             WHERE c.shift_id = @shiftId AND c.treasury_id = x.treasury_id
             """, new { shiftId, branchId = shift.BranchId, openedAt = shift.OpenedAt },

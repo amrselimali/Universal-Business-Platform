@@ -78,7 +78,7 @@ public sealed class StocktakeService
         if (!warehouse.IsActive || !warehouse.BranchIds.Contains(branchId))
             throw new ValidationAppException("validation.warehouse_not_in_branch");
 
-        return await _stocktakes.GetCountSheetAsync(warehouseId, ct);
+        return await _stocktakes.GetCountSheetAsync(branchId, warehouseId, ct);
     }
 
     public async Task<StocktakeDetail> UpdateLinesAsync(ActorContext actor, Guid id,

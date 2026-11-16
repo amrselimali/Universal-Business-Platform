@@ -31,6 +31,18 @@ else
                     <MudSelectItem T="Guid?" Value="@((Guid?)category.Id)">@CategoryName(category)</MudSelectItem>
                 }
             </MudSelect>
+            <MudSelect T="Guid?" @bind-Value="_branchId" Label="@T.T("common.branch")"
+                       Variant="Variant.Outlined" Margin="Margin.Dense"
+                       Clearable="@Actor!.IsSuperAdmin" @bind-Value:after="ReloadAsync">
+                @if (Actor!.IsSuperAdmin)
+                {
+                    <MudSelectItem T="Guid?" Value="@((Guid?)null)">@T.T("common.company_wide")</MudSelectItem>
+                }
+                @foreach (var branch in _branches)
+                {
+                    <MudSelectItem T="Guid?" Value="@((Guid?)branch.Id)">@branch.NameAr</MudSelectItem>
+                }
+            </MudSelect>
             <MudSwitch T="bool" Value="_includeInactive" Label="@T.T("common.include_inactive")" Color="Color.Primary"
                        ValueChanged="OnFilterChanged" />
         </div>
@@ -40,6 +52,7 @@ else
             <HeaderContent>
                 <MudTh><MudTableSortLabel T="Item" SortLabel="code">@T.T("common.code")</MudTableSortLabel></MudTh>
                 <MudTh><MudTableSortLabel T="Item" SortLabel="name_ar">@T.T("common.name_ar")</MudTableSortLabel></MudTh>
+                <MudTh>@T.T("common.branch")</MudTh>
                 <MudTh>@T.T("items.category")</MudTh>
                 <MudTh>@T.T("items.base_unit")</MudTh>
                 <MudTh>@T.T("items.type")</MudTh>
@@ -50,6 +63,9 @@ else
             <RowTemplate>
                 <MudTd DataLabel="@T.T("common.code")"><span class="ubp-code">@context.Code</span></MudTd>
                 <MudTd DataLabel="@T.T("common.name_ar")">@Name(context)</MudTd>
+                <MudTd DataLabel="@T.T("common.branch")">
+                    @(context.BranchName ?? T.T("common.company_wide"))
+                </MudTd>
                 <MudTd DataLabel="@T.T("items.category")">@(context.CategoryName ?? "—")</MudTd>
                 <MudTd DataLabel="@T.T("items.base_unit")">@context.BaseUnitName</MudTd>
                 <MudTd DataLabel="@T.T("items.type")">

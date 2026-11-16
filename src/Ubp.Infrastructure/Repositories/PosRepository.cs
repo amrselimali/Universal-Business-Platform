@@ -56,6 +56,7 @@ public sealed partial class PosRepository : IPosRepository
         public Guid TreasuryId { get; set; }
         public Guid TreasuryMethodId { get; set; }
         public Guid BranchId { get; set; }
+        public bool IsCompanyWide { get; set; }
         public string TreasuryType { get; set; } = TreasuryTypes.Cash;
         public Guid AccountId { get; set; }
         public Guid? ClearingAccountId { get; set; }
@@ -257,6 +258,7 @@ public sealed partial class PosRepository : IPosRepository
             var account = await connection.QuerySingleOrDefaultAsync<PaymentAccount>(
                 new CommandDefinition("""
                 SELECT t.id AS TreasuryId, m.id AS TreasuryMethodId, t.branch_id AS BranchId,
+                       t.is_company_wide AS IsCompanyWide,
                        t.treasury_type AS TreasuryType, t.account_id AS AccountId,
                        m.clearing_account_id AS ClearingAccountId,
                        t.provider_fee_account_id AS FeeAccountId,
@@ -278,7 +280,7 @@ public sealed partial class PosRepository : IPosRepository
             if (account is null || account.AccountId == Guid.Empty ||
                 account.TreasuryMethodId == Guid.Empty)
                 throw new ValidationAppException("validation.treasury_method_not_found");
-            if (account.BranchId != input.BranchId)
+            if (!account.IsCompanyWide && account.BranchId != input.BranchId)
                 throw new ValidationAppException("validation.treasury_branch_mismatch");
             if (account.RequiresReference && string.IsNullOrWhiteSpace(payment.Reference))
                 throw new ValidationAppException("validation.reference_required");

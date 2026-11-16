@@ -13,6 +13,12 @@ public sealed partial class TreasuryService
         CancellationToken ct = default)
     {
         await _permissions.RequireAsync(actor, ScreenCodes.Treasuries, ActionCodes.Edit, ct: ct);
+        var existing = (await _treasury.ListTreasuriesAsync(null, ct))
+            .FirstOrDefault(t => t.Id == treasuryId) ?? throw new NotFoundAppException();
+        BranchScope.Ensure(actor, existing.BranchId);
+        if (existing.IsCompanyWide != input.IsCompanyWide && !actor.IsAdmin)
+            throw new ForbiddenException("error.company_scope_admin_only");
+        if (input.BranchId != Guid.Empty) BranchScope.Ensure(actor, input.BranchId);
         if (string.IsNullOrWhiteSpace(input.Code) || string.IsNullOrWhiteSpace(input.NameAr) ||
             input.AccountId == Guid.Empty)
             throw new ValidationAppException("validation.required_fields");

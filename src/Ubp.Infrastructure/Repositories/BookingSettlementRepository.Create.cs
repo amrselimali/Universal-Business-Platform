@@ -51,7 +51,8 @@ public sealed partial class BookingSettlementRepository
                         WHERE m.treasury_id = t.id AND m.is_active
                         ORDER BY (m.code = 'DEFAULT') DESC, m.code LIMIT 1) AS MethodId
                 FROM treasuries t
-                WHERE t.id = @treasuryId AND t.branch_id = @branchId AND t.is_active
+                WHERE t.id = @treasuryId AND (t.is_company_wide OR t.branch_id = @branchId)
+                  AND t.is_active
                 """, new { treasuryId = input.TreasuryId, branchId = input.BranchId }, tx,
                 cancellationToken: ct));
             if (treasury.Id == Guid.Empty || treasury.MethodId == Guid.Empty)

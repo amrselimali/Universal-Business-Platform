@@ -11,19 +11,25 @@ public partial class Items
 {
     [Inject] private ItemService ItemService { get; set; } = default!;
     [Inject] private ItemCategoryService CategoryService { get; set; } = default!;
+    [Inject] private BranchService BranchService { get; set; } = default!;
     [Inject] private IDialogService DialogService { get; set; } = default!;
 
     private MudTable<Item> _table = default!;
     private string? _search;
     private Guid? _categoryId;
+    private Guid? _branchId;
     private bool _includeInactive;
     private IReadOnlyList<ItemCategory> _categories = Array.Empty<ItemCategory>();
+    private IReadOnlyList<Branch> _branches = Array.Empty<Branch>();
 
     protected override string ScreenCode => ScreenCodes.Items;
 
     protected override async Task OnLoadAsync()
     {
         _categories = await CategoryService.OptionsAsync(Actor!);
+        _branches = await BranchService.OptionsAsync(Actor!);
+        if (!Actor!.IsSuperAdmin)
+            _branchId = Actor.CurrentBranchId ?? _branches.FirstOrDefault()?.Id;
     }
 
     private string Name(Item item) => T.Language == "en" && !string.IsNullOrWhiteSpace(item.NameEn) ? item.NameEn! : item.NameAr;
@@ -36,7 +42,7 @@ public partial class Items
         {
             Page = state.Page + 1, PageSize = 25, Search = _search, IncludeInactive = _includeInactive,
             SortBy = state.SortLabel ?? "code", Descending = state.SortDirection == SortDirection.Descending
-        }, _categoryId, null, ct);
+        }, _categoryId, null, _branchId, ct);
         return new TableData<Item> { Items = result.Items, TotalItems = result.Total };
     }
 

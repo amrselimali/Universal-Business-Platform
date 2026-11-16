@@ -209,7 +209,9 @@ public sealed partial class TreasuryRepository : ITreasuryRepository
     {
         await using var connection = await _factory.OpenAsync(ct);
         return (await connection.QueryAsync<Treasury>(new CommandDefinition("""
-            SELECT t.id AS Id, t.branch_id AS BranchId, t.code AS Code, t.name_ar AS NameAr,
+            SELECT t.id AS Id, t.branch_id AS BranchId,
+                   t.is_company_wide AS IsCompanyWide,
+                   t.code AS Code, t.name_ar AS NameAr,
                    t.name_en AS NameEn, t.treasury_type AS TreasuryType, t.account_id AS AccountId,
                    t.is_main AS IsMain,
                    a.code AS AccountCode, a.name_ar AS AccountName, t.opening_balance AS OpeningBalance,
@@ -222,8 +224,9 @@ public sealed partial class TreasuryRepository : ITreasuryRepository
                    t.follow_in_shift AS FollowInShift,
                    t.is_active AS IsActive
             FROM treasuries t JOIN accounts a ON a.id = t.account_id
-            WHERE t.is_active AND (@branchId::uuid IS NULL OR t.branch_id = @branchId::uuid)
-            ORDER BY t.code
+            WHERE t.is_active AND (@branchId::uuid IS NULL OR t.is_company_wide
+                                   OR t.branch_id = @branchId::uuid)
+            ORDER BY t.is_company_wide DESC, t.code
             """, new { branchId }, cancellationToken: ct))).ToList();
     }
 
@@ -235,7 +238,9 @@ public sealed partial class TreasuryRepository : ITreasuryRepository
 
         await using var connection = await _factory.OpenAsync(ct);
         return (await connection.QueryAsync<Treasury>(new CommandDefinition("""
-            SELECT t.id AS Id, t.branch_id AS BranchId, t.code AS Code, t.name_ar AS NameAr,
+            SELECT t.id AS Id, t.branch_id AS BranchId,
+                   t.is_company_wide AS IsCompanyWide,
+                   t.code AS Code, t.name_ar AS NameAr,
                    t.name_en AS NameEn, t.treasury_type AS TreasuryType, t.account_id AS AccountId,
                    t.is_main AS IsMain,
                    a.code AS AccountCode, a.name_ar AS AccountName, t.opening_balance AS OpeningBalance,
@@ -248,8 +253,9 @@ public sealed partial class TreasuryRepository : ITreasuryRepository
                    t.follow_in_shift AS FollowInShift,
                    t.is_active AS IsActive
             FROM treasuries t JOIN accounts a ON a.id = t.account_id
-            WHERE @branchId::uuid IS NULL OR t.branch_id = @branchId::uuid
-            ORDER BY t.is_active DESC, t.code
+            WHERE @branchId::uuid IS NULL OR t.is_company_wide
+                  OR t.branch_id = @branchId::uuid
+            ORDER BY t.is_active DESC, t.is_company_wide DESC, t.code
             """, new { branchId }, cancellationToken: ct))).ToList();
     }
 
@@ -284,7 +290,8 @@ public sealed partial class TreasuryRepository : ITreasuryRepository
                    m.follow_in_shift AS FollowInShift, t.name_ar AS TreasuryName
             FROM treasury_methods m
             JOIN treasuries t ON t.id = m.treasury_id
-            WHERE t.branch_id = @branchId AND t.is_active AND m.is_active
+            WHERE (t.is_company_wide OR t.branch_id = @branchId)
+              AND t.is_active AND m.is_active
             ORDER BY t.code, m.code
             """, new { branchId }, cancellationToken: ct))).ToList();
     }

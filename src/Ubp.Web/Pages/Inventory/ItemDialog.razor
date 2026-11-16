@@ -14,6 +14,17 @@
                         </MudSelect>
                         <MudTextField @bind-Value="_input.NameAr" Label="@T.T("common.name_ar")" Required="true" Variant="Variant.Outlined" />
                         <MudTextField @bind-Value="_input.NameEn" Label="@T.T("common.name_en")" Variant="Variant.Outlined" />
+                        <MudSelect T="Guid?" @bind-Value="_input.BranchId" Label="@T.T("items.branch_scope")"
+                                   Variant="Variant.Outlined" Clearable="true">
+                            <MudSelectItem T="Guid?" Value="@((Guid?)null)">@T.T("common.company_wide")</MudSelectItem>
+                            @foreach (var branch in _branches)
+                            {
+                                <MudSelectItem T="Guid?" Value="@((Guid?)branch.Id)">@branch.NameAr</MudSelectItem>
+                            }
+                        </MudSelect>
+                        <MudText Typo="Typo.caption" Class="ubp-muted ubp-span-2">
+                            @T.T("items.branch_scope_hint")
+                        </MudText>
                         <MudSelect T="Guid?" @bind-Value="_input.CategoryId" Label="@T.T("items.category")" Variant="Variant.Outlined" Clearable="true">
                             @foreach (var category in _categories)
                             {

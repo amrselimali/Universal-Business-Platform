@@ -110,7 +110,10 @@ public sealed partial class TreasuryRepository
                 new Dictionary<string, string> { ["key"] = key, ["module"] = "treasury" });
         }
 
-        var interBranch = target is not null && target.BranchId != head.BranchId;
+        // الخزينة العامة تُحاسَب على فرع السند؛ الخاصة تُحاسَب على فرعها.
+        var targetBranch = target is null ? (Guid?)null
+            : target.IsCompanyWide ? head.BranchId : target.BranchId;
+        var interBranch = targetBranch is { } tb && tb != head.BranchId;
         var gl = BuildVoucherGl(head, lines, source, target, interBranch, Need);
 
         var docNo = await connection.ExecuteScalarAsync<string>(new CommandDefinition("""
@@ -130,7 +133,7 @@ public sealed partial class TreasuryRepository
         {
             await connection.ExecuteAsync(new CommandDefinition(
                 "SELECT fn_assert_period_open(@docDate::date, @branchId, 'ACCOUNTING')",
-                new { docDate = head.DocDate, branchId = target!.BranchId }, tx,
+                new { docDate = head.DocDate, branchId = targetBranch!.Value }, tx,
                 cancellationToken: ct));
 
             var destinationGl = new List<JournalLine>
@@ -139,7 +142,7 @@ public sealed partial class TreasuryRepository
                 new(Need(PostingKeys.InterBranchClearing), 0, head.TotalAmount)
             };
             await CreateVoucherEntryAsync(connection, tx, Guid.CreateVersion7(), target.TreasuryType,
-                target.BranchId, head.DocDate, docNo,
+                targetBranch.Value, head.DocDate, docNo,
                 $"استلام تحويل بين الفروع {docNo}", destinationGl, userId, null, ct);
         }
 

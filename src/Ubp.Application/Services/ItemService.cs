@@ -25,28 +25,34 @@ public sealed class ItemService
     }
 
     public async Task<PagedResult<Item>> ListAsync(ActorContext actor, PageRequest request,
-        Guid? categoryId, string? itemType, CancellationToken ct = default)
+        Guid? categoryId, string? itemType, Guid? branchId = null,
+        CancellationToken ct = default)
     {
         await _permissions.RequireAsync(actor, ScreenCodes.Items, ActionCodes.View, ct: ct);
-        return await _items.ListAsync(request, categoryId, itemType, ct);
+        var scoped = BranchScope.Effective(actor, branchId);
+        return await _items.ListAsync(request, categoryId, itemType, scoped, ct);
     }
 
     public async Task<IReadOnlyList<ItemOption>> OptionsAsync(ActorContext actor, string? search,
-        bool sellableOnly = false, CancellationToken ct = default)
+        bool sellableOnly = false, Guid? branchId = null, CancellationToken ct = default)
     {
         await _permissions.RequireAsync(actor, ScreenCodes.Items, ActionCodes.View, ct: ct);
-        return await _items.ListOptionsAsync(search, 25, sellableOnly, null, ct);
+        var scoped = BranchScope.Effective(actor, branchId);
+        return await _items.ListOptionsAsync(search, 25, sellableOnly, null, scoped, ct);
     }
 
     public async Task<ItemDetail> GetDetailAsync(ActorContext actor, Guid id, CancellationToken ct = default)
     {
         await _permissions.RequireAsync(actor, ScreenCodes.Items, ActionCodes.View, ct: ct);
-        return await _items.GetDetailAsync(id, ct) ?? throw new NotFoundAppException();
+        var detail = await _items.GetDetailAsync(id, ct) ?? throw new NotFoundAppException();
+        EnsureItemAccess(actor, detail.Item);
+        return detail;
     }
 
     public async Task<Item> CreateAsync(ActorContext actor, ItemInput input, CancellationToken ct = default)
     {
         await _permissions.RequireAsync(actor, ScreenCodes.Items, ActionCodes.Add, ct: ct);
+        NormalizeScope(actor, input);
         await NormalizeAndValidateAsync(input, null, ct);
         try
         {
@@ -62,6 +68,8 @@ public sealed class ItemService
     {
         await _permissions.RequireAsync(actor, ScreenCodes.Items, ActionCodes.Edit, ct: ct);
         var old = await _items.GetAsync(id, ct) ?? throw new NotFoundAppException();
+        EnsureItemAccess(actor, old);
+        NormalizeScope(actor, input);
         await NormalizeAndValidateAsync(input, old, ct);
 
         if (old.BaseUnitId != input.BaseUnitId && await _items.HasStockAsync(id, ct))
@@ -81,6 +89,7 @@ public sealed class ItemService
     {
         await _permissions.RequireAsync(actor, ScreenCodes.Items, ActionCodes.Delete, ct: ct);
         var old = await _items.GetAsync(id, ct) ?? throw new NotFoundAppException();
+        EnsureItemAccess(actor, old);
         if (await _items.HasStockAsync(id, ct))
             throw new ValidationAppException("validation.item_in_use");
 
@@ -98,9 +107,24 @@ public sealed class ItemService
     {
         await _permissions.RequireAsync(actor, ScreenCodes.Items, ActionCodes.ToggleActive, ct: ct);
         var old = await _items.GetAsync(id, ct) ?? throw new NotFoundAppException();
+        EnsureItemAccess(actor, old);
         var updated = await _items.SetActiveAsync(id, isActive, ct) ?? throw new NotFoundAppException();
         await _audit.WriteAsync(actor, "items", id.ToString(), "UPDATE", old, updated, ct);
         return updated;
+    }
+
+    /// <summary>
+    /// نطاق الصنف: NULL (أو Guid.Empty) = الشركة كلها، وغير ذلك فرع يجب أن يملكه المستخدم — 0107.
+    /// </summary>
+    private static void NormalizeScope(ActorContext actor, ItemInput input)
+    {
+        if (input.BranchId == Guid.Empty) input.BranchId = null;
+        if (input.BranchId is { } branchId) BranchScope.Ensure(actor, branchId);
+    }
+
+    private static void EnsureItemAccess(ActorContext actor, Item item)
+    {
+        if (item.BranchId is { } branchId) BranchScope.Ensure(actor, branchId);
     }
 
     private async Task NormalizeAndValidateAsync(ItemInput input, Item? old, CancellationToken ct)

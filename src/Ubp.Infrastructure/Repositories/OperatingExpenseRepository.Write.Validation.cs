@@ -90,9 +90,11 @@ public sealed partial class OperatingExpenseRepository
 
         if (input.TreasuryMethodId is { } methodId)
         {
-            var method = await connection.QuerySingleOrDefaultAsync<(Guid BranchId, bool Ok)>(
+            var method = await connection.QuerySingleOrDefaultAsync<(Guid BranchId,
+                bool IsCompanyWide, bool Ok)>(
                 new CommandDefinition("""
-                    SELECT t.branch_id AS BranchId, true AS Ok
+                    SELECT t.branch_id AS BranchId, t.is_company_wide AS IsCompanyWide,
+                           true AS Ok
                     FROM treasury_methods m JOIN treasuries t ON t.id = m.treasury_id
                     WHERE m.id = @methodId AND m.treasury_id = @treasuryId
                       AND m.is_active AND t.is_active
@@ -100,7 +102,7 @@ public sealed partial class OperatingExpenseRepository
                     cancellationToken: ct));
             if (!method.Ok)
                 throw new ValidationAppException("validation.treasury_method_not_found");
-            if (method.BranchId != input.BranchId)
+            if (!method.IsCompanyWide && method.BranchId != input.BranchId)
                 throw new ValidationAppException("validation.treasury_branch_mismatch");
         }
 

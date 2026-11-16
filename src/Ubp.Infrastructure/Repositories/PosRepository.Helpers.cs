@@ -31,7 +31,9 @@ public sealed partial class PosRepository
                              WHERE iu.item_id = i.id AND iu.unit_id = i.base_unit_id), 0)
                        AS DefaultPrice
             FROM items i WHERE i.id = ANY(@ids) AND i.is_active
-            """, new { ids }, tx, cancellationToken: ct))).ToDictionary(x => x.Id);
+              AND (i.branch_id IS NULL OR i.branch_id = @branchId)
+            """, new { ids, branchId = input.BranchId }, tx, cancellationToken: ct)))
+            .ToDictionary(x => x.Id);
     }
 
     private static async Task<Dictionary<Guid, decimal>> LoadTaxRatesAsync(NpgsqlConnection c,

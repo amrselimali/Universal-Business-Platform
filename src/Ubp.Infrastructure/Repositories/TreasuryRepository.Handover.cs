@@ -28,14 +28,15 @@ public sealed partial class TreasuryRepository
         await using var tx = await connection.BeginTransactionAsync(ct);
 
         var treasury = await connection.QuerySingleOrDefaultAsync<(Guid AccountId, Guid BranchId,
-            string TreasuryType, bool FollowInShift)>(new CommandDefinition("""
+            bool IsCompanyWide, string TreasuryType, bool FollowInShift)>(new CommandDefinition("""
             SELECT account_id AS AccountId, branch_id AS BranchId,
+                   is_company_wide AS IsCompanyWide,
                    treasury_type AS TreasuryType, follow_in_shift AS FollowInShift
             FROM treasuries WHERE id = @treasuryId AND is_active
             """, new { treasuryId = input.TreasuryId }, tx, cancellationToken: ct));
         if (treasury.AccountId == Guid.Empty)
             throw new ValidationAppException("validation.treasury_not_found");
-        if (treasury.BranchId != input.BranchId)
+        if (!treasury.IsCompanyWide && treasury.BranchId != input.BranchId)
             throw new ValidationAppException("validation.treasury_branch_mismatch");
 
         // الحساب الوسيط لنقدية الفرع: يُحدَّد افتراضياً من شاشة إعدادات الحسابات — 0093.
