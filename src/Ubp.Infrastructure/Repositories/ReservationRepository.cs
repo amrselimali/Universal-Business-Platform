@@ -61,8 +61,8 @@ public sealed class ReservationRepository : IReservationRepository
         var sql = $"""
             SELECT {Columns},
                    COALESCE(u.paid_amount, 0) AS PaidAmount,
-                   GREATEST(r.booked_qty * r.unit_price - COALESCE(u.paid_amount, 0), 0)
-                       AS UncollectedValue
+                   -- نفس حقل العرض الذي يستخدمه الفلتر: لا تعارض بين العمود والفلترة.
+                   COALESCE(u.uncollected_value, 0) AS UncollectedValue
             FROM v_customer_reservations r
             LEFT JOIN v_customer_line_paid u ON u.booking_line_id = r.booking_line_id
             WHERE {Filter}
