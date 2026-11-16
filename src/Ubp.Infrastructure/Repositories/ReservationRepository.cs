@@ -102,10 +102,36 @@ public sealed class ReservationRepository : IReservationRepository
             _ => "r.booking_date DESC, r.booking_no DESC NULLS LAST, r.item_code"
         };
         var sql = $"""
-            SELECT {Columns}, b.name_ar AS BranchName, c.code AS CustomerCode
+            SELECT {Columns}, b.name_ar AS BranchName, c.code AS CustomerCode,
+                   CASE WHEN tot.booked_value > 0
+                        THEN LEAST(r.booked_qty * r.unit_price,
+                             ROUND((bk.deposit_amount + COALESCE(paid.paid_amount, 0)
+                                    - COALESCE(settled.paid_amount, 0))
+                                   * (r.booked_qty * r.unit_price) / tot.booked_value, 2))
+                        ELSE 0 END AS PaidAmount,
+                   GREATEST(r.booked_qty * r.unit_price -
+                     CASE WHEN tot.booked_value > 0
+                          THEN LEAST(r.booked_qty * r.unit_price,
+                               ROUND((bk.deposit_amount + COALESCE(paid.paid_amount, 0)
+                                      - COALESCE(settled.paid_amount, 0))
+                                     * (r.booked_qty * r.unit_price) / tot.booked_value, 2))
+                          ELSE 0 END, 0) AS UncollectedValue
             FROM v_customer_reservations r
             JOIN branches b ON b.id = r.branch_id
             JOIN customers c ON c.id = r.customer_id
+            JOIN bookings bk ON bk.id = r.booking_id
+            LEFT JOIN (
+                SELECT booking_id, SUM(amount) AS paid_amount
+                FROM booking_payments GROUP BY booking_id
+            ) paid ON paid.booking_id = r.booking_id
+            LEFT JOIN (
+                SELECT booking_id, SUM(paid_amount) AS paid_amount
+                FROM customer_account_settlement_lines GROUP BY booking_id
+            ) settled ON settled.booking_id = r.booking_id
+            JOIN LATERAL (
+                SELECT COALESCE(SUM(l2.quantity * l2.unit_price), 0) AS booked_value
+                FROM booking_lines l2 WHERE l2.booking_id = r.booking_id
+            ) tot ON true
             WHERE {string.Join(" AND ", where)}
             ORDER BY {order}
             LIMIT 5000

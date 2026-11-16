@@ -73,6 +73,7 @@ else
                     <MudTh Align="Right">@T.T("uncollected.lines")</MudTh>
                     <MudTh Align="Right">@T.T("uncollected.remaining_qty")</MudTh>
                     <MudTh Align="Right">@T.T("uncollected.remaining_value")</MudTh>
+                    <MudTh Align="Right">@T.T("uncollected.uncollected_value")</MudTh>
                 </HeaderContent>
                 <RowTemplate>
                     <MudTd><span class="ubp-code">@context.CustomerCode</span></MudTd>
@@ -81,6 +82,7 @@ else
                     <MudTd Align="Right">@context.Lines</MudTd>
                     <MudTd Align="Right">@context.RemainingQty.ToString("N2")</MudTd>
                     <MudTd Align="Right">@context.RemainingValue.ToString("N2")</MudTd>
+                    <MudTd Align="Right">@context.UncollectedValue.ToString("N2")</MudTd>
                 </RowTemplate>
             </MudTable>
         }
@@ -94,6 +96,7 @@ else
                     <MudTh Align="Right">@T.T("uncollected.lines")</MudTh>
                     <MudTh Align="Right">@T.T("uncollected.remaining_qty")</MudTh>
                     <MudTh Align="Right">@T.T("uncollected.remaining_value")</MudTh>
+                    <MudTh Align="Right">@T.T("uncollected.uncollected_value")</MudTh>
                 </HeaderContent>
                 <RowTemplate>
                     <MudTd>@context.BranchName</MudTd>
@@ -101,6 +104,7 @@ else
                     <MudTd Align="Right">@context.Lines</MudTd>
                     <MudTd Align="Right">@context.RemainingQty.ToString("N2")</MudTd>
                     <MudTd Align="Right">@context.RemainingValue.ToString("N2")</MudTd>
+                    <MudTd Align="Right">@context.UncollectedValue.ToString("N2")</MudTd>
                 </RowTemplate>
             </MudTable>
         }
@@ -118,6 +122,7 @@ else
                     <MudTh Align="Right">@T.T("reservations.consumed")</MudTh>
                     <MudTh Align="Right">@T.T("reservations.remaining")</MudTh>
                     <MudTh Align="Right">@T.T("uncollected.remaining_value")</MudTh>
+                    <MudTh Align="Right">@T.T("uncollected.uncollected_value")</MudTh>
                     <MudTh>@T.T("sales.booking_notes")</MudTh>
                 </HeaderContent>
                 <RowTemplate>
@@ -130,6 +135,7 @@ else
                     <MudTd Align="Right">@context.ConsumedQty.ToString("N2")</MudTd>
                     <MudTd Align="Right">@context.RemainingQty.ToString("N2")</MudTd>
                     <MudTd Align="Right">@context.RemainingValue.ToString("N2")</MudTd>
+                    <MudTd Align="Right">@context.UncollectedValue.ToString("N2")</MudTd>
                     <MudTd>@(string.IsNullOrWhiteSpace(context.BookingNotes) ? "—" : context.BookingNotes)</MudTd>
                 </RowTemplate>
                 <PagerContent>

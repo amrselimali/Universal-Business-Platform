@@ -45,10 +45,11 @@ public sealed partial class BookingSettlementRepository : IBookingSettlementRepo
                    r.booked_qty AS BookedQty, r.consumed_qty AS ConsumedQty,
                    r.remaining_qty AS RemainingQty, r.unit_price AS UnitPrice,
                    r.remaining_value AS RemainingValue,
-                   CASE WHEN tot.remaining_value > 0
-                        THEN ROUND((bk.deposit_amount + COALESCE(paid.paid_amount, 0)
+                   CASE WHEN tot.booked_value > 0
+                        THEN LEAST(r.booked_qty * r.unit_price,
+                             ROUND((bk.deposit_amount + COALESCE(paid.paid_amount, 0)
                                     - COALESCE(settled.paid_amount, 0))
-                                   * r.remaining_value / tot.remaining_value, 2)
+                                   * (r.booked_qty * r.unit_price) / tot.booked_value, 2))
                         ELSE 0 END AS PaidAmount
             FROM v_customer_reservations r
             JOIN bookings bk ON bk.id = r.booking_id
@@ -61,7 +62,7 @@ public sealed partial class BookingSettlementRepository : IBookingSettlementRepo
                 FROM customer_account_settlement_lines GROUP BY booking_id
             ) settled ON settled.booking_id = r.booking_id
             JOIN LATERAL (
-                SELECT COALESCE(SUM(l2.reserved_qty * l2.unit_price), 0) AS remaining_value
+                SELECT COALESCE(SUM(l2.quantity * l2.unit_price), 0) AS booked_value
                 FROM booking_lines l2 WHERE l2.booking_id = r.booking_id
             ) tot ON true
             WHERE r.branch_id = @branchId AND r.customer_id = @customerId

@@ -28,6 +28,7 @@ public partial class BookingSettlementDialog
     private IReadOnlyList<ItemOption> _services = Array.Empty<ItemOption>();
     private List<SettlementRow> _rows = new();
     private Guid _treasuryId;
+    private Guid _cashTreasuryId;
     private string _settlementType = BookingSettlementTypes.Refund;
     private List<NewOfferRow> _newOffers = new();
     private string? _notes;
@@ -40,10 +41,15 @@ public partial class BookingSettlementDialog
                                   _treasuryId == Guid.Empty) ||
                                  (_settlementType == BookingSettlementTypes.NewBooking &&
                                   (_newOffers.Count == 0 || _newOffers.Any(o =>
-                                      o.ItemId == Guid.Empty || o.Quantity <= 0 || o.UnitPrice < 0)));
+                                      o.Service is null || o.Quantity <= 0 || o.UnitPrice < 0) ||
+                                   (CashDifference != 0 && _cashTreasuryId == Guid.Empty)));
 
     private int SelectedCount => _rows.Count(r => r.Selected);
     private decimal SelectedTotal => Math.Round(_rows.Where(r => r.Selected).Sum(r => r.Due), 2,
+        MidpointRounding.AwayFromZero);
+    private decimal NewServicesTotal => Math.Round(
+        _newOffers.Sum(o => o.Quantity * o.UnitPrice), 2, MidpointRounding.AwayFromZero);
+    private decimal CashDifference => Math.Round(NewServicesTotal - SelectedTotal, 2,
         MidpointRounding.AwayFromZero);
 
     protected override async Task OnInitializedAsync()
@@ -57,6 +63,7 @@ public partial class BookingSettlementDialog
                 _treasuries = await Settlements.ListTreasuriesAsync(actor, BranchId);
                 _services = await Settlements.ListServicesAsync(actor);
                 _treasuryId = _treasuries.FirstOrDefault()?.Id ?? Guid.Empty;
+                _cashTreasuryId = _treasuryId;
                 _newOffers = new List<NewOfferRow> { NewOffer() };
                 _rows = _sheet.Lines.Select(line => new SettlementRow
                 {
@@ -84,19 +91,30 @@ public partial class BookingSettlementDialog
         StateHasChanged();
     }
 
-    private void OnNewItemChanged(NewOfferRow row, Guid itemId)
+    private void OnNewItemChanged(NewOfferRow row, ItemOption? service)
     {
-        row.ItemId = itemId;
-        row.UnitPrice = _services.FirstOrDefault(s => s.Id == itemId)?.DefaultPrice ?? 0;
+        row.Service = service;
+        row.UnitPrice = service?.DefaultPrice ?? 0;
         StateHasChanged();
     }
 
-    private NewOfferRow NewOffer() => new()
+    private Task<IEnumerable<ItemOption>> SearchServices(string? search,
+        CancellationToken ct) =>
+        Task.FromResult(_services.Where(s =>
+            string.IsNullOrWhiteSpace(search) ||
+            s.Code.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+            s.NameAr.Contains(search, StringComparison.OrdinalIgnoreCase)));
+
+    private string TreasuryLabel(Guid id)
     {
-        ItemId = _services.FirstOrDefault()?.Id ?? Guid.Empty,
-        UnitPrice = _services.FirstOrDefault()?.DefaultPrice ?? 0,
-        Quantity = 1
-    };
+        var treasury = _treasuries.FirstOrDefault(t => t.Id == id);
+        return treasury is null ? "—" : $"{treasury.Code} — {treasury.NameAr}";
+    }
+
+    private static string ServiceLabel(ItemOption? service) =>
+        service is null ? "" : $"{service.Code} — {service.NameAr}";
+
+    private NewOfferRow NewOffer() => new() { Quantity = 1 };
 
     private void AddOffer()
     {
@@ -133,7 +151,7 @@ public partial class BookingSettlementDialog
             return;
         }
         if (_settlementType == BookingSettlementTypes.NewBooking &&
-            (_newOffers.Count == 0 || _newOffers.Any(o => o.ItemId == Guid.Empty ||
+            (_newOffers.Count == 0 || _newOffers.Any(o => o.Service is null ||
                                                           o.Quantity <= 0 || o.UnitPrice < 0)))
         {
             Snackbar.Add(T.T("settlement.select_service"), Severity.Warning);
@@ -160,14 +178,13 @@ public partial class BookingSettlementDialog
             {
                 BranchId = BranchId, CustomerId = CustomerId,
                 TreasuryId = _settlementType == BookingSettlementTypes.Refund
-                    ? _treasuryId : Guid.Empty,
+                    ? _treasuryId : _cashTreasuryId,
                 SettlementType = _settlementType,
                 NewBookingLines = _settlementType == BookingSettlementTypes.NewBooking
                     ? _newOffers.Select(o => new NewBookingLineInput
                     {
-                        ItemId = o.ItemId,
-                        UnitId = _services.FirstOrDefault(s => s.Id == o.ItemId)?.BaseUnitId
-                                 ?? Guid.Empty,
+                        ItemId = o.Service!.Id,
+                        UnitId = o.Service.BaseUnitId,
                         Quantity = o.Quantity, UnitPrice = o.UnitPrice, Notes = o.Notes
                     }).ToList()
                     : new List<NewBookingLineInput>(),
@@ -190,7 +207,7 @@ public partial class BookingSettlementDialog
 
     private sealed class NewOfferRow
     {
-        public Guid ItemId { get; set; }
+        public ItemOption? Service { get; set; }
         public decimal Quantity { get; set; } = 1;
         public decimal UnitPrice { get; set; }
         public string? Notes { get; set; }
@@ -211,7 +228,7 @@ public partial class BookingSettlementDialog
         public decimal PaidAmount { get; set; }
         public decimal ExternalUnitPrice { get; set; }
         public bool Selected { get; set; }
-        public decimal Due => Math.Round(ExternalUnitPrice * ConsumedQty - PaidAmount, 2,
+        public decimal Due => Math.Round(PaidAmount - ExternalUnitPrice * ConsumedQty, 2,
             MidpointRounding.AwayFromZero);
     }
 }

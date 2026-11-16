@@ -35,4 +35,7 @@ public sealed class ReservationRow
     public decimal RemainingQty { get; set; }
     public decimal UnitPrice { get; set; }
     public decimal RemainingValue { get; set; }
+    public decimal PaidAmount { get; set; }
+    /// <summary>المتبقي غير المحصل من قيمة الخدمة = قيمة الحجز − المسدد للخدمة.</summary>
+    public decimal UncollectedValue { get; set; }
 }

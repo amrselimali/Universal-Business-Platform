@@ -58,7 +58,7 @@ public sealed partial class BookingSettlementTests : IClassFixture<TestDb>
             .GetReceiptLinesAsync(result.VoucherId);
         var receiptLine = Assert.Single(lines);
         Assert.Equal(3, receiptLine.SettledQty);
-        Assert.Equal(150, receiptLine.ExternalUnitPrice);
+        Assert.Equal(50, receiptLine.ExternalUnitPrice);
         Assert.Equal(100, receiptLine.RefundAmount);
 
         var entry = await _db.JournalEntryRepo.GetBySourceAsync(EntrySources.Voucher,
@@ -176,7 +176,7 @@ public sealed partial class BookingSettlementTests : IClassFixture<TestDb>
             {
                 new BookingSettlementLineInput
                 {
-                    BookingId = f.Booking.Id, BookingLineId = f.LineId, ExternalUnitPrice = 150
+                    BookingId = f.Booking.Id, BookingLineId = f.LineId, ExternalUnitPrice = 50
                 }
             }
         });

@@ -31,7 +31,7 @@ public sealed partial class BookingSettlementTests
             {
                 new BookingSettlementLineInput
                 {
-                    BookingId = f.Booking.Id, BookingLineId = f.LineId, ExternalUnitPrice = 150
+                    BookingId = f.Booking.Id, BookingLineId = f.LineId, ExternalUnitPrice = 50
                 }
             }
         });

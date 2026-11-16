@@ -72,7 +72,7 @@ public sealed partial class BookingSettlementRepository
                     WHERE bp.booking_id = b.id) AS PaidAmount,
                    (SELECT COALESCE(SUM(sl.paid_amount), 0) FROM customer_account_settlement_lines sl
                     WHERE sl.booking_id = b.id) AS SettledPaidAmount,
-                   (SELECT COALESCE(SUM(l2.reserved_qty * l2.unit_price), 0)
+                   (SELECT COALESCE(SUM(l2.quantity * l2.unit_price), 0)
                     FROM booking_lines l2 WHERE l2.booking_id = b.id) AS BookingRemainingValue
             FROM booking_lines l
             JOIN bookings b ON b.id = l.booking_id
@@ -97,10 +97,12 @@ public sealed partial class BookingSettlementRepository
 
             var consumed = Math.Max(row.DeliveredQty, row.InvoicedQty) + row.TransferredQty
                            + row.SettledQty;
+            var lineValue = row.BookedQty * row.UnitPrice;
             var paidAlloc = row.BookingRemainingValue > 0
-                ? Math.Round((row.DepositAmount + row.PaidAmount - row.SettledPaidAmount) *
-                             (row.RemainingQty * row.UnitPrice) / row.BookingRemainingValue, 2,
-                    MidpointRounding.AwayFromZero)
+                ? Math.Min(lineValue, Math.Round((row.DepositAmount + row.PaidAmount
+                                                  - row.SettledPaidAmount) * lineValue
+                                                 / row.BookingRemainingValue, 2,
+                    MidpointRounding.AwayFromZero))
                 : 0m;
             calcs.Add(new SettlementCalc
             {
@@ -108,7 +110,7 @@ public sealed partial class BookingSettlementRepository
                 BookingDate = row.BookingDate, BookedQty = row.BookedQty, ConsumedQty = consumed,
                 SettledQty = row.RemainingQty, UnitPrice = row.UnitPrice,
                 ExternalUnitPrice = line.ExternalUnitPrice, PaidAmount = paidAlloc,
-                RefundAmount = Math.Round(line.ExternalUnitPrice * consumed - paidAlloc, 2,
+                RefundAmount = Math.Round(paidAlloc - line.ExternalUnitPrice * consumed, 2,
                     MidpointRounding.AwayFromZero),
                 RevenueAdjustment = Math.Round(consumed *
                     (line.ExternalUnitPrice - row.UnitPrice), 2, MidpointRounding.AwayFromZero)
@@ -123,9 +125,10 @@ public sealed partial class BookingSettlementRepository
         Guid? settlementVoucherId = null;
         Guid? newBookingId = null;
         string? newBookingNo = null;
+        decimal newBookingTotal = 0;
         if (isNewBooking)
         {
-            (newBookingId, newBookingNo) = await CreateNewBookingAsync(connection, tx, input,
+            (newBookingId, newBookingNo, newBookingTotal) = await CreateNewBookingAsync(connection, tx, input,
                 newBookingLines, totalRefund, customer.Name, userId, ct);
         }
         else
@@ -164,12 +167,28 @@ public sealed partial class BookingSettlementRepository
             """, new
         {
             settlementId, branchId = input.BranchId, customerId = input.CustomerId,
-            treasuryId = isNewBooking ? (Guid?)null : input.TreasuryId,
+            treasuryId = input.TreasuryId == Guid.Empty ? (Guid?)null : input.TreasuryId,
             voucherId = settlementVoucherId, newBookingId, docDate = input.DocDate.Date,
             settlementType = isNewBooking ? BookingSettlementTypes.NewBooking
                 : BookingSettlementTypes.Refund,
             total = totalRefund, totalQty, notes = input.Notes, userId
         }, tx, cancellationToken: ct));
+
+        if (isNewBooking && input.TreasuryId != Guid.Empty &&
+            Math.Round(newBookingTotal - totalRefund, 2) != 0)
+        {
+            var difference = Math.Round(newBookingTotal - totalRefund, 2,
+                MidpointRounding.AwayFromZero);
+            await connection.ExecuteAsync(new CommandDefinition("""
+                INSERT INTO customer_account_settlement_cash_lines
+                    (settlement_id, line_no, treasury_id, amount, direction)
+                VALUES (@settlementId, 1, @treasuryId, @amount, @direction)
+                """, new
+            {
+                settlementId, treasuryId = input.TreasuryId, amount = Math.Abs(difference),
+                direction = difference > 0 ? "collect" : "refund"
+            }, tx, cancellationToken: ct));
+        }
 
         var lineNo = 0;
         foreach (var calc in calcs)

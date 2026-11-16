@@ -8,7 +8,7 @@ namespace Ubp.Infrastructure.Repositories;
 public sealed partial class BookingSettlementRepository
 {
     /// <summary>إنشاء حجز عرض جديد بالقيمة المستحقة كدفعة مقدمة — بلا أي قيد محاسبي.</summary>
-    private static async Task<(Guid Id, string DocNo)> CreateNewBookingAsync(
+    private static async Task<(Guid Id, string DocNo, decimal Total)> CreateNewBookingAsync(
         NpgsqlConnection connection, NpgsqlTransaction tx, BookingSettlementInput input,
         IReadOnlyList<NewBookingLineInput> lines, decimal dueAmount, string customerName,
         Guid userId, CancellationToken ct)
@@ -84,6 +84,6 @@ public sealed partial class BookingSettlementRepository
             }, tx, cancellationToken: ct));
         }
 
-        return (bookingId, docNo);
+        return (bookingId, docNo, bookingTotal);
     }
 }

@@ -25,24 +25,27 @@ public partial class UncollectedServices
     protected override string ScreenCode => ScreenCodes.UncollectedServices;
 
     private sealed record CustomerGroup(Guid CustomerId, string CustomerCode, string CustomerName,
-        string Branches, int Lines, decimal RemainingQty, decimal RemainingValue);
+        string Branches, int Lines, decimal RemainingQty, decimal RemainingValue,
+        decimal UncollectedValue);
 
     private sealed record BranchGroup(Guid BranchId, string BranchName, int Customers, int Lines,
-        decimal RemainingQty, decimal RemainingValue);
+        decimal RemainingQty, decimal RemainingValue, decimal UncollectedValue);
 
     private List<CustomerGroup> CustomerGroups => _rows
         .GroupBy(r => r.CustomerId)
         .Select(g => new CustomerGroup(g.Key, g.First().CustomerCode ?? "", g.First().CustomerName,
             string.Join("، ", g.Select(x => x.BranchName).Where(x => !string.IsNullOrWhiteSpace(x))
                 .Distinct()),
-            g.Count(), g.Sum(x => x.RemainingQty), g.Sum(x => x.RemainingValue)))
+            g.Count(), g.Sum(x => x.RemainingQty), g.Sum(x => x.RemainingValue),
+            g.Sum(x => x.UncollectedValue)))
         .OrderByDescending(g => g.RemainingValue).ToList();
 
     private List<BranchGroup> BranchGroups => _rows
         .GroupBy(r => r.BranchId)
         .Select(g => new BranchGroup(g.Key, g.First().BranchName ?? "",
             g.Select(x => x.CustomerId).Distinct().Count(), g.Count(),
-            g.Sum(x => x.RemainingQty), g.Sum(x => x.RemainingValue)))
+            g.Sum(x => x.RemainingQty), g.Sum(x => x.RemainingValue),
+            g.Sum(x => x.UncollectedValue)))
         .OrderByDescending(g => g.RemainingValue).ToList();
 
     protected override async Task OnLoadAsync()
