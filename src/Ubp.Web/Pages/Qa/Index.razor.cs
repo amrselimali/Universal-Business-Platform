@@ -10,11 +10,8 @@ namespace Ubp.Web.Pages.Qa;
 public partial class Index
 {
     [Inject] private QaService Qa { get; set; } = default!;
-    [Inject] private IDialogService DialogService { get; set; } = default!;
 
     private IReadOnlyList<QaMatrixRow> _matrix = Array.Empty<QaMatrixRow>();
-    private IReadOnlyList<QaRunSummary> _runs = Array.Empty<QaRunSummary>();
-    private readonly HashSet<string> _selected = new(StringComparer.OrdinalIgnoreCase);
     private QaAuditReport? _report;
     private bool _running;
 
@@ -23,35 +20,9 @@ public partial class Index
     protected override async Task OnLoadAsync()
     {
         _matrix = await Qa.GetMatrixAsync(Actor!);
-        _runs = await Qa.GetRunsAsync(Actor!);
     }
 
-    private void Toggle(string code, bool selected)
-    {
-        if (selected) _selected.Add(code); else _selected.Remove(code);
-    }
-
-    private async Task RunAllAsync() => await ExecuteRunAsync(Array.Empty<string>());
-    private async Task RunSelectedAsync() => await ExecuteRunAsync(_selected.ToList());
-
-    private async Task ExecuteRunAsync(IReadOnlyList<string> codes)
-    {
-        _running = true;
-        StateHasChanged();
-        await RunAsync(async () =>
-        {
-            var summary = await Qa.RunAsync(Actor!, codes);
-            _matrix = await Qa.GetMatrixAsync(Actor!);
-            _runs = await Qa.GetRunsAsync(Actor!);
-            _selected.Clear();
-            Snackbar.Add($"{T.T("qa.run_done")}: {summary.PassedCount} / {summary.TotalCount}",
-                summary.FailedCount == 0 ? Severity.Success : Severity.Warning);
-        });
-        _running = false;
-        StateHasChanged();
-    }
-
-    /// <summary>الفحص الشامل: اختبارات أساسية + فحص مباشر على قاعدة البيانات الحقيقية.</summary>
+    /// <summary>زر واحد: الفحص الشامل (اختبارات أساسية + فحص مباشر + فحوص ذكية).</summary>
     private async Task RunFullAsync()
     {
         _running = true;
@@ -60,7 +31,6 @@ public partial class Index
         {
             _report = await Qa.RunFullAuditAsync(Actor!);
             _matrix = await Qa.GetMatrixAsync(Actor!);
-            _runs = await Qa.GetRunsAsync(Actor!);
             Snackbar.Add($"{T.T("qa.run_done")}: {_report.PassedTests}/{_report.Tests.Count}",
                 _report.FailedTests == 0 ? Severity.Success : Severity.Warning);
         }
@@ -89,9 +59,4 @@ public partial class Index
         "medium" => Color.Info,
         _ => Color.Default
     };
-
-    private async Task ShowResultsAsync(QaRunSummary run) =>
-        await DialogService.ShowAsync<QaResultsDialog>(T.T("qa.results"),
-            new DialogParameters { ["Run"] = run },
-            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
 }

@@ -43,10 +43,13 @@ public sealed partial class QaService
                 reasons.Add($"{table.DeadTuples:N0} صف ميت");
                 severity = "attention";
             }
+            // الجداول الصغيرة تُقرأ بالمسح المتسلسل بشكل طبيعي وأرخص من الفهرس؛
+            // لا ننبّه إلا عند وجود حجم كافٍ وعدد مسحات فعلي (نفس حد فحص الأداء).
+            var meaningfulScans = table.SeqScans >= 100 && table.Rows >= 1000;
             var scanRatio = table.IndexScans == 0
                 ? (table.SeqScans > 200 ? double.MaxValue : 0)
                 : (double)table.SeqScans / table.IndexScans;
-            if (scanRatio > 5)
+            if (meaningfulScans && scanRatio > 5)
             {
                 reasons.Add("مسح متسلسل أكثر من الفهارس");
                 if (severity == "ok") severity = "attention";

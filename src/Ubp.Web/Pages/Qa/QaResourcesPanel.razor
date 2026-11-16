@@ -22,7 +22,7 @@ else
             <MudTd>@context.Used.ToString("N1") @context.Unit</MudTd>
             <MudTd>
                 @(context.Total > 0
-                    ? (context.Total - context.Used).ToString("N1") + " " + context.Unit
+                    ? Math.Max(0, context.Total - context.Used).ToString("N1") + " " + context.Unit
                     : "—")
             </MudTd>
             <MudTd Style="min-width:160px">

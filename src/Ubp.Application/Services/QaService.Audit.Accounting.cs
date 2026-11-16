@@ -70,6 +70,7 @@ public sealed partial class QaService
             LEFT JOIN item_category_accounts m ON m.category_id = c.id
             WHERE m.id IS NULL OR m.inventory_account_id IS NULL
             """, "كل تصنيف يحتاج حساب مخزون وتكلفة مبيعات حتى لا يفشل توليد القيد.");
+        await EnrichMissingCategoryAccountsAsync(connection, tx, report, ct);
 
         await CheckPostedDocumentsAsync(connection, tx, report, ct);
 
@@ -104,5 +105,21 @@ public sealed partial class QaService
                 });
             }
         }
+    }
+
+    /// <summary>يضيف أسماء التصنيفات الناقصة إلى الملاحظة لتسهيل الإصلاح من الإعدادات.</summary>
+    private static async Task EnrichMissingCategoryAccountsAsync(NpgsqlConnection connection,
+        NpgsqlTransaction tx, QaAuditReport report, CancellationToken ct)
+    {
+        var finding = report.Findings.LastOrDefault(f => f.Code == "ACC_CATEGORY_ACCOUNTS");
+        if (finding is null) return;
+        var names = (await connection.QueryAsync<string>(new CommandDefinition("""
+            SELECT c.name_ar FROM item_categories c
+            LEFT JOIN item_category_accounts m ON m.category_id = c.id
+            WHERE m.id IS NULL OR m.inventory_account_id IS NULL
+            ORDER BY c.name_ar LIMIT 10
+            """, transaction: tx, cancellationToken: ct))).ToList();
+        if (names.Count > 0)
+            finding.Detail += " — التصنيفات: " + string.Join("، ", names);
     }
 }
