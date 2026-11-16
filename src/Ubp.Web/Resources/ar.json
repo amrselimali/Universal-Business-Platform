@@ -2038,7 +2038,7 @@
   "consumption.documents": "عدد المستندات",
   "consumption.period": "التاريخ",
   "consumption.note": "ملاحظة",
-  "consumption.hint": "استهلاك الأرصدة الافتتاحية لا يؤثر على القيود المحاسبية؛ يظهر فقط في شاشات التشغيل.",
+  "consumption.hint": "الرصيد الافتتاحي عند إنشائه لا يُنشئ قيدًا محاسبيًا. أي عملية لاحقة عليه (سداد، تنفيذ، تحويل، تسوية أو أي استهلاك) تُسجَّل محاسبيًا وتؤثر على القيود.",
   "consumption.source_opening": "أرصدة افتتاحية",
   "consumption.source_execution": "تنفيذ خدمات",
   "consumption.source_transfer": "تحويل خدمات",

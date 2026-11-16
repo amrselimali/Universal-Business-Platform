@@ -2016,7 +2016,7 @@
   "consumption.documents": "Documents",
   "consumption.period": "Date",
   "consumption.note": "Note",
-  "consumption.hint": "Opening-balance consumption does not affect accounting entries; it only appears in operations screens.",
+  "consumption.hint": "Creating an opening balance posts no accounting entry. Any later operation on it (payment, execution, transfer, settlement or any consumption) is posted to accounting and affects the entries.",
   "consumption.source_opening": "Opening balances",
   "consumption.source_execution": "Service execution",
   "consumption.source_transfer": "Service transfer",
