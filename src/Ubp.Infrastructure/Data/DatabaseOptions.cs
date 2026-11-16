@@ -130,14 +130,14 @@ public sealed class QaConnectionFactory : IDbConnectionFactory
 
     public QaConnectionFactory(DatabaseOptions options) => _options = options;
 
-    public string ConnectionString => _options.QaConnectionString;
+    /// <summary>قاعدة الفحص = القاعدة الحقيقية عند عدم إعداد قاعدة QA منفصلة (الاختبارات داخل معاملة تُلغى).</summary>
+    public string ConnectionString => string.IsNullOrWhiteSpace(_options.QaConnectionString)
+        ? _options.ConnectionString
+        : _options.QaConnectionString;
 
     public async Task<NpgsqlConnection> OpenAsync(CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(_options.QaConnectionString))
-            throw new InvalidOperationException("QA_DATABASE_NOT_CONFIGURED");
-
-        var connection = new NpgsqlConnection(_options.QaConnectionString);
+        var connection = new NpgsqlConnection(ConnectionString);
         await connection.OpenAsync(ct);
         return connection;
     }

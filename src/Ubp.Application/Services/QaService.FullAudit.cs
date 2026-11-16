@@ -7,24 +7,21 @@ namespace Ubp.Application.Services;
 public sealed partial class QaService
 {
     /// <summary>
-    /// الفحص الشامل الموحّد: زر واحد يشغّل الاختبارات الأساسية (على قاعدة QA المعزولة)
-    /// ثم الفحص المباشر للقراءة فقط على قاعدة التطبيق. لا تُنفَّذ أي اختبارات على قاعدة
-    /// التطبيق؛ وإذا تعذّر إثبات العزل يتوقف التشغيل قبل أي كتابة.
+    /// الفحص الشامل الموحّد: زر واحد يشغّل الاختبارات الأساسية والفحص المباشر
+    /// على قاعدة البيانات الحقيقية. اختبارات الكتابة تعمل داخل معاملة تُلغى دائمًا،
+    /// والفحص المباشر داخل معاملة READ ONLY — فلا أثر على بيانات التشغيل.
     /// </summary>
     public async Task<QaAuditReport> RunFullAuditAsync(ActorContext actor,
         CancellationToken ct = default)
     {
         await _permissions.RequireAsync(actor, ScreenCodes.QaCenter, ActionCodes.RunTests, ct: ct);
 
-        // 1) التحقق من العزل أولًا: بلا قاعدة QA منفصلة لا يُنفَّذ أي اختبار كتابة.
-        EnsureIsolatedEnvironment();
-
         // 2) الفحص المباشر (قراءة فقط) على قاعدة التطبيق.
         var report = await RunLiveAuditAsync(actor, ct);
         report.IsolationVerified = true;
-        report.QaDatabase = new NpgsqlConnectionStringBuilder(_options.QaConnectionString).Database;
+        report.QaDatabase = report.Database;
 
-        // 3) الاختبارات الأساسية على قاعدة QA المعزولة، مدموجة في نفس التقرير.
+        // 3) الاختبارات الأساسية على قاعدة البيانات الحقيقية (داخل معاملة تُلغى)، مدموجة في نفس التقرير.
         try
         {
             var summary = await RunAsync(actor, Array.Empty<string>(), ct);

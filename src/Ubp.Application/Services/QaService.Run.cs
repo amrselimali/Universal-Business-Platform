@@ -14,8 +14,6 @@ public sealed partial class QaService
         CancellationToken ct = default)
     {
         await _permissions.RequireAsync(actor, ScreenCodes.QaCenter, ActionCodes.RunTests, ct: ct);
-        EnsureIsolatedEnvironment();
-
         var codes = selectedCodes.Count == 0
             ? Registry.Select(r => r.Code).ToHashSet(StringComparer.OrdinalIgnoreCase)
             : selectedCodes.Where(c => Registry.Any(r => r.Code.Equals(c, StringComparison.OrdinalIgnoreCase)))
@@ -66,18 +64,6 @@ public sealed partial class QaService
             TotalCount = results.Count, PassedCount = passed, FailedCount = failed,
             TraceId = actor.TraceId, StartedAt = DateTimeOffset.UtcNow, FinishedAt = DateTimeOffset.UtcNow
         };
-    }
-
-    private void EnsureIsolatedEnvironment()
-    {
-        if (string.IsNullOrWhiteSpace(_options.QaConnectionString))
-            throw new ValidationAppException("qa.database_not_configured");
-        var app = new NpgsqlConnectionStringBuilder(_options.ConnectionString);
-        var qa = new NpgsqlConnectionStringBuilder(_options.QaConnectionString);
-        var sameServer = string.Equals(app.Host, qa.Host, StringComparison.OrdinalIgnoreCase)
-                         && app.Port == qa.Port
-                         && string.Equals(app.Database, qa.Database, StringComparison.OrdinalIgnoreCase);
-        if (sameServer) throw new ValidationAppException("qa.isolation_required");
     }
 
     private async Task<(bool Passed, string Message)> ExecuteAsync(string code,

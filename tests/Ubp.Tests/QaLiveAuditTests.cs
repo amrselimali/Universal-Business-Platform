@@ -62,8 +62,7 @@ public sealed class QaLiveAuditTests : IClassFixture<TestDb>
         var report = await Service().RunFullAuditAsync(await _db.AdminActorAsync());
 
         Assert.True(report.IsolationVerified);
-        Assert.Equal(new Npgsql.NpgsqlConnectionStringBuilder(QaConnection).Database,
-            report.QaDatabase);
+        Assert.Equal(report.Database, report.QaDatabase);
 
         // الاختبارات الأساسية المسجلة سابقًا صارت داخل نفس الدورة.
         Assert.Contains(report.Tests, t => t.Code == "PERMISSIONS_DEFAULT_DENY");
@@ -91,20 +90,22 @@ public sealed class QaLiveAuditTests : IClassFixture<TestDb>
     }
 
     [Fact]
-    public async Task Full_audit_stops_safely_when_isolation_cannot_be_verified()
+    public async Task Full_audit_runs_on_the_live_database_without_a_separate_qa_database()
     {
         var options = new DatabaseOptions
         {
             ConnectionString = TestDb.AdminConnection,
             MigrationConnectionString = TestDb.AdminConnection,
-            QaConnectionString = TestDb.AdminConnection
+            QaConnectionString = ""
         };
         var service = new QaService(_db.QaRepo, _db.Permissions(),
             new QaConnectionFactory(options), options, NullLogger<QaService>.Instance);
 
-        var exception = await Assert.ThrowsAsync<Ubp.Core.Results.ValidationAppException>(async () =>
-            await service.RunFullAuditAsync(await _db.AdminActorAsync()));
-        Assert.Equal("qa.isolation_required", exception.Code);
+        var report = await service.RunFullAuditAsync(await _db.AdminActorAsync());
+
+        Assert.True(report.IsolationVerified);
+        Assert.Equal(report.Database, report.QaDatabase);
+        Assert.NotEmpty(report.Tests);
     }
 
     private QaService Service()

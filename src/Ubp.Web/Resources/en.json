@@ -734,7 +734,7 @@
   "qa.duration": "Duration",
   "qa.failed": "Failed",
   "qa.hint": "Dynamic quality center: code-registered tests, selective execution, and traceable results.",
-  "qa.isolation_note": "Tests never run against the application database. A separate QA database is required; if isolation cannot be verified, execution fails closed.",
+  "qa.isolation_note": "The audit runs on the live database: the direct inspection uses a READ ONLY transaction, and write tests run inside a transaction that is always rolled back.",
   "qa.isolation_required": "QA database must be different from the application database",
   "qa.last_result": "Last result",
   "qa.message": "Message",
@@ -2021,5 +2021,9 @@
   "consumption.source_execution": "Service execution",
   "consumption.source_transfer": "Service transfer",
   "consumption.source_other": "Other adjustments",
-  "consumption.source_other_note": "Unallocated difference (adjustment/direct consumption)"
+  "consumption.source_other_note": "Unallocated difference (adjustment/direct consumption)",
+  "qa.live_db_note": "The audit runs on the live database: the direct inspection uses a READ ONLY transaction, and write tests run inside a transaction that is always rolled back.",
+  "qa.live_isolation_ok": "Database under audit: “{0}” — read only, no changes.",
+  "qa.tests_title": "Available tests",
+  "qa.run_full": "Run full audit"
 }
