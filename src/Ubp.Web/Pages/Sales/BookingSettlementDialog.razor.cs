@@ -73,7 +73,6 @@ public partial class BookingSettlementDialog
                     ItemName = line.ItemName, BookedQty = line.BookedQty,
                     ConsumedQty = line.ConsumedQty, RemainingQty = line.RemainingQty,
                     ServiceValue = line.BookedQty * line.UnitPrice,
-                    DueBefore = line.RemainingValue,
                     PaidAmount = line.PaidAmount, ExternalUnitPrice = line.UnitPrice
                 }).ToList();
             }
@@ -227,7 +226,6 @@ public partial class BookingSettlementDialog
         public decimal ConsumedQty { get; set; }
         public decimal RemainingQty { get; set; }
         public decimal ServiceValue { get; set; }
-        public decimal DueBefore { get; set; }
         public decimal PaidAmount { get; set; }
         public decimal ExternalUnitPrice { get; set; }
         public bool Selected { get; set; }

@@ -39,11 +39,16 @@ COMMENT ON VIEW v_customer_booking_balances IS
 DROP VIEW IF EXISTS v_customer_uncollected;
 CREATE VIEW v_customer_uncollected AS
 WITH paid_totals AS (
+    -- المسدد = المقدمة + كل الإيصالات/التحصيلات − ما استُهلك من مسدد في تسويات سابقة.
     SELECT b.id AS booking_id, b.total_amount,
-           b.deposit_amount + COALESCE(p.paid_amount, 0) AS paid_total
+           GREATEST(b.deposit_amount + COALESCE(p.paid_amount, 0)
+                    - COALESCE(s.settled_paid, 0), 0) AS paid_total
     FROM bookings b
     LEFT JOIN (SELECT booking_id, SUM(amount) AS paid_amount
                FROM booking_payments GROUP BY booking_id) p ON p.booking_id = b.id
+    LEFT JOIN (SELECT booking_id, SUM(paid_amount) AS settled_paid
+               FROM customer_account_settlement_lines GROUP BY booking_id) s
+           ON s.booking_id = b.id
     WHERE b.status NOT IN ('cancelled', 'reversed')
 )
 SELECT r.booking_id, r.branch_id, r.customer_id, r.booking_no, r.booking_date,

@@ -184,7 +184,6 @@
                                 <th>@T.T("reservations.remaining")</th>
                                 <th>@T.T("settlement.service_value")</th>
                                 <th>@T.T("settlement.paid_value")</th>
-                                <th>@T.T("settlement.due_before")</th>
                                 <th>@T.T("settlement.external_price")</th>
                                 <th>@T.T("settlement.due_to_customer")</th>
                             </tr>
@@ -204,7 +203,6 @@
                                     <td>@row.RemainingQty.ToString("N2")</td>
                                     <td>@row.ServiceValue.ToString("N2")</td>
                                     <td>@row.PaidAmount.ToString("N2")</td>
-                                    <td>@row.DueBefore.ToString("N2")</td>
                                     <td style="min-width:140px">
                                         <MudNumericField T="decimal" Value="row.ExternalUnitPrice"
                                                          ValueChanged="@(v => SetExternalPrice(row, v))"
