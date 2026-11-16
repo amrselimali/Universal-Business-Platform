@@ -1,57 +1,71 @@
-
-<MudPaper Elevation="0" Class="ubp-card mt-4">
-    <div class="d-flex flex-wrap align-center gap-2 mb-3">
-        <MudText Typo="Typo.h6">@T.T("qa.live_title")</MudText>
-        <MudSpacer />
-        <MudButton Variant="Variant.Filled" Color="Color.Primary"
-                   StartIcon="@Icons.Material.Filled.HealthAndSafety"
-                   OnClick="RunAsync" Disabled="_running">
-            @T.T("qa.live_run")
-        </MudButton>
-    </div>
-    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mb-3">
-        @T.T("qa.live_note")
-    </MudAlert>
-
-    @if (_running)
+<MudPaper Elevation="0" Class="ubp-card" Hidden="@(Report is null && !Running)">
+    @if (Running)
     {
-        <MudProgressLinear Indeterminate="true" Class="mb-3" />
+        <div class="ubp-loading"><MudProgressCircular Indeterminate="true" />
+            <MudText Class="mt-2">@T.T("qa.live_running")</MudText></div>
     }
-
-    @if (_report is not null)
+    else if (Report is null)
     {
+        <div class="ubp-empty">@T.T("qa.live_not_run")</div>
+    }
+    else
+    {
+        <MudText Typo="Typo.h6" Class="mb-2">@T.T("qa.live_title")</MudText>
+        <MudAlert Severity="@IsolationSeverity" Variant="Variant.Outlined" Dense="true" Class="mb-3">
+            @(Report.IsolationVerified
+                ? string.Format(T.T("qa.live_isolation_ok"), Report.QaDatabase)
+                : T.T("qa.isolation_note"))
+        </MudAlert>
+
         <div class="ubp-stats mb-3">
-            <div class="ubp-stat">
-                <MudIcon Icon="@Icons.Material.Filled.Speed" />
-                <div><span>@T.T("qa.live_score")</span><strong>@_report.HealthScore / 100 (@_report.Grade)</strong></div>
-            </div>
-            <div class="ubp-stat">
-                <MudIcon Icon="@Icons.Material.Filled.Timer" />
-                <div><span>@T.T("qa.live_duration")</span><strong>@_report.DurationMs.ToString("N0") ms</strong></div>
-            </div>
-            <div class="ubp-stat">
-                <MudIcon Icon="@Icons.Material.Filled.ErrorOutline" />
-                <div><span>@T.T("qa.live_critical")</span><strong>@_report.CriticalCount</strong></div>
-            </div>
-            <div class="ubp-stat">
-                <MudIcon Icon="@Icons.Material.Filled.WarningAmber" />
-                <div><span>@T.T("qa.live_high")</span><strong>@_report.HighCount</strong></div>
-            </div>
-            <div class="ubp-stat">
-                <MudIcon Icon="@Icons.Material.Filled.Storage" />
-                <div><span>@T.T("qa.live_database")</span><strong class="ubp-small">@_report.Database</strong></div>
-            </div>
+            <div class="ubp-stat"><MudIcon Icon="@ScoreIcon" />
+                <div><span>@T.T("qa.live_score")</span><strong>@Report.HealthScore (@Report.Grade)</strong></div></div>
+            <div class="ubp-stat"><MudIcon Icon="@Icons.Material.Filled.CheckCircle" />
+                <div><span>@T.T("qa.live_tests")</span><strong>@Report.PassedTests / @Report.Tests.Count</strong></div></div>
+            <div class="ubp-stat"><MudIcon Icon="@Icons.Material.Filled.Error" />
+                <div><span>@T.T("qa.live_critical")</span><strong>@Report.CriticalCount</strong></div></div>
+            <div class="ubp-stat"><MudIcon Icon="@Icons.Material.Filled.Warning" />
+                <div><span>@T.T("qa.live_high")</span><strong>@Report.HighCount</strong></div></div>
+            <div class="ubp-stat"><MudIcon Icon="@Icons.Material.Filled.Timer" />
+                <div><span>@T.T("qa.live_duration")</span><strong>@Report.DurationMs.ToString("N0") ms</strong></div></div>
+            <div class="ubp-stat"><MudIcon Icon="@Icons.Material.Filled.Storage" />
+                <div><span>@T.T("qa.live_database")</span><strong class="ubp-small">@Report.Database</strong></div></div>
         </div>
 
-        @if (_report.Findings.Count == 0)
+        <MudText Typo="Typo.subtitle1" Class="mb-2">@T.T("qa.live_tests_title")</MudText>
+        <MudTable Items="Report.Tests" Dense="true" Hover="true" Elevation="0" Class="ubp-table mb-4">
+            <HeaderContent>
+                <MudTh>@T.T("qa.code")</MudTh>
+                <MudTh>@T.T("qa.test")</MudTh>
+                <MudTh>@T.T("qa.category")</MudTh>
+                <MudTh>@T.T("qa.live_severity")</MudTh>
+                <MudTh>@T.T("qa.status")</MudTh>
+                <MudTh>@T.T("qa.duration")</MudTh>
+                <MudTh>@T.T("qa.message")</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd><span class="ubp-code">@context.Code</span></MudTd>
+                <MudTd>@context.Name</MudTd>
+                <MudTd>@context.Category</MudTd>
+                <MudTd><MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                               Color="@SeverityColor(context.Criticality)">@context.Criticality</MudChip></MudTd>
+                <MudTd><MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                               Color="@StatusColor(context.Status)">@context.Status</MudChip></MudTd>
+                <MudTd>@(context.DurationMs > 0 ? $"{context.DurationMs} ms" : "—")</MudTd>
+                <MudTd><span class="ubp-small">@context.Message</span></MudTd>
+            </RowTemplate>
+        </MudTable>
+
+        <MudText Typo="Typo.subtitle1" Class="mb-2">@T.T("qa.live_findings")
+            (@Report.Findings.Count)</MudText>
+        @if (Report.Findings.Count == 0)
         {
             <MudAlert Severity="Severity.Success" Variant="Variant.Outlined">
-                @T.T("qa.live_clean")
-            </MudAlert>
+                @T.T("qa.live_clean")</MudAlert>
         }
         else
         {
-            <MudTable Items="_report.Findings" Dense="true" Hover="true" Elevation="0" Class="ubp-table">
+            <MudTable Items="Report.Findings" Dense="true" Hover="true" Elevation="0" Class="ubp-table">
                 <HeaderContent>
                     <MudTh>@T.T("qa.live_area")</MudTh>
                     <MudTh>@T.T("qa.live_severity")</MudTh>
@@ -62,74 +76,15 @@
                 <RowTemplate>
                     <MudTd>@context.Area</MudTd>
                     <MudTd><MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
-                                    Color="@SeverityColor(context.Severity)">@context.Severity</MudChip></MudTd>
-                    <MudTd>
-                        <div>@context.Title</div>
-                        <span class="ubp-muted ubp-small">@context.Detail</span>
-                    </MudTd>
-                    <MudTd><span class="ubp-code">@context.Metric</span></MudTd>
+                                   Color="@SeverityColor(context.Severity)">@context.Severity</MudChip></MudTd>
+                    <MudTd>@context.Title<div class="ubp-small ubp-muted">@context.Detail</div></MudTd>
+                    <MudTd><span class="ubp-small">@context.Metric</span></MudTd>
                     <MudTd><span class="ubp-small">@context.Suggestion</span></MudTd>
                 </RowTemplate>
             </MudTable>
         }
-        @if (_report.Queries.Count > 0)
-        {
-            <MudText Typo="Typo.subtitle1" Class="mt-4 mb-2">@T.T("qa.live_slow_queries")</MudText>
-            <MudTable Items="_report.Queries.OrderByDescending(q => q.DurationMs)" Dense="true"
-                      Elevation="0" Class="ubp-table">
-                <HeaderContent>
-                    <MudTh>@T.T("qa.live_query")</MudTh>
-                    <MudTh Align="Right">ms</MudTh>
-                    <MudTh Align="Right">@T.T("qa.live_rows")</MudTh>
-                    <MudTh>@T.T("qa.live_hotspot")</MudTh>
-                </HeaderContent>
-                <RowTemplate>
-                    <MudTd>@context.Name</MudTd>
-                    <MudTd Align="Right"><strong>@context.DurationMs.ToString("N2")</strong></MudTd>
-                    <MudTd Align="Right">@context.Rows.ToString("N0")</MudTd>
-                    <MudTd>@(context.Hotspot ?? "—")</MudTd>
-                </RowTemplate>
-            </MudTable>
-        }
 
-        @if (_report.Tables.Count > 0)
-        {
-            <MudText Typo="Typo.subtitle1" Class="mt-4 mb-2">@T.T("qa.live_tables")</MudText>
-            <MudTable Items="_report.Tables" Dense="true" Elevation="0" Class="ubp-table">
-                <HeaderContent>
-                    <MudTh>@T.T("qa.live_table")</MudTh>
-                    <MudTh Align="Right">@T.T("qa.live_rows")</MudTh>
-                    <MudTh Align="Right">@T.T("qa.live_size")</MudTh>
-                    <MudTh Align="Right">seq</MudTh>
-                    <MudTh Align="Right">idx</MudTh>
-                </HeaderContent>
-                <RowTemplate>
-                    <MudTd><span class="ubp-code">@context.Table</span></MudTd>
-                    <MudTd Align="Right">@context.Rows.ToString("N0")</MudTd>
-                    <MudTd Align="Right">@context.TotalSize</MudTd>
-                    <MudTd Align="Right">@context.SeqScans.ToString("N0")</MudTd>
-                    <MudTd Align="Right">@context.IndexScans.ToString("N0")</MudTd>
-                </RowTemplate>
-            </MudTable>
-        }
-
-        @if (_report.Workflows.Count > 0)
-        {
-            <MudText Typo="Typo.subtitle1" Class="mt-4 mb-2">@T.T("qa.live_workflows")</MudText>
-            <MudTable Items="_report.Workflows" Dense="true" Elevation="0" Class="ubp-table">
-                <HeaderContent>
-                    <MudTh>@T.T("qa.live_workflow")</MudTh>
-                    <MudTh Align="Right">@T.T("qa.live_count")</MudTh>
-                    <MudTh>@T.T("qa.live_status")</MudTh>
-                </HeaderContent>
-                <RowTemplate>
-                    <MudTd>@context.Name<span class="ubp-muted ubp-small"> — @context.Detail</span></MudTd>
-                    <MudTd Align="Right">@context.Count.ToString("N0")</MudTd>
-                    <MudTd><MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
-                                    Color="@(context.Status == "ok" ? Color.Success : context.Status == "attention" ? Color.Warning : Color.Default)">
-                        @context.Status</MudChip></MudTd>
-                </RowTemplate>
-            </MudTable>
-        }
+        <QaResourcesPanel Report="Report" />
+        <QaTablesPanel Report="Report" />
     }
 </MudPaper>

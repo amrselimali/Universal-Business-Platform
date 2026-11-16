@@ -40,9 +40,14 @@ public sealed partial class QaService
             report.Database = head.Db;
 
             await CollectPerformanceAsync(connection, tx, report, ct);
-            await CollectResourcesAsync(connection, tx, report, ct);
             await CollectCodeAndConstraintsAsync(connection, tx, report, ct);
             await CollectWorkflowProbesAsync(connection, tx, report, ct);
+            await CollectAccountingAsync(connection, tx, report, ct);
+            await CollectSecurityAsync(connection, tx, report, ct);
+            await CollectSmartCoverageAsync(connection, tx, report, ct);
+            // الموارد أخيرًا: تحتاج نتائج الاستعلامات/الجداول/الدورات لتجزئة الاستهلاك.
+            await CollectResourcesAsync(connection, tx, report, ct);
+            ApplyTableHealth(report);
         }
         catch (Exception ex)
         {

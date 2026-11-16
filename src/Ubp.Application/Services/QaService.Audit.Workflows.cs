@@ -80,8 +80,7 @@ public sealed partial class QaService
     {
         try
         {
-            var count = await connection.ExecuteScalarAsync<long>(new CommandDefinition(sql,
-                transaction: tx, cancellationToken: ct));
+            var count = await SafeScalarAsync<long>(connection, tx, sql, null, ct);
             var healthy = isHealthy(count);
             report.Workflows.Add(new QaWorkflowProbe
             {

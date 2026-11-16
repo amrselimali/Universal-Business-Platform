@@ -1,0 +1,56 @@
+@inject UiCulture T
+
+<MudText Typo="Typo.subtitle1" Class="mt-4 mb-2">@T.T("qa.live_resources")</MudText>
+@if (Report.Resources.Count == 0)
+{
+    <div class="ubp-empty">@T.T("common.no_data")</div>
+}
+else
+{
+    <MudTable Items="Report.Resources" Dense="true" Hover="true" Elevation="0" Class="ubp-table">
+        <HeaderContent>
+            <MudTh>@T.T("qa.live_resource")</MudTh>
+            <MudTh>@T.T("qa.category")</MudTh>
+            <MudTh>@T.T("qa.live_used")</MudTh>
+            <MudTh>@T.T("qa.live_free")</MudTh>
+            <MudTh>@T.T("qa.live_percent")</MudTh>
+            <MudTh>@T.T("qa.live_note")</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd>@context.Name</MudTd>
+            <MudTd>@context.Category</MudTd>
+            <MudTd>@context.Used.ToString("N1") @context.Unit</MudTd>
+            <MudTd>
+                @(context.Total > 0
+                    ? (context.Total - context.Used).ToString("N1") + " " + context.Unit
+                    : "—")
+            </MudTd>
+            <MudTd Style="min-width:160px">
+                <MudProgressLinear Value="@context.Percent" Color="@BarColor(context.Percent)"
+                                   Size="Size.Small" Class="mb-1" />
+                <span class="ubp-small">@context.Percent.ToString("N1")%</span>
+            </MudTd>
+            <MudTd><span class="ubp-small ubp-muted">@context.Detail</span></MudTd>
+        </RowTemplate>
+    </MudTable>
+}
+
+<MudText Typo="Typo.subtitle1" Class="mt-4 mb-2">@T.T("qa.live_slices")</MudText>
+<MudTable Items="Report.Slices" Dense="true" Hover="true" Elevation="0" Class="ubp-table">
+    <HeaderContent>
+        <MudTh>@T.T("qa.live_resource")</MudTh>
+        <MudTh>@T.T("qa.live_kind")</MudTh>
+        <MudTh>@T.T("qa.live_cpu")</MudTh>
+        <MudTh>@T.T("qa.live_db_blocks")</MudTh>
+        <MudTh>@T.T("qa.live_size")</MudTh>
+        <MudTh>@T.T("qa.live_note")</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd><span class="ubp-code">@context.Name</span></MudTd>
+        <MudTd>@context.Kind</MudTd>
+        <MudTd>@(context.CpuMs > 0 ? context.CpuMs.ToString("N1") + " ms" : "—")</MudTd>
+        <MudTd>@(context.DbBlocks > 0 ? context.DbBlocks.ToString("N0") : "—")</MudTd>
+        <MudTd>@(string.IsNullOrWhiteSpace(context.Size) ? "—" : context.Size)</MudTd>
+        <MudTd><span class="ubp-small ubp-muted">@context.Note</span></MudTd>
+    </RowTemplate>
+</MudTable>

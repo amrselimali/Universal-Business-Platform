@@ -1,0 +1,60 @@
+
+<MudText Typo="Typo.subtitle1" Class="mt-4 mb-2">@T.T("qa.live_tables")</MudText>
+<MudTable Items="Report.Tables" Dense="true" Hover="true" Elevation="0" Class="ubp-table">
+    <HeaderContent>
+        <MudTh>@T.T("qa.live_table")</MudTh>
+        <MudTh>@T.T("qa.live_health")</MudTh>
+        <MudTh>@T.T("qa.live_rows")</MudTh>
+        <MudTh>@T.T("qa.live_size")</MudTh>
+        <MudTh>@T.T("qa.live_indexes")</MudTh>
+        <MudTh>@T.T("qa.live_seq_scan")</MudTh>
+        <MudTh>@T.T("qa.live_health_reason")</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd><span class="ubp-code">@context.Table</span></MudTd>
+        <MudTd>
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                     Color="@HealthColor(context.Health)">@HealthLabel(context.Health)</MudChip>
+        </MudTd>
+        <MudTd>@context.Rows.ToString("N0")</MudTd>
+        <MudTd>@context.TotalSize</MudTd>
+        <MudTd>@context.IndexSize</MudTd>
+        <MudTd>@context.SeqScans.ToString("N0") / @context.IndexScans.ToString("N0")</MudTd>
+        <MudTd><span class="ubp-small ubp-muted">@context.HealthReason</span></MudTd>
+    </RowTemplate>
+</MudTable>
+
+<MudText Typo="Typo.subtitle1" Class="mt-4 mb-2">@T.T("qa.live_workflows")</MudText>
+<MudTable Items="Report.Workflows" Dense="true" Hover="true" Elevation="0" Class="ubp-table">
+    <HeaderContent>
+        <MudTh>@T.T("qa.live_workflow")</MudTh>
+        <MudTh>@T.T("qa.live_count")</MudTh>
+        <MudTh>@T.T("qa.live_status")</MudTh>
+        <MudTh>@T.T("qa.live_note")</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd>@context.Name</MudTd>
+        <MudTd>@context.Count.ToString("N0")</MudTd>
+        <MudTd><MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                       Color="@StatusColor(context.Status)">@context.Status</MudChip></MudTd>
+        <MudTd><span class="ubp-small ubp-muted">@context.Detail</span></MudTd>
+    </RowTemplate>
+</MudTable>
+
+<MudText Typo="Typo.subtitle1" Class="mt-4 mb-2">@T.T("qa.live_slow_queries")</MudText>
+<MudTable Items="Report.Queries" Dense="true" Hover="true" Elevation="0" Class="ubp-table">
+    <HeaderContent>
+        <MudTh>@T.T("qa.live_query")</MudTh>
+        <MudTh>@T.T("qa.live_cpu")</MudTh>
+        <MudTh>@T.T("qa.live_rows")</MudTh>
+        <MudTh>@T.T("qa.live_db_blocks")</MudTh>
+        <MudTh>@T.T("qa.live_hotspot")</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd>@context.Name</MudTd>
+        <MudTd>@context.DurationMs.ToString("N1") ms</MudTd>
+        <MudTd>@context.Rows.ToString("N0")</MudTd>
+        <MudTd>@(context.SharedHitBlocks + context.SharedReadBlocks)</MudTd>
+        <MudTd><span class="ubp-small">@context.Hotspot</span></MudTd>
+    </RowTemplate>
+</MudTable>

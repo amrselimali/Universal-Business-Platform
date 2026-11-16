@@ -56,6 +56,57 @@ public sealed class QaLiveAuditTests : IClassFixture<TestDb>
         Assert.DoesNotContain("FK_WITHOUT_INDEX", codes);
     }
 
+    [Fact]
+    public async Task Full_audit_merges_basic_and_smart_tests_and_reports_resources()
+    {
+        var report = await Service().RunFullAuditAsync(await _db.AdminActorAsync());
+
+        Assert.True(report.IsolationVerified);
+        Assert.Equal(new Npgsql.NpgsqlConnectionStringBuilder(QaConnection).Database,
+            report.QaDatabase);
+
+        // الاختبارات الأساسية المسجلة سابقًا صارت داخل نفس الدورة.
+        Assert.Contains(report.Tests, t => t.Code == "PERMISSIONS_DEFAULT_DENY");
+        Assert.Contains(report.Tests, t => t.Code == "AUDIT_IMMUTABLE");
+        // الاختبارات الذكية تُشتق من الكود والمخطط الفعليين.
+        Assert.Contains(report.Tests, t => t.Code == "SMART_MIGRATIONS_COMPLETE");
+        Assert.Contains(report.Tests, t => t.Code == "SMART_TABLE_PK");
+        Assert.Contains(report.Tests, t => t.Code == "SMART_COVERAGE_FINGERPRINT");
+        // فحوص الأمان والترحيل المحاسبي.
+        Assert.Contains(report.Tests, t => t.Code == "SEC_SSL");
+        Assert.Contains(report.Tests, t => t.Code == "SEC_SENSITIVE_COLUMNS");
+        Assert.Contains(report.Tests, t => t.Code == "ACC_ALL_POSTED_HAVE_JOURNAL");
+        // لا تكرار لأكواد الاختبارات.
+        Assert.Equal(report.Tests.Count, report.Tests.Select(t => t.Code).Distinct().Count());
+
+        // موارد السيرفر والمتبقي غير المستخدم.
+        Assert.Contains(report.Resources, r => r.Category == "Memory" && r.Total > 0);
+        Assert.Contains(report.Resources, r => r.Category == "Cpu");
+        Assert.Contains(report.Resources, r => r.Category == "Database");
+        Assert.NotEmpty(report.Slices);
+
+        // حالة صحية لكل جدول.
+        Assert.All(report.Tables, t => Assert.Contains(t.Health, new[] { "ok", "attention", "critical" }));
+        Assert.All(report.Tables, t => Assert.False(string.IsNullOrWhiteSpace(t.HealthReason)));
+    }
+
+    [Fact]
+    public async Task Full_audit_stops_safely_when_isolation_cannot_be_verified()
+    {
+        var options = new DatabaseOptions
+        {
+            ConnectionString = TestDb.AdminConnection,
+            MigrationConnectionString = TestDb.AdminConnection,
+            QaConnectionString = TestDb.AdminConnection
+        };
+        var service = new QaService(_db.QaRepo, _db.Permissions(),
+            new QaConnectionFactory(options), options, NullLogger<QaService>.Instance);
+
+        var exception = await Assert.ThrowsAsync<Ubp.Core.Results.ValidationAppException>(async () =>
+            await service.RunFullAuditAsync(await _db.AdminActorAsync()));
+        Assert.Equal("qa.isolation_required", exception.Code);
+    }
+
     private QaService Service()
     {
         var options = new DatabaseOptions

@@ -15,6 +15,7 @@ public sealed partial class QaService
         await CollectConnectionsAsync(connection, tx, report, ct);
         await CollectLocksAsync(connection, tx, report, ct);
         await CollectBloatAsync(connection, tx, report, ct);
+        await CollectServerResourcesAsync(connection, tx, report, ct);
     }
 
     private async Task CollectTableSizesAsync(NpgsqlConnection connection, NpgsqlTransaction tx,
@@ -38,6 +39,7 @@ public sealed partial class QaService
                 report.Tables.Add(new QaTableProfile
                 {
                     Table = row.Rel, Rows = row.Live, TotalSize = HumanSize(row.Bytes),
+                    TotalBytes = row.Bytes,
                     IndexSize = HumanSize(row.IdxBytes), SeqScans = row.Seq, IndexScans = row.Idx
                 });
                 // جدول ضخم بلا أي مسح بالفهرس إشارة إلى فهرس مفقود.
