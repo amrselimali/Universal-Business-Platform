@@ -11,16 +11,36 @@ namespace Ubp.Web.Pages.Sales;
 public partial class Reservations
 {
     [Inject] private IDialogService Dialogs { get; set; } = default!;
+    [Inject] private BranchService Branches { get; set; } = default!;
     private MudTable<ReservationRow> _table = default!;
     private ReservationRow? _selected;
     private bool _onlyRemaining = true;
     private bool _busy;
     private string? _customerSearch;
     private DateTime? _extendTo = DateTime.Today.AddDays(30);
+    private IReadOnlyList<Branch> _branches = Array.Empty<Branch>();
+    /// <summary>الفروع المختارة (الافتراضي: كل الفروع المربوطة بالمستخدم).</summary>
+    private HashSet<Guid> _branchIds = new();
+    private IReadOnlyCollection<Guid>? _selectedBranchIds;
 
     protected override string ScreenCode => ScreenCodes.Reservations;
 
-    protected override Task OnLoadAsync() => Task.CompletedTask;
+    protected override async Task OnLoadAsync()
+    {
+        _branches = await Branches.OptionsAsync(Actor!);
+        // الوضع الافتراضي: كل الفروع المربوطة بالمستخدم محددة.
+        _branchIds = _branches.Select(b => b.Id).ToHashSet();
+        _selectedBranchIds = _branchIds.Count == 0 ? null : _branchIds.ToArray();
+    }
+
+    private IReadOnlyList<Guid> AllBranchesSelected => _branches.Select(b => b.Id).ToList();
+
+    private async Task OnBranchesChanged(IEnumerable<Guid>? values)
+    {
+        _branchIds = values is null ? new HashSet<Guid>() : values.ToHashSet();
+        _selectedBranchIds = _branchIds.Count == 0 ? null : _branchIds.ToArray();
+        await RefreshAsync();
+    }
 
     private async Task<TableData<ReservationRow>> LoadAsync(TableState state, CancellationToken ct)
     {
@@ -28,7 +48,7 @@ public partial class Reservations
         {
             Page = state.Page + 1,
             PageSize = state.PageSize <= 25 ? 25 : 50
-        }, null, _onlyRemaining, _customerSearch, ct);
+        }, null, _onlyRemaining, _customerSearch, ct, _selectedBranchIds);
         return new TableData<ReservationRow> { Items = page.Items, TotalItems = page.Total };
     }
 

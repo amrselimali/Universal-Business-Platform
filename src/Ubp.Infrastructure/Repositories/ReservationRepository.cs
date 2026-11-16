@@ -126,6 +126,14 @@ public sealed class ReservationRepository : IReservationRepository
                 LEFT JOIN vouchers v ON v.id = s.voucher_id
                 LEFT JOIN treasuries t ON t.id = s.treasury_id
                 WHERE sl.booking_line_id = @bookingLineId
+                UNION ALL
+                -- الدفعة المقدمة المسجلة مع الحجز (أرصدة افتتاحية عند تكويد العميل أو مقدمة حجز).
+                SELECT 'دفعة مقدمة'::varchar, NULL::varchar, b.booking_date, NULL::text,
+                       ROUND(b.deposit_amount
+                             * (l.quantity * l.unit_price) / NULLIF(b.total_amount, 0), 2)
+                FROM bookings b
+                JOIN booking_lines l ON l.booking_id = b.id AND l.id = @bookingLineId
+                WHERE b.deposit_amount > 0
             ) x
             ORDER BY doc_date, doc_no
             """, new { bookingLineId }, cancellationToken: ct));

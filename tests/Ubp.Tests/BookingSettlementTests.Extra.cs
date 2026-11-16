@@ -155,6 +155,55 @@ public sealed partial class BookingSettlementTests
     }
 
     [Fact]
+    public async Task Opening_balance_deposit_appears_in_payment_details()
+    {
+        var actor = await _db.AdminActorAsync();
+        var branch = await _db.CreateBranchAsync("OBP-B", "فرع تفاصيل أرصدة");
+        await _db.CreateWarehouseAsync("OBP-W", "مخزن تفاصيل أرصدة", branch);
+        var unit = await _db.UnitRepo.CreateAsync(new UnitInput
+            { Code = "OBP-U", NameAr = "وحدة تفاصيل أرصدة" });
+        var service = await _db.ItemRepo.CreateAsync(new ItemInput
+        {
+            Code = "OBP-SV", NameAr = "خدمة تفاصيل أرصدة", ItemType = "SERVICE",
+            BaseUnitId = unit.Id,
+            Units = new List<ItemUnitInput> { new() { UnitId = unit.Id, ConversionFactor = 1 } }
+        });
+        var category = await _db.PartnerRepo.CreateCategoryAsync(PartnerKind.Customer,
+            new PartnerCategoryInput { Code = "OBPC", NameAr = "تصنيف تفاصيل أرصدة" });
+        var customer = await _db.Partners().CreateAsync(actor, PartnerKind.Customer,
+            new PartnerInput
+            {
+                Code = "OBP-C", NameAr = "عميل تفاصيل أرصدة", Phone = "01000000003",
+                WhatsAppPhone = "01000000003", ScopeType = "BRANCH", BranchId = branch,
+                CategoryId = category.Id,
+                OpeningBalances =
+                {
+                    new ServiceOpeningBalanceInput
+                    {
+                        ServiceId = service.Id, Quantity = 2, UnitPrice = 100, PaidAmount = 150
+                    }
+                }
+            });
+
+        var page = await _db.Reservations().ListAsync(actor, new PageRequest
+        {
+            Page = 1, PageSize = 25
+        }, customer.Id, false, null);
+        var row = Assert.Single(page.Items);
+        Assert.Equal(150, row.PaidAmount);
+        Assert.Equal(50, row.UncollectedValue);
+
+        var detail = await _db.Reservations().GetPaymentDetailAsync(actor, row.BookingLineId);
+        Assert.NotNull(detail);
+        Assert.Equal(200, detail!.ServiceValue);
+        Assert.Equal(150, detail.PaidAmount);
+        Assert.Equal(50, detail.DueAmount);
+        var deposit = Assert.Single(detail.Rows);
+        Assert.Equal("دفعة مقدمة", deposit.Kind);
+        Assert.Equal(150, deposit.Amount);
+    }
+
+    [Fact]
     public async Task Paid_value_and_due_are_shown_on_reservations_with_payment_details()
     {
         var actor = await _db.AdminActorAsync();

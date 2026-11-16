@@ -24,13 +24,26 @@ public sealed partial class ReservationService
 
     public async Task<PagedResult<ReservationRow>> ListAsync(ActorContext actor, PageRequest request,
         Guid? customerId = null, bool onlyRemaining = false, string? customerSearch = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        IReadOnlyCollection<Guid>? branchFilterIds = null)
     {
         await _permissions.RequireAsync(actor, ScreenCodes.Reservations, ActionCodes.View, ct: ct);
         // المدير العام يرى الكل، وغيره يرى فروعه فقط (القص في الخدمة لا في الواجهة).
-        var branchIds = actor.IsSuperAdmin
+        var allowed = actor.IsSuperAdmin
             ? Array.Empty<Guid>()
             : actor.AllowedBranchIds.Distinct().ToArray();
+        var branchIds = allowed;
+        if (branchFilterIds is { Count: > 0 })
+        {
+            var selected = branchFilterIds.Distinct().ToArray();
+            if (!actor.IsSuperAdmin)
+            {
+                // لا يُسمح بتوسيع النطاق: التفلتر محصور في الفروع المصرح بها.
+                selected = selected.Where(b => allowed.Contains(b)).ToArray();
+                if (selected.Length == 0) selected = allowed;
+            }
+            branchIds = selected;
+        }
         return await _reservations.ListAsync(request, branchIds, customerId, onlyRemaining,
             customerSearch, ct);
     }

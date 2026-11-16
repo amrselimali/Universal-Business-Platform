@@ -27,6 +27,19 @@ else
                           AdornmentIcon="@Icons.Material.Filled.Search" Class="ubp-search" />
             <MudSwitch T="bool" Value="_onlyRemaining" ValueChanged="OnRemainingChanged"
                        Label="@T.T("reservations.only_remaining")" Color="Color.Primary" />
+            @if (_branches.Count > 1)
+            {
+                <MudSelect T="Guid" MultiSelection="true" SelectedValues="_branchIds"
+                           SelectedValuesChanged="OnBranchesChanged"
+                           Label="@T.T("common.branch")" Variant="Variant.Outlined"
+                           Margin="Margin.Dense" Style="min-width:240px"
+                           SelectAll="true" SelectAllValue="AllBranchesSelected">
+                    @foreach (var branch in _branches)
+                    {
+                        <MudSelectItem T="Guid" Value="@branch.Id">@branch.NameAr</MudSelectItem>
+                    }
+                </MudSelect>
+            }
             @if (Can(ActionCodes.ExtendReservation))
             {
                 <MudDatePicker @bind-Date="_extendTo" Label="@T.T("reservations.extend_to")"
