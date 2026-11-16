@@ -119,11 +119,30 @@ public sealed partial class TreasuryRepository
                 WHERE st.branch_id = @branchId AND st.status IN ('draft', 'posted')
                   AND st.created_at >= @openedAt
                   AND (@until::timestamptz IS NULL OR st.created_at <= @until::timestamptz)
+            ), settlements AS (
+                -- تسوية بحجز عرض جديد: تظهر كحركة صفرية في تقرير الشفت مع الخدمات المسواة — 0096.
+                SELECT c.name_ar AS CustomerName, NULL::varchar AS TreasuryType,
+                       0::numeric AS Collected, 0::numeric AS Revenue,
+                       SUM(l.settled_qty) AS Quantity, 0::numeric AS MeterUnits,
+                       NULL::text AS EmployeeName,
+                       string_agg(i.name_ar || ' × ' ||
+                                  trim(to_char(l.settled_qty, 'FM999999990.##')), ' • ') AS ItemName,
+                       0::numeric AS UnitPrice, 'تسوية حساب عميل'::varchar AS Source,
+                       NULL::text AS ComplaintEmployeeName
+                FROM customer_account_settlements s
+                JOIN customers c ON c.id = s.customer_id
+                JOIN customer_account_settlement_lines l ON l.settlement_id = s.id
+                JOIN items i ON i.id = l.item_id
+                WHERE s.branch_id = @branchId AND s.settlement_type = 'new_booking'
+                  AND s.created_at >= @openedAt
+                  AND (@until::timestamptz IS NULL OR s.created_at <= @until::timestamptz)
+                GROUP BY c.name_ar
             )
             SELECT * FROM receipts
             UNION ALL SELECT * FROM revenues
             UNION ALL SELECT * FROM executions
             UNION ALL SELECT * FROM transfers
+            UNION ALL SELECT * FROM settlements
             ORDER BY CustomerName
             """, args, cancellationToken: ct))).ToList();
 
