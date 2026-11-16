@@ -25,7 +25,7 @@ public sealed partial class ReservationService
     public async Task<PagedResult<ReservationRow>> ListAsync(ActorContext actor, PageRequest request,
         Guid? customerId = null, bool onlyRemaining = false, string? customerSearch = null,
         CancellationToken ct = default,
-        IReadOnlyCollection<Guid>? branchFilterIds = null)
+        IReadOnlyCollection<Guid>? branchFilterIds = null, bool openOnly = false)
     {
         await _permissions.RequireAsync(actor, ScreenCodes.Reservations, ActionCodes.View, ct: ct);
         // المدير العام يرى الكل، وغيره يرى فروعه فقط (القص في الخدمة لا في الواجهة).
@@ -45,7 +45,7 @@ public sealed partial class ReservationService
             branchIds = selected;
         }
         return await _reservations.ListAsync(request, branchIds, customerId, onlyRemaining,
-            customerSearch, ct);
+            customerSearch, ct, openOnly);
     }
 
     /// <summary>تفاصيل سداد خدمة: الإيصالات والتسويات التي سددت جزءًا من قيمتها.</summary>

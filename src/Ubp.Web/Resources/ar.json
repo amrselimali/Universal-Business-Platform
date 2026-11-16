@@ -900,6 +900,7 @@
   "reservations.extended": "تم تمديد الحجز",
   "reservations.hint": "كارتة كميات العملاء: المحجوز والمستهلك والمتبقي لكل عميل وصنف، بما فيها حجوزات نقطة البيع؛ والتنفيذ يصرف المتبقي ويُسجل وحدات العدّاد.",
   "reservations.item": "الصنف",
+  "reservations.open_only": "خدمات ما زالت مفتوحة",
   "reservations.only_remaining": "المتبقي فقط",
   "reservations.settle": "تسوية",
   "reservations.release": "تسوية",

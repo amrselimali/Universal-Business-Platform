@@ -900,6 +900,7 @@
   "reservations.extended": "Booking extended",
   "reservations.hint": "Customer quantity card: reserved, consumed and remaining per customer and item, including POS bookings; execution consumes the remainder and records meter units.",
   "reservations.item": "Item",
+  "reservations.open_only": "Still-open services",
   "reservations.only_remaining": "Remaining only",
   "reservations.settle": "Settle",
   "reservations.release": "Settle",

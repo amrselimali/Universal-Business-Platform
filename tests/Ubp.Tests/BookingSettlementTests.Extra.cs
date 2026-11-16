@@ -155,6 +155,33 @@ public sealed partial class BookingSettlementTests
     }
 
     [Fact]
+    public async Task Open_only_filter_keeps_lines_with_remaining_or_due()
+    {
+        var actor = await _db.AdminActorAsync();
+        var f = await SetupAsync("OPEN", pay: 500);
+        // خدمة منفَّذة بالكامل ومسددة بالكامل: لا متبقٍ ولا مستحق.
+        await using (var connection = new NpgsqlConnection(TestDb.AdminConnection))
+        {
+            await connection.OpenAsync();
+            await connection.ExecuteAsync(
+                "UPDATE booking_lines SET delivered_qty = quantity, reserved_qty = 0 WHERE booking_id = @id",
+                new { id = f.Booking.Id });
+        }
+
+        var closed = await _db.Reservations().ListAsync(actor, new PageRequest
+        {
+            Page = 1, PageSize = 25
+        }, f.Customer.Id, false, null, default, null, true);
+        Assert.DoesNotContain(closed.Items, r => r.BookingLineId == f.LineId);
+
+        var open = await _db.Reservations().ListAsync(actor, new PageRequest
+        {
+            Page = 1, PageSize = 25
+        }, f.Customer.Id, false, null, default, null, false);
+        Assert.Contains(open.Items, r => r.BookingLineId == f.LineId);
+    }
+
+    [Fact]
     public async Task Opening_balance_deposit_appears_in_payment_details()
     {
         var actor = await _db.AdminActorAsync();

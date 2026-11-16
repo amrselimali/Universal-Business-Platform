@@ -9,7 +9,7 @@ public interface IReservationRepository
 {
     Task<PagedResult<ReservationRow>> ListAsync(PageRequest request, IReadOnlyCollection<Guid> branchIds,
         Guid? customerId, bool onlyRemaining, string? customerSearch = null,
-        CancellationToken ct = default);
+        CancellationToken ct = default, bool openOnly = false);
     /// <summary>تفاصيل سداد خدمة (إيصالات/تسويات) — نافذة تفاصيل المسدد.</summary>
     Task<PaymentDetail?> GetPaymentDetailAsync(Guid bookingLineId, CancellationToken ct = default);
     Task<IReadOnlyList<ReservationRow>> RemainingLinesAsync(Guid bookingId,
@@ -46,6 +46,8 @@ public sealed class ReservationRepository : IReservationRepository
                         WHERE c.id = r.customer_id
                           AND c.search_text LIKE '%' || normalize_search(@customerSearch) || '%'))
         AND (NOT @onlyRemaining OR r.remaining_qty > 0)
+        -- خدمات ما زالت مفتوحة: كمية متبقية أو مبلغ مستحق على العميل.
+        AND (NOT @openOnly OR r.remaining_qty <> 0 OR COALESCE(u.uncollected_value, 0) <> 0)
         """;
 
     private readonly IDbConnectionFactory _factory;
@@ -54,7 +56,7 @@ public sealed class ReservationRepository : IReservationRepository
 
     public async Task<PagedResult<ReservationRow>> ListAsync(PageRequest request,
         IReadOnlyCollection<Guid> branchIds, Guid? customerId, bool onlyRemaining,
-        string? customerSearch = null, CancellationToken ct = default)
+        string? customerSearch = null, CancellationToken ct = default, bool openOnly = false)
     {
         var sql = $"""
             SELECT {Columns},
@@ -66,7 +68,9 @@ public sealed class ReservationRepository : IReservationRepository
             WHERE {Filter}
             ORDER BY r.booking_no NULLS LAST, r.booking_line_id
             LIMIT @take OFFSET @offset;
-            SELECT count(*)::int FROM v_customer_reservations r WHERE {Filter};
+            SELECT count(*)::int FROM v_customer_reservations r
+            LEFT JOIN v_customer_line_paid u ON u.booking_line_id = r.booking_line_id
+            WHERE {Filter};
             """;
         await using var connection = await _factory.OpenAsync(ct);
         using var multi = await connection.QueryMultipleAsync(new CommandDefinition(sql, new
@@ -76,6 +80,7 @@ public sealed class ReservationRepository : IReservationRepository
             customerId,
             customerSearch,
             onlyRemaining,
+            openOnly,
             take = request.SafePageSize,
             offset = request.Offset
         }, cancellationToken: ct));

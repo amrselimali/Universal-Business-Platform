@@ -27,6 +27,8 @@ else
                           AdornmentIcon="@Icons.Material.Filled.Search" Class="ubp-search" />
             <MudSwitch T="bool" Value="_onlyRemaining" ValueChanged="OnRemainingChanged"
                        Label="@T.T("reservations.only_remaining")" Color="Color.Primary" />
+            <MudSwitch T="bool" Value="_openOnly" ValueChanged="OnOpenOnlyChanged"
+                       Label="@T.T("reservations.open_only")" Color="Color.Primary" />
             @if (_branches.Count > 1)
             {
                 <MudSelect T="Guid" MultiSelection="true" SelectedValues="_branchIds"

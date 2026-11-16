@@ -15,6 +15,7 @@ public partial class Reservations
     private MudTable<ReservationRow> _table = default!;
     private ReservationRow? _selected;
     private bool _onlyRemaining = true;
+    private bool _openOnly;
     private bool _busy;
     private string? _customerSearch;
     private DateTime? _extendTo = DateTime.Today.AddDays(30);
@@ -48,11 +49,17 @@ public partial class Reservations
         {
             Page = state.Page + 1,
             PageSize = state.PageSize <= 25 ? 25 : 50
-        }, null, _onlyRemaining, _customerSearch, ct, _selectedBranchIds);
+        }, null, _onlyRemaining, _customerSearch, ct, _selectedBranchIds, _openOnly);
         return new TableData<ReservationRow> { Items = page.Items, TotalItems = page.Total };
     }
 
     private async Task RefreshAsync() => await _table.ReloadServerData();
+
+    private async Task OnOpenOnlyChanged(bool value)
+    {
+        _openOnly = value;
+        await RefreshAsync();
+    }
 
     private async Task OnRemainingChanged(bool value)
     {
