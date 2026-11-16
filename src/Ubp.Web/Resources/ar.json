@@ -2030,5 +2030,18 @@
   "qa.live_indexes": "الفهارس",
   "qa.live_seq_scan": "مسح متسلسل / بالفهرس",
   "reservations.unit_price": "سعر الوحدة",
-  "reservations.booking_value": "قيمة الحجز"
+  "reservations.booking_value": "قيمة الحجز",
+  "consumption.title": "تفاصيل الكمية المستهلكة",
+  "consumption.total": "إجمالي المستهلك",
+  "consumption.source": "المصدر",
+  "consumption.quantity": "الكمية",
+  "consumption.documents": "عدد المستندات",
+  "consumption.period": "التاريخ",
+  "consumption.note": "ملاحظة",
+  "consumption.hint": "استهلاك الأرصدة الافتتاحية لا يؤثر على القيود المحاسبية؛ يظهر فقط في شاشات التشغيل.",
+  "consumption.source_opening": "أرصدة افتتاحية",
+  "consumption.source_execution": "تنفيذ خدمات",
+  "consumption.source_transfer": "تحويل خدمات",
+  "consumption.source_other": "تسويات أخرى",
+  "consumption.source_other_note": "فرق غير موزع على مستندات (تسوية/استهلاك مباشر)"
 }

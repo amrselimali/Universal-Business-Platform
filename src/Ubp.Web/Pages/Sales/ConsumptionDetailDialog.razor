@@ -1,0 +1,76 @@
+@inherits ComponentBase
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">@T.T("consumption.title")</MudText>
+    </TitleContent>
+    <DialogContent>
+        @if (_loading)
+        {
+            <MudProgressLinear Indeterminate="true" />
+        }
+        else if (_detail is null)
+        {
+            <div class="ubp-empty">@T.T("common.no_data")</div>
+        }
+        else
+        {
+            <MudText Typo="Typo.body2" Class="mb-3">
+                @T.T("consumption.total"): <strong>@Fmt.Decimal(_detail.TotalConsumed)</strong>
+            </MudText>
+            <MudTable Items="_detail.Lines" Dense="true" Hover="true" Elevation="0" Class="ubp-table">
+                <HeaderContent>
+                    <MudTh>@T.T("consumption.source")</MudTh>
+                    <MudTh Align="Right">@T.T("consumption.quantity")</MudTh>
+                    <MudTh Align="Right">@T.T("consumption.documents")</MudTh>
+                    <MudTh>@T.T("consumption.period")</MudTh>
+                    <MudTh>@T.T("consumption.note")</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd>@T.T(context.Source)</MudTd>
+                    <MudTd Align="Right">@Fmt.Decimal(context.Quantity)</MudTd>
+                    <MudTd Align="Right">@context.Documents</MudTd>
+                    <MudTd>
+                        @(context.FirstDate is null
+                            ? "—"
+                            : context.FirstDate == context.LastDate
+                                ? Fmt.Date(context.FirstDate)
+                                : $"{Fmt.Date(context.FirstDate)} — {Fmt.Date(context.LastDate)}")
+                    </MudTd>
+                    <MudTd>@(string.IsNullOrWhiteSpace(context.Note) ? "—" : T.T(context.Note))</MudTd>
+                </RowTemplate>
+            </MudTable>
+            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mt-3">
+                @T.T("consumption.hint")
+            </MudAlert>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Close">@T.T("common.close")</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public Guid BookingLineId { get; set; }
+    [Inject] private ReservationService ReservationsApi { get; set; } = default!;
+    [Inject] private UserContext UserContext { get; set; } = default!;
+    [Inject] private UiCulture T { get; set; } = default!;
+    [Inject] private IDisplayFormatter Fmt { get; set; } = default!;
+
+    private ConsumptionDetail? _detail;
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var actor = await UserContext.RequireAsync();
+            _detail = await ReservationsApi.GetConsumptionDetailAsync(actor, BookingLineId);
+        }
+        catch { _detail = null; }
+        finally { _loading = false; }
+    }
+
+    private void Close() => MudDialog.Close();
+}

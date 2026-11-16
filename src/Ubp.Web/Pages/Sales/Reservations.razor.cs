@@ -111,6 +111,14 @@ public partial class Reservations
             new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
     }
 
+    /// <summary>تفاصيل الكمية المستهلكة ومصادرها (افتتاحي/تحويل/تنفيذ).</summary>
+    private async Task ShowConsumptionAsync(ReservationRow row)
+    {
+        await Dialogs.ShowAsync<ConsumptionDetailDialog>(T.T("consumption.title"),
+            new DialogParameters { ["BookingLineId"] = row.BookingLineId },
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
+    }
+
     private async Task SettleAsync(ReservationRow row)
     {
         if (_busy || row.RemainingQty <= 0) return;

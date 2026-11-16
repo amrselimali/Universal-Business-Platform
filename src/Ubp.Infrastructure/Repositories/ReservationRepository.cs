@@ -12,6 +12,8 @@ public interface IReservationRepository
         CancellationToken ct = default, bool openOnly = false);
     /// <summary>تفاصيل سداد خدمة (إيصالات/تسويات) — نافذة تفاصيل المسدد.</summary>
     Task<PaymentDetail?> GetPaymentDetailAsync(Guid bookingLineId, CancellationToken ct = default);
+    /// <summary>تفاصيل الكمية المستهلكة موزعة على المصادر التشغيلية.</summary>
+    Task<ConsumptionDetail?> GetConsumptionDetailAsync(Guid bookingLineId, CancellationToken ct = default);
     Task<IReadOnlyList<ReservationRow>> RemainingLinesAsync(Guid bookingId,
         CancellationToken ct = default);
     Task<Guid?> InsertAdjustmentAsync(Guid bookingId, Guid? bookingLineId, string kind,
@@ -24,7 +26,7 @@ public interface IReservationRepository
 /// قراءة الحجوزات من <c>v_customer_reservations</c> (مصدر واحد للكميات المحجوزة/المستهلكة/المتبقية)،
 /// وسجل التحويلات التي تمنع تحويل نفس السطر مرتين.
 /// </summary>
-public sealed class ReservationRepository : IReservationRepository
+public sealed partial class ReservationRepository : IReservationRepository
 {
     private const string Columns = """
         r.booking_id AS BookingId, r.branch_id AS BranchId, r.customer_id AS CustomerId,

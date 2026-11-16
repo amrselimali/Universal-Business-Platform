@@ -56,4 +56,12 @@ public sealed partial class ReservationService
         return await _reservations.GetPaymentDetailAsync(bookingLineId, ct);
     }
 
+    /// <summary>تفاصيل الكمية المستهلكة: أرصدة افتتاحية / تحويل خدمات / تنفيذ.</summary>
+    public async Task<ConsumptionDetail?> GetConsumptionDetailAsync(ActorContext actor,
+        Guid bookingLineId, CancellationToken ct = default)
+    {
+        await _permissions.RequireAsync(actor, ScreenCodes.Reservations, ActionCodes.View, ct: ct);
+        return await _reservations.GetConsumptionDetailAsync(bookingLineId, ct);
+    }
+
 }

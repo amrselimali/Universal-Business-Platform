@@ -2008,5 +2008,18 @@
   "qa.live_status": "Status",
   "qa.live_findings": "findings",
   "reservations.unit_price": "Unit price",
-  "reservations.booking_value": "Booking value"
+  "reservations.booking_value": "Booking value",
+  "consumption.title": "Consumed quantity details",
+  "consumption.total": "Total consumed",
+  "consumption.source": "Source",
+  "consumption.quantity": "Quantity",
+  "consumption.documents": "Documents",
+  "consumption.period": "Date",
+  "consumption.note": "Note",
+  "consumption.hint": "Opening-balance consumption does not affect accounting entries; it only appears in operations screens.",
+  "consumption.source_opening": "Opening balances",
+  "consumption.source_execution": "Service execution",
+  "consumption.source_transfer": "Service transfer",
+  "consumption.source_other": "Other adjustments",
+  "consumption.source_other_note": "Unallocated difference (adjustment/direct consumption)"
 }

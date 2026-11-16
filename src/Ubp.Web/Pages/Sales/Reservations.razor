@@ -76,7 +76,13 @@ else
                 <MudTd>@context.CustomerName</MudTd>
                 <MudTd>@context.ItemCode — @context.ItemName</MudTd>
                 <MudTd>@Fmt.Decimal(context.ReservedQty)</MudTd>
-                <MudTd>@Fmt.Decimal(context.ConsumedQty)</MudTd>
+                <MudTd>
+                    <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Primary"
+                               Disabled="@(context.ConsumedQty <= 0)"
+                               OnClick="@(() => ShowConsumptionAsync(context))">
+                        @Fmt.Decimal(context.ConsumedQty)
+                    </MudButton>
+                </MudTd>
                 <MudTd><strong>@Fmt.Decimal(context.RemainingQty)</strong></MudTd>
                 <MudTd Align="Right">@Fmt.Decimal(context.UnitPrice)</MudTd>
                 <MudTd Align="Right">@Fmt.Decimal(context.BookedQty * context.UnitPrice)</MudTd>

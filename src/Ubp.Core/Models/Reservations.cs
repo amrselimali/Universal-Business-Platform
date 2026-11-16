@@ -61,3 +61,23 @@ public sealed class PaymentDetail
     public decimal DueAmount => Math.Max(Math.Round(ServiceValue - PaidAmount, 2), 0);
     public IReadOnlyList<PaymentDetailRow> Rows { get; set; } = Array.Empty<PaymentDetailRow>();
 }
+
+/// <summary>تفاصيل الكمية المستهلكة من خدمة محجوزة موزعة على المصادر.</summary>
+public sealed class ConsumptionDetail
+{
+    public Guid BookingLineId { get; set; }
+    public decimal TotalConsumed { get; set; }
+    public IReadOnlyList<ConsumptionSourceLine> Lines { get; set; } =
+        Array.Empty<ConsumptionSourceLine>();
+}
+
+/// <summary>سطر مصدر استهلاك: تنفيذ / أرصدة افتتاحية / تحويل خدمات / تسويات.</summary>
+public sealed class ConsumptionSourceLine
+{
+    public string Source { get; set; } = "";
+    public decimal Quantity { get; set; }
+    public int Documents { get; set; }
+    public DateTime? FirstDate { get; set; }
+    public DateTime? LastDate { get; set; }
+    public string? Note { get; set; }
+}
