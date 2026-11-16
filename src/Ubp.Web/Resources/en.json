@@ -1872,6 +1872,7 @@
   "settlement.paid_value": "Paid value",
   "settlement.external_price": "External unit price",
   "settlement.due_before": "Amount due before settlement",
+  "settlement.refund_or_due": "Refund to customer (+) / due from customer (-)",
   "settlement.due_to_customer": "Amount due to customer",
   "settlement.selected_total": "Total due to customer",
   "settlement.settle": "Settle",

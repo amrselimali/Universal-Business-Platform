@@ -78,8 +78,8 @@ else
                 <MudTd><strong>@Fmt.Decimal(context.RemainingQty)</strong></MudTd>
                 <MudTd>@Fmt.Decimal(context.RemainingValue)</MudTd>
                 <MudTd Align="Right">
-                    <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Primary"
-                               Disabled="@(context.PaidAmount <= 0)"
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.ReceiptLong"
                                OnClick="@(() => ShowPaymentsAsync(context))">
                         @context.PaidAmount.ToString("N2")
                     </MudButton>

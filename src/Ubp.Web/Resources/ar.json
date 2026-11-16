@@ -1872,6 +1872,7 @@
   "settlement.paid_value": "القيمة المسددة",
   "settlement.external_price": "سعر الوحدة خارج العرض",
   "settlement.due_before": "القيمة المستحقة للعميل",
+  "settlement.refund_or_due": "المسترد للعميل (+) / المستحق عليه (−)",
   "settlement.due_to_customer": "المبلغ المستحق للعميل",
   "settlement.selected_total": "إجمالي المستحق للعميل",
   "settlement.settle": "تسوية",

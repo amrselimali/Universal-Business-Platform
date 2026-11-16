@@ -155,6 +155,32 @@ public sealed partial class BookingSettlementTests
     }
 
     [Fact]
+    public async Task Paid_amount_matches_between_settlement_sheet_and_reservations_list()
+    {
+        var actor = await _db.AdminActorAsync();
+        var f = await SetupAsync("CMP", pay: 200);
+        await using (var connection = new NpgsqlConnection(TestDb.AdminConnection))
+        {
+            await connection.OpenAsync();
+            await connection.ExecuteAsync(
+                "UPDATE booking_lines SET delivered_qty = 2, reserved_qty = 3 WHERE booking_id = @id",
+                new { id = f.Booking.Id });
+        }
+
+        var sheet = await _db.BookingSettlements().GetSheetAsync(actor, f.Branch, f.Customer.Id);
+        var page = await _db.Reservations().ListAsync(actor, new PageRequest
+        {
+            Page = 1, PageSize = 25
+        }, f.Customer.Id, false, null);
+
+        var sheetLine = Assert.Single(sheet!.Lines);
+        var listLine = Assert.Single(page.Items, r => r.BookingLineId == f.LineId);
+        Assert.Equal(sheetLine.PaidAmount, listLine.PaidAmount);
+        Assert.Equal(sheetLine.BookedQty * sheetLine.UnitPrice - sheetLine.PaidAmount,
+            listLine.UncollectedValue);
+    }
+
+    [Fact]
     public async Task Open_only_filter_keeps_lines_with_remaining_or_due()
     {
         var actor = await _db.AdminActorAsync();
