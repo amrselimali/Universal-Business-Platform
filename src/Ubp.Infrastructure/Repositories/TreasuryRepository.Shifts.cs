@@ -53,7 +53,10 @@ public sealed partial class TreasuryRepository
                s.notes AS Notes, s.reopened_at AS ReopenedAt, s.reopen_reason AS ReopenReason,
                s.review_status AS ReviewStatus, s.auto_closed AS AutoClosed,
                s.reviewed_at AS ReviewedAt,
-               COALESCE((SELECT SUM(v.total_amount) FROM vouchers v
+               COALESCE((SELECT SUM(CASE WHEN EXISTS (
+                             SELECT 1 FROM customer_account_settlements bs WHERE bs.voucher_id = v.id)
+                         THEN -v.total_amount ELSE v.total_amount END)
+                         FROM vouchers v
                          WHERE v.branch_id = s.branch_id AND v.voucher_type = 'receipt'
                            AND v.status <> 'cancelled'
                            AND v.created_at >= s.opened_at

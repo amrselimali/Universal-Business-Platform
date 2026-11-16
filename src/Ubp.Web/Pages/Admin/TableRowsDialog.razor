@@ -2,55 +2,103 @@
 
 <MudDialog>
     <TitleContent>
-        <MudText Typo="Typo.h6">@Table</MudText>
+        <div class="ubp-inline w-100">
+            <MudText Typo="Typo.h6">@Table</MudText>
+            <MudSpacer />
+            <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined"
+                     Icon="@Icons.Material.Filled.Visibility">
+                @T.T("database.read_only")
+            </MudChip>
+        </div>
     </TitleContent>
     <DialogContent>
-        @if (_loading)
-        {
-            <MudProgressLinear Indeterminate="true" />
-        }
-        else
-        {
-            <div class="ubp-inline mb-3">
-                <MudText Typo="Typo.caption">@T.T("database.page") @_page @T.T("database.of") @TotalPages</MudText>
+        <MudPaper Elevation="0" Class="ubp-card">
+            <div class="ubp-inline ubp-gap mb-3">
+                <MudTextField T="string" Value="_search" ValueChanged="OnSearchChangedAsync"
+                              Placeholder="@T.T("database.search_placeholder")" Immediate="true"
+                              DebounceInterval="400" Adornment="Adornment.Start"
+                              AdornmentIcon="@Icons.Material.Filled.Search" Clearable="true"
+                              Variant="Variant.Outlined" Margin="Margin.Dense" Class="ubp-search" />
+                <MudSelect T="int" Value="_pageSize" ValueChanged="OnPageSizeChangedAsync"
+                           Label="@T.T("common.rows_per_page")" Dense="true"
+                           Variant="Variant.Outlined" Style="max-width:180px">
+                    @foreach (var size in PageSizes)
+                    {
+                        <MudSelectItem T="int" Value="@size">@size</MudSelectItem>
+                    }
+                </MudSelect>
                 <MudSpacer />
-                <MudButton Size="Size.Small" Variant="Variant.Text" Disabled="@(_page <= 1)"
-                           OnClick="PrevAsync">@T.T("common.previous")</MudButton>
-                <MudButton Size="Size.Small" Variant="Variant.Text" Disabled="@(_page >= TotalPages)"
-                           OnClick="NextAsync">@T.T("common.next")</MudButton>
+                <MudText Typo="Typo.body2">
+                    @T.T("database.total_rows"): <b>@_total.ToString("N0")</b>
+                </MudText>
             </div>
+            <MudAlert Severity="Severity.Info" Dense="true" Variant="Variant.Outlined" Class="mb-3">
+                @T.T("database.sensitive_hidden")
+            </MudAlert>
 
-            @foreach (var row in _rows)
+            @if (_loading)
             {
-                <MudExpansionPanel Dense="true" Class="ubp-row-panel">
-                    <TitleContent>
-                        <div class="ubp-inline">
-                            <MudIcon Icon="@Icons.Material.Filled.DataObject" Size="Size.Small" />
-                            <span class="ubp-code">@RowId(row)</span>
-                        </div>
-                    </TitleContent>
-                    <ChildContent>
-                        <pre class="ubp-json">@Pretty(row)</pre>
-                        @if (Editable)
-                        {
-                            <div class="ubp-inline mt-3">
-                                <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary"
-                                           StartIcon="@Icons.Material.Filled.Edit"
-                                           OnClick="@(() => EditAsync(row))">@T.T("common.edit")</MudButton>
-                                <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error"
-                                           StartIcon="@Icons.Material.Filled.Delete"
-                                           OnClick="@(() => DeleteAsync(row))">@T.T("common.delete")</MudButton>
-                            </div>
-                        }
-                    </ChildContent>
-                </MudExpansionPanel>
+                <MudProgressLinear Indeterminate="true" />
             }
+            else if (_error is not null)
+            {
+                <MudAlert Severity="Severity.Error" Variant="Variant.Outlined">@_error</MudAlert>
+            }
+            else
+            {
+                <div class="ubp-db-scroll">
+                    <MudTable Items="_rows" Dense="true" Hover="true" Striped="true"
+                              Elevation="0" RowsPerPage="@_pageSize"
+                              Class="ubp-table ubp-db-table" Bordered="true">
+                        <HeaderContent>
+                            @foreach (var column in _columns)
+                            {
+                                <MudTh>
+                                    <div class="ubp-db-col">
+                                        <span class="ubp-code">@column.Name</span>
+                                        <span class="ubp-db-type">@column.DataType</span>
+                                    </div>
+                                </MudTh>
+                            }
+                        </HeaderContent>
+                        <RowTemplate>
+                            @for (var i = 0; i < _columns.Count; i++)
+                            {
+                                var text = i < context.Cells.Count ? context.Cells[i] : "";
+                                <MudTd>
+                                    @if (string.IsNullOrEmpty(text))
+                                    {
+                                        <span class="ubp-db-null">@T.T("database.null_value")</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="ubp-db-value">@text</span>
+                                    }
+                                </MudTd>
+                            }
+                        </RowTemplate>
+                        <NoRecordsContent>
+                            <div class="ubp-empty">@T.T("common.no_data")</div>
+                        </NoRecordsContent>
+                    </MudTable>
+                </div>
 
-            @if (_rows.Count == 0)
-            {
-                <div class="ubp-empty">@T.T("common.no_data")</div>
+                <div class="ubp-inline mt-3">
+                    <MudText Typo="Typo.caption">
+                        @T.T("database.page") @_page @T.T("database.of") @TotalPages
+                    </MudText>
+                    <MudSpacer />
+                    <MudButton Size="Size.Small" Variant="Variant.Text" Disabled="@(_page <= 1)"
+                               OnClick="FirstAsync">@T.T("database.first")</MudButton>
+                    <MudButton Size="Size.Small" Variant="Variant.Text" Disabled="@(_page <= 1)"
+                               OnClick="PrevAsync">@T.T("common.previous")</MudButton>
+                    <MudButton Size="Size.Small" Variant="Variant.Text"
+                               Disabled="@(_page >= TotalPages)" OnClick="NextAsync">@T.T("common.next")</MudButton>
+                    <MudButton Size="Size.Small" Variant="Variant.Text"
+                               Disabled="@(_page >= TotalPages)" OnClick="LastAsync">@T.T("database.last")</MudButton>
+                </div>
             }
-        }
+        </MudPaper>
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="Close">@T.T("common.close")</MudButton>

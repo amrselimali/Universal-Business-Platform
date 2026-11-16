@@ -65,6 +65,7 @@ public partial class Terminal : SecurePageBase
     private Guid _warehouseId;
     private Guid _treasuryId;
     private DateTime? _expiryDate = DateTime.Today.AddMonths(6);
+    private string? _bookingNotes;
     private string? _search;
     private IReadOnlyList<Branch> _branches = Array.Empty<Branch>();
     private IReadOnlyList<Partner> _customers = Array.Empty<Partner>();
@@ -339,6 +340,7 @@ public partial class Terminal : SecurePageBase
                 BranchId = _branchId, CustomerId = _customerId, WarehouseId = _warehouseId,
                 DocDate = DateTime.Today, DraftOnly = draftOnly,
                 ExpiresAt = new DateTimeOffset(_expiryDate.Value.Date),
+                Notes = string.IsNullOrWhiteSpace(_bookingNotes) ? null : _bookingNotes.Trim(),
                 Lines = _cart.Select(l => new PosLineInput
                 {
                     ItemId = l.ItemId, UnitId = l.UnitId, Quantity = l.Qty2,
@@ -364,6 +366,7 @@ public partial class Terminal : SecurePageBase
 
             _cart.Clear();
             _payments.Clear();
+            _bookingNotes = null;
             await SearchAsync();
         }
         finally { _busy = false; }

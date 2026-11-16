@@ -32,8 +32,15 @@ public sealed partial class PosRepository
                    v.total_amount AS Total, v.fee_total AS AllocatedTotal,
                    v.journal_entry_id AS JournalEntryId,
                    t.name_ar AS TreasuryName,
-                   -- مضمون جدول الإيصال في خلية واحدة: خدمات البيع (كمية/قيمة) أو حجوزات السداد — 0095.
+                   -- مضمون جدول الإيصال في خلية واحدة: تسوية/خدمات البيع/حجوزات السداد — 0096.
                    COALESCE(
+                     (SELECT string_agg(i.name_ar || ' × ' ||
+                              trim(to_char(bsl.settled_qty, 'FM999999990.##')) || ' — ' ||
+                              trim(to_char(bsl.refund_amount, 'FM999999990.00')), ' • ')
+                      FROM customer_account_settlements bs
+                      JOIN customer_account_settlement_lines bsl ON bsl.settlement_id = bs.id
+                      JOIN items i ON i.id = bsl.item_id
+                      WHERE bs.voucher_id = v.id),
                      (SELECT string_agg(x.txt, ' • ')
                       FROM (
                         SELECT i.name_ar || ' × ' ||
@@ -58,14 +65,26 @@ public sealed partial class PosRepository
                         JOIN bookings b ON b.id = bp.booking_id
                         WHERE bp.voucher_id = v.id
                         ORDER BY b.doc_no
-                      ) y)) AS Description
+                      ) y)) AS Description,
+                   COALESCE(
+                     (SELECT string_agg(DISTINCT b2.notes, ' • ')
+                      FROM booking_payments bp2
+                      JOIN bookings b2 ON b2.id = bp2.booking_id
+                      WHERE bp2.voucher_id = v.id AND b2.notes IS NOT NULL),
+                     (SELECT string_agg(DISTINCT b3.notes, ' • ')
+                      FROM customer_account_settlements s3
+                      JOIN customer_account_settlement_lines sl3 ON sl3.settlement_id = s3.id
+                      JOIN bookings b3 ON b3.id = sl3.booking_id
+                      WHERE s3.voucher_id = v.id AND b3.notes IS NOT NULL),
+                     v.notes) AS Notes
             FROM vouchers v
             LEFT JOIN treasuries t ON t.id = v.treasury_id
             WHERE v.voucher_type = 'receipt' AND v.party_type = 'C'
               AND (EXISTS (SELECT 1 FROM bookings b
                            WHERE b.customer_id = v.party_id AND b.source = 'pos'
                              AND b.branch_id = v.branch_id AND b.booking_date = v.doc_date)
-                   OR EXISTS (SELECT 1 FROM booking_payments bp WHERE bp.voucher_id = v.id))
+                   OR EXISTS (SELECT 1 FROM booking_payments bp WHERE bp.voucher_id = v.id)
+                   OR EXISTS (SELECT 1 FROM customer_account_settlements bs WHERE bs.voucher_id = v.id))
               AND (@branchId::uuid IS NULL OR v.branch_id = @branchId::uuid)
               AND (@from::date IS NULL OR v.doc_date >= @from::date)
               AND (@to::date IS NULL OR v.doc_date <= @to::date)
@@ -113,6 +132,34 @@ public sealed partial class PosRepository
             JOIN treasury_methods m ON m.id = l.treasury_method_id
             WHERE l.voucher_id = @id ORDER BY l.line_no
             """, new { id = voucherId }, cancellationToken: ct))).ToList();
+
+        var settlement = await connection.QuerySingleOrDefaultAsync<(Guid Id, decimal Total,
+            string? UserName)>(new CommandDefinition("""
+            SELECT bs.id, bs.total_refund,
+                   (SELECT COALESCE(u.name, u.username) FROM users u WHERE u.id = bs.created_by)
+            FROM customer_account_settlements bs WHERE bs.voucher_id = @id
+            """, new { id = voucherId }, cancellationToken: ct));
+        if (settlement.Id != Guid.Empty)
+        {
+            voucher.IsSettlementReceipt = true;
+            voucher.CreatedByName = settlement.UserName;
+            voucher.DueTotal = settlement.Total;
+            voucher.TaxTotal = 0;
+            voucher.PaidBefore = 0;
+            voucher.RemainingDue = 0;
+            voucher.SettlementLines = (await connection.QueryAsync<BookingSettlementReceiptLine>(
+                new CommandDefinition("""
+                SELECT i.name_ar AS ItemName, l.settled_qty AS SettledQty,
+                       l.settled_qty AS RemainingQty,
+                       l.external_unit_price AS ExternalUnitPrice,
+                       l.refund_amount AS RefundAmount
+                FROM customer_account_settlements bs
+                JOIN customer_account_settlement_lines l ON l.settlement_id = bs.id
+                JOIN items i ON i.id = l.item_id
+                WHERE bs.voucher_id = @id ORDER BY l.line_no
+                """, new { id = voucherId }, cancellationToken: ct))).ToList();
+            return voucher;
+        }
 
         var head = await connection.QuerySingleAsync<(DateTime CreatedAt, string? DocNo)>(
             new CommandDefinition(

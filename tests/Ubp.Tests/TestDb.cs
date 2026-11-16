@@ -110,6 +110,10 @@ public sealed partial class TestDb
         StocktakeRepo, StockDocRepo, StockPostingRepo, ItemRepo, WarehouseRepo, Settings(),
         Permissions(), new AuditService(AuditRepo));
 
+    public StocktakeSettlementService StocktakeSettlementService() => new(
+        StocktakeRepo, new StocktakeSettlementRepository(Factory), WarehouseRepo, Settings(),
+        Permissions(), new AuditService(AuditRepo));
+
     public PeriodService PeriodService() =>
         new(PeriodRepo, BranchRepo, Permissions(), new AuditService(AuditRepo));
 

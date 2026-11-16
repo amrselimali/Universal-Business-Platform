@@ -72,6 +72,23 @@ public partial class Reservations
         finally { _busy = false; }
     }
 
+    private async Task SettleAsync(ReservationRow row)
+    {
+        if (_busy || row.RemainingQty <= 0) return;
+        var dialog = await Dialogs.ShowAsync<BookingSettlementDialog>(T.T("settlement.title"),
+            new DialogParameters
+            {
+                ["BranchId"] = row.BranchId,
+                ["CustomerId"] = row.CustomerId
+            },
+            new DialogOptions { MaxWidth = MaxWidth.ExtraLarge, FullWidth = true });
+        if ((await dialog.Result) is { Canceled: false })
+        {
+            await RefreshAsync();
+            Snackbar.Add(T.T("settlement.created"), Severity.Success);
+        }
+    }
+
     private async Task ReleaseAsync(ReservationRow row)
     {
         if (_busy) return;

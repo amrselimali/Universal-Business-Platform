@@ -214,6 +214,20 @@ public sealed class StocktakeLine
     public string? Reason { get; set; }
 }
 
+/// <summary>
+/// سطر شاشة إدخال الجرد: كود الصنف واسمه والكمية الدفترية وتكلفتها قبل إنشاء الجلسة.
+/// تُستخدم لعرض الأصناف فورًا عند فتح «جرد جديد» دون إنشاء مسودة قبل الحفظ.
+/// </summary>
+public sealed class StocktakeCountSheetRow
+{
+    public Guid ItemId { get; set; }
+    public string ItemCode { get; set; } = "";
+    public string ItemName { get; set; } = "";
+    public decimal BookQty { get; set; }
+    public decimal UnitCost { get; set; }
+}
+
+
 public sealed class StocktakeDetail
 {
     public Stocktake Header { get; set; } = new();
@@ -234,3 +248,7 @@ public sealed class StocktakeLineInput
     public decimal UnitCost { get; set; }
     public string? Reason { get; set; }
 }
+
+/// <summary>نتيجة الترحيل الموحد للجرد: مستند التسوية المخزنية وقيدها المحاسبي.</summary>
+public sealed record StocktakeSettlementResult(Guid StocktakeId, Guid DocumentId,
+    string? DocumentNo, Guid EntryId, decimal TotalCost, int LinesCount);

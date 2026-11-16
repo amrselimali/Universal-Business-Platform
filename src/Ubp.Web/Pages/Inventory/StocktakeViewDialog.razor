@@ -1,0 +1,78 @@
+@inherits ComponentBase
+
+<MudDialog>
+    <TitleContent>
+        <div class="ubp-inline w-100">
+            <MudText Typo="Typo.h6">@T.T("stocktake.view") — @DisplayCode</MudText>
+            <MudSpacer />
+            @if (_detail is not null)
+            {
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                         Color="@(_detail.Header.Status == "POSTED" ? Color.Success : Color.Default)">
+                    @T.T("stocktake.status_" + _detail.Header.Status.ToLowerInvariant())
+                </MudChip>
+            }
+        </div>
+    </TitleContent>
+    <DialogContent>
+        @if (_loading)
+        {
+            <MudProgressLinear Indeterminate="true" />
+        }
+        else if (_error is not null)
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined">@_error</MudAlert>
+        }
+        else if (_detail is not null)
+        {
+            <MudAlert Severity="Severity.Info" Dense="true" Variant="Variant.Outlined" Class="mb-3">
+                @T.T("stocktake.view_only")
+            </MudAlert>
+            <div class="ubp-inline ubp-gap mb-2">
+                <MudText Typo="Typo.body2">@T.T("common.branch"): <b>@_detail.Header.BranchName</b></MudText>
+                <MudText Typo="Typo.body2">@T.T("common.warehouse"): <b>@_detail.Header.WarehouseName</b></MudText>
+                <MudText Typo="Typo.body2">@T.T("stocktake.created_at"): <b>@_detail.Header.CreatedAt.LocalDateTime.ToString("yyyy-MM-dd")</b></MudText>
+                @if (_detail.Header.PostedAt.HasValue)
+                {
+                    <MudText Typo="Typo.body2">@T.T("stocktake.posted_at"): <b>@_detail.Header.PostedAt.Value.LocalDateTime.ToString("yyyy-MM-dd HH:mm")</b></MudText>
+                }
+            </div>
+
+            @if (_detail.Header.Notes is not null)
+            {
+                <MudText Typo="Typo.body2" Class="mb-3">@T.T("common.notes"): @_detail.Header.Notes</MudText>
+            }
+
+            <div style="overflow-x:auto">
+                <table class="ubp-table" style="width:100%">
+                    <thead>
+                        <tr>
+                            <th>@T.T("stocktake.item_code")</th>
+                            <th>@T.T("stocktake.item_name")</th>
+                            <th>@T.T("stocktake.book_qty")</th>
+                            <th>@T.T("stocktake.counted_qty")</th>
+                            <th>@T.T("stocktake.difference")</th>
+                            <th>@T.T("stocktake.line_notes")</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var line in _detail.Lines)
+                        {
+                            <tr>
+                                <td><span class="ubp-code">@line.ItemCode</span></td>
+                                <td>@line.ItemName</td>
+                                <td>@line.BookQty.ToString("N2")</td>
+                                <td>@line.CountedQty.ToString("N2")</td>
+                                <td style="@DifferenceStyle(line.Difference)">@line.Difference.ToString("N2")</td>
+                                <td>@(string.IsNullOrWhiteSpace(line.Reason) ? "—" : line.Reason)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Close">@T.T("common.close")</MudButton>
+    </DialogActions>
+</MudDialog>

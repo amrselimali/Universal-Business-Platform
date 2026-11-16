@@ -137,3 +137,59 @@ public sealed class StocktakeReasonTests : IClassFixture<TestDb>
         Assert.Equal("فقد أثناء النقل", detail!.Lines.Single().Reason);
     }
 }
+
+public sealed class StocktakeCountSheetTests : IClassFixture<TestDb>
+{
+    private readonly TestDb _db;
+
+    public StocktakeCountSheetTests(TestDb db) => _db = db;
+
+    [Fact]
+    public async Task Count_sheet_lists_active_goods_with_book_quantity_and_cost()
+    {
+        var branch = await _db.CreateBranchAsync("SHT-B", "فرع شاشة الجرد");
+        var warehouse = await _db.CreateWarehouseAsync("SHT-W", "مخزن شاشة الجرد", branch);
+        var item = await _db.CreateItemAsync("IT-SHT", "صنف شاشة الجرد");
+        var actor = await _db.AdminActorAsync();
+        await _db.PostReceiptAsync(item, branch, warehouse, 10, 7);
+
+        var rows = await _db.StocktakeService().GetCountSheetAsync(actor, branch, warehouse);
+        var row = Assert.Single(rows, r => r.ItemId == item.Id);
+
+        Assert.Equal("IT-SHT", row.ItemCode);
+        Assert.Equal("صنف شاشة الجرد", row.ItemName);
+        Assert.Equal(10, row.BookQty);
+        Assert.Equal(7, row.UnitCost);
+    }
+
+    [Fact]
+    public async Task New_count_sheet_can_be_saved_as_a_draft_with_entered_quantities_and_notes()
+    {
+        var branch = await _db.CreateBranchAsync("SHT2-B", "فرع حفظ الجرد");
+        var warehouse = await _db.CreateWarehouseAsync("SHT2-W", "مخزن حفظ الجرد", branch);
+        var item = await _db.CreateItemAsync("IT-SHT2", "صنف حفظ الجرد");
+        var actor = await _db.AdminActorAsync();
+        await _db.PostReceiptAsync(item, branch, warehouse, 10, 7);
+        var service = _db.StocktakeService();
+
+        var sheet = await service.GetCountSheetAsync(actor, branch, warehouse);
+        Assert.Contains(sheet, row => row.ItemId == item.Id);
+        var created = await service.CreateAsync(actor, new StocktakeInput
+        {
+            BranchId = branch, WarehouseId = warehouse
+        });
+        var inputs = created.Lines.Select(line => new StocktakeLineInput
+        {
+            ItemId = line.ItemId,
+            CountedQty = line.ItemId == item.Id ? 8 : line.CountedQty,
+            UnitCost = line.UnitCost,
+            Reason = line.ItemId == item.Id ? "عجز أثناء الجرد" : line.Reason
+        }).ToList();
+        var detail = await service.UpdateLinesAsync(actor, created.Header.Id, inputs);
+
+        var saved = Assert.Single(detail.Lines, line => line.ItemId == item.Id);
+        Assert.Equal(8, saved.CountedQty);
+        Assert.Equal(-2, saved.Difference);
+        Assert.Equal("عجز أثناء الجرد", saved.Reason);
+    }
+}

@@ -9,8 +9,15 @@ public interface IStocktakeRepository
 {
     Task<PagedResult<Stocktake>> ListAsync(PageRequest request, string? status, bool isAdmin,
         IReadOnlyCollection<Guid> branchIds, CancellationToken ct = default);
+    /// <summary>جرودات شاشة التسويات: فلترة بالفترة (تاريخ الإنشاء) والمخزن وبصلاحية عرض مستقلة.</summary>
+    Task<PagedResult<Stocktake>> ListSettlementsAsync(PageRequest request, DateTime? from,
+        DateTime? to, Guid? warehouseId, bool isAdmin, IReadOnlyCollection<Guid> branchIds,
+        CancellationToken ct = default);
     Task<Stocktake?> GetAsync(Guid id, CancellationToken ct = default);
     Task<StocktakeDetail?> GetDetailAsync(Guid id, CancellationToken ct = default);
+    /// <summary>أصناف شاشة الإدخال قبل إنشاء الجلسة: الأصناف النشطة ورصيد المخزن وتكلفتها.</summary>
+    Task<IReadOnlyList<StocktakeCountSheetRow>> GetCountSheetAsync(Guid warehouseId,
+        CancellationToken ct = default);
     Task<string> NextCodeAsync(Guid branchId, DateTime date, CancellationToken ct = default);
     Task<Stocktake> CreateAsync(StocktakeInput input, string code, Guid userId, CancellationToken ct = default);
     Task UpdateLinesAsync(Guid id, IReadOnlyList<StocktakeLineInput> lines, CancellationToken ct = default);
@@ -74,6 +81,39 @@ public sealed partial class StocktakeRepository : IStocktakeRepository
         };
     }
 
+    public async Task<PagedResult<Stocktake>> ListSettlementsAsync(PageRequest request,
+        DateTime? from, DateTime? to, Guid? warehouseId, bool isAdmin,
+        IReadOnlyCollection<Guid> branchIds, CancellationToken ct = default)
+    {
+        var where = new List<string>();
+        if (!isAdmin) where.Add("s.branch_id = ANY(@branchIds)");
+        if (from.HasValue) where.Add("s.created_at::date >= @from");
+        if (to.HasValue) where.Add("s.created_at::date <= @to");
+        if (warehouseId.HasValue) where.Add("s.warehouse_id = @warehouseId");
+        if (!string.IsNullOrWhiteSpace(request.Search))
+            where.Add("(s.code ILIKE '%' || @search || '%' OR coalesce(s.notes,'') ILIKE '%' || @search || '%')");
+
+        var whereSql = where.Count == 0 ? "WHERE true" : "WHERE " + string.Join(" AND ", where);
+        var sql = $"""
+            SELECT {Columns} FROM stocktakes s {whereSql}
+            ORDER BY s.created_at DESC LIMIT @take OFFSET @offset;
+            SELECT count(*) FROM stocktakes s {whereSql};
+            """;
+
+        await using var connection = await _factory.OpenAsync(ct);
+        using var multi = await connection.QueryMultipleAsync(new CommandDefinition(sql, new
+        {
+            branchIds = branchIds.ToArray(), from, to, warehouseId,
+            search = request.Search, take = request.SafePageSize, offset = request.Offset
+        }, cancellationToken: ct));
+        var items = (await multi.ReadAsync<Stocktake>()).ToList();
+        var total = await multi.ReadFirstAsync<int>();
+        return new PagedResult<Stocktake>
+        {
+            Items = items, Total = total, Page = request.SafePage, PageSize = request.SafePageSize
+        };
+    }
+
     public async Task<string> NextCodeAsync(Guid branchId, DateTime date, CancellationToken ct = default)
     {
         await using var connection = await _factory.OpenAsync(ct);
@@ -105,5 +145,23 @@ public sealed partial class StocktakeRepository : IStocktakeRepository
         await using var connection = await _factory.OpenAsync(ct);
         var lines = (await connection.QueryAsync<StocktakeLine>(new CommandDefinition(sql, new { id }, cancellationToken: ct))).ToList();
         return new StocktakeDetail { Header = header, Lines = lines };
+    }
+
+    public async Task<IReadOnlyList<StocktakeCountSheetRow>> GetCountSheetAsync(Guid warehouseId,
+        CancellationToken ct = default)
+    {
+        const string sql = """
+            SELECT i.id AS ItemId, i.code AS ItemCode, i.name_ar AS ItemName,
+                   COALESCE(b.on_hand, 0) AS BookQty, COALESCE(b.average_cost, 0) AS UnitCost
+            FROM items i
+            LEFT JOIN stock_balances b
+                   ON b.item_id = i.id AND b.warehouse_id = @warehouseId
+            WHERE i.is_active AND i.item_type = 'GOODS'
+            ORDER BY i.code
+            """;
+        await using var connection = await _factory.OpenAsync(ct);
+        var rows = await connection.QueryAsync<StocktakeCountSheetRow>(
+            new CommandDefinition(sql, new { warehouseId }, cancellationToken: ct));
+        return rows.ToList();
     }
 }

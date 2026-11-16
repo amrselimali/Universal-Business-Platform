@@ -68,6 +68,14 @@ public sealed partial class TreasuryRepository
         if (head.Status != VoucherStatuses.Draft || head.JournalEntryId is not null)
             throw new ValidationAppException("validation.voucher_not_draft");
 
+        if (await BookingSettlementRepository.IsSettlementVoucherAsync(connection, tx, id, ct))
+        {
+            if (!await BookingSettlementRepository.PostCoreAsync(connection, tx, id, userId, ct))
+                throw new ValidationAppException("validation.voucher_not_draft");
+            await tx.CommitAsync(ct);
+            return id;
+        }
+
         var lines = (await connection.QueryAsync<VoucherPostLine>(new CommandDefinition("""
             SELECT l.line_no AS LineNo, l.treasury_method_id AS TreasuryMethodId,
                    l.amount AS Amount, l.fee_amount AS FeeAmount, l.reference AS Reference,

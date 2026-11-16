@@ -175,6 +175,11 @@ public sealed class Voucher
     public List<ReceiptLineDisplay> DisplayLines { get; set; } = new();
     /// <summary>true = إيصال سداد خدمات محجوزة (جدول حجوزات) بدل جدول البيع — 0095.</summary>
     public bool IsCollectionReceipt { get; set; }
+    /// <summary>true = إيصال تسوية حساب عميل (خدمات مستهلكة/متبقية وقيمة مستردة) — 0096.</summary>
+    public bool IsSettlementReceipt { get; set; }
+    public List<BookingSettlementReceiptLine> SettlementLines { get; set; } = new();
+    /// <summary>اسم منشئ الإيصال لعرضه في إيصال تسوية الحساب.</summary>
+    public string? CreatedByName { get; set; }
     /// <summary>إجمالي القيمة المستحقة (قبل الضريبة وقبل العمولة) — 0095.</summary>
     public decimal DueTotal { get; set; }
     /// <summary>إجمالي الضريبة — 0095.</summary>

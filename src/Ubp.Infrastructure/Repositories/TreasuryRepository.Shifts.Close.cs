@@ -96,6 +96,10 @@ public sealed partial class TreasuryRepository
         await connection.ExecuteScalarAsync<decimal>(new CommandDefinition("""
             SELECT COALESCE(SUM(CASE
                        WHEN v.treasury_id = @treasuryId AND v.voucher_type = 'receipt'
+                            AND EXISTS (SELECT 1 FROM customer_account_settlements bs
+                                        WHERE bs.voucher_id = v.id)
+                           THEN -v.total_amount
+                       WHEN v.treasury_id = @treasuryId AND v.voucher_type = 'receipt'
                            THEN v.total_amount
                        WHEN v.treasury_id = @treasuryId AND v.voucher_type = 'payment'
                            THEN -v.total_amount
@@ -196,6 +200,7 @@ public sealed partial class TreasuryRepository
             FROM vouchers v
             JOIN treasuries t ON t.id = v.treasury_id
             WHERE t.id = @treasuryId AND v.voucher_type = 'receipt' AND v.status <> 'cancelled'
+              AND NOT EXISTS (SELECT 1 FROM customer_account_settlements bs WHERE bs.voucher_id = v.id)
               AND v.created_at >= @openedAt
               AND (@until::timestamptz IS NULL OR v.created_at <= @until::timestamptz)
             """, new { treasuryId, openedAt, until }, tx, cancellationToken: ct));

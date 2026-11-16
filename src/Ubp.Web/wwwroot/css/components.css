@@ -189,3 +189,16 @@
     display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px;
     margin: 0 0 14px; font-size: .78rem; color: var(--ubp-muted);
 }
+
+/* استعراض بيانات قاعدة البيانات: تمرير أفقي وحفظ شكل القيم — 0095 */
+.ubp-gap { gap: 12px; }
+.ubp-db-scroll { overflow-x: auto; max-width: 100%; }
+.ubp-db-table { min-width: max-content; width: 100%; }
+.ubp-db-table th, .ubp-db-table td { vertical-align: top; white-space: nowrap; }
+.ubp-db-col { display: flex; flex-direction: column; gap: 1px; }
+.ubp-db-type { font-size: .66rem; color: var(--ubp-muted); font-weight: 400; }
+.ubp-db-null { color: var(--ubp-muted); font-size: .78rem; font-style: italic; }
+.ubp-db-value { font-size: .8rem; }
+
+/* صف يحتاج ملاحظة إلزامية في شاشة إدخال الجرد */
+.ubp-row-error > td { background: #FEF2F2 !important; }

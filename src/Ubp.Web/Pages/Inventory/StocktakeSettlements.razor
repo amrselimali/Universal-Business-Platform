@@ -1,0 +1,89 @@
+@page "/inventory/stocktake-settlements"
+@attribute [Authorize]
+@inherits SecurePageBase
+<PageTitle>@T.T("screen.stocktake_settlements")</PageTitle>
+
+@if (Denied) { <ForbiddenView /> }
+else if (Loading) { <div class="ubp-loading"><MudProgressCircular Indeterminate="true" /></div> }
+else
+{
+    <PageHeader Title="@T.T("screen.stocktake_settlements")"
+                Subtitle="@T.T("stocktake.settlements_hint")">
+        <Actions>
+            @if (Can(ActionCodes.View))
+            {
+                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh"
+                           OnClick="ReloadAsync">@T.T("common.refresh")</MudButton>
+            }
+        </Actions>
+    </PageHeader>
+
+    <MudPaper Elevation="0" Class="ubp-card">
+        <div class="ubp-toolbar">
+            <MudDatePicker @bind-Date="_from" Label="@T.T("common.from")"
+                           Variant="Variant.Outlined" Margin="Margin.Dense"
+                           DateFormat="yyyy-MM-dd" Editable="true" />
+            <MudDatePicker @bind-Date="_to" Label="@T.T("common.to")"
+                           Variant="Variant.Outlined" Margin="Margin.Dense"
+                           DateFormat="yyyy-MM-dd" Editable="true" />
+            <MudSelect T="Guid?" @bind-Value="_warehouseId" Label="@T.T("common.warehouse")"
+                       Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true"
+                       @bind-Value:after="ReloadAsync" Style="min-width:240px">
+                @foreach (var warehouse in _warehouses)
+                {
+                    <MudSelectItem T="Guid?" Value="@((Guid?)warehouse.Id)">@warehouse.NameAr</MudSelectItem>
+                }
+            </MudSelect>
+            <MudTextField @bind-Value="_search" Placeholder="@T.T("common.search")"
+                          Immediate="true" DebounceInterval="400"
+                          OnDebounceIntervalElapsed="ReloadAsync"
+                          Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Class="ubp-search" />
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="ReloadAsync">
+                @T.T("stocktake.show")
+            </MudButton>
+        </div>
+
+        <MudTable @ref="_table" ServerData="LoadServerData" Dense="true" Hover="true"
+                  Striped="true" Elevation="0" RowsPerPage="25" Class="ubp-table">
+            <HeaderContent>
+                <MudTh>@T.T("stocktake.code")</MudTh>
+                <MudTh>@T.T("common.warehouse")</MudTh>
+                <MudTh>@T.T("stocktake.created_at")</MudTh>
+                <MudTh>@T.T("stocktake.lines")</MudTh>
+                <MudTh>@T.T("stocktake.total_difference")</MudTh>
+                <MudTh>@T.T("common.status")</MudTh>
+                <MudTh Align="Right">@T.T("common.actions")</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd><span class="ubp-code">@context.Code</span></MudTd>
+                <MudTd>@context.WarehouseName</MudTd>
+                <MudTd>@context.CreatedAt.LocalDateTime.ToString("yyyy-MM-dd")</MudTd>
+                <MudTd>@context.LinesCount</MudTd>
+                <MudTd>@context.TotalDifference.ToString("N2")</MudTd>
+                <MudTd>
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                             Color="@(context.Status == "POSTED" ? Color.Success : Color.Default)">
+                        @T.T("stocktake.status_" + context.Status.ToLowerInvariant())
+                    </MudChip>
+                </MudTd>
+                <MudTd Align="Right">
+                    <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.Visibility"
+                               OnClick="@(() => ViewAsync(context))">@T.T("stocktake.view")</MudButton>
+                    @if (Can(ActionCodes.Post))
+                    {
+                        <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Success"
+                                   StartIcon="@Icons.Material.Filled.CheckCircle"
+                                   Disabled="@(context.Status != "DRAFT" || _posting)"
+                                   OnClick="@(() => PostAsync(context))">@T.T("stocktake.post")</MudButton>
+                    }
+                </MudTd>
+            </RowTemplate>
+            <PagerContent>
+                <MudTablePager PageSizeOptions="new[] { 25, 50 }"
+                               RowsPerPageString="@T.T("common.rows_per_page")" />
+            </PagerContent>
+        </MudTable>
+    </MudPaper>
+}

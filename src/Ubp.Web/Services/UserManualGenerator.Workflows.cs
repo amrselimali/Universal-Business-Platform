@@ -29,7 +29,8 @@ public sealed partial class UserManualGenerator
             new("ترحيل الفاتورة", "/sales/invoices", ActionCodes.Post),
             new("تسوية الحجز", "/sales/settlements", ActionCodes.Create),
             new("اعتماد التسوية", "/sales/settlements", ActionCodes.Approve),
-            new("ترحيل التسوية", "/sales/settlements", ActionCodes.Post)
+            new("ترحيل التسوية", "/sales/settlements", ActionCodes.Post),
+            new("تسوية حساب عميل محجوز", "/sales/reservations", ActionCodes.SettleAccount)
         ]),
         new("دورة المخزون", "استلام/صرف/تحويل ثم ترحيل، والتصحيح بالعكس.",
         [
@@ -42,7 +43,8 @@ public sealed partial class UserManualGenerator
         [
             new("إنشاء جرد", "/inventory/stocktake", ActionCodes.Add),
             new("إدخال الكميات", "/inventory/stocktake", ActionCodes.Edit),
-            new("ترحيل الجرد", "/inventory/stocktake", ActionCodes.Post)
+            new("ترحيل الجرد", "/inventory/stocktake", ActionCodes.Post),
+            new("تسويات جردية", "/inventory/stocktake-settlements", ActionCodes.Post)
         ]),
         new("دورة المحاسبة", "قيد مسودة، ترحيل، عكس، ثم إغلاق الفترة.",
         [
@@ -168,6 +170,9 @@ public sealed partial class UserManualGenerator
             [ActionCodes.ReopenPeriod] = ("إعادة فتح الفترة", "يعكس إغلاق النطاق.", "يتطلب صلاحية وسببًا.", "UPDATE"),
             [ActionCodes.RunMigrations] = ("تنفيذ الترحيلات", "يشغّل سكربتات SQL المعلّقة.", "Super Admin + قفل جلسي + معاملة لكل سكربت.", "MIGRATION"),
             [ActionCodes.EditRows] = ("تعديل الصفوف", "تعديل/حذف صف قاعدة بيانات مباشرة.", "Super Admin؛ أعمدة محمية؛ audit إلزامي.", "UPDATE/DELETE"),
+            [ActionCodes.BrowseData] = ("استعراض البيانات", "يعرض بيانات الجدول بصفحات وبحث للقراءة فقط.", "Super Admin؛ أعمدة حساسة مخفية.", "لا شيء"),
+            [ActionCodes.ExportTable] = ("تصدير جدول", "ينزّل ملف Excel للجدول بكامل أعمدته وبياناته.", "Super Admin؛ بلا أعمدة حساسة؛ حد Excel لكل ورقة.", "EXPORT"),
+            [ActionCodes.ExportDatabase] = ("تصدير قاعدة البيانات", "ينزّل ملف Excel واحدًا بورقة مستقلة لكل جدول.", "Super Admin؛ كل الجداول؛ بلا أعمدة حساسة.", "EXPORT"),
             [ActionCodes.ResetPassword] = ("إعادة تعيين كلمة المرور", "يضبط كلمة مرور جديدة.", "سياسة كلمة المرور؛ يلغي كل الجلسات.", "PASSWORD_RESET"),
             [ActionCodes.Unlock] = ("فك القفل", "يصفّر المحاولات الفاشلة.", "لا يغيّر كلمة المرور.", "UPDATE"),
             [ActionCodes.ReleaseReservation] = ("تحرير الحجز", "يلغي الحجز ويحرر الكميات.", "سبب مطلوب؛ لا يمس القيود المرحّلة.", "bookings:UPDATE"),

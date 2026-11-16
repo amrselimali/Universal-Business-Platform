@@ -10,6 +10,10 @@ public interface IReservationRepository
     Task<PagedResult<ReservationRow>> ListAsync(PageRequest request, IReadOnlyCollection<Guid> branchIds,
         Guid? customerId, bool onlyRemaining, string? customerSearch = null,
         CancellationToken ct = default);
+    /// <summary>الخدمات غير المحصلة لكل العملاء مع فلترة التاريخ والترتيب — شاشة مستقلة.</summary>
+    Task<IReadOnlyList<ReservationRow>> ListUncollectedAsync(DateTime? from, DateTime? to,
+        Guid? branchId, bool isAdmin, IReadOnlyCollection<Guid> branchIds, string sort,
+        CancellationToken ct = default);
     Task<IReadOnlyList<ReservationRow>> RemainingLinesAsync(Guid bookingId,
         CancellationToken ct = default);
     Task<Guid?> InsertAdjustmentAsync(Guid bookingId, Guid? bookingLineId, string kind,
@@ -25,13 +29,15 @@ public interface IReservationRepository
 public sealed class ReservationRepository : IReservationRepository
 {
     private const string Columns = """
-        booking_id AS BookingId, branch_id AS BranchId, customer_id AS CustomerId,
-        customer_name AS CustomerName, booking_status AS BookingStatus, booking_no AS BookingNo,
-        deposit_amount AS DepositAmount, expires_at AS ExpiresAt, booking_line_id AS BookingLineId,
-        item_id AS ItemId, item_code AS ItemCode, item_name AS ItemName,
-        warehouse_id AS WarehouseId, warehouse_name AS WarehouseName, booked_qty AS BookedQty,
-        reserved_qty AS ReservedQty, consumed_qty AS ConsumedQty, remaining_qty AS RemainingQty,
-        unit_price AS UnitPrice, remaining_value AS RemainingValue
+        r.booking_id AS BookingId, r.branch_id AS BranchId, r.customer_id AS CustomerId,
+        r.customer_name AS CustomerName, r.booking_status AS BookingStatus, r.booking_no AS BookingNo,
+        r.booking_date AS BookingDate, r.booking_notes AS BookingNotes,
+        r.deposit_amount AS DepositAmount, r.expires_at AS ExpiresAt, r.booking_line_id AS BookingLineId,
+        r.item_id AS ItemId, r.item_code AS ItemCode, r.item_name AS ItemName,
+        r.warehouse_id AS WarehouseId, r.warehouse_name AS WarehouseName, r.booked_qty AS BookedQty,
+        r.reserved_qty AS ReservedQty, r.consumed_qty AS ConsumedQty, r.settled_qty AS SettledQty,
+        r.remaining_qty AS RemainingQty, r.unit_price AS UnitPrice,
+        r.remaining_value AS RemainingValue
         """;
 
     private const string Filter = """
@@ -53,7 +59,7 @@ public sealed class ReservationRepository : IReservationRepository
         string? customerSearch = null, CancellationToken ct = default)
     {
         var sql = $"""
-            SELECT {Columns} FROM v_customer_reservations
+            SELECT {Columns} FROM v_customer_reservations r
             WHERE {Filter}
             ORDER BY booking_no NULLS LAST, booking_line_id
             LIMIT @take OFFSET @offset;
@@ -79,12 +85,45 @@ public sealed class ReservationRepository : IReservationRepository
         };
     }
 
+    public async Task<IReadOnlyList<ReservationRow>> ListUncollectedAsync(DateTime? from,
+        DateTime? to, Guid? branchId, bool isAdmin, IReadOnlyCollection<Guid> branchIds,
+        string sort, CancellationToken ct = default)
+    {
+        var where = new List<string> { "r.remaining_qty > 0" };
+        if (!isAdmin) where.Add("r.branch_id = ANY(@branchIds)");
+        if (branchId.HasValue) where.Add("r.branch_id = @branchId");
+        if (from.HasValue) where.Add("r.booking_date >= @from");
+        if (to.HasValue) where.Add("r.booking_date <= @to");
+        var order = sort switch
+        {
+            "date_asc" => "r.booking_date ASC, r.booking_no NULLS LAST, r.item_code",
+            "value" => "r.remaining_value DESC, r.booking_date DESC",
+            "customer" => "c.name_ar, r.booking_date DESC, r.item_code",
+            _ => "r.booking_date DESC, r.booking_no DESC NULLS LAST, r.item_code"
+        };
+        var sql = $"""
+            SELECT {Columns}, b.name_ar AS BranchName, c.code AS CustomerCode
+            FROM v_customer_reservations r
+            JOIN branches b ON b.id = r.branch_id
+            JOIN customers c ON c.id = r.customer_id
+            WHERE {string.Join(" AND ", where)}
+            ORDER BY {order}
+            LIMIT 5000
+            """;
+        await using var connection = await _factory.OpenAsync(ct);
+        var rows = await connection.QueryAsync<ReservationRow>(new CommandDefinition(sql, new
+        {
+            branchIds = branchIds.ToArray(), branchId, from, to
+        }, cancellationToken: ct));
+        return rows.ToList();
+    }
+
     public async Task<IReadOnlyList<ReservationRow>> RemainingLinesAsync(Guid bookingId,
         CancellationToken ct = default)
     {
         await using var connection = await _factory.OpenAsync(ct);
         var rows = await connection.QueryAsync<ReservationRow>(new CommandDefinition(
-            $"SELECT {Columns} FROM v_customer_reservations " +
+            $"SELECT {Columns} FROM v_customer_reservations r " +
             "WHERE booking_id = @bookingId AND remaining_qty > 0 ORDER BY booking_line_id",
             new { bookingId }, cancellationToken: ct));
         return rows.ToList();

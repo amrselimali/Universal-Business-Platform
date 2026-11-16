@@ -33,4 +33,39 @@ public sealed class PermissionRegistryTests
         Assert.Contains(ActionCodes.EditRows,
             AppRegistry.ByCode[ScreenCodes.DatabaseAdmin].Actions.Select(a => a.Code));
     }
+
+    [Fact]
+    public void Database_browse_and_export_are_independent_grantable_permissions()
+    {
+        var screen = AppRegistry.ByCode[ScreenCodes.DatabaseAdmin];
+        foreach (var code in new[]
+                 {
+                     ActionCodes.BrowseData, ActionCodes.ExportTable, ActionCodes.ExportDatabase
+                 })
+            Assert.Contains(code, screen.Actions.Select(a => a.Code));
+    }
+
+    [Fact]
+    public void Stocktake_settlements_screen_has_independent_view_and_post_permissions()
+    {
+        var screen = AppRegistry.ByCode[ScreenCodes.StocktakeSettlements];
+        Assert.Contains(ActionCodes.View, screen.Actions.Select(a => a.Code));
+        Assert.Contains(ActionCodes.Post, screen.Actions.Select(a => a.Code));
+        Assert.NotEqual(ScreenCodes.Stocktake, screen.Code);
+    }
+
+    [Fact]
+    public void Customer_account_settlement_is_a_grantable_permission()
+    {
+        Assert.Contains(ActionCodes.SettleAccount,
+            AppRegistry.ByCode[ScreenCodes.Reservations].Actions.Select(a => a.Code));
+    }
+
+    [Fact]
+    public void Uncollected_services_screen_has_its_own_permission()
+    {
+        var screen = AppRegistry.ByCode[ScreenCodes.UncollectedServices];
+        Assert.Contains(ActionCodes.View, screen.Actions.Select(a => a.Code));
+        Assert.NotEqual(ScreenCodes.Reservations, screen.Code);
+    }
 }

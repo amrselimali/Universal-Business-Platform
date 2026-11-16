@@ -14,3 +14,14 @@ window.ubpReports = {
         setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
     }
 };
+window.ubpExports = {
+    download: function (url, fileName) {
+        const link = document.createElement('a');
+        link.href = url;
+        if (fileName) link.download = fileName;
+        link.rel = 'noopener';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+};

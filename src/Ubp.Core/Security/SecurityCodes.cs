@@ -38,6 +38,8 @@ public static class ScreenCodes
     public const string Suppliers = "SUPPLIERS";
     public const string StockDocuments = "STOCK_DOCUMENTS";
     public const string Stocktake = "STOCKTAKE";
+    /// <summary>شاشة تسويات الجرد بصلاحيات مستقلة عن شاشة الجرد.</summary>
+    public const string StocktakeSettlements = "STOCKTAKE_SETTLEMENTS";
     public const string FinancialPeriods = "FINANCIAL_PERIODS";
     public const string StockReports = "STOCK_REPORTS";
     public const string Accounts = "ACCOUNTS";
@@ -69,6 +71,8 @@ public static class ScreenCodes
     public const string SalesBookings = "SALES_BOOKINGS";
     public const string SalesAppointments = "SALES_APPOINTMENTS";
     public const string Reservations = "SALES_RESERVATIONS";
+    /// <summary>شاشة الخدمات غير المحصلة لكل العملاء بصلاحيات مستقلة.</summary>
+    public const string UncollectedServices = "UNCOLLECTED_SERVICES";
     public const string SalesInvoices = "SALES_INVOICES";
     public const string SalesReturns = "SALES_RETURNS";
     public const string SalesSettlements = "SALES_SETTLEMENTS";
@@ -99,6 +103,12 @@ public static class ActionCodes
     public const string Unlock = "UNLOCK";
     public const string RunMigrations = "RUN_MIGRATIONS";
     public const string EditRows = "EDIT_ROWS";
+    /// <summary>استعراض بيانات أي جدول (قراءة فقط) — صلاحية مستقلة عن تصدير الجداول.</summary>
+    public const string BrowseData = "BROWSE_DATA";
+    /// <summary>تصدير جدول منفرد إلى Excel — صلاحية مستقلة.</summary>
+    public const string ExportTable = "EXPORT_TABLE";
+    /// <summary>تصدير قاعدة البيانات بالكامل إلى ملف Excel واحد — صلاحية مستقلة.</summary>
+    public const string ExportDatabase = "EXPORT_DATABASE";
     public const string RunTests = "RUN_TESTS";
     public const string Post = "POST";
     public const string Reverse = "REVERSE";
@@ -162,6 +172,8 @@ public static class ActionCodes
     public const string TransferService = "TRANSFER_SERVICE";
     /// <summary>إتمام تحصيل الخدمات المحجوزة من نقطة البيع (زر «اتمام» في نافذة التحصيل).</summary>
     public const string CompleteCollection = "COMPLETE_COLLECTION";
+    /// <summary>تسوية حساب عميل للخدمات المحجوزة (استهلاك المتبقي وإيصال وقيد) — 0096.</summary>
+    public const string SettleAccount = "SETTLE_ACCOUNT";
     /// <summary>إدارة تصنيفات العملاء/الموردين من شاشة الأطراف.</summary>
     public const string ManageCategories = "MANAGE_CATEGORIES";
 }

@@ -59,6 +59,7 @@ public static class ServiceRegistration
         services.AddHttpContextAccessor();
         services.AddScoped<UserContext>();
         services.AddScoped<UiCulture>();
+        services.AddSingleton<DatabaseExportFileStore>();
         services.AddSingleton<Translator>();
         services.AddTransient<MudLocalizer, UbpMudLocalizer>();
 
@@ -136,6 +137,7 @@ public static class ServiceRegistration
         services.AddScoped<IStockDocumentRepository, StockDocumentRepository>();
         services.AddScoped<IStockPostingRepository, StockPostingRepository>();
         services.AddScoped<IStocktakeRepository, StocktakeRepository>();
+        services.AddScoped<IStocktakeSettlementRepository, StocktakeSettlementRepository>();
         services.AddScoped<IStockReportRepository, StockReportRepository>();
         services.AddScoped<IAccountRepository, AccountRepository>();
         services.AddScoped<ICostCenterRepository, CostCenterRepository>();
@@ -161,6 +163,7 @@ public static class ServiceRegistration
         services.AddScoped<ISalesFinanceRepository, SalesFinanceRepository>();
         services.AddScoped<IPosRepository, PosRepository>();
         services.AddScoped<IBookingCollectionRepository, BookingCollectionRepository>();
+        services.AddScoped<IBookingSettlementRepository, BookingSettlementRepository>();
         services.AddScoped<IBranchWhatsAppSettingsRepository, BranchWhatsAppSettingsRepository>();
         services.AddScoped<IWhatsAppInboundRepository, WhatsAppInboundRepository>();
         services.AddScoped<IFollowUpRepository, FollowUpRepository>();
@@ -197,6 +200,7 @@ public static class ServiceRegistration
         services.AddScoped<PeriodService>();
         services.AddScoped<StockDocumentService>();
         services.AddScoped<StocktakeService>();
+        services.AddScoped<StocktakeSettlementService>();
         services.AddScoped<StockReportService>();
         services.AddScoped<ReportCenterService>();
         services.AddScoped<ISavedReportFilterRepository, SavedReportFilterRepository>();
@@ -214,6 +218,8 @@ public static class ServiceRegistration
         services.AddScoped<ReservationService>();
         services.AddScoped<BookingExecutionService>();
         services.AddScoped<BookingCollectionService>();
+        services.AddScoped<BookingSettlementService>();
+        services.AddScoped<UncollectedServicesService>();
         services.AddScoped<BranchWhatsAppSettingsService>();
         services.AddScoped<WhatsAppInboxService>();
         services.AddScoped<WhatsAppWebhookService>();

@@ -62,6 +62,25 @@ public sealed class StocktakeService
         catch (PostgresException ex) { throw DbErrorMapper.Map(ex); }
     }
 
+    /// <summary>
+    /// أصناف شاشة «جرد جديد» قبل إنشاء الجلسة: الأصناف النشطة فقط مع الرصيد الدفتري
+    /// وتكلفة المتوسط للمخزن المحدد. لا تُنشئ أي مسودة قبل حفظ المستخدم.
+    /// </summary>
+    public async Task<IReadOnlyList<StocktakeCountSheetRow>> GetCountSheetAsync(
+        ActorContext actor, Guid branchId, Guid warehouseId, CancellationToken ct = default)
+    {
+        await _permissions.RequireAsync(actor, ScreenCodes.Stocktake, ActionCodes.Add, ct: ct);
+        if (!actor.CanAccessBranch(branchId))
+            throw new ForbiddenException("error.branch_not_allowed");
+
+        var warehouse = await _warehouses.GetAsync(warehouseId, ct)
+            ?? throw new ValidationAppException("validation.warehouse_required");
+        if (!warehouse.IsActive || !warehouse.BranchIds.Contains(branchId))
+            throw new ValidationAppException("validation.warehouse_not_in_branch");
+
+        return await _stocktakes.GetCountSheetAsync(warehouseId, ct);
+    }
+
     public async Task<StocktakeDetail> UpdateLinesAsync(ActorContext actor, Guid id,
         IReadOnlyList<StocktakeLineInput> lines, CancellationToken ct = default)
     {

@@ -14,6 +14,13 @@ public interface ISchemaAdminRepository
     Task<IReadOnlyList<TableInfo>> GetTablesAsync(CancellationToken ct = default);
     Task<IReadOnlyList<ColumnInfo>> GetColumnsAsync(string table, CancellationToken ct = default);
     Task<RowPage> GetRowsAsync(string table, int page, CancellationToken ct = default);
+    /// <summary>صفحة استعراض للقراءة فقط مع بحث وعدد صفوف قابل للتحديد وإجمالي دقيق.</summary>
+    Task<TableRowsPage> GetRowsPageAsync(string table, int page, int pageSize, string? search,
+        CancellationToken ct = default);
+    /// <summary>دفعة قراءة متتابعة للتصدير (Keyset على ctid) — لا تُحمَّل كل السجلات معاً.</summary>
+    Task<TableExportBatch> ReadExportBatchAsync(string table, IReadOnlyList<string> columns,
+        string? cursor, int batchSize, CancellationToken ct = default);
+    Task<long> CountRowsAsync(string table, CancellationToken ct = default);
     Task<Dictionary<string, object?>?> GetRowAsync(string table, string id, CancellationToken ct = default);
     Task<bool> UpdateRowAsync(string table, string id, Dictionary<string, object?> values,
         CancellationToken ct = default);
@@ -24,7 +31,7 @@ public interface ISchemaAdminRepository
 
 public sealed partial class SchemaAdminRepository : ISchemaAdminRepository
 {
-    private static readonly Regex SafeName = new("^[a-z_][a-z0-9_]*$", RegexOptions.Compiled);
+    private static readonly Regex SafeName = new("^[A-Za-z_][A-Za-z0-9_]*$", RegexOptions.Compiled);
     private static readonly HashSet<string> ProtectedColumns = new(StringComparer.OrdinalIgnoreCase)
     { "id", "password_hash", "token_hash", "search_text", "created_at", "updated_at", "version" };
 
@@ -67,7 +74,7 @@ public sealed partial class SchemaAdminRepository : ISchemaAdminRepository
         {
             if (!SafeName.IsMatch(row.Name)) continue;
             var count = await connection.ExecuteScalarAsync<long>(new CommandDefinition(
-                $"SELECT count(*) FROM {row.Name}", cancellationToken: ct));
+                $"SELECT count(*) FROM {Quote(row.Name)}", cancellationToken: ct));
             row.RowCount = count;
         }
         return rows;
@@ -75,7 +82,7 @@ public sealed partial class SchemaAdminRepository : ISchemaAdminRepository
 
     public async Task<IReadOnlyList<ColumnInfo>> GetColumnsAsync(string table, CancellationToken ct = default)
     {
-        EnsureReadable(table);
+        await EnsureReadableAsync(table, ct);
         const string sql = """
             SELECT column_name AS Name, data_type AS DataType,
                    (is_nullable = 'YES') AS Nullable

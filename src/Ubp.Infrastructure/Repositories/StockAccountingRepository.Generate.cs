@@ -8,7 +8,7 @@ namespace Ubp.Infrastructure.Repositories;
 public sealed partial class StockAccountingRepository
 {
     /// <summary>إنشاء قيد المخزون وترحيله داخل نفس معاملة استدعاء التوليد.</summary>
-    private static async Task<Guid> GenerateCoreAsync(NpgsqlConnection connection, NpgsqlTransaction tx,
+    internal static async Task<Guid> GenerateCoreAsync(NpgsqlConnection connection, NpgsqlTransaction tx,
         Guid documentId, Guid userId, CancellationToken ct)
     {
         var head = await connection.QuerySingleOrDefaultAsync<DocHead>(new CommandDefinition("""

@@ -25,18 +25,30 @@ public sealed partial class TreasuryRepository
         report.Lines = (await connection.QueryAsync<ShiftCollectionRow>(new CommandDefinition("""
             WITH receipts AS (
                 SELECT v.party_name AS CustomerName, t.treasury_type AS TreasuryType,
-                       v.total_amount AS Collected,
+                       CASE WHEN EXISTS (SELECT 1 FROM customer_account_settlements bs
+                                         WHERE bs.voucher_id = v.id)
+                            THEN -v.total_amount ELSE v.total_amount END AS Collected,
                        0::numeric AS Revenue, 0::numeric AS Quantity, 0::numeric AS MeterUnits,
                        NULL::text AS EmployeeName,
-                       -- كل بنود الإيصال (خدمات + تنفيذ مباشر) بكمياتها — 0095.
-                       (SELECT string_agg(i.name_ar || ' × ' ||
-                                 trim(to_char(bl.quantity, 'FM999999990.##')), ' • ')
-                        FROM booking_payments bp
-                        JOIN booking_lines bl ON bl.booking_id = bp.booking_id
-                        JOIN items i ON i.id = bl.item_id
-                        WHERE bp.voucher_id = v.id) AS ItemName,
+                       COALESCE(
+                         (SELECT string_agg(i.name_ar || ' × ' ||
+                                  trim(to_char(bsl.settled_qty, 'FM999999990.##')), ' • ')
+                          FROM customer_account_settlements bs
+                          JOIN customer_account_settlement_lines bsl ON bsl.settlement_id = bs.id
+                          JOIN items i ON i.id = bsl.item_id
+                          WHERE bs.voucher_id = v.id),
+                         (SELECT string_agg(i.name_ar || ' × ' ||
+                                  trim(to_char(bl.quantity, 'FM999999990.##')), ' • ')
+                          FROM booking_payments bp
+                          JOIN booking_lines bl ON bl.booking_id = bp.booking_id
+                          JOIN items i ON i.id = bl.item_id
+                          WHERE bp.voucher_id = v.id)) AS ItemName,
                        0::numeric AS UnitPrice,
-                       'تحصيل/قبض'::varchar AS Source, NULL::text AS ComplaintEmployeeName
+                       CASE WHEN EXISTS (SELECT 1 FROM customer_account_settlements bs
+                                         WHERE bs.voucher_id = v.id)
+                            THEN 'تسوية حساب عميل'::varchar
+                            ELSE 'تحصيل/قبض'::varchar END AS Source,
+                       NULL::text AS ComplaintEmployeeName
                 FROM vouchers v
                 JOIN treasuries t ON t.id = v.treasury_id
                 WHERE v.branch_id = @branchId AND v.voucher_type = 'receipt'
@@ -266,7 +278,9 @@ public sealed partial class TreasuryRepository
             FROM vouchers v
             JOIN treasuries t ON t.id = v.treasury_id
             WHERE v.branch_id = @branchId AND v.voucher_type = 'receipt'
-              AND v.status <> 'cancelled' AND v.created_at >= @openedAt
+              AND v.status <> 'cancelled'
+              AND NOT EXISTS (SELECT 1 FROM customer_account_settlements bs WHERE bs.voucher_id = v.id)
+              AND v.created_at >= @openedAt
               AND (@until::timestamptz IS NULL OR v.created_at <= @until::timestamptz)
               AND t.collection_fee_percent > 0
             GROUP BY t.treasury_type, t.name_ar, t.collection_fee_percent

@@ -77,15 +77,32 @@ public sealed partial class DatabaseAdminService : IManualSchemaProvider
         CancellationToken ct = default)
     {
         RequireSuperAdmin(actor);
-        await _permissions.RequireAsync(actor, ScreenCodes.DatabaseAdmin, ActionCodes.View, ct: ct);
+        await _permissions.RequireAsync(actor, ScreenCodes.DatabaseAdmin, ActionCodes.BrowseData, ct: ct);
         return await _schema.GetRowsAsync(table, page, ct);
+    }
+
+    /// <summary>صفحة استعراض للقراءة فقط: بحث خادمي، حجم صفحة قابل للتحديد، وإجمالي السجلات.</summary>
+    public async Task<TableRowsPage> GetRowsPageAsync(ActorContext actor, string table, int page,
+        int pageSize, string? search, CancellationToken ct = default)
+    {
+        RequireSuperAdmin(actor);
+        await _permissions.RequireAsync(actor, ScreenCodes.DatabaseAdmin, ActionCodes.BrowseData, ct: ct);
+        try
+        {
+            return await _schema.GetRowsPageAsync(table, page, pageSize, search, ct);
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw new ValidationAppException(ex.Message == "TABLE_NOT_ALLOWED"
+                ? "validation.table_not_allowed" : "validation.no_exportable_columns");
+        }
     }
 
     public async Task<IReadOnlyList<ColumnInfo>> GetColumnsAsync(ActorContext actor, string table,
         CancellationToken ct = default)
     {
         RequireSuperAdmin(actor);
-        await _permissions.RequireAsync(actor, ScreenCodes.DatabaseAdmin, ActionCodes.View, ct: ct);
+        await _permissions.RequireAsync(actor, ScreenCodes.DatabaseAdmin, ActionCodes.BrowseData, ct: ct);
         return await _schema.GetColumnsAsync(table, ct);
     }
 

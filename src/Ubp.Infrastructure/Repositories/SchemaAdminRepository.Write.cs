@@ -31,24 +31,10 @@ public sealed partial class SchemaAdminRepository
 
     public async Task<RowPage> GetRowsAsync(string table, int page, CancellationToken ct = default)
     {
-        EnsureReadable(table);
-        page = page < 1 ? 1 : page;
-        var columns = await GetColumnsAsync(table, ct);
-        var columnNames = columns.Select(c => c.Name).ToList();
-        var idColumn = columnNames.Contains("id") ? "id" : columnNames.First();
-        var order = table == "audit_log" ? "id DESC" : $"{idColumn} ASC";
-        var sql = $"""
-            SELECT row_to_json(t)::text FROM (
-                SELECT * FROM {table} ORDER BY {order} LIMIT 25 OFFSET @offset
-            ) t;
-            SELECT count(*) FROM {table};
-            """;
-        await using var connection = await _factory.OpenAsync(ct);
-        using var multi = await connection.QueryMultipleAsync(
-            new CommandDefinition(sql, new { offset = (page - 1) * 25 }, cancellationToken: ct));
-        var rows = (await multi.ReadAsync<string>()).ToList();
-        var total = await multi.ReadFirstAsync<int>();
-        return new RowPage(columnNames, rows, total);
+        // يبقى التوقيع القديم للتوافق؛ القراءة الفعلية تمر بالمسار الموحّد (بلا أعمدة حساسة).
+        var data = await GetRowsPageAsync(table, page, 25, null, ct);
+        return new RowPage(data.Columns.Select(c => c.Name).ToList(), data.RowsJson,
+            (int)Math.Min(int.MaxValue, data.Total));
     }
 
     public async Task<Dictionary<string, object?>?> GetRowAsync(string table, string id,

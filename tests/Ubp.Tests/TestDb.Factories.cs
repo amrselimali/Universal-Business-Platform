@@ -105,6 +105,13 @@ public sealed partial class TestDb
         BookingCollectionsRepo, Permissions(), new AuditService(AuditRepo),
         new NullReceiptNotifier());
 
+    public BookingSettlementService BookingSettlements() => new(
+        new BookingSettlementRepository(Factory), TreasuryRepo, ItemRepo, Permissions(),
+        new AuditService(AuditRepo));
+
+    public UncollectedServicesService UncollectedServices() => new(
+        new ReservationRepository(Factory), Permissions());
+
     public BranchWhatsAppSettingsRepository BranchWhatsAppRepo => new(Factory);
 
     public BranchWhatsAppSettingsService BranchWhatsApp() => new(

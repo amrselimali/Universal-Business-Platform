@@ -37,6 +37,7 @@ else
                 <MudTh>@T.T("sales.customer")</MudTh>
                 <MudTh>@T.T("treasury.treasury")</MudTh>
                 <MudTh>@T.T("pos.receipt_description")</MudTh>
+                <MudTh>@T.T("sales.booking_notes")</MudTh>
                 <MudTh Align="Right">@T.T("pos.receipt_value")</MudTh>
                 <MudTh Align="Right">@T.T("common.actions")</MudTh>
             </HeaderContent>
@@ -46,6 +47,9 @@ else
                 <MudTd>@(string.IsNullOrWhiteSpace(context.TreasuryName) ? "—" : context.TreasuryName)</MudTd>
                 <MudTd Class="ubp-receipt-desc">
                     @(string.IsNullOrWhiteSpace(context.Description) ? "—" : context.Description)
+                </MudTd>
+                <MudTd>
+                    @(string.IsNullOrWhiteSpace(context.Notes) ? "—" : context.Notes)
                 </MudTd>
                 <MudTd Align="Right">@context.Total.ToString("N2")</MudTd>
                 <MudTd Align="Right">

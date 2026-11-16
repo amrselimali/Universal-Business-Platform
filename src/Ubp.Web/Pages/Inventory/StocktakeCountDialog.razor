@@ -1,48 +1,87 @@
 @inherits ComponentBase
 
 <MudDialog>
-    <TitleContent><MudText Typo="Typo.h6">@T.T("stocktake.count") — @Code</MudText></TitleContent>
+    <TitleContent>
+        <div class="ubp-inline w-100">
+            <MudText Typo="Typo.h6">@TitleText</MudText>
+            <MudSpacer />
+            @if (!IsNew && _detail is not null)
+            {
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                         Color="@(_detail.Header.Status == "POSTED" ? Color.Success : Color.Default)">
+                    @T.T("stocktake.status_" + _detail.Header.Status.ToLowerInvariant())
+                </MudChip>
+            }
+        </div>
+    </TitleContent>
     <DialogContent>
-        @if (_detail is null) { <MudProgressLinear Indeterminate="true" /> }
+        @if (IsNew)
+        {
+            <div class="ubp-inline ubp-gap mb-3">
+                <MudSelect T="Guid" Value="_branchId" ValueChanged="OnBranchChangedAsync"
+                           Label="@T.T("common.branch")" Variant="Variant.Outlined"
+                           Margin="Margin.Dense" Required="true" Style="min-width:220px">
+                    @foreach (var branch in _branches)
+                    {
+                        <MudSelectItem T="Guid" Value="@branch.Id">@branch.NameAr</MudSelectItem>
+                    }
+                </MudSelect>
+                <MudSelect T="Guid" Value="_warehouseId" ValueChanged="OnWarehouseChangedAsync"
+                           Label="@T.T("common.warehouse")" Variant="Variant.Outlined"
+                           Margin="Margin.Dense" Required="true" Style="min-width:240px">
+                    @foreach (var warehouse in _warehouses.Where(w => w.BranchIds.Contains(_branchId)))
+                    {
+                        <MudSelectItem T="Guid" Value="@warehouse.Id">@warehouse.NameAr</MudSelectItem>
+                    }
+                </MudSelect>
+            </div>
+        }
+        else if (_detail is not null)
+        {
+            <MudText Typo="Typo.caption" Class="ubp-muted mb-3">
+                @T.T("common.branch"): <b>@_detail.Header.BranchName</b>
+                — @T.T("common.warehouse"): <b>@_detail.Header.WarehouseName</b>
+            </MudText>
+        }
+
+        <MudText Typo="Typo.caption" Class="ubp-muted mb-3">@T.T("stocktake.entry_hint")</MudText>
+
+        @if (_loading)
+        {
+            <MudProgressLinear Indeterminate="true" />
+        }
+        else if (_rows.Count == 0)
+        {
+            <div class="ubp-empty">@T.T("stocktake.no_items")</div>
+        }
         else
         {
-            <MudText Typo="Typo.caption" Class="ubp-muted mb-3">@T.T("stocktake.count_hint")</MudText>
             <div style="overflow-x:auto">
                 <table class="ubp-table" style="width:100%">
                     <thead>
                         <tr>
-                            <th>@T.T("common.code")</th>
-                            <th>@T.T("stock.item")</th>
-                            <th>@T.T("stocktake.book_qty")</th>
+                            <th>@T.T("stocktake.item_code")</th>
+                            <th>@T.T("stocktake.item_name")</th>
                             <th>@T.T("stocktake.counted_qty")</th>
-                            <th>@T.T("stocktake.difference")</th>
-                            <th>@T.T("stocktake.reason")</th>
+                            <th>@T.T("stocktake.line_notes")</th>
                         </tr>
                     </thead>
                     <tbody>
-                        @foreach (var line in _detail.Lines)
+                        @foreach (var row in _rows)
                         {
-                            <tr>
-                                <td><span class="ubp-code">@line.ItemCode</span></td>
-                                <td>@line.ItemName</td>
-                                <td>@line.BookQty</td>
-                                <td style="min-width:130px">
-                                    <MudNumericField T="decimal" Value="@Counted(line.Id)" ValueChanged="@(v => SetCounted(line.Id, v))"
+                            <tr class="@(_missingNotes.Contains(row.ItemId) ? "ubp-row-error" : null)">
+                                <td><span class="ubp-code">@row.Code</span></td>
+                                <td>@row.Name</td>
+                                <td style="min-width:150px">
+                                    <MudNumericField T="decimal" Value="row.CountedQty"
+                                                     ValueChanged="@(v => SetCounted(row, v))"
                                                      Dense="true" Variant="Variant.Outlined" Min="0m" />
                                 </td>
-                                <td>@(Counted(line.Id) - line.BookQty)</td>
-                                <td style="min-width:220px">
-                                    @if (Counted(line.Id) != line.BookQty)
-                                    {
-                                        <MudTextField T="string" Value="@Reason(line.ItemId)"
-                                                      ValueChanged="@(v => SetReason(line.ItemId, v))"
-                                                      Placeholder="@T.T("stocktake.reason_hint")"
-                                                      Variant="Variant.Outlined" Dense="true" Required="true" />
-                                    }
-                                    else
-                                    {
-                                        <span class="ubp-muted">—</span>
-                                    }
+                                <td style="min-width:260px">
+                                    <MudTextField T="string" Value="row.Notes"
+                                                  ValueChanged="@(v => SetNotes(row, v))"
+                                                  Placeholder="@T.T("stocktake.notes_hint")"
+                                                  Variant="Variant.Outlined" Dense="true" />
                                 </td>
                             </tr>
                         }
@@ -53,6 +92,7 @@
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="Cancel" Disabled="_busy">@T.T("common.cancel")</MudButton>
-        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync" Disabled="@(_busy || _detail is null)">@T.T("common.save")</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync"
+                   Disabled="@(_busy || _loading || _rows.Count == 0)">@T.T("common.save")</MudButton>
     </DialogActions>
 </MudDialog>

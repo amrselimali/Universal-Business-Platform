@@ -34,14 +34,16 @@ public partial class StocktakePage
 
     private async Task AddAsync()
     {
-        var dialog = await DialogService.ShowAsync<StocktakeDialog>(T.T("stocktake.add"), new DialogParameters());
+        var dialog = await DialogService.ShowAsync<StocktakeCountDialog>(T.T("stocktake.add"),
+            new DialogParameters { ["Id"] = Guid.Empty },
+            new DialogOptions { MaxWidth = MaxWidth.ExtraLarge, FullWidth = true });
         if ((await dialog.Result) is { Canceled: false }) { await ReloadAsync(); ShowSuccess("common.saved"); }
     }
 
     private async Task CountAsync(Stocktake stocktake)
     {
         var dialog = await DialogService.ShowAsync<StocktakeCountDialog>(stocktake.Code,
-            new DialogParameters { ["Id"] = stocktake.Id },
+            new DialogParameters { ["Id"] = stocktake.Id, ["Code"] = stocktake.Code },
             new DialogOptions { MaxWidth = MaxWidth.ExtraLarge, FullWidth = true });
         if ((await dialog.Result) is { Canceled: false }) { await ReloadAsync(); ShowSuccess("common.saved"); }
     }

@@ -6,7 +6,10 @@
 
 <MudDialog>
     <TitleContent>
-        <MudText Typo="Typo.h6">@T.T("pos.receipt") — @(_receipt?.DocNo ?? "…")</MudText>
+        <MudText Typo="Typo.h6">
+            @(_receipt?.IsSettlementReceipt == true ? T.T("settlement.receipt_title") : T.T("pos.receipt"))
+            — @(_receipt?.DocNo ?? "…")
+        </MudText>
     </TitleContent>
     <DialogContent>
         @if (_loading)
@@ -23,53 +26,93 @@
                 <div class="pos-receipt-head">
                     <div><b>@T.T("pos.receipt_no"): @_receipt.DocNo</b></div>
                     <div>@_receipt.PartyName</div>
+                    @if (_receipt.IsSettlementReceipt)
+                    {
+                        <div>@T.T("common.date"): @_receipt.DocDate.ToString("yyyy-MM-dd")</div>
+                        <div>@T.T("treasury.treasury"): @_receipt.TreasuryName</div>
+                        <div>@T.T("common.user"): @(_receipt.CreatedByName ?? "—")</div>
+                    }
                 </div>
-                <table>
-                    <thead>
-                        <tr>
-                            @if (_receipt.IsCollectionReceipt)
-                            {
-                                <th>@T.T("pos.booking_service_price")</th>
-                                <th class="num">@T.T("pos.booking_value_col")</th>
-                            }
-                            else
-                            {
-                                <th>@T.T("pos.service")</th>
-                                <th class="num">@T.T("common.quantity")</th>
-                                <th class="num">@T.T("pos.value")</th>
-                            }
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var line in _receipt.DisplayLines)
-                        {
+                @if (_receipt.IsSettlementReceipt)
+                {
+                    <table>
+                        <thead>
                             <tr>
-                                <td>@line.Description</td>
+                                <th>@T.T("pos.service")</th>
+                                <th class="num">@T.T("settlement.settled_qty")</th>
+                                <th class="num">@T.T("settlement.remaining_qty")</th>
+                                <th class="num">@T.T("settlement.external_price")</th>
+                                <th class="num">@T.T("settlement.refund_value")</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var line in _receipt.SettlementLines)
+                            {
+                                <tr>
+                                    <td>@line.ItemName</td>
+                                    <td class="num">@line.SettledQty.ToString("N2")</td>
+                                    <td class="num">@line.RemainingQty.ToString("N2")</td>
+                                    <td class="num">@line.ExternalUnitPrice.ToString("N2")</td>
+                                    <td class="num">@line.RefundAmount.ToString("N2")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                    <div class="pos-receipt-totals">
+                        <div><b>@T.T("settlement.total_refund")</b>
+                            <b>@_receipt.TotalAmount.ToString("N2")</b></div>
+                        <div><span>@T.T("treasury.treasury")</span><span>@_receipt.TreasuryName</span></div>
+                    </div>
+                }
+                else
+                {
+                    <table>
+                        <thead>
+                            <tr>
                                 @if (_receipt.IsCollectionReceipt)
                                 {
-                                    <td class="num">@line.Value.ToString("N2")</td>
+                                    <th>@T.T("pos.booking_service_price")</th>
+                                    <th class="num">@T.T("pos.booking_value_col")</th>
                                 }
                                 else
                                 {
-                                    <td class="num">@line.Quantity.ToString("N2")</td>
-                                    <td class="num">@line.Value.ToString("N2")</td>
+                                    <th>@T.T("pos.service")</th>
+                                    <th class="num">@T.T("common.quantity")</th>
+                                    <th class="num">@T.T("pos.value")</th>
                                 }
                             </tr>
-                        }
-                    </tbody>
-                </table>
-                <div class="pos-receipt-totals">
-                    <div><span>@T.T("pos.due_value")</span><span>@_receipt.DueTotal.ToString("N2")</span></div>
-                    <div><span>@T.T("pos.tax")</span><span>@_receipt.TaxTotal.ToString("N2")</span></div>
-                    <div><span>@T.T("pos.paid_previously")</span><span>@_receipt.PaidBefore.ToString("N2")</span></div>
-                    <div><span>@T.T("pos.collection_fee")</span><span>@_receipt.FeeTotal.ToString("N2")</span></div>
-                    <div><b>@T.T("pos.grand_due")</b><b>@_receipt.GrandDue.ToString("N2")</b></div>
-                    <div>
-                        <span>@T.T("pos.paid_amount") (@_receipt.TreasuryName)</span>
-                        <span>@_receipt.PaidAmount.ToString("N2")</span>
+                        </thead>
+                        <tbody>
+                            @foreach (var line in _receipt.DisplayLines)
+                            {
+                                <tr>
+                                    <td>@line.Description</td>
+                                    @if (_receipt.IsCollectionReceipt)
+                                    {
+                                        <td class="num">@line.Value.ToString("N2")</td>
+                                    }
+                                    else
+                                    {
+                                        <td class="num">@line.Quantity.ToString("N2")</td>
+                                        <td class="num">@line.Value.ToString("N2")</td>
+                                    }
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                    <div class="pos-receipt-totals">
+                        <div><span>@T.T("pos.due_value")</span><span>@_receipt.DueTotal.ToString("N2")</span></div>
+                        <div><span>@T.T("pos.tax")</span><span>@_receipt.TaxTotal.ToString("N2")</span></div>
+                        <div><span>@T.T("pos.paid_previously")</span><span>@_receipt.PaidBefore.ToString("N2")</span></div>
+                        <div><span>@T.T("pos.collection_fee")</span><span>@_receipt.FeeTotal.ToString("N2")</span></div>
+                        <div><b>@T.T("pos.grand_due")</b><b>@_receipt.GrandDue.ToString("N2")</b></div>
+                        <div>
+                            <span>@T.T("pos.paid_amount") (@_receipt.TreasuryName)</span>
+                            <span>@_receipt.PaidAmount.ToString("N2")</span>
+                        </div>
+                        <div><span>@T.T("pos.remaining")</span><span>@_receipt.RemainingDue.ToString("N2")</span></div>
                     </div>
-                    <div><span>@T.T("pos.remaining")</span><span>@_receipt.RemainingDue.ToString("N2")</span></div>
-                </div>
+                }
             </div>
         }
     </DialogContent>

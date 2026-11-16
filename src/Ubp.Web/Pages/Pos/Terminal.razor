@@ -127,6 +127,11 @@ else
                                Variant="Variant.Outlined" DateFormat="yyyy-MM-dd" Editable="true"
                                Class="mb-2" />
 
+                <MudTextField @bind-Value="_bookingNotes" Label="@T.T("sales.booking_notes")"
+                              Placeholder="@T.T("sales.booking_notes_hint")"
+                              Variant="Variant.Outlined" Margin="Margin.Dense"
+                              Lines="2" Class="mb-2" />
+
                 <MudTable Items="_cart" Dense="true" Elevation="0" Class="ubp-table">
                     <HeaderContent>
                         <MudTh>@T.T("sales.item")</MudTh>

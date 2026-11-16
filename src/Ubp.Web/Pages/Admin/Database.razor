@@ -21,6 +21,12 @@ else
                            StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="RunMigrationsAsync"
                            Disabled="@_busy">@T.T("database.run_migrations")</MudButton>
             }
+            @if (Can(ActionCodes.ExportDatabase))
+            {
+                <MudButton Variant="Variant.Outlined" Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.FileDownload" OnClick="ExportDatabaseAsync"
+                           Disabled="@(_busy || _exporting)">@T.T("database.export")</MudButton>
+            }
             @if (Can(ActionCodes.EditRows))
             {
                 <MudButton Variant="Variant.Outlined" Color="Color.Error"
@@ -29,6 +35,33 @@ else
             }
         </Actions>
     </PageHeader>
+
+    @if (_exportProgress is not null)
+    {
+        <MudPaper Elevation="0" Class="ubp-card mb-4">
+            <div class="ubp-inline">
+                <MudText Typo="Typo.subtitle2">@T.T("database.export_progress")</MudText>
+                <MudSpacer />
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                         Color="@ExportStatusColor">@ExportStatusText</MudChip>
+            </div>
+            <MudProgressLinear Color="@ExportStatusColor" Value="@_exportProgress.Percent"
+                               Class="my-2" />
+            <div class="ubp-inline">
+                <MudText Typo="Typo.caption">@_exportProgress.Percent%</MudText>
+                <MudSpacer />
+                <MudText Typo="Typo.caption">
+                    @T.T("database.exported_tables"): @_exportProgress.TablesDone / @_exportProgress.TablesTotal
+                </MudText>
+            </div>
+            @if (!string.IsNullOrWhiteSpace(_exportProgress.CurrentTable))
+            {
+                <MudText Typo="Typo.caption" Class="mt-1">
+                    @T.T("database.current_table"): <span class="ubp-code">@_exportProgress.CurrentTable</span>
+                </MudText>
+            }
+        </MudPaper>
+    }
 
     <div class="ubp-stats">
         <div class="ubp-stat">
@@ -64,7 +97,7 @@ else
                               Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
                               Variant="Variant.Outlined" Margin="Margin.Dense" Class="ubp-search mb-3" />
                 <MudTable Items="FilteredTables" Dense="true" Hover="true" Striped="true" Elevation="0"
-                          Class="ubp-table">
+                          RowsPerPage="@(_status?.Tables.Count ?? 100)" Class="ubp-table">
                     <HeaderContent>
                         <MudTh>@T.T("database.table_name")</MudTh>
                         <MudTh>@T.T("database.rows")</MudTh>
@@ -76,8 +109,18 @@ else
                         <MudTd>@context.RowCount.ToString("N0")</MudTd>
                         <MudTd>@context.ColumnCount</MudTd>
                         <MudTd Align="Right">
-                            <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Primary"
-                                       OnClick="@(() => OpenTableAsync(context))">@T.T("database.browse")</MudButton>
+                            @if (Can(ActionCodes.BrowseData))
+                            {
+                                <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Primary"
+                                           OnClick="@(() => OpenTableAsync(context))">@T.T("database.browse")</MudButton>
+                            }
+                            @if (Can(ActionCodes.ExportTable))
+                            {
+                                <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Primary"
+                                           StartIcon="@Icons.Material.Filled.FileDownload"
+                                           Disabled="@_exporting"
+                                           OnClick="@(() => ExportTableAsync(context))">@T.T("database.export")</MudButton>
+                            }
                         </MudTd>
                     </RowTemplate>
                 </MudTable>

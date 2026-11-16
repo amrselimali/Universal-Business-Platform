@@ -1,0 +1,150 @@
+@inherits ComponentBase
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">@T.T("settlement.title")</MudText>
+    </TitleContent>
+    <DialogContent>
+        @if (_loading)
+        {
+            <MudProgressLinear Indeterminate="true" />
+        }
+        else if (_sheet is null)
+        {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">
+                @T.T("settlement.no_customer")
+            </MudAlert>
+        }
+        else
+        {
+            <div class="ubp-inline ubp-gap mb-2">
+                <MudText Typo="Typo.body2">@T.T("sales.customer"): <b>@_sheet.CustomerName</b></MudText>
+                <MudText Typo="Typo.body2">@T.T("settlement.customer_code"): <b>@_sheet.CustomerCode</b></MudText>
+                <MudText Typo="Typo.body2">@T.T("settlement.customer_phone"): <b>@(_sheet.CustomerPhone ?? "—")</b></MudText>
+                <MudText Typo="Typo.body2">@T.T("common.branch"): <b>@_sheet.BranchName</b></MudText>
+                <MudText Typo="Typo.body2">@T.T("settlement.paper_code"): <b>@(_sheet.PaperCode ?? "—")</b></MudText>
+            </div>
+            <div class="ubp-inline mb-3">
+                <MudSelect T="string" Value="_settlementType" ValueChanged="OnSettlementTypeChanged"
+                           Label="@T.T("settlement.type")" Variant="Variant.Outlined"
+                           Margin="Margin.Dense" Style="min-width:220px">
+                    <MudSelectItem T="string" Value="@BookingSettlementTypes.Refund">
+                        @T.T("settlement.type_refund")
+                    </MudSelectItem>
+                    <MudSelectItem T="string" Value="@BookingSettlementTypes.NewBooking">
+                        @T.T("settlement.type_new_booking")
+                    </MudSelectItem>
+                </MudSelect>
+                @if (_settlementType == BookingSettlementTypes.Refund)
+                {
+                    <MudSelect T="Guid" Value="_treasuryId" ValueChanged="OnTreasuryChanged"
+                               Label="@T.T("treasury.treasury")" Variant="Variant.Outlined"
+                               Margin="Margin.Dense" Style="min-width:260px">
+                        @foreach (var treasury in _treasuries)
+                        {
+                            <MudSelectItem T="Guid" Value="@treasury.Id">@treasury.NameAr</MudSelectItem>
+                        }
+                    </MudSelect>
+                }
+                <MudTextField @bind-Value="_notes" Label="@T.T("common.notes")"
+                              Variant="Variant.Outlined" Margin="Margin.Dense"
+                              Style="min-width:280px" />
+            </div>
+
+            @if (_settlementType == BookingSettlementTypes.NewBooking)
+            {
+                <div class="ubp-inline mb-3">
+                    <MudSelect T="Guid" Value="_newItemId" ValueChanged="OnNewItemChanged"
+                               Label="@T.T("settlement.service")" Variant="Variant.Outlined"
+                               Margin="Margin.Dense" Style="min-width:280px">
+                        @foreach (var service in _services)
+                        {
+                            <MudSelectItem T="Guid" Value="@service.Id">
+                                @service.Code — @service.NameAr
+                            </MudSelectItem>
+                        }
+                    </MudSelect>
+                    <MudNumericField T="decimal" @bind-Value="_newQty" Label="@T.T("common.quantity")"
+                                     Min="0.01m" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                     Style="max-width:140px" />
+                    <MudNumericField T="decimal" @bind-Value="_newPrice" Label="@T.T("sales.price")"
+                                     Min="0m" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                     Style="max-width:160px" />
+                    <MudTextField @bind-Value="_newNotes" Label="@T.T("settlement.new_booking_notes")"
+                                  Variant="Variant.Outlined" Margin="Margin.Dense"
+                                  Style="min-width:260px" />
+                </div>
+                <MudText Typo="Typo.caption" Class="ubp-muted mb-3">
+                    @T.T("settlement.new_booking_hint")
+                </MudText>
+            }
+
+            @if (_sheet.Lines.Count == 0)
+            {
+                <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
+                    @T.T("settlement.no_remaining")
+                </MudAlert>
+            }
+            else
+            {
+                <div style="overflow-x:auto">
+                    <table class="ubp-table settlement-table" style="width:100%">
+                        <thead>
+                            <tr>
+                                <th></th>
+                                <th>@T.T("settlement.booking_date")</th>
+                                <th>@T.T("common.item")</th>
+                                <th>@T.T("reservations.reserved")</th>
+                                <th>@T.T("reservations.consumed")</th>
+                                <th>@T.T("reservations.remaining")</th>
+                                <th>@T.T("settlement.service_value")</th>
+                                <th>@T.T("settlement.paid_value")</th>
+                                <th>@T.T("settlement.due_before")</th>
+                                <th>@T.T("settlement.external_price")</th>
+                                <th>@T.T("settlement.due_to_customer")</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var row in _rows)
+                            {
+                                <tr>
+                                    <td>
+                                        <MudCheckBox T="bool" Value="row.Selected"
+                                                     ValueChanged="@(v => Toggle(row, v))" Dense="true" />
+                                    </td>
+                                    <td>@row.BookingDate.ToString("yyyy-MM-dd")</td>
+                                    <td><span class="ubp-code">@row.ItemCode</span> — @row.ItemName</td>
+                                    <td>@row.BookedQty.ToString("N2")</td>
+                                    <td>@row.ConsumedQty.ToString("N2")</td>
+                                    <td>@row.RemainingQty.ToString("N2")</td>
+                                    <td>@row.ServiceValue.ToString("N2")</td>
+                                    <td>@row.PaidAmount.ToString("N2")</td>
+                                    <td>@row.DueBefore.ToString("N2")</td>
+                                    <td style="min-width:140px">
+                                        <MudNumericField T="decimal" Value="row.ExternalUnitPrice"
+                                                         ValueChanged="@(v => SetExternalPrice(row, v))"
+                                                         Dense="true" Variant="Variant.Outlined" Min="0m" />
+                                    </td>
+                                    <td><b>@row.Due.ToString("N2")</b></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+                <MudText Typo="Typo.body2" Class="mt-3">
+                    @T.T("settlement.selected_total"): <b>@SelectedTotal.ToString("N2")</b>
+                </MudText>
+            }
+        }
+    </DialogContent>
+    <DialogActions>
+        @if (_sheet is not null && _rows.Count > 0)
+        {
+            <MudButton Color="Color.Success" Variant="Variant.Filled" OnClick="SettleAsync"
+                       Disabled="CannotSettle">
+                @T.T("settlement.settle")
+            </MudButton>
+        }
+        <MudButton OnClick="Cancel" Disabled="_busy">@T.T("common.close")</MudButton>
+    </DialogActions>
+</MudDialog>

@@ -32,10 +32,28 @@ public sealed partial class TreasuryRepository
     public async Task<bool> PostShiftAsync(Guid shiftId, Guid userId, CancellationToken ct = default)
     {
         await using var connection = await _factory.OpenAsync(ct);
-        return await connection.ExecuteAsync(new CommandDefinition("""
+        await using var tx = await connection.BeginTransactionAsync(ct);
+        var updated = await connection.ExecuteAsync(new CommandDefinition("""
             UPDATE cashier_shifts SET review_status = 'pending', updated_by = @userId
             WHERE id = @shiftId AND status = 'closed'
-            """, new { shiftId, userId }, cancellationToken: ct)) > 0;
+            """, new { shiftId, userId }, tx, cancellationToken: ct)) > 0;
+        if (!updated) return false;
+
+        // ترحيل إيصالات تسوية حساب العميل المسودة مع الشفت (القيد المسودة يصبح مرحّلًا) — 0096.
+        var settlements = await connection.QueryAsync<Guid>(new CommandDefinition("""
+            SELECT v.id
+            FROM vouchers v
+            JOIN customer_account_settlements bs ON bs.voucher_id = v.id AND bs.status = 'draft'
+            JOIN cashier_shifts s ON s.id = @shiftId
+            WHERE v.status = 'draft' AND v.branch_id = s.branch_id
+              AND v.created_at >= s.opened_at
+              AND (s.closed_at IS NULL OR v.created_at <= s.closed_at)
+            """, new { shiftId }, tx, cancellationToken: ct));
+        foreach (var voucherId in settlements)
+            await BookingSettlementRepository.PostCoreAsync(connection, tx, voucherId, userId, ct);
+
+        await tx.CommitAsync(ct);
+        return true;
     }
 
     /// <summary>
@@ -126,6 +144,7 @@ public sealed partial class TreasuryRepository
             JOIN treasuries t ON t.id = c.treasury_id
             JOIN vouchers v ON v.branch_id = s.branch_id AND v.treasury_id = t.id
                  AND v.voucher_type = 'receipt' AND v.status <> 'cancelled'
+                 AND NOT EXISTS (SELECT 1 FROM customer_account_settlements bs WHERE bs.voucher_id = v.id)
                  AND v.created_at >= s.opened_at
                  AND (s.closed_at IS NULL OR v.created_at <= s.closed_at)
             WHERE c.shift_id = @shiftId AND t.collection_fee_percent > 0
@@ -159,6 +178,19 @@ public sealed partial class TreasuryRepository
             """, new { shiftId }, tx, cancellationToken: ct));
         foreach (var transferId in pendingTransfers)
             await ServiceTransferRepository.PostCoreAsync(connection, tx, transferId, userId, ct);
+
+        // ترحيل إيصالات تسوية حساب العميل المسودة المتبقية داخل الشفت — 0096.
+        var pendingSettlements = await connection.QueryAsync<Guid>(new CommandDefinition("""
+            SELECT v.id
+            FROM vouchers v
+            JOIN customer_account_settlements bs ON bs.voucher_id = v.id AND bs.status = 'draft'
+            JOIN cashier_shifts s ON s.id = @shiftId
+            WHERE v.status = 'draft' AND v.branch_id = s.branch_id
+              AND v.created_at >= s.opened_at
+              AND (s.closed_at IS NULL OR v.created_at <= s.closed_at)
+            """, new { shiftId }, tx, cancellationToken: ct));
+        foreach (var voucherId in pendingSettlements)
+            await BookingSettlementRepository.PostCoreAsync(connection, tx, voucherId, userId, ct);
 
         await connection.ExecuteAsync(new CommandDefinition("""
             UPDATE shift_review_items

@@ -78,6 +78,10 @@ public static partial class AppRegistry
             new[] { A(ActionCodes.View), A(ActionCodes.Add), A(ActionCodes.Edit),
                     A(ActionCodes.Delete), A(ActionCodes.Post) }),
 
+        new(ScreenCodes.StocktakeSettlements, "/inventory/stocktake-settlements", "FactCheck",
+            "screen.stocktake_settlements", GroupInventory,
+            new[] { A(ActionCodes.View), A(ActionCodes.Post) }),
+
         new(ScreenCodes.Customers, "/partners/customers", "People", "screen.customers", GroupPartners,
             new[] { A(ActionCodes.View), A(ActionCodes.Add), A(ActionCodes.Edit),
                     A(ActionCodes.Delete), A(ActionCodes.ToggleActive),
@@ -108,7 +112,9 @@ public static partial class AppRegistry
             new[] { A(ActionCodes.View), A(ActionCodes.RunTests) }),
 
         new(ScreenCodes.DatabaseAdmin, "/admin/database", "Storage", "screen.database_admin", GroupSystem,
-            new[] { A(ActionCodes.View), A(ActionCodes.RunMigrations), A(ActionCodes.EditRows) }),
+            new[] { A(ActionCodes.View), A(ActionCodes.RunMigrations), A(ActionCodes.EditRows),
+                    A(ActionCodes.BrowseData), A(ActionCodes.ExportTable),
+                    A(ActionCodes.ExportDatabase) }),
 
         new(ScreenCodes.Accounts, "/accounting/accounts", "AccountTree", "screen.accounts", GroupAccounting,
             new[] { A(ActionCodes.View), A(ActionCodes.CreateRoot), A(ActionCodes.CreateChild),

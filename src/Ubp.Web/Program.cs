@@ -77,6 +77,7 @@ app.UseSerilogRequestLogging();
 
 app.MapAuthEndpoints();
 app.MapSystemEndpoints();
+app.MapDatabaseExportEndpoints();
 app.MapWhatsAppWebhookEndpoints();
 app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
 

@@ -28,7 +28,8 @@ public sealed class PermissionService
     private static bool IsReadOnlyAction(string action) =>
         action is ActionCodes.View or ActionCodes.Print or ActionCodes.Export
             or ActionCodes.ExportCsv or ActionCodes.ExportXlsx or ActionCodes.Preview
-            or ActionCodes.SaveFilter or ActionCodes.DeleteFilter or ActionCodes.Open;
+            or ActionCodes.SaveFilter or ActionCodes.DeleteFilter or ActionCodes.Open
+            or ActionCodes.BrowseData or ActionCodes.ExportTable or ActionCodes.ExportDatabase;
 
     /// <summary>أفعال الترحيل المحاسبي محجوبة عن مستخدم الشفت: تسجيلاته تبقى مسودات للمراجعة.</summary>
     private static bool IsPostingAction(string action) =>

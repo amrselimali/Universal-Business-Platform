@@ -1,0 +1,141 @@
+@page "/sales/uncollected-services"
+@attribute [Authorize]
+@inherits SecurePageBase
+<PageTitle>@T.T("screen.uncollected_services")</PageTitle>
+
+@if (Denied) { <ForbiddenView /> }
+else if (Loading) { <div class="ubp-loading"><MudProgressCircular Indeterminate="true" /></div> }
+else
+{
+    <PageHeader Title="@T.T("screen.uncollected_services")"
+                Subtitle="@T.T("uncollected.hint")">
+        <Actions>
+            @if (Can(ActionCodes.Print))
+            {
+                <MudButton Variant="Variant.Outlined" Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.Print" OnClick="PrintAsync">
+                    @T.T("common.print")
+                </MudButton>
+            }
+        </Actions>
+    </PageHeader>
+
+    <MudPaper Elevation="0" Class="ubp-card">
+        <div class="ubp-toolbar">
+            <MudDatePicker @bind-Date="_from" Label="@T.T("common.from")"
+                           Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="yyyy-MM-dd"
+                           Editable="true" />
+            <MudDatePicker @bind-Date="_to" Label="@T.T("common.to")"
+                           Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="yyyy-MM-dd"
+                           Editable="true" />
+            <MudSelect T="Guid?" Value="_branchId" Label="@T.T("common.branch")"
+                       Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true"
+                       ValueChanged="OnBranchChanged" Style="min-width:220px">
+                @foreach (var branch in _branches)
+                {
+                    <MudSelectItem T="Guid?" Value="@((Guid?)branch.Id)">@branch.NameAr</MudSelectItem>
+                }
+            </MudSelect>
+            <MudSelect T="string" Value="_sort" Label="@T.T("uncollected.sort")"
+                       Variant="Variant.Outlined" Margin="Margin.Dense"
+                       ValueChanged="OnSortChanged" Style="min-width:210px">
+                <MudSelectItem T="string" Value="@("date_desc")">@T.T("uncollected.sort_date_desc")</MudSelectItem>
+                <MudSelectItem T="string" Value="@("date_asc")">@T.T("uncollected.sort_date_asc")</MudSelectItem>
+                <MudSelectItem T="string" Value="@("value")">@T.T("uncollected.sort_value")</MudSelectItem>
+                <MudSelectItem T="string" Value="@("customer")">@T.T("uncollected.sort_customer")</MudSelectItem>
+            </MudSelect>
+            <MudSelect T="string" Value="_group" Label="@T.T("uncollected.group")"
+                       Variant="Variant.Outlined" Margin="Margin.Dense"
+                       ValueChanged="OnGroupChanged" Style="min-width:200px">
+                <MudSelectItem T="string" Value="@("none")">@T.T("uncollected.group_none")</MudSelectItem>
+                <MudSelectItem T="string" Value="@("customer")">@T.T("uncollected.group_customer")</MudSelectItem>
+                <MudSelectItem T="string" Value="@("branch")">@T.T("uncollected.group_branch")</MudSelectItem>
+            </MudSelect>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="LoadAsync">
+                @T.T("uncollected.show")
+            </MudButton>
+        </div>
+
+        <MudText Typo="Typo.body2" Class="mb-2">
+            @T.T("uncollected.total_lines"): <b>@_rows.Count</b> —
+            @T.T("uncollected.total_remaining_qty"): <b>@_rows.Sum(r => r.RemainingQty).ToString("N2")</b> —
+            @T.T("uncollected.total_value"): <b>@_rows.Sum(r => r.RemainingValue).ToString("N2")</b>
+        </MudText>
+
+        @if (_group == "customer")
+        {
+            <MudTable Items="CustomerGroups" Dense="true" Hover="true" Striped="true" Elevation="0"
+                      Class="ubp-table">
+                <HeaderContent>
+                    <MudTh>@T.T("settlement.customer_code")</MudTh>
+                    <MudTh>@T.T("reservations.customer")</MudTh>
+                    <MudTh>@T.T("uncollected.branches")</MudTh>
+                    <MudTh Align="Right">@T.T("uncollected.lines")</MudTh>
+                    <MudTh Align="Right">@T.T("uncollected.remaining_qty")</MudTh>
+                    <MudTh Align="Right">@T.T("uncollected.remaining_value")</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd><span class="ubp-code">@context.CustomerCode</span></MudTd>
+                    <MudTd>@context.CustomerName</MudTd>
+                    <MudTd>@context.Branches</MudTd>
+                    <MudTd Align="Right">@context.Lines</MudTd>
+                    <MudTd Align="Right">@context.RemainingQty.ToString("N2")</MudTd>
+                    <MudTd Align="Right">@context.RemainingValue.ToString("N2")</MudTd>
+                </RowTemplate>
+            </MudTable>
+        }
+        else if (_group == "branch")
+        {
+            <MudTable Items="BranchGroups" Dense="true" Hover="true" Striped="true" Elevation="0"
+                      Class="ubp-table">
+                <HeaderContent>
+                    <MudTh>@T.T("common.branch")</MudTh>
+                    <MudTh Align="Right">@T.T("uncollected.customers")</MudTh>
+                    <MudTh Align="Right">@T.T("uncollected.lines")</MudTh>
+                    <MudTh Align="Right">@T.T("uncollected.remaining_qty")</MudTh>
+                    <MudTh Align="Right">@T.T("uncollected.remaining_value")</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd>@context.BranchName</MudTd>
+                    <MudTd Align="Right">@context.Customers</MudTd>
+                    <MudTd Align="Right">@context.Lines</MudTd>
+                    <MudTd Align="Right">@context.RemainingQty.ToString("N2")</MudTd>
+                    <MudTd Align="Right">@context.RemainingValue.ToString("N2")</MudTd>
+                </RowTemplate>
+            </MudTable>
+        }
+        else
+        {
+            <MudTable Items="_rows" Dense="true" Hover="true" Striped="true" Elevation="0"
+                      RowsPerPage="50" Class="ubp-table">
+                <HeaderContent>
+                    <MudTh>@T.T("settlement.booking_date")</MudTh>
+                    <MudTh>@T.T("reservations.booking")</MudTh>
+                    <MudTh>@T.T("common.branch")</MudTh>
+                    <MudTh>@T.T("reservations.customer")</MudTh>
+                    <MudTh>@T.T("common.item")</MudTh>
+                    <MudTh Align="Right">@T.T("reservations.reserved")</MudTh>
+                    <MudTh Align="Right">@T.T("reservations.consumed")</MudTh>
+                    <MudTh Align="Right">@T.T("reservations.remaining")</MudTh>
+                    <MudTh Align="Right">@T.T("uncollected.remaining_value")</MudTh>
+                    <MudTh>@T.T("sales.booking_notes")</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd>@context.BookingDate.ToString("yyyy-MM-dd")</MudTd>
+                    <MudTd><span class="ubp-code">@context.BookingNo</span></MudTd>
+                    <MudTd>@context.BranchName</MudTd>
+                    <MudTd>@context.CustomerName</MudTd>
+                    <MudTd>@context.ItemCode — @context.ItemName</MudTd>
+                    <MudTd Align="Right">@context.BookedQty.ToString("N2")</MudTd>
+                    <MudTd Align="Right">@context.ConsumedQty.ToString("N2")</MudTd>
+                    <MudTd Align="Right">@context.RemainingQty.ToString("N2")</MudTd>
+                    <MudTd Align="Right">@context.RemainingValue.ToString("N2")</MudTd>
+                    <MudTd>@(string.IsNullOrWhiteSpace(context.BookingNotes) ? "—" : context.BookingNotes)</MudTd>
+                </RowTemplate>
+                <PagerContent>
+                    <MudTablePager PageSizeOptions="new[] { 25, 50, 100 }" />
+                </PagerContent>
+            </MudTable>
+        }
+    </MudPaper>
+}
