@@ -14,8 +14,8 @@ public partial class Reservations
     [Inject] private BranchService Branches { get; set; } = default!;
     private MudTable<ReservationRow> _table = default!;
     private ReservationRow? _selected;
-    private bool _onlyRemaining = true;
-    private bool _openOnly;
+    private bool _onlyRemaining;
+    private bool _openOnly = true;
     private bool _busy;
     private string? _customerSearch;
     private DateTime? _extendTo = DateTime.Today.AddDays(30);
@@ -35,6 +35,10 @@ public partial class Reservations
     }
 
     private IReadOnlyList<Guid> AllBranchesSelected => _branches.Select(b => b.Id).ToList();
+
+    /// <summary>عرض أسماء الفروع بدل معرّفاتها في قائمة الفلتر.</summary>
+    private string BranchName(Guid id) =>
+        _branches.FirstOrDefault(b => b.Id == id)?.NameAr ?? id.ToString();
 
     private async Task OnBranchesChanged(IEnumerable<Guid>? values)
     {

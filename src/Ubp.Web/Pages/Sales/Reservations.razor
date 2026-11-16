@@ -33,6 +33,7 @@ else
             {
                 <MudSelect T="Guid" MultiSelection="true" SelectedValues="_branchIds"
                            SelectedValuesChanged="OnBranchesChanged"
+                           ToStringFunc="@BranchName"
                            Label="@T.T("common.branch")" Variant="Variant.Outlined"
                            Margin="Margin.Dense" Style="min-width:240px"
                            SelectAll="true" SelectAllValue="AllBranchesSelected">

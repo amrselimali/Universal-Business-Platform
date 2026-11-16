@@ -252,7 +252,7 @@ public sealed partial class BookingSettlementTests
         Assert.Equal(150, detail.PaidAmount);
         Assert.Equal(50, detail.DueAmount);
         var deposit = Assert.Single(detail.Rows);
-        Assert.Equal("دفعة مقدمة", deposit.Kind);
+        Assert.Equal("أرصدة افتتاحية", deposit.Kind);
         Assert.Equal(150, deposit.Amount);
     }
 

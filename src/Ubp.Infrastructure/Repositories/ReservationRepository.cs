@@ -132,8 +132,10 @@ public sealed class ReservationRepository : IReservationRepository
                 LEFT JOIN treasuries t ON t.id = s.treasury_id
                 WHERE sl.booking_line_id = @bookingLineId
                 UNION ALL
-                -- الدفعة المقدمة المسجلة مع الحجز (أرصدة افتتاحية عند تكويد العميل أو مقدمة حجز).
-                SELECT 'دفعة مقدمة'::varchar, NULL::varchar, b.booking_date, NULL::text,
+                -- الدفعة المقدمة المسجلة مع الحجز: أرصدة افتتاحية عند تكويد العميل أو مقدمة حجز.
+                SELECT CASE WHEN b.notes = 'رصيد افتتاحي للخدمات' THEN 'أرصدة افتتاحية'
+                            ELSE 'دفعة مقدمة' END,
+                       NULL::varchar, b.booking_date, NULL::text,
                        ROUND(b.deposit_amount
                              * (l.quantity * l.unit_price) / NULLIF(b.total_amount, 0), 2)
                 FROM bookings b
