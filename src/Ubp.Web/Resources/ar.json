@@ -1983,7 +1983,7 @@
   "sales.print_period_label": "فترة الحجز",
   "qa.live_title": "الفحص المباشر لقاعدة البيانات الحقيقية",
   "qa.live_run": "تشغيل الفحص المباشر",
-  "qa.live_note": "الفحص يقرأ من قاعدة البيانات الفعلية داخل معاملة READ ONLY ولا يعدّل أي بيانات: يقيس زمن الاستعلامات الحقيقية، استهلاك الموارد، القيود، ودورات العمل الحالية ويستخرج النتائج والتوصيات فقط.",
+  "qa.live_note": "تفصيل",
   "qa.live_score": "درجة السلامة",
   "qa.live_duration": "زمن الفحص",
   "qa.live_critical": "حرجة",
@@ -2022,12 +2022,13 @@
   "qa.live_kind": "النوع",
   "qa.live_cpu": "المعالج/الزمن",
   "qa.live_db_blocks": "كتل قاعدة البيانات",
-  "qa.live_note": "تفصيل",
   "qa.live_health": "الحالة الصحية",
   "qa.live_health_ok": "سليم",
   "qa.live_health_attention": "يحتاج انتباه",
   "qa.live_health_critical": "حرج",
   "qa.live_health_reason": "سبب الحالة",
   "qa.live_indexes": "الفهارس",
-  "qa.live_seq_scan": "مسح متسلسل / بالفهرس"
+  "qa.live_seq_scan": "مسح متسلسل / بالفهرس",
+  "reservations.unit_price": "سعر الوحدة",
+  "reservations.booking_value": "قيمة الحجز"
 }

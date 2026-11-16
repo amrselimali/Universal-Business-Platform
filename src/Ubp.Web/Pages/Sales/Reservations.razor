@@ -62,7 +62,8 @@ else
                 <MudTh>@T.T("reservations.reserved")</MudTh>
                 <MudTh>@T.T("reservations.consumed")</MudTh>
                 <MudTh>@T.T("reservations.remaining")</MudTh>
-                <MudTh>@T.T("reservations.remaining_value")</MudTh>
+                <MudTh Align="Right">@T.T("reservations.unit_price")</MudTh>
+                <MudTh Align="Right">@T.T("reservations.booking_value")</MudTh>
                 <MudTh Align="Right">@T.T("settlement.paid_value")</MudTh>
                 <MudTh Align="Right">@T.T("settlement.due_on_customer")</MudTh>
                 <MudTh>@T.T("sales.offer_expiry")</MudTh>
@@ -77,7 +78,8 @@ else
                 <MudTd>@Fmt.Decimal(context.ReservedQty)</MudTd>
                 <MudTd>@Fmt.Decimal(context.ConsumedQty)</MudTd>
                 <MudTd><strong>@Fmt.Decimal(context.RemainingQty)</strong></MudTd>
-                <MudTd>@Fmt.Decimal(context.RemainingValue)</MudTd>
+                <MudTd Align="Right">@Fmt.Decimal(context.UnitPrice)</MudTd>
+                <MudTd Align="Right">@Fmt.Decimal(context.BookedQty * context.UnitPrice)</MudTd>
                 <MudTd Align="Right">
                     <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary"
                                StartIcon="@Icons.Material.Filled.ReceiptLong"

@@ -2006,5 +2006,7 @@
   "qa.live_workflow": "Workflow",
   "qa.live_count": "Count",
   "qa.live_status": "Status",
-  "qa.live_findings": "findings"
+  "qa.live_findings": "findings",
+  "reservations.unit_price": "Unit price",
+  "reservations.booking_value": "Booking value"
 }

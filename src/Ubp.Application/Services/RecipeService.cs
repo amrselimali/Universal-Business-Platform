@@ -28,14 +28,14 @@ public sealed class RecipeService
     public async Task<PagedResult<ServiceRecipe>> ListAsync(ActorContext actor, PageRequest request,
         bool includeInactive, CancellationToken ct = default)
     {
-        await _permissions.RequireAsync(actor, ScreenCodes.ServiceRecipes, ActionCodes.View, ct: ct);
+        await _permissions.RequireAsync(actor, ScreenCodes.Items, ActionCodes.View, ct: ct);
         return await _recipes.ListAsync(request, includeInactive, ct);
     }
 
     public async Task<ServiceRecipe> GetAsync(ActorContext actor, Guid id,
         CancellationToken ct = default)
     {
-        await _permissions.RequireAsync(actor, ScreenCodes.ServiceRecipes, ActionCodes.View, ct: ct);
+        await _permissions.RequireAsync(actor, ScreenCodes.Items, ActionCodes.View, ct: ct);
         return await _recipes.GetAsync(id, ct)
             ?? await GetByItemAsync(actor, id, ct);
     }
@@ -43,7 +43,7 @@ public sealed class RecipeService
     public async Task<ServiceRecipe?> GetByItemAsync(ActorContext actor, Guid itemId,
         CancellationToken ct = default)
     {
-        await _permissions.RequireAsync(actor, ScreenCodes.ServiceRecipes, ActionCodes.View, ct: ct);
+        await _permissions.RequireAsync(actor, ScreenCodes.Items, ActionCodes.View, ct: ct);
         return await _recipes.GetByItemAsync(itemId, ct);
     }
 
@@ -51,8 +51,8 @@ public sealed class RecipeService
     public async Task<ServiceRecipe> SaveAsync(ActorContext actor, Guid? id, ServiceRecipeInput input,
         CancellationToken ct = default)
     {
-        await _permissions.RequireAsync(actor, ScreenCodes.ServiceRecipes,
-            id is null ? ActionCodes.Create : ActionCodes.EditLines, ct: ct);
+        await _permissions.RequireAsync(actor, ScreenCodes.Items,
+            id is null ? ActionCodes.Add : ActionCodes.Edit, ct: ct);
 
         var item = await _items.GetAsync(input.ItemId, ct) ?? throw new NotFoundAppException();
         if (item.ItemType != "SERVICE")
@@ -84,7 +84,7 @@ public sealed class RecipeService
     public async Task<ServiceRecipe> SetActiveAsync(ActorContext actor, Guid id, bool isActive,
         CancellationToken ct = default)
     {
-        await _permissions.RequireAsync(actor, ScreenCodes.ServiceRecipes, ActionCodes.ToggleActive,
+        await _permissions.RequireAsync(actor, ScreenCodes.Items, ActionCodes.ToggleActive,
             ct: ct);
         var updated = await _recipes.SetActiveAsync(id, isActive, actor.UserId, ct)
             ?? throw new NotFoundAppException();

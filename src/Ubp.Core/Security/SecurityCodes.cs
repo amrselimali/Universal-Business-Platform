@@ -60,7 +60,6 @@ public static class ScreenCodes
     public const string Taxes = "TAXES";
     public const string PaymentTerms = "PAYMENT_TERMS";
     public const string PriceLists = "PRICE_LISTS";
-    public const string ServiceRecipes = "SERVICE_RECIPES";
     public const string PurchaseInvoices = "PURCHASE_INVOICES";
     public const string PurchaseReturns = "PURCHASE_RETURNS";
     public const string PurchaseAging = "PURCHASE_AGING";

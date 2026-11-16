@@ -201,12 +201,6 @@ public static partial class AppRegistry
                     A(ActionCodes.ToggleActive), A(ActionCodes.Delete),
                     A(ActionCodes.ManageItems) }, "settings.price_lists"),
 
-        // الوصفات تُدار داخل شاشة الأصناف (لا شاشة مستقلة) — المدخل يحفظ الصلاحية ويمنع رابطاً ميتاً
-        new(ScreenCodes.ServiceRecipes, "/inventory/items", "Blender", "screen.service_recipes",
-            GroupInventory,
-            new[] { A(ActionCodes.View), A(ActionCodes.Create), A(ActionCodes.EditLines),
-                    A(ActionCodes.ToggleActive) }, "inventory.recipes"),
-
         new(ScreenCodes.PurchaseInvoices, "/purchasing/invoices", "Receipt", "screen.purchase_invoices",
             GroupAccounting,
             new[] { A(ActionCodes.View), A(ActionCodes.Create), A(ActionCodes.Edit),

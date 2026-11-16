@@ -55,6 +55,7 @@ else
                 </MudTd>
                 <MudTd Align="Right">
                     <MudMenu Icon="@Icons.Material.Filled.MoreVert" Dense="true" AnchorOrigin="Origin.BottomRight">
+                        <MudMenuItem OnClick="@(() => ViewAsync(context))" Icon="@Icons.Material.Filled.Visibility">@T.T("stocktake.view")</MudMenuItem>
                         @if (context.Status == "DRAFT" && Can(ActionCodes.Edit))
                         {
                             <MudMenuItem OnClick="@(() => CountAsync(context))" Icon="@Icons.Material.Filled.FactCheck">@T.T("stocktake.edit")</MudMenuItem>

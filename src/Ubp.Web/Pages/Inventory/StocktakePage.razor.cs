@@ -40,6 +40,14 @@ public partial class StocktakePage
         if ((await dialog.Result) is { Canceled: false }) { await ReloadAsync(); ShowSuccess("common.saved"); }
     }
 
+    /// <summary>عرض قراءة فقط لجرد محفوظ (مسودة أو مرحّل) وفق صلاحية العرض.</summary>
+    private async Task ViewAsync(Stocktake stocktake)
+    {
+        await DialogService.ShowAsync<StocktakeViewDialog>($"{T.T("stocktake.view")} — {stocktake.Code}",
+            new DialogParameters { ["Id"] = stocktake.Id, ["Code"] = stocktake.Code },
+            new DialogOptions { MaxWidth = MaxWidth.ExtraLarge, FullWidth = true });
+    }
+
     private async Task CountAsync(Stocktake stocktake)
     {
         var dialog = await DialogService.ShowAsync<StocktakeCountDialog>(stocktake.Code,
