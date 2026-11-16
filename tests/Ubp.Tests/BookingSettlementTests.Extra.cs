@@ -118,6 +118,31 @@ public sealed partial class BookingSettlementTests
     }
 
     [Fact]
+    public async Task Fully_consumed_unpaid_service_appears_in_sheet_and_uncollected_list()
+    {
+        var actor = await _db.AdminActorAsync();
+        var f = await SetupAsync("FULL", pay: 0);
+        await using (var connection = new NpgsqlConnection(TestDb.AdminConnection))
+        {
+            await connection.OpenAsync();
+            await connection.ExecuteAsync(
+                "UPDATE booking_lines SET delivered_qty = quantity, reserved_qty = 0 WHERE booking_id = @id",
+                new { id = f.Booking.Id });
+        }
+
+        var sheet = await _db.BookingSettlements().GetSheetAsync(actor, f.Branch, f.Customer.Id);
+        var row = Assert.Single(sheet!.Lines);
+        Assert.Equal(5, row.ConsumedQty);
+        Assert.Equal(0, row.RemainingQty);
+        Assert.Equal(0, row.PaidAmount);
+
+        var rows = await _db.UncollectedServices().ListAsync(actor, DateTime.Today,
+            DateTime.Today, f.Branch, "date_asc");
+        var listed = Assert.Single(rows, r => r.BookingId == f.Booking.Id);
+        Assert.Equal(500, listed.UncollectedValue);
+    }
+
+    [Fact]
     public async Task Uncollected_services_list_filters_and_sorts_for_all_customers()
     {
         var actor = await _db.AdminActorAsync();

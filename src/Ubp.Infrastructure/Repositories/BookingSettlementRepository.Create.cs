@@ -90,8 +90,6 @@ public sealed partial class BookingSettlementRepository
                 row.BranchId != input.BranchId ||
                 row.BookingStatus is "cancelled" or "reversed")
                 throw new ValidationAppException("validation.booking_not_found");
-            if (row.RemainingQty <= 0)
-                throw new ValidationAppException("validation.booking_line_no_remaining");
             if (line.ExternalUnitPrice < 0)
                 throw new ValidationAppException("validation.price_invalid");
 
@@ -120,7 +118,7 @@ public sealed partial class BookingSettlementRepository
         var totalRefund = Math.Round(calcs.Sum(c => c.RefundAmount), 2,
             MidpointRounding.AwayFromZero);
         var totalQty = calcs.Sum(c => c.SettledQty);
-        if (totalRefund <= 0)
+        if (!isNewBooking && totalRefund <= 0)
             throw new ValidationAppException("validation.settlement_total_required");
         Guid? settlementVoucherId = null;
         Guid? newBookingId = null;

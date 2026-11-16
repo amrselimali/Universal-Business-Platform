@@ -36,7 +36,7 @@ public partial class BookingSettlementDialog
     private bool _busy;
 
     private bool CannotSettle => _busy || _loading || SelectedCount == 0 ||
-                                 SelectedTotal <= 0 ||
+                                 SelectedTotal == 0 ||
                                  (_settlementType == BookingSettlementTypes.Refund &&
                                   _treasuryId == Guid.Empty) ||
                                  (_settlementType == BookingSettlementTypes.NewBooking &&
@@ -159,7 +159,9 @@ public partial class BookingSettlementDialog
             return;
         }
         var selected = _rows.Where(r => r.Selected).ToList();
-        if (selected.Count == 0 || selected.Sum(r => r.Due) <= 0)
+        if (selected.Count == 0 ||
+            (_settlementType == BookingSettlementTypes.Refund &&
+             selected.Sum(r => r.Due) <= 0))
         {
             Snackbar.Add(T.T("validation.settlement_total_required"), Severity.Warning);
             return;

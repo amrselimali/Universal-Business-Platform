@@ -89,7 +89,7 @@ public sealed class ReservationRepository : IReservationRepository
         DateTime? to, Guid? branchId, bool isAdmin, IReadOnlyCollection<Guid> branchIds,
         string sort, CancellationToken ct = default)
     {
-        var where = new List<string> { "r.remaining_qty > 0" };
+        var where = new List<string>();
         if (!isAdmin) where.Add("r.branch_id = ANY(@branchIds)");
         if (branchId.HasValue) where.Add("r.branch_id = @branchId");
         if (from.HasValue) where.Add("r.booking_date >= @from");
@@ -97,7 +97,7 @@ public sealed class ReservationRepository : IReservationRepository
         var order = sort switch
         {
             "date_asc" => "r.booking_date ASC, r.booking_no NULLS LAST, r.item_code",
-            "value" => "r.remaining_value DESC, r.booking_date DESC",
+            "value" => "UncollectedValue DESC, r.booking_date DESC",
             "customer" => "c.name_ar, r.booking_date DESC, r.item_code",
             _ => "r.booking_date DESC, r.booking_no DESC NULLS LAST, r.item_code"
         };

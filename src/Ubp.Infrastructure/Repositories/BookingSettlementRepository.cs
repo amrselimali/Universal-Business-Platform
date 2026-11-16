@@ -66,7 +66,14 @@ public sealed partial class BookingSettlementRepository : IBookingSettlementRepo
                 FROM booking_lines l2 WHERE l2.booking_id = r.booking_id
             ) tot ON true
             WHERE r.branch_id = @branchId AND r.customer_id = @customerId
-              AND r.remaining_qty > 0
+              -- يُعرض السطر إذا كانت له كمية متبقية أو مبلغ غير مسدد من قيمة الخدمة.
+              AND (r.remaining_qty > 0
+                   OR GREATEST(r.booked_qty * r.unit_price - (CASE WHEN tot.booked_value > 0
+                        THEN LEAST(r.booked_qty * r.unit_price,
+                             ROUND((bk.deposit_amount + COALESCE(paid.paid_amount, 0)
+                                    - COALESCE(settled.paid_amount, 0))
+                                   * (r.booked_qty * r.unit_price) / tot.booked_value, 2))
+                        ELSE 0 END), 0) > 0)
             ORDER BY r.booking_date, r.booking_no NULLS LAST, r.item_code
             """, new { branchId, customerId }, cancellationToken: ct))).ToList();
 
