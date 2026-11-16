@@ -153,11 +153,34 @@ public partial class Terminal : SecurePageBase
         _warehouses = await Lookup.WarehousesAsync(Actor!);
         if (BranchWarehouses.All(w => w.Id != _warehouseId))
             _warehouseId = BranchWarehouses.FirstOrDefault()?.Id ?? Guid.Empty;
-        var treasuries = await Lookup.TreasuriesAsync(Actor!, _branchId);
+        await LoadTreasuriesAsync();
+        await SearchAsync();
+    }
+
+    /// <summary>كل الخزائن النشطة للفرع، ومع غيابها يعرض كل الخزائن النشطة للمدير الأعلى.</summary>
+    private async Task LoadTreasuriesAsync()
+    {
+        var treasuries = (await Lookup.TreasuriesAsync(Actor!, _branchId))
+            .Where(t => t.IsActive).ToList();
+        if (treasuries.Count == 0 && Actor!.IsSuperAdmin)
+        {
+            treasuries = (await Lookup.TreasuriesAsync(Actor, null))
+                .Where(t => t.IsActive).ToList();
+        }
         _treasuries = treasuries;
         _treasuryId = treasuries.FirstOrDefault()?.Id ?? Guid.Empty;
-        _methods = await Lookup.TreasuryMethodsAsync(Actor!, _branchId);
-        await SearchAsync();
+        var methodsBranch = _branchId != Guid.Empty
+            ? _branchId
+            : treasuries.FirstOrDefault()?.BranchId ?? Guid.Empty;
+        _methods = methodsBranch == Guid.Empty
+            ? Array.Empty<TreasuryMethod>()
+            : await Lookup.TreasuryMethodsAsync(Actor!, methodsBranch);
+    }
+
+    private string TreasuryLabel(Guid id)
+    {
+        var treasury = _treasuries.FirstOrDefault(t => t.Id == id);
+        return treasury is null ? "—" : $"{treasury.Code} — {treasury.NameAr}";
     }
 
     private async Task SearchAsync()
@@ -186,10 +209,7 @@ public partial class Terminal : SecurePageBase
 
         // تحديث الخزائن (طرق الدفع) المكوَّدة في شاشة الخزائن عند اختيار العميل.
         if (_branchId != Guid.Empty)
-        {
-            _treasuries = await Lookup.TreasuriesAsync(Actor!, _branchId);
-            _methods = await Lookup.TreasuryMethodsAsync(Actor!, _branchId);
-        }
+            await LoadTreasuriesAsync();
         StateHasChanged();
     }
 
@@ -263,7 +283,11 @@ public partial class Terminal : SecurePageBase
     private void AddPayment()
     {
         var treasury = _treasuries.FirstOrDefault();
-        if (treasury is null) return;
+        if (treasury is null)
+        {
+            Snackbar.Add(T.T("pos.no_treasuries"), Severity.Warning);
+            return;
+        }
         var remaining = Math.Max(Total - _payments.Sum(p => p.Collected), 0);
         var fee = Math.Round(remaining * treasury.ProviderFeePercent / 100m +
             treasury.ProviderFeeAmount, 2, MidpointRounding.AwayFromZero);

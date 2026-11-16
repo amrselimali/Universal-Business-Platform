@@ -693,6 +693,7 @@
   "pos.whatsapp_unavailable": "Could not queue the message: check the customer phone and WhatsApp settings",
   "pos.fee": "Method fee",
   "pos.fees": "Total fees",
+  "pos.no_treasuries": "No active treasuries are registered for this branch. Add one from the treasuries screen first.",
   "pos.net": "Net",
   "pos.no_products": "No sellable products found",
   "pos.paid": "Collected",

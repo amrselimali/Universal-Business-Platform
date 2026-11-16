@@ -187,6 +187,12 @@ else
                     <div><span>@T.T("pos.remaining")</span><b>@Remaining.ToString("N2")</b></div>
                 </div>
 
+                @if (_treasuries.Count == 0)
+                {
+                    <MudAlert Severity="Severity.Warning" Dense="true" Variant="Variant.Outlined"
+                              Class="mt-2">@T.T("pos.no_treasuries")</MudAlert>
+                }
+
                 <MudTable Items="_payments" Dense="true" Elevation="0" Class="ubp-table mt-2">
                     <HeaderContent>
                         <MudTh>@T.T("treasury.treasury")</MudTh>
@@ -198,6 +204,7 @@ else
                     <RowTemplate>
                         <MudTd>
                             <MudSelect T="Guid" Value="context.TreasuryId" Dense="true"
+                                       ToStringFunc="@(id => TreasuryLabel(id))"
                                        ValueChanged="@(v => PickTreasury(context, v))">
                                 @foreach (var treasury in _treasuries)
                                 {
