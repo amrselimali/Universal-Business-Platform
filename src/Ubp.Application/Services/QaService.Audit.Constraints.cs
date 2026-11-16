@@ -55,14 +55,40 @@ public sealed partial class QaService
     {
         try
         {
-            var triggers = (await connection.QueryAsync<string>(new CommandDefinition(
-                "SELECT tgname FROM pg_trigger WHERE NOT tgisinternal",
-                transaction: tx, cancellationToken: ct))).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            // التحقق من الحارس بدالة المشغّل وليس باسمه: الأسماء تختلف بين الترحيلات.
+            var auditGuard = await connection.ExecuteScalarAsync<int>(new CommandDefinition("""
+                SELECT count(*)::int FROM pg_trigger t
+                JOIN pg_class c ON c.oid = t.tgrelid
+                JOIN pg_proc p ON p.oid = t.tgfoid
+                WHERE NOT t.tgisinternal AND c.relname = 'audit_log'
+                  AND p.proname = 'fn_audit_log_immutable'
+                """, transaction: tx, cancellationToken: ct));
+            if (auditGuard < 2)
+                report.Findings.Add(new QaFinding
+                {
+                    Area = "Constraints", Code = "MISSING_AUDIT_GUARD",
+                    Severity = QaSeverity.Critical,
+                    Title = "حارس سجل الأنشطة غير مكتمل",
+                    Metric = $"{auditGuard} مشغّل",
+                    Detail = "سجل الأنشطة يجب أن يمنع التعديل والحذف (مشغّلان).",
+                    Suggestion = "نفّذ الترحيلات الناقصة من شاشة إدارة قاعدة البيانات."
+                });
 
-            RequireTrigger(report, triggers, "trg_audit_log_guard", QaSeverity.Critical,
-                "حارس سجل الأنشطة", "سجل الأنشطة يجب أن يكون غير قابل للتعديل.");
-            RequireTrigger(report, triggers, "trg_touch_users", QaSeverity.High,
-                "زيادة نسخة المستخدم", "التزامن على نسخة السجل مطلوب لمنع الكتابة فوق تعديلات الآخرين.");
+            var versionGuard = await connection.ExecuteScalarAsync<int>(new CommandDefinition("""
+                SELECT count(*)::int FROM pg_trigger t
+                JOIN pg_proc p ON p.oid = t.tgfoid
+                WHERE NOT t.tgisinternal AND p.proname = 'fn_touch_version'
+                """, transaction: tx, cancellationToken: ct));
+            if (versionGuard < 5)
+                report.Findings.Add(new QaFinding
+                {
+                    Area = "Constraints", Code = "MISSING_VERSION_TRIGGER",
+                    Severity = QaSeverity.High,
+                    Title = "مشغّلات النسخ (التزامن) ناقصة",
+                    Metric = $"{versionGuard} مشغّل",
+                    Detail = "التزامن على نسخة السجل يمنع الكتابة فوق تعديلات الآخرين.",
+                    Suggestion = "نفّذ الترحيلات الناقصة."
+                });
 
             var uniqueCount = await connection.ExecuteScalarAsync<int>(new CommandDefinition(
                 "SELECT count(*)::int FROM pg_indexes WHERE schemaname='public' AND indexdef LIKE '%UNIQUE%'",
@@ -77,26 +103,44 @@ public sealed partial class QaService
                     Suggestion = "راجع قيود الفرادة (أكواد المستندات/الحسابات/المستخدمين)."
                 });
 
-            var missingFkIndexes = (await connection.QueryAsync<string>(new CommandDefinition("""
-                SELECT conrelid::regclass::text AS tbl
-                FROM pg_constraint c
-                WHERE c.contype = 'f' AND c.connamespace = 'public'::regnamespace
-                  AND NOT EXISTS (
-                    SELECT 1 FROM pg_index i
-                    WHERE i.indrelid = c.conrelid
-                      AND (i.indkey::int2[])[0:array_length(c.conkey, 1) - 1] = c.conkey)
-                GROUP BY conrelid
-                ORDER BY conrelid::regclass::text
-                LIMIT 8
+            // المفتاح الأجنبي يُعدّ مفهرسًا إذا وُجد فهرس يبدأ بأعمدته (بأي ترتيب).
+            var missingFkIndexes = (await connection.QueryAsync<(string Table, string Name)>(
+                new CommandDefinition("""
+                WITH fk AS (
+                    SELECT c.conrelid, c.conname, c.conkey,
+                           array_length(c.conkey, 1) AS n, a.attname
+                    FROM pg_constraint c
+                    JOIN pg_namespace ns ON ns.oid = c.connamespace
+                    JOIN pg_attribute a ON a.attrelid = c.conrelid
+                                       AND a.attnum = c.conkey[1]
+                    WHERE c.contype = 'f' AND ns.nspname = 'public'
+                      AND array_length(c.conkey, 1) = 1
+                      AND right(a.attname, 3) <> '_by'
+                      AND a.attname NOT IN ('actor_user_id', 'read_by')
+                ), idx AS (
+                    SELECT i.indrelid,
+                           string_to_array(i.indkey::text, ' ')::int2[] AS keys,
+                           array_length(string_to_array(i.indkey::text, ' '), 1) AS n
+                    FROM pg_index i
+                )
+                SELECT DISTINCT fk.conrelid::regclass::text AS "Table", fk.attname AS "Name"
+                FROM fk
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM idx
+                    WHERE idx.indrelid = fk.conrelid AND idx.n >= fk.n
+                      AND (SELECT array_agg(k ORDER BY k)
+                           FROM unnest(idx.keys[1:fk.n]) k)
+                          = (SELECT array_agg(k ORDER BY k) FROM unnest(fk.conkey) k))
+                ORDER BY 1, 2 LIMIT 40
                 """, transaction: tx, cancellationToken: ct))).ToList();
-            foreach (var table in missingFkIndexes)
+            foreach (var fk in missingFkIndexes)
                 report.Findings.Add(new QaFinding
                 {
                     Area = "Constraints", Code = "FK_WITHOUT_INDEX", Severity = QaSeverity.Medium,
-                    Title = $"مفتاح أجنبي بلا فهرس: {table}",
+                    Title = $"مفتاح أجنبي بلا فهرس: {fk.Table}.{fk.Name}",
                     Metric = "FK بدون فهرس مطابق",
                     Detail = "الحذف/التحديث في الجدول الأب يمسح الجدول الابن كاملًا.",
-                    Suggestion = "أضف فهرسًا على عمود المفتاح الأجنبي."
+                    Suggestion = "أضف فهرسًا على أعمدة المفتاح الأجنبي."
                 });
         }
         catch (Exception ex)
@@ -111,17 +155,4 @@ public sealed partial class QaService
         }
     }
 
-    private static void RequireTrigger(QaAuditReport report, HashSet<string> triggers,
-        string name, string severity, string title, string detail)
-    {
-        if (triggers.Contains(name)) return;
-        report.Findings.Add(new QaFinding
-        {
-            Area = "Constraints", Code = "MISSING_TRIGGER", Severity = severity,
-            Title = $"مُشغِّل مفقود: {title} ({name})",
-            Metric = "غير موجود",
-            Detail = detail,
-            Suggestion = "نفّذ الترحيلات الناقصة من شاشة إدارة قاعدة البيانات."
-        });
-    }
 }

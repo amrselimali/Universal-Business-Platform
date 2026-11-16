@@ -7,8 +7,9 @@ using Xunit;
 namespace Ubp.Tests;
 
 /// <summary>
-/// الفحص المباشر: يجب أن يقرأ من قاعدة البيانات الفعلية، يقيس الاستعلامات ودورات العمل،
-/// وألا يغيّر أي بيانات إطلاقًا (معاملة READ ONLY).
+/// الفحص المباشر: يقرأ من قاعدة البيانات الفعلية، يقيس الاستعلامات ودورات العمل،
+/// ولا يغيّر أي بيانات (معاملة READ ONLY). ويتأكد أن قيود المخطط وفهارس المفاتيح
+/// الأجنبية مكتملة بعد ترحيل 0105.
 /// </summary>
 public sealed class QaLiveAuditTests : IClassFixture<TestDb>
 {
@@ -23,14 +24,7 @@ public sealed class QaLiveAuditTests : IClassFixture<TestDb>
     [Fact]
     public async Task Live_audit_reads_real_database_and_writes_nothing()
     {
-        var options = new DatabaseOptions
-        {
-            ConnectionString = TestDb.AdminConnection,
-            MigrationConnectionString = TestDb.AdminConnection,
-            QaConnectionString = QaConnection
-        };
-        var service = new QaService(_db.QaRepo, _db.Permissions(),
-            new QaConnectionFactory(options), options, NullLogger<QaService>.Instance);
+        var service = Service();
         var actor = await _db.AdminActorAsync();
 
         var before = await CountsAsync();
@@ -44,13 +38,37 @@ public sealed class QaLiveAuditTests : IClassFixture<TestDb>
         Assert.NotEmpty(report.Queries);
         Assert.NotEmpty(report.Workflows);
         Assert.NotEmpty(report.Tables);
-        // كل استعلام مقاس له زمن فعلي ومصدر خطة.
         Assert.All(report.Queries, q => Assert.True(q.DurationMs >= 0));
-        // أي محاولة كتابة داخل الفحص تفشل: لا تغيّر أي عدّاد في الجداول.
+        // لا تغيير في أي عدّاد: الفحص قراءة فقط بالفعل.
         Assert.Equal(before, after);
     }
 
-    private async Task<(long Audit, long Bookings, long Journals)> CountsAsync()
+    [Fact]
+    public async Task Live_audit_finds_no_missing_guards_or_fk_indexes()
+    {
+        var report = await Service().RunLiveAuditAsync(await _db.AdminActorAsync());
+        var codes = report.Findings.Select(f => f.Code).ToHashSet(StringComparer.Ordinal);
+
+        // حارس سجل الأنشطة موجود بمشغّلين (تحديث/حذف) وليس باسم ثابت.
+        Assert.DoesNotContain("MISSING_AUDIT_GUARD", codes);
+        Assert.DoesNotContain("MISSING_VERSION_TRIGGER", codes);
+        // كل مفتاح أجنبي له فهرس مطابق بعد 0105.
+        Assert.DoesNotContain("FK_WITHOUT_INDEX", codes);
+    }
+
+    private QaService Service()
+    {
+        var options = new DatabaseOptions
+        {
+            ConnectionString = TestDb.AdminConnection,
+            MigrationConnectionString = TestDb.AdminConnection,
+            QaConnectionString = QaConnection
+        };
+        return new QaService(_db.QaRepo, _db.Permissions(),
+            new QaConnectionFactory(options), options, NullLogger<QaService>.Instance);
+    }
+
+    private static async Task<(long Audit, long Bookings, long Journals)> CountsAsync()
     {
         await using var connection = new Npgsql.NpgsqlConnection(TestDb.AdminConnection);
         await connection.OpenAsync();

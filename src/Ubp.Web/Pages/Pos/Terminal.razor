@@ -291,58 +291,7 @@ else
         </MudItem>
     </MudGrid>
 
-    @if (_receipt is not null)
-    {
-        <MudPaper Elevation="0" Class="ubp-card mt-4">
-            <div class="ubp-toolbar">
-                <MudText Typo="Typo.subtitle1">@T.T("pos.receipt")</MudText>
-                <MudButton StartIcon="@Icons.Material.Filled.Print" Variant="Variant.Outlined"
-                           OnClick="PrintAsync">@T.T("pos.print")</MudButton>
-                @if (WhatsAppUrl is not null)
-                {
-                    <MudButton Href="@WhatsAppUrl" Target="_blank"
-                               StartIcon="@Icons.Material.Filled.Send" Variant="Variant.Outlined"
-                               Color="Color.Success">@T.T("pos.send_whatsapp")</MudButton>
-                }
-            </div>
-
-            <div id="pos-print-area" class="pos-receipt ubp-print-receipt">
-                <div class="pos-receipt-head">
-                    <div><b>@T.T("pos.receipt_no"): @ReceiptNo</b></div>
-                    <div>@_customerName</div>
-                    @if (_receipt.Executed)
-                    {
-                        <div><b>@T.T("pos.direct_sale_done")</b></div>
-                    }
-                </div>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>@T.T("pos.service")</th>
-                            <th class="num">@T.T("common.quantity")</th>
-                            <th class="num">@T.T("pos.value")</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var line in _lastLines)
-                        {
-                            <tr>
-                                <td>@line.Name</td>
-                                <td class="num">@line.Qty2.ToString("N2")</td>
-                                <td class="num">@line.Total.ToString("N2")</td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
-                <div class="pos-receipt-totals">
-                    <div><span>@T.T("pos.due_value")</span><span>@_lastNet.ToString("N2")</span></div>
-                    <div><span>@T.T("pos.tax")</span><span>@_receipt.TaxTotal.ToString("N2")</span></div>
-                    <div><span>@T.T("pos.collection_fee")</span><span>@_receipt.FeeTotal.ToString("N2")</span></div>
-                    <div><b>@T.T("pos.grand_due")</b><b>@((_receipt.Total + _receipt.FeeTotal).ToString("N2"))</b></div>
-                    <div><span>@T.T("pos.paid_amount")</span><span>@_receipt.Paid.ToString("N2")</span></div>
-                    <div><span>@T.T("pos.remaining")</span><span>@Math.Max(_receipt.Total + _receipt.FeeTotal - _receipt.Paid, 0).ToString("N2")</span></div>
-                </div>
-            </div>
-        </MudPaper>
-    }
+    <PosFinalReceipt Receipt="_receipt" Lines="_lastLines.Select(l => new PosReceiptLine(l.Name, l.Qty2, l.Total)).ToList()" CustomerName="_customerName"
+                     ReceiptNo="ReceiptNo" Net="_lastNet" WhatsAppUrl="WhatsAppUrl"
+                     OnPrint="PrintAsync" />
 }
