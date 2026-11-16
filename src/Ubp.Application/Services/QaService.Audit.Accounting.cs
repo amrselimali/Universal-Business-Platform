@@ -67,10 +67,19 @@ public sealed partial class QaService
         await CheckSqlAsync("ACC_CATEGORY_ACCOUNTS", "تصنيفات أصناف بلا حسابات",
             QaSeverity.Medium, """
             SELECT count(*) FROM item_categories c
-            LEFT JOIN item_category_accounts m ON m.category_id = c.id
-            WHERE m.id IS NULL OR m.inventory_account_id IS NULL
-            """, "كل تصنيف يحتاج حساب مخزون وتكلفة مبيعات حتى لا يفشل توليد القيد.");
+            WHERE c.is_active
+              AND NOT EXISTS (SELECT 1 FROM item_category_accounts m WHERE m.category_id = c.id)
+            """, "كل تصنيف نشط يحتاج ربط حساب المخزون وتكلفة المبيعات حتى لا يفشل توليد القيد. التصنيفات غير النشطة لا تُحتسب.");
         await EnrichMissingCategoryAccountsAsync(connection, tx, report, ct);
+
+        // أصناف نشطة بلا تصنيف أو بتصنيف غير مربوط: الترحيل يفشل لها حتى لو بقية التصنيفات مربوطة.
+        await CheckSqlAsync("ACC_ITEMS_WITHOUT_CATEGORY_ACCOUNTS", "أصناف نشطة بلا ربط حسابي",
+            QaSeverity.High, """
+            SELECT count(*) FROM items i
+            LEFT JOIN item_category_accounts m ON m.category_id = i.category_id
+            WHERE i.is_active AND i.item_type = 'GOODS'
+              AND (i.category_id IS NULL OR m.id IS NULL)
+            """, "صنّف هذه الأصناف واربط تصنيفاتها بحسابات المخزون وتكلفة المبيعات.");
 
         await CheckPostedDocumentsAsync(connection, tx, report, ct);
 
@@ -115,8 +124,8 @@ public sealed partial class QaService
         if (finding is null) return;
         var names = (await connection.QueryAsync<string>(new CommandDefinition("""
             SELECT c.name_ar FROM item_categories c
-            LEFT JOIN item_category_accounts m ON m.category_id = c.id
-            WHERE m.id IS NULL OR m.inventory_account_id IS NULL
+            WHERE c.is_active
+              AND NOT EXISTS (SELECT 1 FROM item_category_accounts m WHERE m.category_id = c.id)
             ORDER BY c.name_ar LIMIT 10
             """, transaction: tx, cancellationToken: ct))).ToList();
         if (names.Count > 0)
