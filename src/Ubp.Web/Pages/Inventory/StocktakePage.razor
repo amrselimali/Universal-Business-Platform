@@ -57,11 +57,7 @@ else
                     <MudMenu Icon="@Icons.Material.Filled.MoreVert" Dense="true" AnchorOrigin="Origin.BottomRight">
                         @if (context.Status == "DRAFT" && Can(ActionCodes.Edit))
                         {
-                            <MudMenuItem OnClick="@(() => CountAsync(context))" Icon="@Icons.Material.Filled.FactCheck">@T.T("stocktake.count")</MudMenuItem>
-                        }
-                        @if (context.Status == "DRAFT" && Can(ActionCodes.Post))
-                        {
-                            <MudMenuItem OnClick="@(() => PostAsync(context))" Icon="@Icons.Material.Filled.CheckCircle">@T.T("stocktake.post")</MudMenuItem>
+                            <MudMenuItem OnClick="@(() => CountAsync(context))" Icon="@Icons.Material.Filled.FactCheck">@T.T("stocktake.edit")</MudMenuItem>
                         }
                         @if (context.Status == "DRAFT" && Can(ActionCodes.Delete))
                         {

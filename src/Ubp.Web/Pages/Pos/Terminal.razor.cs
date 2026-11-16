@@ -193,7 +193,8 @@ public partial class Terminal : SecurePageBase
 
     private async Task SearchCustomersAsync()
     {
-        _customers = await Lookup.PartnersAsync(Actor!, PartnerKind.Customer, _customerSearch);
+        _customers = await Lookup.PartnersAsync(Actor!, PartnerKind.Customer, _customerSearch,
+            branchId: _branchId);
         // العميل يبدأ فارغًا في نقطة البيع (لا اختيار تلقائي لأول عميل).
         if (_customerId != Guid.Empty && _customers.All(c => c.Id != _customerId))
             await OnCustomerChanged(Guid.Empty);
@@ -229,6 +230,7 @@ public partial class Terminal : SecurePageBase
         _branchId = value;
         _cart.Clear();
         await LoadBranchAsync();
+        await SearchCustomersAsync();
         StateHasChanged();
     }
 

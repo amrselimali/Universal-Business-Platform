@@ -53,9 +53,20 @@ public sealed class BookingSettlementInput
     public decimal NewBookingQuantity { get; set; }
     public decimal NewBookingUnitPrice { get; set; }
     public string? NewBookingNotes { get; set; }
+    /// <summary>سطور عروض متعددة في الحجز الجديد — 0105.</summary>
+    public List<NewBookingLineInput> NewBookingLines { get; set; } = new();
     public DateTime DocDate { get; set; } = DateTime.Today;
     public string? Notes { get; set; }
     public List<BookingSettlementLineInput> Lines { get; set; } = new();
+}
+
+public sealed class NewBookingLineInput
+{
+    public Guid ItemId { get; set; }
+    public Guid UnitId { get; set; }
+    public decimal Quantity { get; set; }
+    public decimal UnitPrice { get; set; }
+    public string? Notes { get; set; }
 }
 
 public static class BookingSettlementTypes

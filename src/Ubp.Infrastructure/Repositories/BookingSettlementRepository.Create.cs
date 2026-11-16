@@ -12,12 +12,20 @@ public sealed partial class BookingSettlementRepository
     {
         var isNewBooking = string.Equals(input.SettlementType,
             BookingSettlementTypes.NewBooking, StringComparison.OrdinalIgnoreCase);
+        var newBookingLines = input.NewBookingLines
+            .Where(l => l.ItemId != Guid.Empty).ToList();
+        if (isNewBooking && newBookingLines.Count == 0 && input.NewBookingItemId != Guid.Empty)
+            newBookingLines.Add(new NewBookingLineInput
+            {
+                ItemId = input.NewBookingItemId, UnitId = input.NewBookingUnitId,
+                Quantity = input.NewBookingQuantity, UnitPrice = input.NewBookingUnitPrice
+            });
         if (input.BranchId == Guid.Empty || input.CustomerId == Guid.Empty)
             throw new ValidationAppException("validation.required_fields");
         if (!isNewBooking && input.TreasuryId == Guid.Empty)
             throw new ValidationAppException("validation.required_fields");
-        if (isNewBooking && (input.NewBookingItemId == Guid.Empty ||
-                             input.NewBookingQuantity <= 0 || input.NewBookingUnitPrice < 0))
+        if (isNewBooking && (newBookingLines.Count == 0 ||
+                             newBookingLines.Any(l => l.Quantity <= 0 || l.UnitPrice < 0)))
             throw new ValidationAppException("validation.required_fields");
         if (input.Lines.Count == 0)
             throw new ValidationAppException("validation.document_has_no_lines");
@@ -118,7 +126,7 @@ public sealed partial class BookingSettlementRepository
         if (isNewBooking)
         {
             (newBookingId, newBookingNo) = await CreateNewBookingAsync(connection, tx, input,
-                totalRefund, customer.Name, userId, ct);
+                newBookingLines, totalRefund, customer.Name, userId, ct);
         }
         else
         {
@@ -224,71 +232,5 @@ public sealed partial class BookingSettlementRepository
             NewBookingId = newBookingId, NewBookingNo = newBookingNo,
             TotalRefund = totalRefund, TotalSettledQty = totalQty, LinesCount = calcs.Count
         };
-    }
-
-    /// <summary>إنشاء حجز عرض جديد بالقيمة المستحقة كدفعة مقدمة — بلا أي قيد محاسبي.</summary>
-    private static async Task<(Guid Id, string DocNo)> CreateNewBookingAsync(
-        NpgsqlConnection connection, NpgsqlTransaction tx, BookingSettlementInput input,
-        decimal dueAmount, string customerName, Guid userId, CancellationToken ct)
-    {
-        var item = await connection.QuerySingleOrDefaultAsync<(Guid Id, Guid UnitId, string Code,
-            string Name, string ItemType, bool IsActive)>(new CommandDefinition("""
-            SELECT id, base_unit_id, code, name_ar, item_type, is_active
-            FROM items WHERE id = @id
-            """, new { id = input.NewBookingItemId }, tx, cancellationToken: ct));
-        if (item.Id == Guid.Empty || !item.IsActive)
-            throw new ValidationAppException("validation.item_not_found");
-
-        var warehouseId = await connection.ExecuteScalarAsync<Guid?>(new CommandDefinition("""
-            SELECT w.id
-            FROM warehouses w
-            JOIN warehouse_branches wb ON wb.warehouse_id = w.id
-            WHERE wb.branch_id = @branchId AND w.is_active
-            ORDER BY w.code LIMIT 1
-            """, new { branchId = input.BranchId }, tx, cancellationToken: ct));
-        if (warehouseId is null)
-            throw new ValidationAppException("validation.warehouse_required");
-
-        var total = Math.Round(input.NewBookingQuantity * input.NewBookingUnitPrice, 2,
-            MidpointRounding.AwayFromZero);
-        if (total <= 0) throw new ValidationAppException("validation.price_invalid");
-        var deposit = Math.Min(dueAmount, total);
-        var bookingId = Guid.CreateVersion7();
-        var docNo = await connection.ExecuteScalarAsync<string>(new CommandDefinition("""
-            SELECT next_document_number('BOOK'::varchar, @branchId::uuid, @docDate::date,
-                                        'BK'::varchar, 6::smallint)
-            """, new { branchId = input.BranchId, docDate = input.DocDate.Date }, tx,
-            cancellationToken: ct));
-
-        await connection.ExecuteAsync(new CommandDefinition("""
-            INSERT INTO bookings
-                (id, branch_id, doc_no, booking_date, status, notes, customer_id, source,
-                 total_amount, deposit_amount, expires_at, created_by)
-            VALUES (@bookingId, @branchId, @docNo, @docDate, 'confirmed', @notes, @customerId,
-                    'manual', @total, @deposit, now() + interval '6 months', @userId)
-            """, new
-        {
-            bookingId, branchId = input.BranchId, docNo, docDate = input.DocDate.Date,
-            notes = string.IsNullOrWhiteSpace(input.NewBookingNotes)
-                ? $"حجز عرض من تسوية حساب {customerName}"
-                : input.NewBookingNotes.Trim(),
-            customerId = input.CustomerId, total, deposit, userId
-        }, tx, cancellationToken: ct));
-
-        await connection.ExecuteAsync(new CommandDefinition("""
-            INSERT INTO booking_lines
-                (id, booking_id, line_no, item_id, unit_id, warehouse_id, quantity, unit_price,
-                 discount_percent, net_amount, tax_amount, total_amount, reserved_qty,
-                 operation_type)
-            VALUES (@lineId, @bookingId, 1, @itemId, @unitId, @warehouseId, @qty, @price,
-                    0, @total, 0, @total, @qty, 'normal')
-            """, new
-        {
-            lineId = Guid.CreateVersion7(), bookingId, itemId = item.Id,
-            unitId = item.UnitId, warehouseId = warehouseId.Value,
-            qty = input.NewBookingQuantity, price = input.NewBookingUnitPrice, total
-        }, tx, cancellationToken: ct));
-
-        return (bookingId, docNo);
     }
 }

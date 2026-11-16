@@ -38,7 +38,7 @@ public partial class StocktakeCountDialog
     private bool IsNew => Id == Guid.Empty;
     private string TitleText => IsNew
         ? T.T("stocktake.add")
-        : $"{T.T("stocktake.count")} — {Code}";
+        : $"{T.T("stocktake.edit")} — {Code}";
 
     protected override async Task OnInitializedAsync()
     {

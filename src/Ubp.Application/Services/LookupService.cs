@@ -32,14 +32,18 @@ public sealed class LookupService
 
     /// <summary>أطراف نشِطة ضمن نطاق فرع المستخدم (المدير العام يرى الكل).</summary>
     public async Task<IReadOnlyList<Partner>> PartnersAsync(ActorContext actor, PartnerKind kind,
-        string? search = null, CancellationToken ct = default)
+        string? search = null, CancellationToken ct = default, Guid? branchId = null)
     {
         EnsureActor(actor);
         var page = await _partners.ListAsync(kind, new PageRequest
         {
             Page = 1, PageSize = PageRequest.MaxPageSize, Search = search
         }, null, actor.IsSuperAdmin, actor.AllowedBranchIds, ct);
-        return page.Items;
+        if (branchId is not { } selectedBranch) return page.Items;
+        return page.Items
+            .Where(p => string.Equals(p.ScopeType, "COMPANY", StringComparison.OrdinalIgnoreCase)
+                        || p.BranchId == selectedBranch)
+            .ToList();
     }
 
     /// <summary>أصناف للاختيار (حد أقصى آمن داخل المستودع)، مع فلتر تصنيف اختياري.</summary>

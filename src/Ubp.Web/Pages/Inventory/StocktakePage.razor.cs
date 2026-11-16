@@ -48,19 +48,6 @@ public partial class StocktakePage
         if ((await dialog.Result) is { Canceled: false }) { await ReloadAsync(); ShowSuccess("common.saved"); }
     }
 
-    private async Task PostAsync(Stocktake stocktake)
-    {
-        var confirmed = await DialogService.ShowMessageBoxAsync(T.T("stocktake.post"),
-            T.T("stocktake.post_confirm"), yesText: T.T("stocktake.post"), cancelText: T.T("common.cancel"));
-        if (confirmed != true) return;
-        await RunAsync(async () =>
-        {
-            await Stocktakes.PostAsync(Actor!, stocktake.Id);
-            await ReloadAsync();
-            ShowSuccess("stocktake.posted");
-        });
-    }
-
     private async Task DeleteAsync(Stocktake stocktake)
     {
         var confirmed = await DialogService.ShowMessageBoxAsync(T.T("common.confirm_delete"), stocktake.Code,

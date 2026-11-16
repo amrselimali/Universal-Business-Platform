@@ -78,6 +78,23 @@ public sealed class StocktakeSettlementTests : IClassFixture<TestDb>
     }
 
     [Fact]
+    public async Task Posting_a_zero_cost_difference_does_not_fail_as_empty_document()
+    {
+        var actor = await _db.AdminActorAsync();
+        await _db.SeedAccountingAsync();
+        var branch = await _db.CreateBranchAsync("ZERO-B", "فرع جرد صفري");
+        var warehouse = await _db.CreateWarehouseAsync("ZERO-W", "مخزن جرد صفري", branch);
+        var item = await _db.CreateItemAsync("IT-ZERO", "صنف جرد صفري");
+        var stocktake = await CreateDraftAsync(branch, warehouse, item, 1, "فرق صفري");
+
+        var result = await _db.StocktakeSettlementService().PostAsync(actor, stocktake.Id);
+
+        Assert.Equal(1, await _db.OnHandAsync(item.Id, warehouse));
+        Assert.Equal(Guid.Empty, result.EntryId);
+        Assert.Equal("POSTED", (await _db.StocktakeRepo.GetAsync(stocktake.Id))!.Status);
+    }
+
+    [Fact]
     public async Task List_filters_by_date_range_and_warehouse()
     {
         var actor = await _db.AdminActorAsync();

@@ -18,8 +18,14 @@ public sealed partial class BookingSettlementTests
         {
             BranchId = f.Branch, CustomerId = f.Customer.Id,
             SettlementType = BookingSettlementTypes.NewBooking,
-            NewBookingItemId = f.ServiceId, NewBookingQuantity = 2,
-            NewBookingUnitPrice = 50, NewBookingNotes = "عرض جديد",
+            NewBookingLines =
+            {
+                new NewBookingLineInput { ItemId = f.ServiceId, Quantity = 1, UnitPrice = 50,
+                    Notes = "عرض أول" },
+                new NewBookingLineInput { ItemId = f.ServiceId, Quantity = 1, UnitPrice = 50,
+                    Notes = "عرض ثان" }
+            },
+            NewBookingNotes = "عرض جديد",
             DocDate = DateTime.Today,
             Lines =
             {
@@ -44,11 +50,15 @@ public sealed partial class BookingSettlementTests
         Assert.Equal(100, booking.Total);
         Assert.Equal(100, booking.Deposit);
         Assert.Equal("عرض جديد", booking.Notes);
-        var line = await connection.QuerySingleAsync<(decimal Qty, decimal Reserved)>(
+        var lines = (await connection.QueryAsync<(decimal Qty, decimal Reserved)>(
             "SELECT quantity, reserved_qty FROM booking_lines WHERE booking_id=@id",
-            new { id = result.NewBookingId });
-        Assert.Equal(2, line.Qty);
-        Assert.Equal(2, line.Reserved);
+            new { id = result.NewBookingId })).ToList();
+        Assert.Equal(2, lines.Count);
+        Assert.All(lines, l =>
+        {
+            Assert.Equal(1, l.Qty);
+            Assert.Equal(1, l.Reserved);
+        });
         Assert.Equal(0, await connection.ExecuteScalarAsync<int>(
             "SELECT count(*)::int FROM customer_account_settlements WHERE voucher_id IS NOT NULL AND id=@id",
             new { id = result.SettlementId }));

@@ -53,28 +53,54 @@
 
             @if (_settlementType == BookingSettlementTypes.NewBooking)
             {
-                <div class="ubp-inline mb-3">
-                    <MudSelect T="Guid" Value="_newItemId" ValueChanged="OnNewItemChanged"
-                               Label="@T.T("settlement.service")" Variant="Variant.Outlined"
-                               Margin="Margin.Dense" Style="min-width:280px">
-                        @foreach (var service in _services)
-                        {
-                            <MudSelectItem T="Guid" Value="@service.Id">
-                                @service.Code — @service.NameAr
-                            </MudSelectItem>
-                        }
-                    </MudSelect>
-                    <MudNumericField T="decimal" @bind-Value="_newQty" Label="@T.T("common.quantity")"
-                                     Min="0.01m" Variant="Variant.Outlined" Margin="Margin.Dense"
-                                     Style="max-width:140px" />
-                    <MudNumericField T="decimal" @bind-Value="_newPrice" Label="@T.T("sales.price")"
-                                     Min="0m" Variant="Variant.Outlined" Margin="Margin.Dense"
-                                     Style="max-width:160px" />
-                    <MudTextField @bind-Value="_newNotes" Label="@T.T("settlement.new_booking_notes")"
-                                  Variant="Variant.Outlined" Margin="Margin.Dense"
-                                  Style="min-width:260px" />
-                </div>
-                <MudText Typo="Typo.caption" Class="ubp-muted mb-3">
+                @foreach (var offer in _newOffers)
+                {
+                    <MudPaper Elevation="0" Class="pa-2 mb-2" Style="border:1px solid var(--ubp-line)">
+                        <div class="ubp-inline">
+                            <div style="display:flex;flex-direction:column;gap:2px;min-width:260px">
+                                <MudText Typo="Typo.caption">@T.T("settlement.service")</MudText>
+                                <MudSelect T="Guid" Value="offer.ItemId"
+                                           ValueChanged="@(v => OnNewItemChanged(offer, v))"
+                                           Variant="Variant.Outlined" Margin="Margin.Dense">
+                                    @foreach (var service in _services)
+                                    {
+                                        <MudSelectItem T="Guid" Value="@service.Id">
+                                            @service.Code — @service.NameAr
+                                        </MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </div>
+                            <div style="display:flex;flex-direction:column;gap:2px;max-width:130px">
+                                <MudText Typo="Typo.caption">@T.T("common.quantity")</MudText>
+                                <MudNumericField T="decimal" Value="offer.Quantity"
+                                                 ValueChanged="@(v => offer.Quantity = v)"
+                                                 Min="0.01m" Variant="Variant.Outlined"
+                                                 Margin="Margin.Dense" />
+                            </div>
+                            <div style="display:flex;flex-direction:column;gap:2px;max-width:150px">
+                                <MudText Typo="Typo.caption">@T.T("sales.price")</MudText>
+                                <MudNumericField T="decimal" Value="offer.UnitPrice"
+                                                 ValueChanged="@(v => offer.UnitPrice = v)"
+                                                 Min="0m" Variant="Variant.Outlined"
+                                                 Margin="Margin.Dense" />
+                            </div>
+                            <div style="display:flex;flex-direction:column;gap:2px;min-width:230px">
+                                <MudText Typo="Typo.caption">@T.T("settlement.new_booking_notes")</MudText>
+                                <MudTextField T="string" Value="offer.Notes"
+                                              ValueChanged="@(v => offer.Notes = v)"
+                                              Variant="Variant.Outlined" Margin="Margin.Dense" />
+                            </div>
+                            <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small"
+                                           Color="Color.Error" Disabled="@(_newOffers.Count <= 1)"
+                                           OnClick="@(() => RemoveOffer(offer))" />
+                        </div>
+                    </MudPaper>
+                }
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.Add" OnClick="AddOffer">
+                    @T.T("settlement.add_offer")
+                </MudButton>
+                <MudText Typo="Typo.caption" Class="ubp-muted mb-3 mt-2">
                     @T.T("settlement.new_booking_hint")
                 </MudText>
             }

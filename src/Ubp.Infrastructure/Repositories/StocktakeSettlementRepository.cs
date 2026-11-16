@@ -86,8 +86,17 @@ public sealed class StocktakeSettlementRepository : IStocktakeSettlementReposito
              WHERE id = @stocktakeId AND status = 'DRAFT'
             """, new { stocktakeId, userId }, tx, cancellationToken: ct));
 
-        var entryId = await StockAccountingRepository.GenerateCoreAsync(connection, tx,
-            documentId, userId, ct);
+        Guid entryId;
+        try
+        {
+            entryId = await StockAccountingRepository.GenerateCoreAsync(connection, tx,
+                documentId, userId, ct);
+        }
+        catch (ValidationAppException ex) when (ex.Code == "validation.document_has_no_lines")
+        {
+            // فروق بكميات لكن بتكلفة صفرية: لا يوجد قيد محاسبي بقيمة، ويظل ترحيل المخزون صحيحًا.
+            entryId = Guid.Empty;
+        }
 
         var info = await connection.QuerySingleAsync<DocumentInfo>(new CommandDefinition("""
             SELECT doc_no AS DocumentNo, total_cost AS TotalCost,

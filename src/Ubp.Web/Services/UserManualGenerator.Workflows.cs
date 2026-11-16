@@ -43,7 +43,6 @@ public sealed partial class UserManualGenerator
         [
             new("إنشاء جرد", "/inventory/stocktake", ActionCodes.Add),
             new("إدخال الكميات", "/inventory/stocktake", ActionCodes.Edit),
-            new("ترحيل الجرد", "/inventory/stocktake", ActionCodes.Post),
             new("تسويات جردية", "/inventory/stocktake-settlements", ActionCodes.Post)
         ]),
         new("دورة المحاسبة", "قيد مسودة، ترحيل، عكس، ثم إغلاق الفترة.",
