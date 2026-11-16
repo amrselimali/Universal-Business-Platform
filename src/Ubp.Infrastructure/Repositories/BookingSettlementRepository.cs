@@ -31,8 +31,9 @@ public sealed partial class BookingSettlementRepository : IBookingSettlementRepo
                    (SELECT MAX(x.doc_no) FROM bookings x
                     WHERE x.customer_id = c.id AND x.branch_id = b.id
                       AND x.status NOT IN ('cancelled', 'reversed')) AS PaperCode
-            FROM customers c CROSS JOIN branches b
-            WHERE c.id = @customerId AND c.is_active AND b.id = @branchId
+            FROM customers c
+            LEFT JOIN branches b ON b.id = @branchId
+            WHERE c.id = @customerId
             """, new { customerId, branchId }, cancellationToken: ct));
         if (head is null) return null;
 

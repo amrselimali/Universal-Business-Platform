@@ -69,8 +69,6 @@ public sealed class StocktakeSettlementService
         var differences = detail.Lines.Where(l => l.Difference != 0).ToList();
         if (differences.Count == 0)
             throw new ValidationAppException("validation.stocktake_no_differences");
-        if (differences.Any(l => string.IsNullOrWhiteSpace(l.Reason)))
-            throw new ValidationAppException("validation.stocktake_reason_required");
 
         var settings = await _settings.GetAsync(ct);
         StocktakeSettlementResult result;

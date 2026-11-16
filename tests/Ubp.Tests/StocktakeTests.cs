@@ -105,7 +105,7 @@ public sealed class StocktakeReasonTests : IClassFixture<TestDb>
     public StocktakeReasonTests(TestDb db) => _db = db;
 
     [Fact]
-    public async Task Difference_without_reason_is_rejected_by_the_database()
+    public async Task Difference_without_reason_is_allowed()
     {
         var branch = await _db.CreateBranchAsync("RSN-B", "فرع سبب الفرق");
         var warehouse = await _db.CreateWarehouseAsync("RSN-W", "مخزن سبب الفرق", branch);
@@ -119,12 +119,13 @@ public sealed class StocktakeReasonTests : IClassFixture<TestDb>
             BranchId = branch, WarehouseId = warehouse
         }, code, actor.UserId);
 
-        var exception = await Assert.ThrowsAsync<Npgsql.PostgresException>(async () =>
-            await _db.StocktakeRepo.UpdateLinesAsync(stocktake.Id, new[]
-            {
-                new StocktakeLineInput { ItemId = item.Id, CountedQty = 9, UnitCost = 4 }
-            }));
-        Assert.Equal("STOCKTAKE_REASON_REQUIRED", exception.MessageText);
+        await _db.StocktakeRepo.UpdateLinesAsync(stocktake.Id, new[]
+        {
+            new StocktakeLineInput { ItemId = item.Id, CountedQty = 9, UnitCost = 4 }
+        });
+        var withoutReason = await _db.StocktakeRepo.GetDetailAsync(stocktake.Id);
+        Assert.Null(withoutReason!.Lines.Single().Reason);
+        Assert.Equal(9, withoutReason.Lines.Single().CountedQty);
 
         await _db.StocktakeRepo.UpdateLinesAsync(stocktake.Id, new[]
         {

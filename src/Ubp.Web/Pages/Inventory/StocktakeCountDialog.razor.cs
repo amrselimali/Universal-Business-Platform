@@ -29,7 +29,6 @@ public partial class StocktakeCountDialog
     private IReadOnlyList<Warehouse> _warehouses = Array.Empty<Warehouse>();
     private StocktakeDetail? _detail;
     private List<EntryRow> _rows = new();
-    private readonly HashSet<Guid> _missingNotes = new();
     private Guid _branchId;
     private Guid _warehouseId;
     private bool _loading;
@@ -90,7 +89,6 @@ public partial class StocktakeCountDialog
     {
         if (!IsNew) return;
         var version = ++_loadVersion;
-        _missingNotes.Clear();
         if (_branchId == Guid.Empty || _warehouseId == Guid.Empty)
         {
             _rows = new List<EntryRow>();
@@ -129,15 +127,9 @@ public partial class StocktakeCountDialog
     {
         row.CountedQty = value;
         row.Touched = true;
-        if (value == row.BookQty || !string.IsNullOrWhiteSpace(row.Notes))
-            _missingNotes.Remove(row.ItemId);
     }
 
-    private void SetNotes(EntryRow row, string? value)
-    {
-        row.Notes = value;
-        if (!string.IsNullOrWhiteSpace(value)) _missingNotes.Remove(row.ItemId);
-    }
+    private void SetNotes(EntryRow row, string? value) => row.Notes = value;
 
     private void Cancel() => MudDialog.Cancel();
 
@@ -147,18 +139,6 @@ public partial class StocktakeCountDialog
         if (IsNew && (_branchId == Guid.Empty || _warehouseId == Guid.Empty))
         {
             Snackbar.Add(T.T("validation.warehouse_required"), Severity.Warning);
-            return;
-        }
-
-        _missingNotes.Clear();
-        var missing = _rows
-            .Where(row => row.CountedQty != row.BookQty && string.IsNullOrWhiteSpace(row.Notes))
-            .ToList();
-        if (missing.Count > 0)
-        {
-            foreach (var row in missing) _missingNotes.Add(row.ItemId);
-            Snackbar.Add(string.Format(T.T("stocktake.notes_missing"),
-                string.Join(", ", missing.Take(5).Select(row => row.Code))), Severity.Warning);
             return;
         }
 

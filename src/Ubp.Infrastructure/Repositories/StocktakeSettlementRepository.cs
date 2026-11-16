@@ -49,14 +49,6 @@ public sealed class StocktakeSettlementRepository : IStocktakeSettlementReposito
         if (differences == 0)
             throw new ValidationAppException("validation.stocktake_no_differences");
 
-        var missingReasons = await connection.ExecuteScalarAsync<int>(new CommandDefinition("""
-            SELECT count(*)::int FROM stocktake_lines
-            WHERE stocktake_id = @stocktakeId AND difference <> 0
-              AND (reason IS NULL OR btrim(reason) = '')
-            """, new { stocktakeId }, tx, cancellationToken: ct));
-        if (missingReasons > 0)
-            throw new ValidationAppException("validation.stocktake_reason_required");
-
         var documentId = Guid.CreateVersion7();
         await connection.ExecuteAsync(new CommandDefinition("""
             INSERT INTO stock_documents

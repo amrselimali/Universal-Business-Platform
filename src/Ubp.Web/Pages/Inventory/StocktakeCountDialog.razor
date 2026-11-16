@@ -69,7 +69,7 @@
                     <tbody>
                         @foreach (var row in _rows)
                         {
-                            <tr class="@(_missingNotes.Contains(row.ItemId) ? "ubp-row-error" : null)">
+                            <tr>
                                 <td><span class="ubp-code">@row.Code</span></td>
                                 <td>@row.Name</td>
                                 <td style="min-width:150px">
