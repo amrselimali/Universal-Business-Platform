@@ -2025,5 +2025,7 @@
   "qa.live_db_note": "The audit runs on the live database: the direct inspection uses a READ ONLY transaction, and write tests run inside a transaction that is always rolled back.",
   "qa.live_isolation_ok": "Database under audit: “{0}” — read only, no changes.",
   "qa.tests_title": "Available tests",
-  "qa.run_full": "Run full audit"
+  "qa.run_full": "Run full audit",
+  "consumption.note_transfer_in": "Quantity transferred in",
+  "consumption.note_transfer_out": "Quantity transferred out"
 }

@@ -78,7 +78,7 @@ else
                 <MudTd>@Fmt.Decimal(context.ReservedQty)</MudTd>
                 <MudTd>
                     <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Primary"
-                               Disabled="@(context.ConsumedQty <= 0)"
+                               Disabled="@(context.ConsumedQty == 0)"
                                OnClick="@(() => ShowConsumptionAsync(context))">
                         @Fmt.Decimal(context.ConsumedQty)
                     </MudButton>
