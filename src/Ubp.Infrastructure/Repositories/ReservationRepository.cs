@@ -90,48 +90,35 @@ public sealed class ReservationRepository : IReservationRepository
         string sort, CancellationToken ct = default)
     {
         var where = new List<string>();
-        if (!isAdmin) where.Add("r.branch_id = ANY(@branchIds)");
-        if (branchId.HasValue) where.Add("r.branch_id = @branchId");
-        if (from.HasValue) where.Add("r.booking_date >= @from");
-        if (to.HasValue) where.Add("r.booking_date <= @to");
+        if (!isAdmin) where.Add("u.branch_id = ANY(@branchIds)");
+        if (branchId.HasValue) where.Add("u.branch_id = @branchId");
+        if (from.HasValue) where.Add("u.booking_date >= @from");
+        if (to.HasValue) where.Add("u.booking_date <= @to");
         var order = sort switch
         {
-            "date_asc" => "r.booking_date ASC, r.booking_no NULLS LAST, r.item_code",
-            "value" => "UncollectedValue DESC, r.booking_date DESC",
-            "customer" => "c.name_ar, r.booking_date DESC, r.item_code",
-            _ => "r.booking_date DESC, r.booking_no DESC NULLS LAST, r.item_code"
+            "date_asc" => "u.booking_date ASC, u.booking_no NULLS LAST, u.item_code",
+            "value" => "u.uncollected_value DESC, u.booking_date DESC",
+            "customer" => "c.name_ar, u.booking_date DESC, u.item_code",
+            _ => "u.booking_date DESC, u.booking_no DESC NULLS LAST, u.item_code"
         };
-        // المتبقي غير المحصل = قيمة الخدمة وقت الحجز − المسدد المنسوب للخدمة.
-        var paidSql = """
-            CASE WHEN tot.booked_value > 0
-                 THEN LEAST(r.booked_qty * r.unit_price,
-                      ROUND((bk.deposit_amount + COALESCE(paid.paid_amount, 0)
-                             - COALESCE(settled.paid_amount, 0))
-                            * (r.booked_qty * r.unit_price) / tot.booked_value, 2))
-                 ELSE 0 END
-            """;
+        // مصدر واحد للحساب: v_customer_uncollected (قيمة السطر − نصيبه من المسدد الفعلي).
         var sql = $"""
-            SELECT {Columns}, b.name_ar AS BranchName, c.code AS CustomerCode,
-                   {paidSql} AS PaidAmount,
-                   GREATEST(r.booked_qty * r.unit_price - ({paidSql}), 0) AS UncollectedValue
-            FROM v_customer_reservations r
-            JOIN branches b ON b.id = r.branch_id
-            JOIN customers c ON c.id = r.customer_id
-            JOIN bookings bk ON bk.id = r.booking_id
-            LEFT JOIN (
-                SELECT booking_id, SUM(amount) AS paid_amount
-                FROM booking_payments GROUP BY booking_id
-            ) paid ON paid.booking_id = r.booking_id
-            LEFT JOIN (
-                SELECT booking_id, SUM(paid_amount) AS paid_amount
-                FROM customer_account_settlement_lines GROUP BY booking_id
-            ) settled ON settled.booking_id = r.booking_id
-            JOIN LATERAL (
-                SELECT COALESCE(SUM(l2.quantity * l2.unit_price), 0) AS booked_value
-                FROM booking_lines l2 WHERE l2.booking_id = r.booking_id
-            ) tot ON true
+            SELECT u.booking_id AS BookingId, u.branch_id AS BranchId,
+                   u.customer_id AS CustomerId, u.booking_no AS BookingNo,
+                   u.booking_date AS BookingDate, u.booking_notes AS BookingNotes,
+                   u.booking_line_id AS BookingLineId, u.item_id AS ItemId,
+                   u.item_code AS ItemCode, u.item_name AS ItemName,
+                   u.booked_qty AS BookedQty, u.consumed_qty AS ConsumedQty,
+                   u.remaining_qty AS RemainingQty, u.unit_price AS UnitPrice,
+                   u.paid_amount AS PaidAmount, u.uncollected_value AS UncollectedValue,
+                   (u.booked_qty * u.unit_price) AS RemainingValue,
+                   b.name_ar AS BranchName, c.code AS CustomerCode,
+                   c.name_ar AS CustomerName
+            FROM v_customer_uncollected u
+            JOIN branches b ON b.id = u.branch_id
+            JOIN customers c ON c.id = u.customer_id
             WHERE {string.Join(" AND ", where)}
-              AND GREATEST(r.booked_qty * r.unit_price - ({paidSql}), 0) <> 0
+              AND u.uncollected_value <> 0
             ORDER BY {order}
             LIMIT 5000
             """;

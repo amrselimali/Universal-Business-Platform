@@ -34,7 +34,7 @@ public sealed partial class BookingSettlementRepository
         public decimal DepositAmount { get; set; }
         public decimal PaidAmount { get; set; }
         public decimal SettledPaidAmount { get; set; }
-        public decimal BookingRemainingValue { get; set; }
+        public decimal BookingTotal { get; set; }
     }
 
     private sealed class SettlementCalc

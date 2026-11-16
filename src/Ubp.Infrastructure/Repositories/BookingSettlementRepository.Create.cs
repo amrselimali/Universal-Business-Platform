@@ -72,8 +72,7 @@ public sealed partial class BookingSettlementRepository
                     WHERE bp.booking_id = b.id) AS PaidAmount,
                    (SELECT COALESCE(SUM(sl.paid_amount), 0) FROM customer_account_settlement_lines sl
                     WHERE sl.booking_id = b.id) AS SettledPaidAmount,
-                   (SELECT COALESCE(SUM(l2.quantity * l2.unit_price), 0)
-                    FROM booking_lines l2 WHERE l2.booking_id = b.id) AS BookingRemainingValue
+                   b.total_amount AS BookingTotal
             FROM booking_lines l
             JOIN bookings b ON b.id = l.booking_id
             WHERE l.id = ANY(@ids) FOR UPDATE OF l, b
@@ -96,10 +95,10 @@ public sealed partial class BookingSettlementRepository
             var consumed = Math.Max(row.DeliveredQty, row.InvoicedQty) + row.TransferredQty
                            + row.SettledQty;
             var lineValue = row.BookedQty * row.UnitPrice;
-            var paidAlloc = row.BookingRemainingValue > 0
-                ? Math.Min(lineValue, Math.Round((row.DepositAmount + row.PaidAmount
-                                                  - row.SettledPaidAmount) * lineValue
-                                                 / row.BookingRemainingValue, 2,
+            // نفس معادلة v_customer_uncollected: نصيب السطر من المسدد الفعلي.
+            var paidTotal = row.DepositAmount + row.PaidAmount;
+            var paidAlloc = row.BookingTotal > 0
+                ? Math.Min(lineValue, Math.Round(paidTotal * lineValue / row.BookingTotal, 2,
                     MidpointRounding.AwayFromZero))
                 : 0m;
             calcs.Add(new SettlementCalc
