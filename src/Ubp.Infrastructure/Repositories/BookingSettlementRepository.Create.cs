@@ -96,7 +96,7 @@ public sealed partial class BookingSettlementRepository
                            + row.SettledQty;
             var lineValue = row.BookedQty * row.UnitPrice;
             // نفس معادلة v_customer_line_paid: نصيب السطر من المسدد الفعلي.
-            var paidTotal = Math.Max(row.DepositAmount + row.PaidAmount - row.SettledPaidAmount, 0);
+            var paidTotal = Math.Max(row.DepositAmount + row.PaidAmount, 0);
             var paidAlloc = row.BookingTotal > 0
                 ? Math.Min(lineValue, Math.Round(paidTotal * lineValue / row.BookingTotal, 2,
                     MidpointRounding.AwayFromZero))

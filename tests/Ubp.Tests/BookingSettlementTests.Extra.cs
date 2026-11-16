@@ -119,6 +119,42 @@ public sealed partial class BookingSettlementTests
     }
 
     [Fact]
+    public async Task Receipts_covering_the_service_value_leave_no_due_after_a_prior_settlement()
+    {
+        var actor = await _db.AdminActorAsync();
+        var f = await SetupAsync("PAID", pay: 500);
+
+        // تسوية سابقة استهلكت نصيبًا من المسدد — يجب ألا تُخفّض مسدد بقية الخدمات.
+        await using (var connection = new NpgsqlConnection(TestDb.AdminConnection))
+        {
+            await connection.OpenAsync();
+            await connection.ExecuteAsync("""
+                INSERT INTO customer_account_settlements
+                    (id, branch_id, customer_id, treasury_id, doc_date, status, total_refund,
+                     total_settled_qty)
+                VALUES (gen_random_uuid(), @branch, @customer, @treasury, current_date, 'draft',
+                        111.11, 0)
+                """, new { branch = f.Branch, customer = f.Customer.Id,
+                    treasury = f.TreasuryId });
+            await connection.ExecuteAsync("""
+                INSERT INTO customer_account_settlement_lines
+                    (settlement_id, line_no, booking_id, booking_line_id, item_id, booking_date,
+                     booked_qty, consumed_qty, settled_qty, booked_unit_price,
+                     external_unit_price, paid_amount, refund_amount)
+                SELECT s.id, 1, @booking, @line, @item, current_date, 5, 0, 0, 100, 100, 111.11, 111.11
+                FROM customer_account_settlements s
+                WHERE s.branch_id = @branch AND s.customer_id = @customer
+                """, new { booking = f.Booking.Id, line = f.LineId, item = f.ServiceId,
+                    branch = f.Branch, customer = f.Customer.Id });
+        }
+
+        var detail = await _db.Reservations().GetPaymentDetailAsync(actor, f.LineId);
+        Assert.NotNull(detail);
+        Assert.Equal(500, detail!.PaidAmount);
+        Assert.Equal(0, detail.DueAmount);
+    }
+
+    [Fact]
     public async Task Paid_value_and_due_are_shown_on_reservations_with_payment_details()
     {
         var actor = await _db.AdminActorAsync();
