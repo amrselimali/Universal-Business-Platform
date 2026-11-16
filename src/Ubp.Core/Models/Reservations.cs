@@ -39,3 +39,25 @@ public sealed class ReservationRow
     /// <summary>المتبقي غير المحصل من قيمة الخدمة = قيمة الحجز − المسدد للخدمة.</summary>
     public decimal UncollectedValue { get; set; }
 }
+
+/// <summary>سطر تفصيل سداد لخدمة: مصدر الدفعة (إيصال/تسوية) وتاريخها والمبلغ المنسوب للخدمة.</summary>
+public sealed class PaymentDetailRow
+{
+    public string Kind { get; set; } = "";
+    public string? DocNo { get; set; }
+    public DateTime Date { get; set; }
+    public string? TreasuryName { get; set; }
+    public decimal Amount { get; set; }
+}
+
+/// <summary>تفاصيل سداد خدمة: إجمالي القيمة والمسدد والإيصالات والتسويات.</summary>
+public sealed class PaymentDetail
+{
+    public string? BookingNo { get; set; }
+    public string? CustomerName { get; set; }
+    public string? ItemName { get; set; }
+    public decimal ServiceValue { get; set; }
+    public decimal PaidAmount { get; set; }
+    public decimal DueAmount => Math.Max(Math.Round(ServiceValue - PaidAmount, 2), 0);
+    public IReadOnlyList<PaymentDetailRow> Rows { get; set; } = Array.Empty<PaymentDetailRow>();
+}

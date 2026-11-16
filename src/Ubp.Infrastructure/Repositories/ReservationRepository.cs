@@ -10,10 +10,8 @@ public interface IReservationRepository
     Task<PagedResult<ReservationRow>> ListAsync(PageRequest request, IReadOnlyCollection<Guid> branchIds,
         Guid? customerId, bool onlyRemaining, string? customerSearch = null,
         CancellationToken ct = default);
-    /// <summary>الخدمات غير المحصلة لكل العملاء مع فلترة التاريخ والترتيب — شاشة مستقلة.</summary>
-    Task<IReadOnlyList<ReservationRow>> ListUncollectedAsync(DateTime? from, DateTime? to,
-        Guid? branchId, bool isAdmin, IReadOnlyCollection<Guid> branchIds, string sort,
-        CancellationToken ct = default);
+    /// <summary>تفاصيل سداد خدمة (إيصالات/تسويات) — نافذة تفاصيل المسدد.</summary>
+    Task<PaymentDetail?> GetPaymentDetailAsync(Guid bookingLineId, CancellationToken ct = default);
     Task<IReadOnlyList<ReservationRow>> RemainingLinesAsync(Guid bookingId,
         CancellationToken ct = default);
     Task<Guid?> InsertAdjustmentAsync(Guid bookingId, Guid? bookingLineId, string kind,
@@ -41,13 +39,13 @@ public sealed class ReservationRepository : IReservationRepository
         """;
 
     private const string Filter = """
-        (@allBranches OR branch_id = ANY(@branchIds))
-        AND (@customerId IS NULL OR customer_id = @customerId)
+        (@allBranches OR r.branch_id = ANY(@branchIds))
+        AND (@customerId IS NULL OR r.customer_id = @customerId)
         AND (@customerSearch IS NULL OR @customerSearch = ''
              OR EXISTS (SELECT 1 FROM customers c
-                        WHERE c.id = customer_id
+                        WHERE c.id = r.customer_id
                           AND c.search_text LIKE '%' || normalize_search(@customerSearch) || '%'))
-        AND (NOT @onlyRemaining OR remaining_qty > 0)
+        AND (NOT @onlyRemaining OR r.remaining_qty > 0)
         """;
 
     private readonly IDbConnectionFactory _factory;
@@ -59,11 +57,16 @@ public sealed class ReservationRepository : IReservationRepository
         string? customerSearch = null, CancellationToken ct = default)
     {
         var sql = $"""
-            SELECT {Columns} FROM v_customer_reservations r
+            SELECT {Columns},
+                   COALESCE(u.paid_amount, 0) AS PaidAmount,
+                   GREATEST(r.booked_qty * r.unit_price - COALESCE(u.paid_amount, 0), 0)
+                       AS UncollectedValue
+            FROM v_customer_reservations r
+            LEFT JOIN v_customer_line_paid u ON u.booking_line_id = r.booking_line_id
             WHERE {Filter}
-            ORDER BY booking_no NULLS LAST, booking_line_id
+            ORDER BY r.booking_no NULLS LAST, r.booking_line_id
             LIMIT @take OFFSET @offset;
-            SELECT count(*)::int FROM v_customer_reservations WHERE {Filter};
+            SELECT count(*)::int FROM v_customer_reservations r WHERE {Filter};
             """;
         await using var connection = await _factory.OpenAsync(ct);
         using var multi = await connection.QueryMultipleAsync(new CommandDefinition(sql, new
@@ -85,49 +88,49 @@ public sealed class ReservationRepository : IReservationRepository
         };
     }
 
-    public async Task<IReadOnlyList<ReservationRow>> ListUncollectedAsync(DateTime? from,
-        DateTime? to, Guid? branchId, bool isAdmin, IReadOnlyCollection<Guid> branchIds,
-        string sort, CancellationToken ct = default)
+    /// <summary>تفاصيل سداد خدمة: قيمة الخدمة، نصيب المسدد، ومصادر السداد (إيصالات/تسويات).</summary>
+    public async Task<PaymentDetail?> GetPaymentDetailAsync(Guid bookingLineId,
+        CancellationToken ct = default)
     {
-        var where = new List<string>();
-        if (!isAdmin) where.Add("u.branch_id = ANY(@branchIds)");
-        if (branchId.HasValue) where.Add("u.branch_id = @branchId");
-        if (from.HasValue) where.Add("u.booking_date >= @from");
-        if (to.HasValue) where.Add("u.booking_date <= @to");
-        var order = sort switch
-        {
-            "date_asc" => "u.booking_date ASC, u.booking_no NULLS LAST, u.item_code",
-            "value" => "u.uncollected_value DESC, u.booking_date DESC",
-            "customer" => "c.name_ar, u.booking_date DESC, u.item_code",
-            _ => "u.booking_date DESC, u.booking_no DESC NULLS LAST, u.item_code"
-        };
-        // مصدر واحد للحساب: v_customer_uncollected (قيمة السطر − نصيبه من المسدد الفعلي).
-        var sql = $"""
-            SELECT u.booking_id AS BookingId, u.branch_id AS BranchId,
-                   u.customer_id AS CustomerId, u.booking_no AS BookingNo,
-                   u.booking_date AS BookingDate, u.booking_notes AS BookingNotes,
-                   u.booking_line_id AS BookingLineId, u.item_id AS ItemId,
-                   u.item_code AS ItemCode, u.item_name AS ItemName,
-                   u.booked_qty AS BookedQty, u.consumed_qty AS ConsumedQty,
-                   u.remaining_qty AS RemainingQty, u.unit_price AS UnitPrice,
-                   u.paid_amount AS PaidAmount, u.uncollected_value AS UncollectedValue,
-                   (u.booked_qty * u.unit_price) AS RemainingValue,
-                   b.name_ar AS BranchName, c.code AS CustomerCode,
-                   c.name_ar AS CustomerName
-            FROM v_customer_uncollected u
-            JOIN branches b ON b.id = u.branch_id
-            JOIN customers c ON c.id = u.customer_id
-            WHERE {string.Join(" AND ", where)}
-              AND u.uncollected_value <> 0
-            ORDER BY {order}
-            LIMIT 5000
-            """;
         await using var connection = await _factory.OpenAsync(ct);
-        var rows = await connection.QueryAsync<ReservationRow>(new CommandDefinition(sql, new
-        {
-            branchIds = branchIds.ToArray(), branchId, from, to
-        }, cancellationToken: ct));
-        return rows.ToList();
+        var head = await connection.QuerySingleOrDefaultAsync<PaymentDetail>(new CommandDefinition("""
+            SELECT r.booking_no AS BookingNo, r.customer_name AS CustomerName,
+                   r.item_name AS ItemName,
+                   (r.booked_qty * r.unit_price) AS ServiceValue,
+                   COALESCE(u.paid_amount, 0) AS PaidAmount
+            FROM v_customer_reservations r
+            LEFT JOIN v_customer_line_paid u ON u.booking_line_id = r.booking_line_id
+            WHERE r.booking_line_id = @bookingLineId
+            """, new { bookingLineId }, cancellationToken: ct));
+        if (head is null) return null;
+
+        var rows = await connection.QueryAsync<PaymentDetailRow>(new CommandDefinition("""
+            SELECT kind AS Kind, doc_no AS DocNo, doc_date AS Date,
+                   treasury_name AS TreasuryName, amount AS Amount
+            FROM (
+                SELECT 'ايصال قبض'::varchar AS kind, v.doc_no, v.doc_date,
+                       t.name_ar AS treasury_name,
+                       ROUND(bp.amount * (l.quantity * l.unit_price)
+                             / NULLIF(b.total_amount, 0), 2) AS amount
+                FROM booking_payments bp
+                JOIN vouchers v ON v.id = bp.voucher_id
+                LEFT JOIN treasuries t ON t.id = v.treasury_id
+                JOIN bookings b ON b.id = bp.booking_id
+                JOIN booking_lines l ON l.booking_id = b.id AND l.id = @bookingLineId
+                WHERE bp.booking_id = b.id
+                UNION ALL
+                SELECT 'تسوية حساب عميل'::varchar, v.doc_no, s.doc_date, t.name_ar,
+                       sl.paid_amount
+                FROM customer_account_settlement_lines sl
+                JOIN customer_account_settlements s ON s.id = sl.settlement_id
+                LEFT JOIN vouchers v ON v.id = s.voucher_id
+                LEFT JOIN treasuries t ON t.id = s.treasury_id
+                WHERE sl.booking_line_id = @bookingLineId
+            ) x
+            ORDER BY doc_date, doc_no
+            """, new { bookingLineId }, cancellationToken: ct));
+        head.Rows = rows.ToList();
+        return head;
     }
 
     public async Task<IReadOnlyList<ReservationRow>> RemainingLinesAsync(Guid bookingId,

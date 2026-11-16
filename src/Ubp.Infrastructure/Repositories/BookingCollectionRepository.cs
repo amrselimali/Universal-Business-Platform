@@ -57,7 +57,7 @@ public sealed partial class BookingCollectionRepository : IBookingCollectionRepo
               AND status NOT IN ('cancelled', 'reversed')
               -- تُعرض الخدمة بأي رصيد لا يساوي صفرًا (يشمل الأرصدة الافتتاحية).
               AND (remaining_amount <> 0
-                   OR EXISTS (SELECT 1 FROM v_customer_uncollected u
+                   OR EXISTS (SELECT 1 FROM v_customer_line_paid u
                               WHERE u.booking_id = v.booking_id
                                 AND u.uncollected_value <> 0))
             UNION ALL

@@ -72,6 +72,14 @@ public partial class Reservations
         finally { _busy = false; }
     }
 
+    /// <summary>فتح تفاصيل السداد: الإيصالات والتسويات التي سددت من قيمة الخدمة.</summary>
+    private async Task ShowPaymentsAsync(ReservationRow row)
+    {
+        await Dialogs.ShowAsync<PaymentDetailDialog>(T.T("payment_detail.title"),
+            new DialogParameters { ["BookingLineId"] = row.BookingLineId },
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
+    }
+
     private async Task SettleAsync(ReservationRow row)
     {
         if (_busy || row.RemainingQty <= 0) return;

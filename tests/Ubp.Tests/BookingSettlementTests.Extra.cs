@@ -1,6 +1,7 @@
 using Dapper;
 using Npgsql;
 using Ubp.Core.Models;
+using Ubp.Core.Paging;
 using Ubp.Core.Results;
 using Xunit;
 
@@ -118,45 +119,27 @@ public sealed partial class BookingSettlementTests
     }
 
     [Fact]
-    public async Task Fully_consumed_unpaid_service_appears_in_sheet_and_uncollected_list()
+    public async Task Paid_value_and_due_are_shown_on_reservations_with_payment_details()
     {
         var actor = await _db.AdminActorAsync();
-        var f = await SetupAsync("FULL", pay: 0);
-        await using (var connection = new NpgsqlConnection(TestDb.AdminConnection))
+        var f = await SetupAsync("RES", pay: 200);
+
+        var page = await _db.Reservations().ListAsync(actor, new PageRequest
         {
-            await connection.OpenAsync();
-            await connection.ExecuteAsync(
-                "UPDATE booking_lines SET delivered_qty = quantity, reserved_qty = 0 WHERE booking_id = @id",
-                new { id = f.Booking.Id });
-        }
+            Page = 1, PageSize = 25
+        }, f.Customer.Id, false, null);
+        var row = Assert.Single(page.Items, r => r.BookingLineId == f.LineId);
+        Assert.Equal(200, row.PaidAmount);
+        Assert.Equal(300, row.UncollectedValue);
 
-        var sheet = await _db.BookingSettlements().GetSheetAsync(actor, f.Branch, f.Customer.Id);
-        var row = Assert.Single(sheet!.Lines);
-        Assert.Equal(5, row.ConsumedQty);
-        Assert.Equal(0, row.RemainingQty);
-        Assert.Equal(0, row.PaidAmount);
-
-        var rows = await _db.UncollectedServices().ListAsync(actor, DateTime.Today,
-            DateTime.Today, f.Branch, "date_asc");
-        var listed = Assert.Single(rows, r => r.BookingId == f.Booking.Id);
-        Assert.Equal(500, listed.UncollectedValue);
-    }
-
-    [Fact]
-    public async Task Uncollected_services_list_filters_and_sorts_for_all_customers()
-    {
-        var actor = await _db.AdminActorAsync();
-        var f = await SetupAsync("UNCOL", pay: 0);
-        var rows = await _db.UncollectedServices().ListAsync(actor, DateTime.Today,
-            DateTime.Today, f.Branch, "date_asc");
-        Assert.Contains(rows, r => r.BookingId == f.Booking.Id);
-        Assert.All(rows, r => Assert.True(r.RemainingQty > 0));
-        Assert.All(rows, r => Assert.Equal(f.Branch, r.BranchId));
-
-        var values = await _db.UncollectedServices().ListAsync(actor, DateTime.Today,
-            DateTime.Today, f.Branch, "value");
-        var ordered = values.Select(v => v.RemainingValue).ToList();
-        Assert.Equal(ordered.OrderByDescending(x => x), ordered);
+        var detail = await _db.Reservations().GetPaymentDetailAsync(actor, f.LineId);
+        Assert.NotNull(detail);
+        Assert.Equal(500, detail!.ServiceValue);
+        Assert.Equal(200, detail.PaidAmount);
+        Assert.Equal(300, detail.DueAmount);
+        var receipt = Assert.Single(detail.Rows);
+        Assert.Equal("ايصال قبض", receipt.Kind);
+        Assert.Equal(200, receipt.Amount);
     }
 
 }

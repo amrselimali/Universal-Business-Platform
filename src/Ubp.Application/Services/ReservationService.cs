@@ -35,4 +35,12 @@ public sealed partial class ReservationService
             customerSearch, ct);
     }
 
+    /// <summary>تفاصيل سداد خدمة: الإيصالات والتسويات التي سددت جزءًا من قيمتها.</summary>
+    public async Task<PaymentDetail?> GetPaymentDetailAsync(ActorContext actor, Guid bookingLineId,
+        CancellationToken ct = default)
+    {
+        await _permissions.RequireAsync(actor, ScreenCodes.Reservations, ActionCodes.View, ct: ct);
+        return await _reservations.GetPaymentDetailAsync(bookingLineId, ct);
+    }
+
 }

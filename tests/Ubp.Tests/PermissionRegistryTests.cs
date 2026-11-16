@@ -60,12 +60,4 @@ public sealed class PermissionRegistryTests
         Assert.Contains(ActionCodes.SettleAccount,
             AppRegistry.ByCode[ScreenCodes.Reservations].Actions.Select(a => a.Code));
     }
-
-    [Fact]
-    public void Uncollected_services_screen_has_its_own_permission()
-    {
-        var screen = AppRegistry.ByCode[ScreenCodes.UncollectedServices];
-        Assert.Contains(ActionCodes.View, screen.Actions.Select(a => a.Code));
-        Assert.NotEqual(ScreenCodes.Reservations, screen.Code);
-    }
 }

@@ -48,7 +48,7 @@ public sealed partial class BookingSettlementRepository : IBookingSettlementRepo
                    COALESCE(u.paid_amount, 0) AS PaidAmount
             FROM v_customer_reservations r
             JOIN bookings bk ON bk.id = r.booking_id
-            LEFT JOIN v_customer_uncollected u
+            LEFT JOIN v_customer_line_paid u
                    ON u.booking_line_id = r.booking_line_id
             WHERE r.branch_id = @branchId AND r.customer_id = @customerId
               AND (r.remaining_qty > 0

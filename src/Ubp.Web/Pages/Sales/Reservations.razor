@@ -47,6 +47,8 @@ else
                 <MudTh>@T.T("reservations.consumed")</MudTh>
                 <MudTh>@T.T("reservations.remaining")</MudTh>
                 <MudTh>@T.T("reservations.remaining_value")</MudTh>
+                <MudTh Align="Right">@T.T("settlement.paid_value")</MudTh>
+                <MudTh Align="Right">@T.T("settlement.due_on_customer")</MudTh>
                 <MudTh>@T.T("sales.offer_expiry")</MudTh>
                 <MudTh></MudTh>
             </HeaderContent>
@@ -60,6 +62,14 @@ else
                 <MudTd>@Fmt.Decimal(context.ConsumedQty)</MudTd>
                 <MudTd><strong>@Fmt.Decimal(context.RemainingQty)</strong></MudTd>
                 <MudTd>@Fmt.Decimal(context.RemainingValue)</MudTd>
+                <MudTd Align="Right">
+                    <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Primary"
+                               Disabled="@(context.PaidAmount <= 0)"
+                               OnClick="@(() => ShowPaymentsAsync(context))">
+                        @context.PaidAmount.ToString("N2")
+                    </MudButton>
+                </MudTd>
+                <MudTd Align="Right">@context.UncollectedValue.ToString("N2")</MudTd>
                 <MudTd>@(context.ExpiresAt is null ? "—" : Fmt.Date(context.ExpiresAt))</MudTd>
                 <MudTd>
                     <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Success"

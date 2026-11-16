@@ -219,7 +219,6 @@ public static class ServiceRegistration
         services.AddScoped<BookingExecutionService>();
         services.AddScoped<BookingCollectionService>();
         services.AddScoped<BookingSettlementService>();
-        services.AddScoped<UncollectedServicesService>();
         services.AddScoped<BranchWhatsAppSettingsService>();
         services.AddScoped<WhatsAppInboxService>();
         services.AddScoped<WhatsAppWebhookService>();

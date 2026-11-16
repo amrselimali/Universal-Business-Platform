@@ -1,0 +1,64 @@
+@inherits ComponentBase
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">@T.T("payment_detail.title")</MudText>
+    </TitleContent>
+    <DialogContent>
+        @if (_loading)
+        {
+            <MudProgressLinear Indeterminate="true" />
+        }
+        else if (_detail is null)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true">@T.T("common.no_data")</MudAlert>
+        }
+        else
+        {
+            <div class="ubp-inline ubp-gap mb-2">
+                <MudText Typo="Typo.body2">@T.T("reservations.booking"): <b>@_detail.BookingNo</b></MudText>
+                <MudText Typo="Typo.body2">@T.T("reservations.customer"): <b>@_detail.CustomerName</b></MudText>
+                <MudText Typo="Typo.body2">@T.T("common.item"): <b>@_detail.ItemName</b></MudText>
+            </div>
+            <div class="ubp-inline ubp-gap mb-3">
+                <MudText Typo="Typo.body2">@T.T("settlement.service_value"): <b>@_detail.ServiceValue.ToString("N2")</b></MudText>
+                <MudText Typo="Typo.body2">@T.T("settlement.paid_value"): <b>@_detail.PaidAmount.ToString("N2")</b></MudText>
+                <MudText Typo="Typo.body2">@T.T("settlement.due_on_customer"): <b>@_detail.DueAmount.ToString("N2")</b></MudText>
+            </div>
+
+            @if (_detail.Rows.Count == 0)
+            {
+                <MudAlert Severity="Severity.Info" Dense="true">@T.T("payment_detail.none")</MudAlert>
+            }
+            else
+            {
+                <table class="ubp-table" style="width:100%">
+                    <thead>
+                        <tr>
+                            <th>@T.T("payment_detail.source")</th>
+                            <th>@T.T("treasury.doc_no")</th>
+                            <th>@T.T("common.date")</th>
+                            <th>@T.T("treasury.treasury")</th>
+                            <th class="num">@T.T("payment_detail.amount")</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var row in _detail.Rows)
+                        {
+                            <tr>
+                                <td>@row.Kind</td>
+                                <td><span class="ubp-code">@(row.DocNo ?? "—")</span></td>
+                                <td>@row.Date.ToString("yyyy-MM-dd")</td>
+                                <td>@(row.TreasuryName ?? "—")</td>
+                                <td class="num">@row.Amount.ToString("N2")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Close">@T.T("common.close")</MudButton>
+    </DialogActions>
+</MudDialog>
