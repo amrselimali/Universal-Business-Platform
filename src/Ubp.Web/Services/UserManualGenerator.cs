@@ -42,7 +42,7 @@ public sealed partial class UserManualGenerator
             if (!force && Cache.TryGetValue(language, out cached)) return cached;
 
             var source = _sources.Read();
-            var dialogs = BuildDialogs(source, language);
+            var dialogs = ApplyDialogDisplayNames(BuildDialogs(source, language));
             var screens = ApplyDialogDisplayNames(BuildScreens(source, language), dialogs);
             var tables = await LoadTablesAsync(actor, ct);
 
@@ -74,6 +74,32 @@ public sealed partial class UserManualGenerator
         {
             Gate.Release();
         }
+    }
+
+    private static List<ManualDialogDoc> ApplyDialogDisplayNames(List<ManualDialogDoc> dialogs)
+    {
+        var names = dialogs.Where(dialog => !string.IsNullOrWhiteSpace(dialog.DisplayName))
+            .GroupBy(dialog => dialog.Name, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First().DisplayName,
+                StringComparer.OrdinalIgnoreCase);
+        return dialogs.Select(dialog =>
+        {
+            var changed = false;
+            var buttons = dialog.Buttons.Select(button =>
+            {
+                var appears = button.Appears;
+                foreach (var name in button.DialogNames)
+                {
+                    if (names.TryGetValue(name, out var display))
+                        appears = appears.Replace($"**{name}**", $"**{display}**",
+                            StringComparison.Ordinal);
+                }
+                if (appears == button.Appears) return button;
+                changed = true;
+                return button with { Appears = appears };
+            }).ToList();
+            return changed ? dialog with { Buttons = buttons } : dialog;
+        }).ToList();
     }
 
     private static List<ManualScreenDoc> ApplyDialogDisplayNames(List<ManualScreenDoc> screens,

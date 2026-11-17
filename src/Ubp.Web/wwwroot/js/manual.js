@@ -309,18 +309,25 @@ window.ubpManual = (function () {
         return null;
     }
 
+    function enabled(element) {
+        if (!element) return false;
+        if (element.disabled) return false;
+        if (element.getAttribute && element.getAttribute('aria-disabled') === 'true') return false;
+        return !(element.classList && element.classList.contains('mud-disabled'));
+    }
+
     async function waitForTrigger(doc, label, timeout) {
-        const deadline = Date.now() + (timeout || 6000);
+        const deadline = Date.now() + (timeout || 10000);
         while (Date.now() < deadline) {
             const trigger = findTarget(doc, label);
-            if (trigger && visible(trigger)) return trigger;
+            if (trigger && visible(trigger) && enabled(trigger)) return trigger;
             await sleep(300);
         }
         return null;
     }
 
     async function openDialog(doc, triggerLabel) {
-        let trigger = await waitForTrigger(doc, triggerLabel, 5000);
+        let trigger = await waitForTrigger(doc, triggerLabel, 10000);
         if (trigger && visible(trigger)) {
             trigger.click();
             return true;
@@ -330,7 +337,7 @@ window.ubpManual = (function () {
             if (!visible(activator)) continue;
             activator.click();
             await sleep(350);
-            trigger = await waitForTrigger(doc, triggerLabel, 1500);
+            trigger = await waitForTrigger(doc, triggerLabel, 5000);
             if (trigger && visible(trigger)) {
                 trigger.click();
                 return true;
