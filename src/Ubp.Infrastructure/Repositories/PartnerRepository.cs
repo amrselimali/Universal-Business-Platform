@@ -83,12 +83,10 @@ public sealed partial class PartnerRepository : IPartnerRepository
         if (!isAdmin) where.Add("(p.scope_type = 'COMPANY' OR p.branch_id = ANY(@branchIds))");
         if (!string.IsNullOrWhiteSpace(request.Search))
         {
-            var search = "p.search_text LIKE '%' || normalize_search(@search) || '%'";
-            // الكود الورقي للعميل = رقم آخر حجز/مستند، ويُبحث به في اختيار العميل.
-            if (kind == PartnerKind.Customer)
-                search += " OR EXISTS (SELECT 1 FROM bookings b " +
-                          "WHERE b.customer_id = p.id AND b.doc_no ILIKE '%' || @search || '%')";
-            where.Add("(" + search + ")");
+            // يشمل البحث حقول العميل المخصصة (مثل «الكود الورقي») بجميع قيمها النصية.
+            where.Add("(p.search_text LIKE '%' || normalize_search(@search) || '%' " +
+                      "OR EXISTS (SELECT 1 FROM jsonb_each_text(p.custom_fields) cf " +
+                      "WHERE cf.value ILIKE '%' || @search || '%'))");
         }
 
         var whereSql = where.Count == 0 ? "WHERE true" : "WHERE " + string.Join(" AND ", where);
