@@ -95,6 +95,10 @@ public sealed partial class BookingSettlementRepository
 
             var consumed = Math.Max(row.DeliveredQty, row.InvoicedQty) + row.TransferredQty
                            + row.SettledQty;
+            // التحويل «واردًا» يخفض المستهلك (قيمة سالبة) لكنه لا يزيد المسترد؛
+            // المسترد يُحسب على الكمية المستهلكة فعليًا فقط مثل شاشة الخدمات المحجوزة.
+            var refundableConsumed = BookingSettlementMath.RefundableConsumed(
+                Math.Max(row.DeliveredQty, row.InvoicedQty), row.TransferredQty, row.SettledQty);
             var lineValue = row.BookedQty * row.UnitPrice;
             // نفس معادلة v_customer_line_paid: نصيب السطر من المسدد الفعلي.
             var paidTotal = Math.Max(row.DepositAmount + row.PaidAmount, 0);
@@ -108,9 +112,9 @@ public sealed partial class BookingSettlementRepository
                 BookingDate = row.BookingDate, BookedQty = row.BookedQty, ConsumedQty = consumed,
                 SettledQty = row.RemainingQty, UnitPrice = row.UnitPrice,
                 ExternalUnitPrice = line.ExternalUnitPrice, PaidAmount = paidAlloc,
-                RefundAmount = Math.Round(paidAlloc - line.ExternalUnitPrice * consumed, 2,
-                    MidpointRounding.AwayFromZero),
-                RevenueAdjustment = Math.Round(consumed *
+                RefundAmount = BookingSettlementMath.Refund(paidAlloc,
+                    line.ExternalUnitPrice, refundableConsumed),
+                RevenueAdjustment = Math.Round(refundableConsumed *
                     (line.ExternalUnitPrice - row.UnitPrice), 2, MidpointRounding.AwayFromZero)
             });
         }

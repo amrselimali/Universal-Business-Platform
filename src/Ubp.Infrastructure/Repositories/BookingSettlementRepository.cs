@@ -42,12 +42,16 @@ public sealed partial class BookingSettlementRepository : IBookingSettlementRepo
             SELECT r.booking_id AS BookingId, r.booking_line_id AS BookingLineId,
                    r.item_id AS ItemId, r.booking_no AS BookingNo, r.booking_date AS BookingDate,
                    r.item_code AS ItemCode, r.item_name AS ItemName,
-                   r.booked_qty AS BookedQty, r.consumed_qty AS ConsumedQty,
+                   r.booked_qty AS BookedQty, r.reserved_qty AS ReservedQty,
+                   r.consumed_qty AS ConsumedQty,
+                   (GREATEST(bl.delivered_qty, bl.invoiced_qty) +
+                    GREATEST(bl.transferred_qty, 0) + bl.settled_qty) AS RefundableConsumedQty,
                    r.remaining_qty AS RemainingQty, r.unit_price AS UnitPrice,
                    COALESCE(u.uncollected_value, 0) AS RemainingValue,
                    COALESCE(u.paid_amount, 0) AS PaidAmount
             FROM v_customer_reservations r
             JOIN bookings bk ON bk.id = r.booking_id
+            JOIN booking_lines bl ON bl.id = r.booking_line_id
             LEFT JOIN v_customer_line_paid u
                    ON u.booking_line_id = r.booking_line_id
             WHERE r.branch_id = @branchId AND r.customer_id = @customerId

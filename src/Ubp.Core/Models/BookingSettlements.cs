@@ -25,12 +25,32 @@ public sealed class BookingSettlementSheetRow
     public string ItemCode { get; set; } = "";
     public string ItemName { get; set; } = "";
     public decimal BookedQty { get; set; }
+    /// <summary>الكمية المحجوزة الفعلية (بعد صافي التحويل) كما في شاشة الخدمات المحجوزة.</summary>
+    public decimal ReservedQty { get; set; }
     public decimal ConsumedQty { get; set; }
+    /// <summary>الكمية المستهلكة فعليًا (منفَّذ/مفوتر + محوَّل صادر + مسوّى)، بلا محوَّل وارد سالب.</summary>
+    public decimal RefundableConsumedQty { get; set; }
     public decimal RemainingQty { get; set; }
     public decimal UnitPrice { get; set; }
     /// <summary>الجزء المنسوب لهذا السطر من المدفوع/الدفعة المقدمة للحجز.</summary>
     public decimal PaidAmount { get; set; }
     public decimal RemainingValue { get; set; }
+}
+
+/// <summary>
+/// حسابات تسوية العميل. الكمية المحوَّلة «واردًا» تكون سالبة في المستهلك،
+/// ولا تدخل في حساب المسترد؛ وإلا تُضاف قيمتها مرة أخرى ويحدث تكرار.
+/// </summary>
+public static class BookingSettlementMath
+{
+    /// <summary>الكمية التي يترتب عليها استهلاك/استرداد: لا تُخصم الكمية المحوَّلة واردًا.</summary>
+    public static decimal RefundableConsumed(decimal deliveredOrInvoicedQty,
+        decimal transferredQty, decimal settledQty) => Math.Max(deliveredOrInvoicedQty, 0) +
+        Math.Max(transferredQty, 0) + Math.Max(settledQty, 0);
+
+    public static decimal Refund(decimal paidAmount, decimal externalUnitPrice,
+        decimal consumedQty) => Math.Round(paidAmount -
+        externalUnitPrice * Math.Max(consumedQty, 0), 2, MidpointRounding.AwayFromZero);
 }
 
 public sealed class BookingSettlementLineInput

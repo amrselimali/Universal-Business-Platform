@@ -71,6 +71,8 @@ public partial class BookingSettlementDialog
                     BookingId = line.BookingId, BookingLineId = line.BookingLineId,
                     BookingDate = line.BookingDate, ItemCode = line.ItemCode,
                     ItemName = line.ItemName, BookedQty = line.BookedQty,
+                    ReservedQty = line.ReservedQty,
+                    RefundableConsumedQty = line.RefundableConsumedQty,
                     ConsumedQty = line.ConsumedQty, RemainingQty = line.RemainingQty,
                     ServiceValue = line.BookedQty * line.UnitPrice,
                     PaidAmount = line.PaidAmount, ExternalUnitPrice = line.UnitPrice
@@ -223,13 +225,17 @@ public partial class BookingSettlementDialog
         public string ItemCode { get; set; } = "";
         public string ItemName { get; set; } = "";
         public decimal BookedQty { get; set; }
+        public decimal ReservedQty { get; set; }
         public decimal ConsumedQty { get; set; }
+        public decimal RefundableConsumedQty { get; set; }
         public decimal RemainingQty { get; set; }
         public decimal ServiceValue { get; set; }
         public decimal PaidAmount { get; set; }
         public decimal ExternalUnitPrice { get; set; }
         public bool Selected { get; set; }
-        public decimal Due => Math.Round(PaidAmount - ExternalUnitPrice * ConsumedQty, 2,
-            MidpointRounding.AwayFromZero);
+        // لا تُخصم الكمية المحوَّلة «واردًا» (سالب) من المسترد؛ المسترد يعتمد على المسدد
+        // ناقص قيمة الكمية المستهلكة فعليًا فقط، مثل شاشة الخدمات المحجوزة.
+        public decimal Due => BookingSettlementMath.Refund(PaidAmount, ExternalUnitPrice,
+            RefundableConsumedQty);
     }
 }

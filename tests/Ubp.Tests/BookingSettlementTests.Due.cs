@@ -41,6 +41,73 @@ public sealed partial class BookingSettlementTests
     }
 
     [Fact]
+    public async Task Transfer_in_target_shows_zero_reserved_and_does_not_double_the_refund()
+    {
+        var actor = await _db.AdminActorAsync();
+        var f = await SetupAsync("TRIN", pay: 0);
+        var target = await _db.PartnerRepo.CreateAsync(PartnerKind.Customer, new PartnerInput
+        {
+            Code = "BS-TRIN", NameAr = "عميل محوَّل إليه", Phone = "01000000001"
+        });
+        await _db.ServiceTransferRepo.CreateAsync(new ServiceTransferInput
+        {
+            BranchId = f.Branch, FromCustomerId = f.Customer.Id, ToCustomerId = target.Id,
+            DocDate = DateTime.Today,
+            Lines = { new ServiceTransferLineInput { FromBookingLineId = f.LineId, Quantity = 2 } }
+        }, actor.UserId);
+
+        Guid bookingId;
+        Guid targetLineId;
+        await using (var connection = new NpgsqlConnection(TestDb.AdminConnection))
+        {
+            await connection.OpenAsync();
+            var row = await connection.QuerySingleAsync<(Guid BookingId, Guid LineId)>("""
+                SELECT b.id AS BookingId, l.id AS LineId
+                FROM bookings b JOIN booking_lines l ON l.booking_id = b.id
+                WHERE b.customer_id = @customerId AND b.source = 'transfer'
+                """, new { customerId = target.Id });
+            bookingId = row.BookingId;
+            targetLineId = row.LineId;
+            // دفعة مقدمة 100 على الحجز الوارد (قيمة السطر 200) لاختبار المسترد.
+            await connection.ExecuteAsync(
+                "UPDATE bookings SET deposit_amount = 100 WHERE id = @id", new { id = bookingId });
+        }
+
+        var sheet = await _db.BookingSettlements().GetSheetAsync(actor, f.Branch, target.Id);
+        var line = Assert.Single(sheet!.Lines);
+        Assert.Equal(2, line.BookedQty);
+        Assert.Equal(0, line.ReservedQty);
+        Assert.Equal(-2, line.ConsumedQty);
+        Assert.Equal(0, line.RefundableConsumedQty);
+        Assert.Equal(2, line.RemainingQty);
+        Assert.Equal(100, line.PaidAmount);
+
+        var result = await _db.BookingSettlements().SettleAsync(actor, new BookingSettlementInput
+        {
+            BranchId = f.Branch, CustomerId = target.Id, TreasuryId = f.TreasuryId,
+            DocDate = DateTime.Today,
+            Lines =
+            {
+                new BookingSettlementLineInput
+                {
+                    BookingId = bookingId, BookingLineId = targetLineId, ExternalUnitPrice = 50
+                }
+            }
+        });
+        Assert.Equal(100, result.TotalRefund);
+        Assert.Equal(2, result.TotalSettledQty);
+
+        await using var verify = new NpgsqlConnection(TestDb.AdminConnection);
+        await verify.OpenAsync();
+        var view = await verify.QuerySingleAsync<(decimal Consumed, decimal Remaining)>("""
+            SELECT consumed_qty, remaining_qty FROM v_customer_reservations
+            WHERE booking_line_id = @id
+            """, new { id = targetLineId });
+        Assert.Equal(0, view.Consumed);
+        Assert.Equal(0, view.Remaining);
+    }
+
+    [Fact]
     public async Task Paid_amount_matches_between_settlement_sheet_and_reservations_list()
     {
         var actor = await _db.AdminActorAsync();
