@@ -116,6 +116,49 @@ public sealed class UserManualScreenshotTests
     }
 
     [Fact]
+    public void Dialog_annotations_include_usage_fields_and_buttons()
+    {
+        var dialog = Dialog();
+        var text = string.Join(" | ", ManualDialogAnnotations.Build(dialog).Select(a => a.Text));
+        Assert.Contains("حوار «ItemDialog» — حوار نموذج", text);
+        Assert.Contains("الاستخدام: حوار ItemDialog", text);
+        Assert.Contains("حقول الحوار: الكود", text);
+        Assert.Contains("زر «حفظ» (SAVE)", text);
+        Assert.Contains("القيود: حقول إلزامية", text);
+        Assert.Contains("السجل: UPDATE", text);
+    }
+
+    [Fact]
+    public void Dialog_illustration_is_svg_with_usage_and_fields()
+    {
+        var svg = ManualDialogIllustration.Render(Dialog());
+        Assert.StartsWith("<svg", svg);
+        Assert.EndsWith("</svg>", svg);
+        Assert.Contains("حوار يُفتح من أزرار الشاشة", svg);
+        Assert.Contains("ItemDialog", svg);
+        Assert.Contains("الكود", svg);
+        Assert.Contains("الاستخدام والشرح", svg);
+        Assert.Contains("direction=\"rtl\"", svg);
+        Assert.DoesNotContain("<script", svg);
+    }
+
+    private static ManualDialogDoc Dialog() => new(
+        "ItemDialog", "حوار ItemDialog — تعديل / إضافة.",
+        [
+            new ManualButtonDoc("حفظ", "SAVE", "SaveAsync", "يحفظ النموذج.", "يغلق الحوار")
+            {
+                Appears = "يغلق الحوار ويعرض رسالة نجاح.",
+                Limits = "حقول إلزامية.",
+                Audit = "UPDATE"
+            }
+        ])
+    {
+        Fields = ["الكود", "الاسم بالعربية", "التصنيف"],
+        Tabs = ["البيانات"],
+        Kind = "حوار نموذج"
+    };
+
+    [Fact]
     public void Illustration_is_an_annotated_svg_with_escaped_text()
     {
         var screen = Screen();

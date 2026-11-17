@@ -220,6 +220,24 @@
 }
 .ubp-shot-notes ol { margin: 8px 0 0; padding-inline-start: 22px; }
 .ubp-shot-notes li { margin: 3px 0; }
+
+/* حوارات كل شاشة: الشاشة التي تظهر عند الضغط على زر */
+.ubp-dialog-section {
+    margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--ubp-line);
+}
+.ubp-dialog-title { color: var(--ubp-primary-dark); margin-bottom: 8px; }
+.ubp-dialog-card {
+    border: 1px solid var(--ubp-line); border-radius: 12px;
+    padding: 12px; margin-top: 10px; background: #FCFDFE;
+}
+.ubp-dialog-head {
+    display: flex; flex-wrap: wrap; justify-content: space-between;
+    align-items: center; gap: 10px;
+}
+.ubp-dialog-head strong { margin-inline-end: 8px; }
+.ubp-dialog-shot { margin-top: 8px; }
+.ubp-dialog-shot .ubp-shot-image { max-width: 820px; max-height: 560px; }
+.ubp-dialog-fields { margin: 6px 0; font-size: .85rem; }
 @media print {
     .ubp-shot-actions, .ubp-shot-toolbar { display: none !important; }
     .ubp-shot-card { break-inside: avoid; }

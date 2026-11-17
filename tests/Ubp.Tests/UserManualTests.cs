@@ -88,6 +88,11 @@ public sealed class UserManualTests
         Assert.True(result.Screens.Count > 50);
         Assert.Contains(result.Screens, screen =>
             screen.Code == ScreenCodes.Items && screen.Buttons.Count > 0 && screen.Fields.Count > 0);
+        Assert.Contains(result.Dialogs, dialog => dialog.Name == "ItemDialog" &&
+            dialog.Fields.Count > 0 && dialog.Buttons.Count > 0);
+        var itemsScreen = result.Screens.Single(screen => screen.Code == ScreenCodes.Items);
+        Assert.Contains(itemsScreen.Buttons, button =>
+            button.DialogNames.Contains("ItemDialog", StringComparer.OrdinalIgnoreCase));
 
         var itemsStart = result.Markdown.IndexOf("#### `/inventory/items`", StringComparison.Ordinal);
         var itemsEnd = result.Markdown.IndexOf("#### `/inventory/documents`", itemsStart,

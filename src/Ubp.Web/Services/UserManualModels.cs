@@ -15,6 +15,9 @@ public sealed record ManualButtonDoc(
 
     /// <summary>ما يُسجَّل في سجل التدقيق عند نجاح العملية.</summary>
     public string Audit { get; init; } = "";
+
+    /// <summary>أسماء الحوارات التي يفتحها الزر (من كود الصفحة).</summary>
+    public IReadOnlyList<string> DialogNames { get; init; } = [];
 }
 
 public sealed record ManualScreenDoc(
@@ -53,6 +56,9 @@ public sealed record UserManualGeneration(
 {
     /// <summary>بيانات كل شاشة لمعرض الصور والشرح المكتوب على اللقطات.</summary>
     public IReadOnlyList<ManualScreenDoc> Screens { get; init; } = [];
+
+    /// <summary>الحوارات التي تُفتح من أزرار الشاشات، لمعرض الصور والاستخدامات.</summary>
+    public IReadOnlyList<ManualDialogDoc> Dialogs { get; init; } = [];
 }
 
 public sealed record ManualColumnDoc(string Name, string DataType, bool Nullable);

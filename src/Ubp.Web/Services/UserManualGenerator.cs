@@ -64,7 +64,8 @@ public sealed partial class UserManualGenerator
                               dialogs.Sum(dialog => dialog.Buttons.Count),
                 tables.Count, tables.Count > 0, source.HasAny)
             {
-                Screens = screens
+                Screens = screens,
+                Dialogs = dialogs
             };
             Cache[language] = result;
             return result;

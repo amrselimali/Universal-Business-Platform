@@ -1,0 +1,49 @@
+namespace Ubp.Web.Services;
+
+/// <summary>
+/// الشرح المكتوب على صورة الحوار: الغرض والاستخدام، الحقول، التبويبات،
+/// وكل زر داخل الحوار وما يظهر/القيود/السجل.
+/// </summary>
+public static class ManualDialogAnnotations
+{
+    public static IReadOnlyList<ManualAnnotation> Build(ManualDialogDoc dialog)
+    {
+        var annotations = new List<ManualAnnotation>
+        {
+            new(dialog.Name, $"حوار «{dialog.Name}» — {dialog.Kind}."),
+            new(dialog.Name, $"الاستخدام: {Trim(dialog.Purpose, 220)}")
+        };
+
+        if (dialog.Fields.Count > 0)
+            annotations.Add(new(dialog.Fields[0], $"حقول الحوار: {Join(dialog.Fields, 10)}."));
+        if (dialog.Tabs.Count > 0)
+            annotations.Add(new(dialog.Tabs[0], $"التبويبات: {Join(dialog.Tabs, 8)}."));
+
+        foreach (var button in dialog.Buttons.Where(b => !string.IsNullOrWhiteSpace(b.Label)).Take(6))
+            annotations.Add(new(button.Label,
+                $"زر «{button.Label}» ({button.Permission}): {Trim(button.Appears, 150)} " +
+                $"{Trim(button.Behavior, 120)} القيود: {Trim(button.Limits, 120)} " +
+                $"السجل: {Trim(button.Audit, 60)}."));
+
+        return annotations.Take(12)
+            .Select(annotation => annotation with
+            {
+                Text = ManualScreenshotAnnotations.Clean(annotation.Text)
+            })
+            .ToList();
+    }
+
+    private static string Join(IReadOnlyList<string> values, int max)
+    {
+        var text = values.Count <= max
+            ? string.Join(" · ", values)
+            : string.Join(" · ", values.Take(max)) + $" · … (+{values.Count - max})";
+        return Trim(text, 260);
+    }
+
+    private static string Trim(string text, int max)
+    {
+        var clean = text.Trim();
+        return clean.Length <= max ? clean : clean[..max].TrimEnd() + "…";
+    }
+}

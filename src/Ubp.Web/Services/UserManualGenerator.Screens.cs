@@ -160,7 +160,8 @@ public sealed partial class UserManualGenerator
                 : (screen is null ? actionCode : screen.PermissionKey(actionCode));
             var behavior = BehaviorFor(actionCode, onClick, href, label);
             var destination = DestinationFor(onClick, href);
-            var appears = AppearsFor(text, onClick, href);
+            var effects = AnalyzeHandler(text, onClick);
+            var appears = AppearsFor(text, onClick, href, effects);
             var limits = LimitsFor(actionCode, onClick, label, tag.Tag);
             var audit = AuditFor(actionCode, onClick);
             if (buttons.Any(b => b.Label == label && b.Permission == permission &&
@@ -169,7 +170,8 @@ public sealed partial class UserManualGenerator
             {
                 Appears = appears,
                 Limits = limits,
-                Audit = audit
+                Audit = audit,
+                DialogNames = effects.Dialogs
             });
             if (buttons.Count >= 40) break;
         }

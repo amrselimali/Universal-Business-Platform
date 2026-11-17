@@ -30,6 +30,7 @@ public partial class UserManual
     private string? _search;
     private DateTimeOffset? _updatedAt;
     private List<ManualScreenDoc> _screens = [];
+    private List<ManualDialogDoc> _dialogs = [];
     private List<KeyValuePair<string, string>> _groups = [];
     private readonly Dictionary<string, string> _shotUrls = new(StringComparer.OrdinalIgnoreCase);
 
@@ -72,6 +73,7 @@ public partial class UserManual
                     _schemaAvailable = generation.SchemaAvailable;
                     _sourceAvailable = generation.SourceAvailable;
                     _screens = generation.Screens.ToList();
+                    _dialogs = generation.Dialogs.ToList();
                     BuildGroups();
                     RefreshShots();
                     _generated = true;
@@ -91,6 +93,7 @@ public partial class UserManual
                 _html = "";
                 _updatedAt = null;
                 _screens = [];
+                _dialogs = [];
                 _groups = [];
                 _shotUrls.Clear();
                 return;
@@ -105,6 +108,7 @@ public partial class UserManual
             _buttonCount = 0;
             _tableCount = 0;
             _screens = [];
+            _dialogs = [];
             _groups = [];
             _shotUrls.Clear();
             _missing = false;
@@ -133,6 +137,12 @@ public partial class UserManual
         {
             var url = Screenshots.UrlFor(Actor!.UserId, screen.Code);
             if (!string.IsNullOrWhiteSpace(url)) _shotUrls[screen.Code] = url;
+            foreach (var dialog in DialogsFor(screen))
+            {
+                var code = DialogCode(screen, dialog);
+                var dialogUrl = Screenshots.UrlFor(Actor.UserId, code);
+                if (!string.IsNullOrWhiteSpace(dialogUrl)) _shotUrls[code] = dialogUrl;
+            }
         }
     }
 
@@ -184,35 +194,6 @@ public partial class UserManual
         }
     }
 
-    private async Task DeleteAsync(ManualScreenDoc screen)
-    {
-        if (_capturing) return;
-        _capturing = true;
-        StateHasChanged();
-        try
-        {
-            var result = await JS.InvokeAsync<ManualShotSaveResult>("ubpManual.remove", screen.Code);
-            if (result is { Ok: true })
-            {
-                _shotUrls.Remove(screen.Code);
-                ShowSuccess("user_manual.shot_deleted");
-            }
-            else
-            {
-                Snackbar.Add(T.T("user_manual.capture_failed"), Severity.Error);
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.LogWarning(ex, "Manual screenshot delete failed for {Code}", screen.Code);
-            Snackbar.Add(T.T("user_manual.capture_failed"), Severity.Error);
-        }
-        finally
-        {
-            _capturing = false;
-            StateHasChanged();
-        }
-    }
 
     private async Task RefreshAsync() =>
         await RunAsync(async () =>

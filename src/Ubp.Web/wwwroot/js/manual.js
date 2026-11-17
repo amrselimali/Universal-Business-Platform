@@ -10,6 +10,14 @@ window.ubpManual = (function () {
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     const norm = (value) => (value || '').replace(/\s+/g, ' ').trim();
 
+    function visible(el) {
+        if (!el || !el.isConnected) return false;
+        const rect = el.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) return false;
+        const style = getComputedStyle(el);
+        return style.visibility !== 'hidden' && style.display !== 'none';
+    }
+
     function findTarget(doc, text) {
         text = norm(text);
         if (!text) return null;
@@ -19,7 +27,7 @@ window.ubpManual = (function () {
         const nodes = doc.querySelectorAll(selector);
         let partial = null;
         for (const node of nodes) {
-            if (node.offsetParent === null) continue;
+            if (!visible(node)) continue;
             const value = norm(node.innerText || node.textContent);
             if (value === text) return node;
             if (!partial && value && value.indexOf(text) >= 0) partial = node;
@@ -204,24 +212,120 @@ window.ubpManual = (function () {
         }
     }
 
+    async function waitForDialog(doc) {
+        const deadline = Date.now() + 12000;
+        while (Date.now() < deadline) {
+            const dialog = doc.querySelector('.mud-dialog, .mud-dialog-content, [role="dialog"]');
+            if (dialog && visible(dialog) && norm(dialog.innerText).length > 0)
+                return dialog;
+            await sleep(250);
+        }
+        return null;
+    }
+
+    async function openDialog(doc, triggerLabel) {
+        let trigger = findTarget(doc, triggerLabel);
+        if (trigger && visible(trigger)) {
+            trigger.click();
+            return true;
+        }
+        const activators = doc.querySelectorAll('.mud-menu-activator');
+        for (const activator of activators) {
+            if (!visible(activator)) continue;
+            activator.click();
+            await sleep(280);
+            trigger = findTarget(doc, triggerLabel);
+            if (trigger && visible(trigger)) {
+                trigger.click();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    async function captureDialog(route, triggerLabel, options) {
+        options = options || {};
+        const width = 1440;
+        const height = 1100;
+        const iframe = document.createElement('iframe');
+        iframe.style.cssText = 'position:fixed;left:-20000px;top:0;width:' + width +
+            'px;height:' + height + 'px;border:0;visibility:hidden;';
+        iframe.src = route + (route.indexOf('?') >= 0 ? '&' : '?') + 'ubp-dialog=' + Date.now();
+        document.body.appendChild(iframe);
+        try {
+            await new Promise((resolve, reject) => {
+                const timer = setTimeout(() => reject(new Error('iframe_timeout')), 20000);
+                iframe.onload = () => {
+                    clearTimeout(timer);
+                    resolve();
+                };
+            });
+            await sleep(1000);
+            const doc = iframe.contentDocument;
+            await waitForPage(doc);
+            await sleep(400);
+            if (!await openDialog(doc, triggerLabel)) throw new Error('trigger_not_found');
+            const dialogEl = await waitForDialog(doc);
+            if (!dialogEl) throw new Error('dialog_not_found');
+            await sleep(600);
+            const shot = await html2canvas(dialogEl, {
+                backgroundColor: '#FFFFFF',
+                scale: 1,
+                logging: false,
+                useCORS: true,
+                width: Math.min(dialogEl.scrollWidth, 1200),
+                height: Math.min(dialogEl.scrollHeight, 1600),
+                windowWidth: width,
+                windowHeight: height
+            });
+            const annotations = options.annotations || [];
+            const rect = dialogEl.getBoundingClientRect();
+            const points = annotations.map((annotation) => {
+                const element = findTarget(dialogEl, annotation.target || '');
+                if (!element) return null;
+                const box = element.getBoundingClientRect();
+                return {
+                    x: box.left - rect.left + box.width / 2,
+                    y: box.top - rect.top + box.height / 2
+                };
+            });
+            return compose(shot, annotations, points, options.title || '', options.route || route,
+                options);
+        } finally {
+            iframe.remove();
+        }
+    }
+
+    async function upload(code, dataUrl) {
+        const blob = await (await fetch(dataUrl)).blob();
+        if (blob.size > 11 * 1024 * 1024) throw new Error('image_too_large');
+        const response = await fetch('/api/v1/manual/screenshots/' + encodeURIComponent(code), {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {
+                'Content-Type': 'image/png',
+                'X-Ubp-Manual': '1'
+            },
+            body: blob
+        });
+        if (!response.ok) throw new Error('save_failed_' + response.status);
+        const data = await response.json();
+        return { ok: true, url: data.url || '' };
+    }
+
     async function captureAndSave(code, route, options) {
         try {
             if (typeof html2canvas !== 'function') throw new Error('html2canvas_missing');
-            const dataUrl = await capture(route, options);
-            const blob = await (await fetch(dataUrl)).blob();
-            if (blob.size > 11 * 1024 * 1024) throw new Error('image_too_large');
-            const response = await fetch('/api/v1/manual/screenshots/' + encodeURIComponent(code), {
-                method: 'POST',
-                credentials: 'same-origin',
-                headers: {
-                    'Content-Type': 'image/png',
-                    'X-Ubp-Manual': '1'
-                },
-                body: blob
-            });
-            if (!response.ok) throw new Error('save_failed_' + response.status);
-            const data = await response.json();
-            return { ok: true, url: data.url || '' };
+            return await upload(code, await capture(route, options));
+        } catch (error) {
+            return { ok: false, error: String((error && error.message) || error) };
+        }
+    }
+
+    async function captureDialogAndSave(code, route, triggerLabel, options) {
+        try {
+            if (typeof html2canvas !== 'function') throw new Error('html2canvas_missing');
+            return await upload(code, await captureDialog(route, triggerLabel, options));
         } catch (error) {
             return { ok: false, error: String((error && error.message) || error) };
         }
@@ -240,5 +344,11 @@ window.ubpManual = (function () {
         }
     }
 
-    return { capture: capture, captureAndSave: captureAndSave, remove: remove };
+    return {
+        capture: capture,
+        captureDialog: captureDialog,
+        captureAndSave: captureAndSave,
+        captureDialogAndSave: captureDialogAndSave,
+        remove: remove
+    };
 })();

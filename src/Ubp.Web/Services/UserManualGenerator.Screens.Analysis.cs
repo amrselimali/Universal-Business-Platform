@@ -6,7 +6,8 @@ namespace Ubp.Web.Services;
 
 public sealed partial class UserManualGenerator
 {
-    private static string AppearsFor(string text, string onClick, string href)
+    private static string AppearsFor(string text, string onClick, string href,
+        HandlerEffects? effects = null)
     {
         if (!string.IsNullOrWhiteSpace(href))
             return href.StartsWith("http", StringComparison.OrdinalIgnoreCase)
@@ -20,7 +21,7 @@ public sealed partial class UserManualGenerator
         if (handler.Contains("reload") || handler.Contains("refresh") || handler.Contains("load") ||
             handler.Contains("search")) return "تحديث/فلترة الجدول في نفس الصفحة.";
 
-        var effects = AnalyzeHandler(text, onClick);
+        effects ??= AnalyzeHandler(text, onClick);
         if (effects.Dialogs.Count > 0)
         {
             var dialogs = string.Join("، ", effects.Dialogs.Select(name => $"**{name}**"));
@@ -119,10 +120,15 @@ public sealed partial class UserManualGenerator
         var services = new List<string>();
         var confirm = false;
         var navigate = "";
+        var bodies = new List<string>();
         foreach (var method in HandlerMethods(onClick))
         {
             var body = ExtractMethodBody(text, method);
-            if (body.Length == 0) continue;
+            if (body.Length > 0) bodies.Add(body);
+        }
+        if (bodies.Count == 0) bodies.Add(onClick);
+        foreach (var body in bodies)
+        {
             foreach (Match match in DialogShowRegex.Matches(body))
             {
                 var name = match.Groups[1].Value.Split('.').Last();

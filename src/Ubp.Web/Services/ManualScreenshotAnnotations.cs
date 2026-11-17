@@ -39,7 +39,7 @@ public static class ManualScreenshotAnnotations
             .ToList();
     }
 
-    private static string Clean(string text) => text.Replace("**", "").Replace("`", "");
+    internal static string Clean(string text) => text.Replace("**", "").Replace("`", "");
 
     private static string Join(IReadOnlyList<string> values, int max)
     {

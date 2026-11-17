@@ -158,6 +158,93 @@ else
                                     }
                                 </ol>
                             </details>
+
+                            @{
+                                var relatedDialogs = DialogsFor(screen);
+                            }
+                            @if (relatedDialogs.Count > 0)
+                            {
+                                <div class="ubp-dialog-section">
+                                    <MudText Typo="Typo.subtitle2" Class="ubp-dialog-title">
+                                        @T.T("user_manual.dialogs")
+                                    </MudText>
+                                    @foreach (var dialog in relatedDialogs)
+                                    {
+                                        var dialogCode = DialogCode(screen, dialog);
+                                        var trigger = TriggerFor(screen, dialog);
+                                        var hasDialogShot = _shotUrls.TryGetValue(dialogCode, out var dialogUrl);
+                                        <div class="ubp-dialog-card">
+                                            <div class="ubp-dialog-head">
+                                                <div>
+                                                    <strong>@dialog.Name</strong>
+                                                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                                                             Color="Color.Info">@dialog.Kind</MudChip>
+                                                </div>
+                                                <div class="ubp-shot-actions">
+                                                    <MudButton Size="Size.Small" Variant="Variant.Outlined"
+                                                               Color="Color.Primary"
+                                                               StartIcon="@Icons.Material.Filled.PhotoCamera"
+                                                               Disabled="_capturing || string.IsNullOrWhiteSpace(trigger)"
+                                                               OnClick="() => CaptureDialogAsync(screen, dialog)">
+                                                        @T.T("user_manual.capture_dialog")
+                                                    </MudButton>
+                                                    @if (hasDialogShot)
+                                                    {
+                                                        <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Delete"
+                                                                       Color="Color.Error" Disabled="_capturing"
+                                                                       OnClick="() => DeleteShotAsync(dialogCode)" />
+                                                    }
+                                                </div>
+                                            </div>
+                                            <MudText Typo="Typo.caption" Class="ubp-muted">@dialog.Purpose</MudText>
+                                            <div class="ubp-dialog-shot">
+                                                @if (hasDialogShot)
+                                                {
+                                                    <a class="ubp-shot-link" href="@dialogUrl" target="_blank" rel="noopener">
+                                                        <img class="ubp-shot-image" src="@dialogUrl" alt="@dialog.Name" loading="lazy" />
+                                                    </a>
+                                                }
+                                                else
+                                                {
+                                                    @((MarkupString)ManualDialogIllustration.Render(dialog))
+                                                }
+                                            </div>
+                                            <details class="ubp-shot-notes" open>
+                                                <summary>@T.T("user_manual.dialog_usage")</summary>
+                                                <div class="ubp-dialog-fields">
+                                                    <strong>@T.T("user_manual.fields"):</strong>
+                                                    @string.Join(" · ", dialog.Fields)
+                                                </div>
+                                                <div class="ubp-manual-table-wrap">
+                                                    <table class="ubp-manual-table">
+                                                        <thead>
+                                                            <tr>
+                                                                <th>@T.T("user_manual.button")</th>
+                                                                <th>@T.T("user_manual.permission")</th>
+                                                                <th>@T.T("user_manual.appears")</th>
+                                                                <th>@T.T("user_manual.limits")</th>
+                                                                <th>@T.T("user_manual.audit")</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            @foreach (var button in dialog.Buttons)
+                                                            {
+                                                                <tr>
+                                                                    <td>@button.Label</td>
+                                                                    <td><code>@button.Permission</code></td>
+                                                                    <td>@button.Appears</td>
+                                                                    <td>@button.Limits</td>
+                                                                    <td>@button.Audit</td>
+                                                                </tr>
+                                                            }
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </details>
+                                        </div>
+                                    }
+                                </div>
+                            }
                         </div>
                     }
                 }
