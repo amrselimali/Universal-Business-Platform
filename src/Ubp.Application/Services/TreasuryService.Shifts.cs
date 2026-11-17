@@ -137,7 +137,11 @@ public sealed partial class TreasuryService
     {
         if (shift.Status != ShiftStatuses.Open) return;
         var localOpened = _formatter.ToUserTime(shift.OpenedAt);
-        var targetDate = localOpened.Date.AddDays(1);
+        // اليوم التالي ليوم الفتح، ولا يقل عن يوم غد حتى لا يُغلق شفت قديم
+        // بناءً على مواعيد يومٍ مضى.
+        var openedNext = localOpened.Date.AddDays(1);
+        var tomorrow = _formatter.ToUserTime(DateTimeOffset.UtcNow).Date.AddDays(1);
+        var targetDate = openedNext > tomorrow ? openedNext : tomorrow;
         var offset = _formatter.Zone.GetUtcOffset(targetDate);
         var from = new DateTimeOffset(DateTime.SpecifyKind(targetDate, DateTimeKind.Unspecified),
             offset).ToUniversalTime();
