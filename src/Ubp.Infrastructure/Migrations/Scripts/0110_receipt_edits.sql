@@ -25,5 +25,13 @@ ALTER TABLE voucher_lines DROP CONSTRAINT IF EXISTS voucher_lines_fee_amount_che
 ALTER TABLE voucher_lines ADD CONSTRAINT ck_voucher_lines_fee_amount
     CHECK (fee_amount >= 0 OR amount < 0);
 
+-- ربط الإيصالات القديمة بالشفت المطابق بالفرع والوقت حتى تعمل قواعد التعديل بأثر رجعي.
+UPDATE vouchers v
+SET shift_id = (SELECT s.id FROM cashier_shifts s
+                WHERE s.branch_id = v.branch_id AND v.created_at >= s.opened_at
+                  AND (s.closed_at IS NULL OR v.created_at <= s.closed_at)
+                ORDER BY s.opened_at DESC LIMIT 1)
+WHERE v.voucher_type = 'receipt' AND v.shift_id IS NULL;
+
 CREATE INDEX IF NOT EXISTS ix_vouchers_shift ON vouchers (shift_id, status);
 CREATE INDEX IF NOT EXISTS ix_vouchers_parent ON vouchers (parent_receipt_id);
