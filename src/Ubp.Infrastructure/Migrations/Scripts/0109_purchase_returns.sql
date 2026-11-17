@@ -33,6 +33,9 @@ CREATE TABLE IF NOT EXISTS purchase_returns (
         CHECK (return_method <> 'CASH' OR treasury_id IS NOT NULL)
 );
 
+ALTER TABLE purchase_returns ADD COLUMN IF NOT EXISTS voucher_id uuid
+    REFERENCES vouchers(id) ON DELETE SET NULL;
+
 CREATE UNIQUE INDEX IF NOT EXISTS ux_purchase_returns_no
     ON purchase_returns (branch_id, doc_no) WHERE doc_no IS NOT NULL;
 CREATE INDEX IF NOT EXISTS ix_purchase_returns_branch_date
@@ -62,4 +65,5 @@ ALTER TABLE journal_entries DROP CONSTRAINT IF EXISTS ck_journal_entries_source_
 ALTER TABLE journal_entries ADD CONSTRAINT ck_journal_entries_source_type
     CHECK (source_type IN ('manual', 'stock_document', 'stocktake', 'opening', 'invoice',
                            'voucher', 'cash_shift', 'delivery', 'execution',
-                           'operating_expense', 'purchase_return'));
+                           'operating_expense', 'cash_handover', 'service_transfer',
+                           'employee_advance', 'review_adjustment', 'purchase_return'));
