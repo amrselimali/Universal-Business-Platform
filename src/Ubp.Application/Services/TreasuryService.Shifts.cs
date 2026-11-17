@@ -110,25 +110,7 @@ public sealed partial class TreasuryService
     {
         await _permissions.RequireAsync(actor, ScreenCodes.TreasuryShifts, ActionCodes.Close, ct: ct);
         var current = await _treasury.GetShiftAsync(shiftId, ct) ?? throw new NotFoundAppException();
-        if (current.Status == ShiftStatuses.Open)
-        {
-            // لا يُغلق الشفت قبل تجهيز اليوم التالي: موعد لكل موظف نشط أو تسجيل إجازة.
-            var localOpened = _formatter.ToUserTime(current.OpenedAt);
-            var targetDate = localOpened.Date.AddDays(1);
-            var offset = _formatter.Zone.GetUtcOffset(targetDate);
-            var from = new DateTimeOffset(DateTime.SpecifyKind(targetDate, DateTimeKind.Unspecified),
-                offset).ToUniversalTime();
-            var to = from.AddDays(1);
-            var missing = await _treasury.ListEmployeesWithoutDayScheduleAsync(current.BranchId,
-                from, to, ct);
-            if (missing.Count > 0)
-                throw new ValidationAppException("validation.shift_employees_next_day_schedule",
-                    new Dictionary<string, string>
-                    {
-                        ["date"] = targetDate.ToString("yyyy-MM-dd"),
-                        ["employees"] = string.Join("، ", missing)
-                    });
-        }
+        await EnsureNextDayScheduleAsync(current, ct);
 
         Shift shift;
         try
@@ -147,6 +129,30 @@ public sealed partial class TreasuryService
         return shift;
     }
 
+    /// <summary>
+    /// شرط إغلاق الشفت: لكل موظف نشط في الفرع (أو الشركة) موعد أو إجازة تغطي
+    /// اليوم التالي ليوم فتح الشفت حسب المنطقة الزمنية للإعدادات.
+    /// </summary>
+    private async Task EnsureNextDayScheduleAsync(Shift shift, CancellationToken ct)
+    {
+        if (shift.Status != ShiftStatuses.Open) return;
+        var localOpened = _formatter.ToUserTime(shift.OpenedAt);
+        var targetDate = localOpened.Date.AddDays(1);
+        var offset = _formatter.Zone.GetUtcOffset(targetDate);
+        var from = new DateTimeOffset(DateTime.SpecifyKind(targetDate, DateTimeKind.Unspecified),
+            offset).ToUniversalTime();
+        var to = from.AddDays(1);
+        var missing = await _treasury.ListEmployeesWithoutDayScheduleAsync(shift.BranchId,
+            from, to, ct);
+        if (missing.Count > 0)
+            throw new ValidationAppException("validation.shift_employees_next_day_schedule",
+                new Dictionary<string, string>
+                {
+                    ["date"] = targetDate.ToString("yyyy-MM-dd"),
+                    ["employees"] = string.Join("، ", missing)
+                });
+    }
+
     /// <summary>إغلاق آلي لكل شفت تجاوزت الخامسة صباحاً (يستدعيه العامل الخلفي).</summary>
     public async Task<int> AutoCloseAsync(DateTimeOffset cutoff, CancellationToken ct = default)
     {
@@ -156,6 +162,9 @@ public sealed partial class TreasuryService
         {
             try
             {
+                // الإغلاق التلقائي لا يتجاوز شرط تجهيز اليوم التالي؛ يُترك الشفت مفتوحًا
+                // حتى يُسجَّل موعد/إجازة لكل موظف نشط.
+                await EnsureNextDayScheduleAsync(shift, ct);
                 await _treasury.CloseShiftAsync(shift.Id, counts: null, shift.UserId,
                     autoClosed: true, ct);
                 closed++;
