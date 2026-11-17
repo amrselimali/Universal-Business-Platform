@@ -74,6 +74,9 @@ public sealed record ManualDialogDoc(string Name, string Purpose, IReadOnlyList<
 
     /// <summary>نوع الحوار: نموذج/تأكيد/مكوّن.</summary>
     public string Kind { get; init; } = "";
+
+    /// <summary>اسم الحوار كما يظهر في الواجهة (عنوان الحوار) وليس اسم الكلاس.</summary>
+    public string DisplayName { get; init; } = "";
 }
 
 /// <summary>نتيجة التقاط صورة الشاشة من JavaScript وحفظها على الخادم.</summary>

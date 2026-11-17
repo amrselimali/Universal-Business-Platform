@@ -9,7 +9,8 @@ public partial class UserManual
     private IReadOnlyList<ManualDialogDoc> DialogsFor(ManualScreenDoc screen) =>
         _dialogs.Where(dialog => screen.Buttons.Any(button =>
                 button.DialogNames.Contains(dialog.Name, StringComparer.OrdinalIgnoreCase) ||
-                button.Appears.Contains($"**{dialog.Name}**", StringComparison.Ordinal)))
+                button.Appears.Contains($"**{dialog.Name}**", StringComparison.Ordinal) ||
+                button.Appears.Contains($"**{DialogTitle(dialog)}**", StringComparison.Ordinal)))
             .Take(8)
             .ToList();
 
@@ -17,13 +18,17 @@ public partial class UserManual
     {
         var triggers = screen.Buttons.Where(button =>
             button.DialogNames.Contains(dialog.Name, StringComparer.OrdinalIgnoreCase) ||
-            button.Appears.Contains($"**{dialog.Name}**", StringComparison.Ordinal)).ToList();
+            button.Appears.Contains($"**{dialog.Name}**", StringComparison.Ordinal) ||
+            button.Appears.Contains($"**{DialogTitle(dialog)}**", StringComparison.Ordinal)).ToList();
         var preferred = triggers.FirstOrDefault(button =>
             button.Label.Contains("إضافة") || button.Label.Contains("جديد") ||
             button.Label.Contains("Add", StringComparison.OrdinalIgnoreCase) ||
             button.Label.Contains("Create", StringComparison.OrdinalIgnoreCase));
         return (preferred ?? triggers.FirstOrDefault())?.Label;
     }
+
+    private static string DialogTitle(ManualDialogDoc dialog) =>
+        string.IsNullOrWhiteSpace(dialog.DisplayName) ? dialog.Name : dialog.DisplayName;
 
     private static string DialogCode(ManualScreenDoc screen, ManualDialogDoc dialog)
     {
@@ -51,7 +56,7 @@ public partial class UserManual
         {
             var payload = new
             {
-                title = $"{dialog.Name} — {screen.Title}",
+                title = $"{DialogTitle(dialog)} — {screen.Title}",
                 route = screen.Route,
                 annotations = ManualScreenshotAnnotations.ToJsPayload(
                     ManualDialogAnnotations.Build(dialog))

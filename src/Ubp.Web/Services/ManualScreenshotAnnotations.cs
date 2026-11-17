@@ -26,7 +26,7 @@ public static class ManualScreenshotAnnotations
 
         foreach (var button in screen.Buttons.Where(b => !string.IsNullOrWhiteSpace(b.Label)).Take(6))
             annotations.Add(new(button.Label,
-                $"زر «{button.Label}» ({button.Permission}): عند الضغط {Trim(button.Appears, 140)} " +
+                $"زر «{button.Label}»: عند الضغط {Trim(button.Appears, 140)} " +
                 $"القيود: {Trim(button.Limits, 120)} السجل: {Trim(button.Audit, 60)}."));
 
         if (screen.Limits.Count > 0)

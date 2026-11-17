@@ -176,7 +176,7 @@ else
                                         <div class="ubp-dialog-card">
                                             <div class="ubp-dialog-head">
                                                 <div>
-                                                    <strong>@dialog.Name</strong>
+                                                    <strong>@DialogTitle(dialog)</strong>
                                                     <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
                                                              Color="Color.Info">@dialog.Kind</MudChip>
                                                 </div>
@@ -201,7 +201,7 @@ else
                                                 @if (hasDialogShot)
                                                 {
                                                     <a class="ubp-shot-link" href="@dialogUrl" target="_blank" rel="noopener">
-                                                        <img class="ubp-shot-image" src="@dialogUrl" alt="@dialog.Name" loading="lazy" />
+                                                        <img class="ubp-shot-image" src="@dialogUrl" alt="@DialogTitle(dialog)" loading="lazy" />
                                                     </a>
                                                 }
                                                 else

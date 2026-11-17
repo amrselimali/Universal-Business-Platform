@@ -57,107 +57,121 @@ window.ubpManual = (function () {
         }[ch]));
     }
 
+    function svgText(x, y, text, size, color, weight, anchor) {
+        if (!text) return '';
+        const actual = anchor === 'right' ? 'start' : anchor === 'left' ? 'end' : 'middle';
+        return '<text x="' + x + '" y="' + y + '" font-size="' + size + '" fill="' + color +
+            '" font-family="Cairo,Segoe UI,Tahoma,Arial,sans-serif" direction="rtl" ' +
+            'text-anchor="' + actual + '"' + (weight ? ' font-weight="' + weight + '"' : '') +
+            '>' + esc(text) + '</text>';
+    }
+
+    function svgCode(x, y, text, size, color) {
+        if (!text) return '';
+        return '<text x="' + x + '" y="' + y + '" font-size="' + size + '" fill="' + color +
+            '" font-family="Segoe UI,Tahoma,Arial,sans-serif" direction="ltr" ' +
+            'text-anchor="end">' + esc(text) + '</text>';
+    }
+
+    function wrapLines(context, text, maxWidth) {
+        const words = String(text || '').split(/\s+/);
+        const lines = [];
+        let line = '';
+        for (const word of words) {
+            const candidate = line ? line + ' ' + word : word;
+            if (context.measureText(candidate).width > maxWidth && line) {
+                lines.push(line);
+                line = word;
+            } else {
+                line = candidate;
+            }
+        }
+        if (line) lines.push(line);
+        return lines.length ? lines : [''];
+    }
+
+    function svgMarker(x, y, number) {
+        return '<circle cx="' + x + '" cy="' + y + '" r="14" fill="#0F766E" ' +
+            'stroke="#FFFFFF" stroke-width="2"/>' +
+            '<text x="' + x + '" y="' + (y + 5) + '" font-size="14" fill="#FFFFFF" ' +
+            'font-family="Segoe UI,Tahoma,Arial,sans-serif" font-weight="700" ' +
+            'direction="ltr" text-anchor="middle">' + number + '</text>';
+    }
+
     async function compose(shot, annotations, points, title, route, options) {
         const scale = options.scale || 0.72;
         const totalWidth = shot.width + panelWidth;
-        const container = document.createElement('div');
-        container.dir = 'rtl';
-        container.style.cssText = 'position:fixed;left:-30000px;top:0;width:' + totalWidth +
-            'px;background:#FFFFFF;font-family:Cairo,"Segoe UI",Tahoma,sans-serif;';
+        const measure = document.createElement('canvas').getContext('2d');
+        measure.font = '14px Cairo, "Segoe UI", Tahoma, sans-serif';
+        const legend = annotations.map((annotation) =>
+            wrapLines(measure, annotation.text, panelWidth - 76));
+        let legendHeight = 78;
+        legend.forEach((lines) => { legendHeight += 20 + lines.length * 20; });
+        const height = Math.max(shot.height + headerHeight + 26,
+            headerHeight + legendHeight + 20);
 
-        const header = document.createElement('div');
-        header.style.cssText = 'height:' + headerHeight + 'px;background:#0F766E;color:#FFFFFF;' +
-            'padding:12px 26px;box-sizing:border-box;display:flex;align-items:center;' +
-            'justify-content:space-between;gap:18px;';
-        header.innerHTML =
-            '<div style="font-size:22px;font-weight:700;line-height:1.3">' + esc(title) + '</div>' +
-            '<div dir="ltr" style="font-size:14px;color:#CCFBF1;white-space:nowrap">' +
-            esc(route) + '</div>';
+        let svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + totalWidth +
+            '" height="' + height + '" viewBox="0 0 ' + totalWidth + ' ' + height + '">';
+        svg += '<rect width="' + totalWidth + '" height="' + height + '" fill="#FFFFFF"/>';
+        svg += '<image href="' + shot.toDataURL('image/png') + '" x="0" y="' + headerHeight +
+            '" width="' + shot.width + '" height="' + shot.height + '"/>';
+        svg += '<rect x="0.5" y="' + (headerHeight + 0.5) + '" width="' + (shot.width - 1) +
+            '" height="' + (shot.height - 1) + '" fill="none" stroke="#E2E8F0"/>';
+        svg += '<rect width="' + totalWidth + '" height="' + headerHeight + '" fill="#0F766E"/>';
+        svg += svgText(totalWidth - 24, 32, title, 22, '#FFFFFF', 'bold', 'right');
+        svg += svgCode(totalWidth - 24, 58, route, 14, '#CCFBF1');
+        svg += '<rect x="' + shot.width + '" y="' + headerHeight + '" width="' + panelWidth +
+            '" height="' + (height - headerHeight) + '" fill="#F8FAFC"/>';
+        svg += '<line x1="' + (shot.width + 0.5) + '" y1="' + headerHeight + '" x2="' +
+            (shot.width + 0.5) + '" y2="' + height + '" stroke="#E2E8F0"/>';
+        svg += svgText(totalWidth - 22, headerHeight + 30, 'الشرح المكتوب على الصورة',
+            17, '#0F766E', 'bold', 'right');
+        svg += svgText(totalWidth - 22, headerHeight + 52, 'كل رقم يشير إلى الجزء الموضح',
+            12, '#64748B', null, 'right');
 
-        const body = document.createElement('div');
-        body.style.cssText = 'display:flex;align-items:flex-start;';
-        const panel = document.createElement('div');
-        panel.style.cssText = 'width:' + panelWidth + 'px;flex:none;padding:16px 20px;' +
-            'box-sizing:border-box;background:#F8FAFC;border-left:1px solid #E2E8F0;direction:rtl;';
-        panel.innerHTML =
-            '<div style="font-size:17px;font-weight:700;color:#0F766E">الشرح المكتوب على الصورة</div>' +
-            '<div style="font-size:12px;color:#64748B;margin:4px 0 12px">كل رقم يشير إلى الجزء الموضح</div>' +
-            annotations.map((annotation, index) =>
-                '<div data-note="' + index + '" style="display:flex;gap:8px;align-items:flex-start;' +
-                'padding:5px 0;font-size:14px;line-height:1.65;color:#0F172A">' +
-                '<span style="flex:none;width:26px;height:26px;border-radius:50%;background:#0F766E;' +
-                'color:#FFFFFF;font-weight:700;font-size:13px;display:flex;align-items:center;' +
-                'justify-content:center">' + (index + 1) + '</span><span>' +
-                esc(annotation.text) + '</span></div>').join('');
-
-        const shotWrap = document.createElement('div');
-        shotWrap.style.cssText = 'position:relative;flex:none;width:' + shot.width +
-            'px;background:#FFFFFF;';
-        const image = document.createElement('img');
-        image.src = shot.toDataURL('image/png');
-        image.width = shot.width;
-        image.height = shot.height;
-        image.style.cssText = 'display:block;width:' + shot.width + 'px;height:' + shot.height + 'px;';
-        shotWrap.appendChild(image);
+        let y = headerHeight + 80;
+        annotations.forEach((annotation, index) => {
+            const lines = legend[index];
+            if (points[index]) {
+                const px = Math.max(18, Math.min(shot.width - 18, points[index].x));
+                const py = headerHeight + Math.max(18,
+                    Math.min(shot.height - 18, points[index].y));
+                svg += '<line x1="' + px + '" y1="' + py + '" x2="' + (totalWidth - 42) +
+                    '" y2="' + (y + 9) + '" stroke="rgba(15,118,110,0.45)" stroke-width="1.5"/>';
+            }
+            svg += svgMarker(totalWidth - 30, y + 9, index + 1);
+            lines.forEach((line, lineIndex) => {
+                svg += svgText(totalWidth - 50, y + 14 + lineIndex * 20, line, 14,
+                    '#0F172A', null, 'right');
+            });
+            y += 20 + lines.length * 20;
+        });
 
         points.forEach((point, index) => {
             if (!point) return;
             const px = Math.max(18, Math.min(shot.width - 18, point.x));
-            const py = Math.max(18, Math.min(shot.height - 18, point.y));
-            const badge = document.createElement('span');
-            badge.textContent = String(index + 1);
-            badge.style.cssText = 'position:absolute;left:' + (px - 16) + 'px;top:' + (py - 16) +
-                'px;width:32px;height:32px;border-radius:50%;background:rgba(15,118,110,0.94);' +
-                'color:#FFFFFF;font-weight:700;font-size:15px;display:flex;align-items:center;' +
-                'justify-content:center;border:2px solid #FFFFFF;box-sizing:border-box;z-index:2;';
-            shotWrap.appendChild(badge);
+            const py = headerHeight + Math.max(18, Math.min(shot.height - 18, point.y));
+            svg += svgMarker(px, py, index + 1);
         });
+        svg += '</svg>';
 
-        body.appendChild(panel);
-        body.appendChild(shotWrap);
-        container.appendChild(header);
-        container.appendChild(body);
-        document.body.appendChild(container);
-
+        const image = new Image();
+        const svgUrl = URL.createObjectURL(new Blob([svg],
+            { type: 'image/svg+xml;charset=utf-8' }));
         try {
-            await image.decode().catch(() => { });
-            await sleep(30);
-            const base = container.getBoundingClientRect();
-            const shotRect = shotWrap.getBoundingClientRect();
-            const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-            svg.setAttribute('width', String(totalWidth));
-            svg.setAttribute('height', String(container.offsetHeight));
-            svg.style.cssText = 'position:absolute;left:0;top:0;pointer-events:none;z-index:1;';
-            points.forEach((point, index) => {
-                if (!point) return;
-                const note = panel.querySelector('[data-note="' + index + '"]');
-                if (!note) return;
-                const noteRect = note.getBoundingClientRect();
-                const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-                line.setAttribute('x1', String(shotRect.left - base.left + point.x));
-                line.setAttribute('y1', String(shotRect.top - base.top + point.y));
-                line.setAttribute('x2', String(noteRect.left - base.left + 13));
-                line.setAttribute('y2', String(noteRect.top - base.top + 13));
-                line.setAttribute('stroke', 'rgba(15,118,110,0.45)');
-                line.setAttribute('stroke-width', '1.5');
-                svg.appendChild(line);
-            });
-            container.insertBefore(svg, container.firstChild);
-
-            const canvas = await html2canvas(container, {
-                backgroundColor: '#FFFFFF',
-                scale: scale,
-                logging: false,
-                useCORS: true,
-                width: totalWidth,
-                height: container.offsetHeight,
-                windowWidth: totalWidth,
-                windowHeight: container.offsetHeight
-            });
-            return canvas.toDataURL('image/png');
+            image.src = svgUrl;
+            await image.decode();
         } finally {
-            container.remove();
+            URL.revokeObjectURL(svgUrl);
         }
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(totalWidth * scale);
+        canvas.height = Math.round(height * scale);
+        const context = canvas.getContext('2d');
+        context.fillStyle = '#FFFFFF';
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        return canvas.toDataURL('image/png');
     }
 
     async function capture(route, options) {

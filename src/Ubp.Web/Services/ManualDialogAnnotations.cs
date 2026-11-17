@@ -8,10 +8,13 @@ public static class ManualDialogAnnotations
 {
     public static IReadOnlyList<ManualAnnotation> Build(ManualDialogDoc dialog)
     {
+        var display = string.IsNullOrWhiteSpace(dialog.DisplayName)
+            ? dialog.Name
+            : dialog.DisplayName;
         var annotations = new List<ManualAnnotation>
         {
-            new(dialog.Name, $"حوار «{dialog.Name}» — {dialog.Kind}."),
-            new(dialog.Name, $"الاستخدام: {Trim(dialog.Purpose, 220)}")
+            new(display, $"حوار «{display}» — {dialog.Kind}."),
+            new(display, $"الاستخدام: {Trim(dialog.Purpose, 220)}")
         };
 
         if (dialog.Fields.Count > 0)
@@ -21,7 +24,7 @@ public static class ManualDialogAnnotations
 
         foreach (var button in dialog.Buttons.Where(b => !string.IsNullOrWhiteSpace(b.Label)).Take(6))
             annotations.Add(new(button.Label,
-                $"زر «{button.Label}» ({button.Permission}): {Trim(button.Appears, 150)} " +
+                $"زر «{button.Label}»: {Trim(button.Appears, 150)} " +
                 $"{Trim(button.Behavior, 120)} القيود: {Trim(button.Limits, 120)} " +
                 $"السجل: {Trim(button.Audit, 60)}."));
 

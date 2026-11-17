@@ -26,7 +26,7 @@ public sealed class UserManualScreenshotTests
             new ManualButtonDoc("إضافة", "ITEMS/ADD", "AddAsync",
                 "يفتح حوار إنشاء سجل جديد.", "يبقى في الصفحة")
             {
-                Appears = "يفتح حوار **ItemDialog**.",
+                Appears = "يفتح حوار **تعديل / إضافة**.",
                 Limits = "حقول إلزامية + تحقق من التكرار.",
                 Audit = "INSERT"
             },
@@ -106,8 +106,8 @@ public sealed class UserManualScreenshotTests
         Assert.Contains("عنوان الشاشة: الأصناف", text);
         Assert.Contains("الحقول والفلاتر الظاهرة: بحث", text);
         Assert.Contains("أعمدة الجدول: الكود", text);
-        Assert.Contains("زر «إضافة» (ITEMS/ADD)", text);
-        Assert.Contains("يفتح حوار ItemDialog", text);
+        Assert.Contains("زر «إضافة»:", text);
+        Assert.Contains("يفتح حوار تعديل / إضافة", text);
         Assert.Contains("القيود: حقول إلزامية", text);
         Assert.Contains("السجل: INSERT", text);
         Assert.Contains("زر «حذف»", text);
@@ -120,10 +120,10 @@ public sealed class UserManualScreenshotTests
     {
         var dialog = Dialog();
         var text = string.Join(" | ", ManualDialogAnnotations.Build(dialog).Select(a => a.Text));
-        Assert.Contains("حوار «ItemDialog» — حوار نموذج", text);
-        Assert.Contains("الاستخدام: حوار ItemDialog", text);
+        Assert.Contains("حوار «تعديل / إضافة» — حوار نموذج", text);
+        Assert.Contains("الاستخدام: حوار تعديل / إضافة", text);
         Assert.Contains("حقول الحوار: الكود", text);
-        Assert.Contains("زر «حفظ» (SAVE)", text);
+        Assert.Contains("زر «حفظ»:", text);
         Assert.Contains("القيود: حقول إلزامية", text);
         Assert.Contains("السجل: UPDATE", text);
     }
@@ -135,7 +135,7 @@ public sealed class UserManualScreenshotTests
         Assert.StartsWith("<svg", svg);
         Assert.EndsWith("</svg>", svg);
         Assert.Contains("حوار يُفتح من أزرار الشاشة", svg);
-        Assert.Contains("ItemDialog", svg);
+        Assert.Contains("تعديل / إضافة", svg);
         Assert.Contains("الكود", svg);
         Assert.Contains("الاستخدام والشرح", svg);
         Assert.Contains("direction=\"rtl\"", svg);
@@ -143,7 +143,7 @@ public sealed class UserManualScreenshotTests
     }
 
     private static ManualDialogDoc Dialog() => new(
-        "ItemDialog", "حوار ItemDialog — تعديل / إضافة.",
+        "ItemDialog", "حوار تعديل / إضافة.",
         [
             new ManualButtonDoc("حفظ", "SAVE", "SaveAsync", "يحفظ النموذج.", "يغلق الحوار")
             {
@@ -155,7 +155,8 @@ public sealed class UserManualScreenshotTests
     {
         Fields = ["الكود", "الاسم بالعربية", "التصنيف"],
         Tabs = ["البيانات"],
-        Kind = "حوار نموذج"
+        Kind = "حوار نموذج",
+        DisplayName = "تعديل / إضافة"
     };
 
     [Fact]

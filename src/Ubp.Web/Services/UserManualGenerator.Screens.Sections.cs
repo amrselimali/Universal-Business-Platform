@@ -70,7 +70,11 @@ public sealed partial class UserManualGenerator
                 md.AppendLine();
 
                 var related = dialogs.Where(dialog => screen.Buttons.Any(button =>
-                    button.Appears.Contains($"**{dialog.Name}**", StringComparison.Ordinal))).ToList();
+                    button.DialogNames.Contains(dialog.Name, StringComparer.OrdinalIgnoreCase) ||
+                    button.Appears.Contains($"**{dialog.Name}**", StringComparison.Ordinal) ||
+                    button.Appears.Contains(
+                        $"**{(string.IsNullOrWhiteSpace(dialog.DisplayName) ? dialog.Name : dialog.DisplayName)}**",
+                        StringComparison.Ordinal))).ToList();
                 if (related.Count > 0)
                 {
                     md.AppendLine("**الحوارات التي تُفتح من هذه الشاشة**");

@@ -68,10 +68,11 @@ public sealed class UserManualTests
         Assert.Contains("**الأزرار — ماذا يظهر عند الضغط، القيود، والسجل**", result.Markdown);
         Assert.Contains("**قيود الصفحة والصلاحيات**", result.Markdown);
         Assert.Contains("عند الضغط يظهر", result.Markdown);
-        Assert.Contains("يفتح حوار **ItemDialog**", result.Markdown);
+        Assert.Contains("يفتح حوار **تعديل / إضافة**", result.Markdown);
         Assert.Contains("**الحقول الظاهرة:**", result.Markdown);
         Assert.Contains("### الحوارات", result.Markdown);
-        Assert.Contains("AccountDialog", result.Markdown);
+        var accountDialog = result.Dialogs.Single(dialog => dialog.Name == "AccountDialog");
+        Assert.Contains(accountDialog.DisplayName, result.Markdown);
         Assert.Contains("STOCK_DOCUMENTS/POST", result.Markdown);
         Assert.Contains("#### `/inventory/items` — الأصناف", result.Markdown);
         Assert.Contains("| الزر | الصلاحية |", result.Markdown);
@@ -89,7 +90,8 @@ public sealed class UserManualTests
         Assert.Contains(result.Screens, screen =>
             screen.Code == ScreenCodes.Items && screen.Buttons.Count > 0 && screen.Fields.Count > 0);
         Assert.Contains(result.Dialogs, dialog => dialog.Name == "ItemDialog" &&
-            dialog.Fields.Count > 0 && dialog.Buttons.Count > 0);
+            dialog.DisplayName == "تعديل / إضافة" && dialog.Fields.Count > 0 &&
+            dialog.Buttons.Count > 0);
         var itemsScreen = result.Screens.Single(screen => screen.Code == ScreenCodes.Items);
         Assert.Contains(itemsScreen.Buttons, button =>
             button.DialogNames.Contains("ItemDialog", StringComparer.OrdinalIgnoreCase));
@@ -102,18 +104,18 @@ public sealed class UserManualTests
         Assert.Contains("**الحقول/الفلاتر:** بحث", items);
         Assert.Contains("التصنيف", items);
         Assert.DoesNotContain("@T.T(", items);
-        Assert.Contains("| إضافة | `ITEMS/ADD` | يفتح حوار **ItemDialog**", items);
+        Assert.Contains("| إضافة | `ITEMS/ADD` | يفتح حوار **تعديل / إضافة**", items);
         Assert.Contains("الحوارات التي تُفتح من هذه الشاشة", items);
         Assert.Contains("الصلاحيات المتاحة على الشاشة", items);
         Assert.Contains("---", items);
 
-        var dialogStart = result.Markdown.IndexOf("#### ItemDialog", StringComparison.Ordinal);
+        var dialogStart = result.Markdown.IndexOf("#### تعديل / إضافة", StringComparison.Ordinal);
         var dialogEnd = result.Markdown.IndexOf("#### ", dialogStart + 5, StringComparison.Ordinal);
         Assert.True(dialogStart > 0 && dialogEnd > dialogStart);
         var dialog = result.Markdown[dialogStart..dialogEnd];
         Assert.Contains("**النوع:** حوار نموذج", dialog);
         Assert.Contains("**الحقول الظاهرة:** الكود", dialog);
-        Assert.Contains("حوار ItemDialog — تعديل / إضافة", dialog);
+        Assert.Contains("حوار تعديل / إضافة", dialog);
 
         var html = MarkdownRenderer.Render(result.Markdown);
         Assert.Contains("ubp-flow", html);

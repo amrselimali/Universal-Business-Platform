@@ -18,12 +18,14 @@ public sealed partial class UserManualGenerator
                 ? "تأكيد"
                 : file.Text.Contains("<MudDialog", StringComparison.Ordinal) ? "حوار نموذج" : "مكوّن";
             var title = FindDialogTitle(file.Text, language);
-            var purpose = string.IsNullOrWhiteSpace(title) ? $"حوار {name}." : $"حوار {name} — {title}.";
+            var displayName = string.IsNullOrWhiteSpace(title) ? name : title;
+            var purpose = string.IsNullOrWhiteSpace(title) ? $"حوار {name}." : $"حوار {title}.";
             dialogs.Add(new ManualDialogDoc(name, purpose, buttons)
             {
                 Fields = fields,
                 Tabs = FindTabs(file.Text, language),
-                Kind = kind
+                Kind = kind,
+                DisplayName = displayName
             });
         }
         return dialogs;
@@ -47,7 +49,8 @@ public sealed partial class UserManualGenerator
         md.AppendLine();
         foreach (var dialog in dialogs)
         {
-            md.AppendLine($"#### {dialog.Name}");
+            var display = string.IsNullOrWhiteSpace(dialog.DisplayName) ? dialog.Name : dialog.DisplayName;
+            md.AppendLine($"#### {display}");
             md.AppendLine();
             md.AppendLine($"**النوع:** {dialog.Kind} · {dialog.Purpose}");
             md.AppendLine();

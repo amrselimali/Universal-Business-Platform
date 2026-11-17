@@ -42,8 +42,8 @@ public sealed partial class UserManualGenerator
             if (!force && Cache.TryGetValue(language, out cached)) return cached;
 
             var source = _sources.Read();
-            var screens = BuildScreens(source, language);
             var dialogs = BuildDialogs(source, language);
+            var screens = ApplyDialogDisplayNames(BuildScreens(source, language), dialogs);
             var tables = await LoadTablesAsync(actor, ct);
 
             var md = new StringBuilder(96 * 1024);
@@ -74,6 +74,36 @@ public sealed partial class UserManualGenerator
         {
             Gate.Release();
         }
+    }
+
+    private static List<ManualScreenDoc> ApplyDialogDisplayNames(List<ManualScreenDoc> screens,
+        IReadOnlyList<ManualDialogDoc> dialogs)
+    {
+        var names = dialogs.Where(dialog => !string.IsNullOrWhiteSpace(dialog.DisplayName))
+            .GroupBy(dialog => dialog.Name, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First().DisplayName,
+                StringComparer.OrdinalIgnoreCase);
+
+        var result = new List<ManualScreenDoc>(screens.Count);
+        foreach (var screen in screens)
+        {
+            var changed = false;
+            var buttons = screen.Buttons.Select(button =>
+            {
+                var appears = button.Appears;
+                foreach (var name in button.DialogNames)
+                {
+                    if (names.TryGetValue(name, out var display))
+                        appears = appears.Replace($"**{name}**", $"**{display}**",
+                            StringComparison.Ordinal);
+                }
+                if (appears == button.Appears) return button;
+                changed = true;
+                return button with { Appears = appears };
+            }).ToList();
+            result.Add(changed ? screen with { Buttons = buttons } : screen);
+        }
+        return result;
     }
 
     private void AppendHeader(StringBuilder md, IReadOnlyList<ManualScreenDoc> screens,

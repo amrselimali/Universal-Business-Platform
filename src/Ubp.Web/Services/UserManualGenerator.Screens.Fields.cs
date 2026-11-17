@@ -18,8 +18,6 @@ public sealed partial class UserManualGenerator
                 value = ResolveText(placeholder, language);
             if (string.IsNullOrWhiteSpace(value) && attrs.TryGetValue("Title", out var title))
                 value = ResolveText(title, language);
-            if (string.IsNullOrWhiteSpace(value) && attrs.TryGetValue("@bind-Value", out var binding))
-                value = binding.Split('.').LastOrDefault()?.TrimStart('_') ?? "";
             if (string.IsNullOrWhiteSpace(value) || value.StartsWith("@", StringComparison.Ordinal)) continue;
             if (!fields.Contains(value)) fields.Add(value);
             if (fields.Count >= 25) break;

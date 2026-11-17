@@ -17,12 +17,12 @@ public static class ManualDialogIllustration
         var height = Math.Max(560, 210 + Math.Min(dialog.Fields.Count, 6) * 44 + 100);
         var sb = new StringBuilder(10 * 1024);
         sb.Append($"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {Width} {height}\" " +
-                  $"role=\"img\" aria-label=\"{Esc(dialog.Name)}\" " +
+                  $"role=\"img\" aria-label=\"{Esc(Display(dialog))}\" " +
                   "style=\"width:100%;max-width:900px;margin-inline:auto;height:auto;display:block;" +
                   "background:#F3F6F8;font-family:Cairo,Segoe UI,sans-serif\">");
         sb.Append($"<rect width=\"{Width}\" height=\"{height}\" fill=\"#F3F6F8\"/>");
         sb.Append("<rect width=\"").Append(Width).Append("\" height=\"74\" fill=\"#0F766E\"/>");
-        Txt(sb, Width - 22, 30, $"حوار: {dialog.Name}", 22, "#FFFFFF", "bold", "end");
+        Txt(sb, Width - 22, 30, $"حوار: {Display(dialog)}", 22, "#FFFFFF", "bold", "end");
         Txt(sb, Width - 22, 54, dialog.Kind, 13, "#CCFBF1", null, "end");
         Txt(sb, 22, 38, "حوار يُفتح من أزرار الشاشة", 14, "#FFFFFF", "bold", "start");
         Txt(sb, 22, 58, "الشرح مرقّم على الصورة", 12, "#CCFBF1", null, "start");
@@ -45,7 +45,7 @@ public static class ManualDialogIllustration
             ["@title"] = (right - 10, y + 8),
             ["@usage"] = (right - 42, y + 8)
         };
-        Txt(sb, right, y + 34, dialog.Name, 18, "#0F172A", "bold", "end");
+        Txt(sb, right, y + 34, Display(dialog), 18, "#0F172A", "bold", "end");
         Txt(sb, right, y + 60, Trim(dialog.Purpose, 95), 12, "#64748B", null, "end");
 
         var rowY = y + 92;
@@ -99,7 +99,8 @@ public static class ManualDialogIllustration
         {
             var target = annotations[i].Target;
             (int X, int Y) position;
-            if (string.Equals(target, dialog.Name, StringComparison.Ordinal))
+            if (string.Equals(target, dialog.DisplayName, StringComparison.Ordinal) ||
+                string.Equals(target, dialog.Name, StringComparison.Ordinal))
             {
                 position = titleUsed ? points["@usage"] : points["@title"];
                 titleUsed = true;
@@ -171,6 +172,9 @@ public static class ManualDialogIllustration
 
     private static string Trim(string text, int max) =>
         text.Length <= max ? text : text[..max].TrimEnd() + "…";
+
+    private static string Display(ManualDialogDoc dialog) =>
+        string.IsNullOrWhiteSpace(dialog.DisplayName) ? dialog.Name : dialog.DisplayName;
 
     private static string Esc(string text) => WebUtility.HtmlEncode(text);
 }

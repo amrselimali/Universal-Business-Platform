@@ -11,6 +11,7 @@ namespace Ubp.Web.Services;
 public sealed class ManualScreenshotStore
 {
     private const string FolderName = "manual-screenshots";
+    private const string RendererVersion = "r2";
     private static readonly Regex CodePattern = new("^[A-Za-z0-9_]{1,80}$",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private readonly IWebHostEnvironment _environment;
@@ -92,7 +93,7 @@ public sealed class ManualScreenshotStore
     }
 
     private string PathFor(Guid userId, string code) =>
-        Path.Combine(DirectoryPath, userId.ToString("N"), code + ".png");
+        Path.Combine(DirectoryPath, userId.ToString("N"), $"{code}.{RendererVersion}.png");
 
     private static bool IsValid(string code) =>
         !string.IsNullOrWhiteSpace(code) && CodePattern.IsMatch(code);

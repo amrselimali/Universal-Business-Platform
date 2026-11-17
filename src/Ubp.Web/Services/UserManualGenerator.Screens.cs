@@ -145,6 +145,8 @@ public sealed partial class UserManualGenerator
                 label = ResolveText(labelAttr, language);
             if (string.IsNullOrWhiteSpace(label) && attrs.TryGetValue("title", out var titleAttr))
                 label = ResolveText(titleAttr, language);
+            if (string.IsNullOrWhiteSpace(label) && attrs.TryGetValue("aria-label", out var ariaAttr))
+                label = ResolveText(ariaAttr, language);
             if (string.IsNullOrWhiteSpace(label) && attrs.TryGetValue("Icon", out var icon))
                 label = icon.Split('.').LastOrDefault() ?? "زر";
             if (string.IsNullOrWhiteSpace(label)) label = "زر";
