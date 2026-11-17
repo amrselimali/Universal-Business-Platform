@@ -57,6 +57,17 @@
                 <MudTextField @bind-Value="_input.Address" Label="@T.T("common.address")" Variant="Variant.Outlined" Class="ubp-span-2" />
                 <MudTextField @bind-Value="_input.Notes" Label="@T.T("common.notes")" Variant="Variant.Outlined" Lines="2" Class="ubp-span-2" />
                 <MudSwitch @bind-Value="_input.IsActive" Label="@T.T("common.active")" Color="Color.Success" />
+                @if (Kind == PartnerKind.Customer && !IsEdit)
+                {
+                    <MudSwitch T="bool" Value="_noOpeningBalance"
+                               ValueChanged="OnNoOpeningBalanceChanged"
+                               Disabled="_balances.Count > 0"
+                               Label="@T.T("partners.no_opening_balance")"
+                               Color="Color.Success" />
+                    <MudText Typo="Typo.caption" Class="ubp-muted ubp-span-2">
+                        @T.T("partners.no_opening_balance_hint")
+                    </MudText>
+                }
             </div>
 
             @if (Kind == PartnerKind.Customer && !IsEdit && _canAddOpeningBalances)
@@ -65,7 +76,8 @@
                 <div class="d-flex align-center justify-space-between mb-2">
                     <MudText Typo="Typo.subtitle2">@T.T("partners.opening_balances")</MudText>
                     <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary"
-                               StartIcon="@Icons.Material.Filled.Add" OnClick="AddBalanceAsync">
+                               StartIcon="@Icons.Material.Filled.Add" OnClick="AddBalanceAsync"
+                               Disabled="_noOpeningBalance">
                         @T.T("partners.add_opening_balance")
                     </MudButton>
                 </div>

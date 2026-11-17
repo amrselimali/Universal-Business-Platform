@@ -32,6 +32,7 @@ public partial class PartnerDialog
     private bool _busy;
     private bool _canUseCompanyScope;
     private bool _canAddOpeningBalances;
+    private bool _noOpeningBalance;
     private string? _nextCode;
     private bool IsEdit => Model is not null;
 
@@ -123,8 +124,29 @@ public partial class PartnerDialog
 
     private void Cancel() => MudDialog.Cancel();
 
+    /// <summary>
+    /// «لا يوجد رصيد افتتاحي» بديل صريح عند إضافة عميل بلا أرصدة. لا يُقبل تفعيله
+    /// مع وجود صفوف أرصدة، ولا يُقبل الحفظ بلا أرصدة وبدون تفعيله.
+    /// </summary>
+    private void OnNoOpeningBalanceChanged(bool value)
+    {
+        if (value && _balances.Count > 0)
+        {
+            Snackbar.Add(T.T("validation.opening_balance_exclusive"), Severity.Warning);
+            _noOpeningBalance = false;
+            return;
+        }
+        _noOpeningBalance = value;
+        StateHasChanged();
+    }
+
     private Task AddBalanceAsync()
     {
+        if (_noOpeningBalance)
+        {
+            Snackbar.Add(T.T("validation.opening_balance_exclusive"), Severity.Warning);
+            return Task.CompletedTask;
+        }
         _balances.Add(new BalanceRow());
         return Task.CompletedTask;
     }
@@ -175,13 +197,26 @@ public partial class PartnerDialog
     {
         await _form.Validate();
         if (!_form.IsValid) return;
-        var withBalances = Kind == PartnerKind.Customer && !IsEdit && _canAddOpeningBalances;
+        var isNewCustomer = Kind == PartnerKind.Customer && !IsEdit;
+        var hasBalances = isNewCustomer && _balances.Count > 0;
+        if (isNewCustomer)
+        {
+            var openingError = PartnerOpeningBalanceRules.Validate(_noOpeningBalance,
+                _balances.Count);
+            if (openingError is not null)
+            {
+                Snackbar.Add(T.T(openingError), Severity.Warning);
+                return;
+            }
+        }
+        var withBalances = isNewCustomer && _canAddOpeningBalances && hasBalances;
         if (withBalances && !ValidateBalances()) return;
         _busy = true;
         try
         {
             var actor = await UserContext.RequireAsync();
             _input.CustomFields = _values.ToDictionary(p => p.Key, p => (object?)p.Value);
+        _input.NoOpeningBalance = isNewCustomer ? _noOpeningBalance : null;
             _input.OpeningBalances = withBalances
                 ? _balances.Select(r => new ServiceOpeningBalanceInput
                 {

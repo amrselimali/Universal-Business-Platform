@@ -52,12 +52,35 @@ public sealed class PartnerInput
     public Dictionary<string, object?> CustomFields { get; set; } = new();
     /// <summary>أرصدة افتتاحية لخدمات العميل تُسجَّل مع إنشائه كحجوزات مؤكدة — 0104.</summary>
     public List<ServiceOpeningBalanceInput> OpeningBalances { get; set; } = new();
+    /// <summary>
+    /// قرار صريح من شاشة الإضافة: true = لا يوجد رصيد افتتاحي، false = يجب إدخال أرصدة،
+    /// null = نداء قديم لا يفرض القرار (توافق خلفي).
+    /// </summary>
+    public bool? NoOpeningBalance { get; set; }
 }
 
 /// <summary>
 /// رصيد افتتاحي لخدمة عند تكويد عميل جديد: كمية وسعر وحدة ومبلغ مسدد سابقًا،
 /// يُحوَّل إلى حجز خدمة مؤكد (للتنفيذ) ويظهر مستحقه في تحصيلات الخدمات المحجوزة.
 /// </summary>
+/// <summary>
+/// شرط شاشة إضافة العميل: أرصدة افتتاحية مسجلة أو قرار صريح «لا يوجد رصيد افتتاحي»،
+/// وليس الاثنان معًا. null = نداء قديم لا يفرض القرار.
+/// </summary>
+public static class PartnerOpeningBalanceRules
+{
+    public static string? Validate(bool? noOpeningBalance, int openingBalancesCount)
+    {
+        if (noOpeningBalance is null) return null;
+        var hasBalances = openingBalancesCount > 0;
+        if (hasBalances && noOpeningBalance.Value)
+            return "validation.opening_balance_exclusive";
+        if (!hasBalances && !noOpeningBalance.Value)
+            return "validation.opening_balance_required";
+        return null;
+    }
+}
+
 public sealed class ServiceOpeningBalanceInput
 {
     public Guid ServiceId { get; set; }

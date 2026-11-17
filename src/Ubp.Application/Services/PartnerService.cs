@@ -46,6 +46,12 @@ public sealed partial class PartnerService
     {
         await _permissions.RequireAsync(actor, Screen(kind), ActionCodes.Add, ct: ct);
         await NormalizeAndValidateAsync(actor, kind, input, null, ct);
+        if (kind == PartnerKind.Customer)
+        {
+            var openingError = PartnerOpeningBalanceRules.Validate(input.NoOpeningBalance,
+                input.OpeningBalances.Count);
+            if (openingError is not null) throw new ValidationAppException(openingError);
+        }
         // الأرصدة الافتتاحية للخدمات تُسجَّل مع العميل في معاملة واحدة — 0104.
         if (kind == PartnerKind.Customer && input.OpeningBalances.Count > 0)
             return await CreateWithOpeningBalancesAsync(actor, input, ct);
