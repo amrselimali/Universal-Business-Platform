@@ -23,10 +23,12 @@
                 </MudSelect>
                 <MudDatePicker @bind-Date="_date" Label="@T.T("common.date")"
                                Variant="Variant.Outlined" />
+                <MudCheckBox T="bool" @bind-Value="_isLeave" Label="@T.T("sales.leave")"
+                             Color="Color.Warning" />
                 <MudTimePicker @bind-Time="_start" Label="@T.T("sales.start")"
-                               Variant="Variant.Outlined" />
+                               Variant="Variant.Outlined" Disabled="_isLeave" />
                 <MudTimePicker @bind-Time="_end" Label="@T.T("sales.end")"
-                               Variant="Variant.Outlined" />
+                               Variant="Variant.Outlined" Disabled="_isLeave" />
                 <MudTextField @bind-Value="_notes" Label="@T.T("sales.shift_notes")"
                               Variant="Variant.Outlined" MaxLength="500" />
             </div>
@@ -58,6 +60,7 @@
     private TimeSpan? _start = new(10, 0, 0);
     private TimeSpan? _end = new(10, 30, 0);
     private string? _notes;
+    private bool _isLeave;
     private IReadOnlyList<Employee> _employees = Array.Empty<Employee>();
     private bool _busy;
 
@@ -88,8 +91,8 @@
     private async Task SaveAsync()
     {
         await _form.Validate();
-        if (!_form.IsValid || _employeeId == Guid.Empty ||
-            _date is null || _start is null || _end is null)
+        if (!_form.IsValid || _employeeId == Guid.Empty || _date is null ||
+            (!_isLeave && (_start is null || _end is null)))
         {
             Snackbar.Add(T.T("validation.required_fields"), Severity.Warning);
             return;
@@ -99,12 +102,20 @@
         try
         {
             var actor = await UserContext.RequireAsync();
-            var starts = new DateTimeOffset(_date.Value.Date + _start.Value);
-            var ends = new DateTimeOffset(_date.Value.Date + _end.Value);
+            // الإجازة تُسجَّل ليوم كامل بلا موعد محدد، ويُكتب في الملاحظات «إجازة + الملاحظة».
+            var starts = _isLeave
+                ? new DateTimeOffset(_date.Value.Date)
+                : new DateTimeOffset(_date.Value.Date + _start!.Value);
+            var ends = _isLeave
+                ? starts.AddDays(1).AddTicks(-1)
+                : new DateTimeOffset(_date.Value.Date + _end!.Value);
+            var notes = _isLeave
+                ? $"{T.T("sales.leave")}{(string.IsNullOrWhiteSpace(_notes) ? "" : " + " + _notes.Trim())}"
+                : _notes;
             var appointment = await Fulfillment.CreateAppointmentAsync(actor, new AppointmentInput
             {
                 BranchId = _branchId, EmployeeId = _employeeId,
-                StartsAt = starts, EndsAt = ends, Notes = _notes
+                StartsAt = starts, EndsAt = ends, Notes = notes, IsLeave = _isLeave
             });
             MudDialog.Close(DialogResult.Ok(appointment));
         }

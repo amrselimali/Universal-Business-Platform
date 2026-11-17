@@ -89,6 +89,10 @@ public interface ITreasuryRepository : IShiftGate
     Task<Shift?> GetShiftAsync(Guid id, CancellationToken ct = default);
     Task<IReadOnlyList<Shift>> ListShiftsAsync(Guid? branchId, DateTime? from, DateTime? to,
         int limit, CancellationToken ct = default);
+    /// <summary>موظفو الفرع النشطون بلا موعد أو إجازة تغطي الفترة المحددة (لإغلاق الشفت).</summary>
+    Task<IReadOnlyList<string>> ListEmployeesWithoutDayScheduleAsync(Guid branchId,
+        DateTimeOffset fromUtc, DateTimeOffset toUtc, CancellationToken ct = default);
+
     /// <summary>أرصدة افتتاح الشفت للفرع: مرحل من الحسابات + تحت المراجعة + عدادات الأجهزة.</summary>
     Task<ShiftOpeningBalances> GetShiftOpeningBalancesAsync(Guid branchId,
         CancellationToken ct = default);

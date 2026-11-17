@@ -49,14 +49,24 @@ else
             </HeaderContent>
             <RowTemplate>
                 <MudTd>@Fmt.DateOnly(DateOnly.FromDateTime(Fmt.ToUserTime(context.StartsAt).Date))</MudTd>
-                <MudTd>@Fmt.Time(context.StartsAt)</MudTd>
-                <MudTd>@Fmt.Time(context.EndsAt)</MudTd>
+                <MudTd>
+                    @if (context.IsLeave)
+                    {
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                                 Color="Color.Warning">@T.T("sales.leave")</MudChip>
+                    }
+                    else { @Fmt.Time(context.StartsAt) }
+                </MudTd>
+                <MudTd>
+                    @if (context.IsLeave) { <span>—</span> }
+                    else { @Fmt.Time(context.EndsAt) }
+                </MudTd>
                 <MudTd>@context.EmployeeName</MudTd>
                 <MudTd>@(string.IsNullOrWhiteSpace(context.Notes) ? "—" : context.Notes)</MudTd>
                 <MudTd>
                     <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
-                             Color="@(context.IsCancelled ? Color.Error : Color.Info)">
-                        @T.T("sales.appointment_" + context.Status)
+                             Color="@(context.IsCancelled ? Color.Error : context.IsLeave ? Color.Warning : Color.Info)">
+                        @T.T(context.IsLeave ? "sales.leave" : "sales.appointment_" + context.Status)
                     </MudChip>
                 </MudTd>
                 <MudTd Align="Right">

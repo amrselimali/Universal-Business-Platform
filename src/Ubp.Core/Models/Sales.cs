@@ -178,6 +178,7 @@ public sealed class Appointment
     public DateTimeOffset EndsAt { get; set; }
     public string Status { get; set; } = AppointmentStatuses.Scheduled;
     public string? Notes { get; set; }
+    public bool IsLeave { get; set; }
     public int Version { get; set; } = 1;
 
     public bool IsCancelled => Status == AppointmentStatuses.Cancelled;
@@ -192,4 +193,6 @@ public sealed class AppointmentInput
     public DateTimeOffset StartsAt { get; set; }
     public DateTimeOffset EndsAt { get; set; }
     public string? Notes { get; set; }
+    /// <summary>إجازة يوم كامل تُسجَّل بلا موعد محدد.</summary>
+    public bool IsLeave { get; set; }
 }

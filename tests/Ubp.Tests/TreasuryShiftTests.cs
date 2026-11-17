@@ -1,5 +1,6 @@
 using Dapper;
 using Npgsql;
+using Ubp.Application.Services;
 using Ubp.Core.Models;
 using Ubp.Core.Results;
 using Ubp.Core.Security;
@@ -81,6 +82,39 @@ public sealed class TreasuryShiftTests : IClassFixture<TestDb>
 
         var open = await service.GetOpenShiftAsync(actor, f.Branch);
         Assert.Equal(first.Id, open!.Id);
+    }
+
+    [Fact]
+    public async Task Close_shift_requires_next_day_appointment_or_leave_for_active_employees()
+    {
+        var actor = await _db.AdminActorAsync();
+        var service = _db.TreasuryService();
+        var f = await SetupAsync("LEAVE");
+        var employeeId = Guid.CreateVersion7();
+        await _db.EmployeeRepo.CreateAsync(employeeId, new EmployeeInput
+        {
+            Code = "TS-E-LEAVE", NameAr = "موظف إجازة", BranchId = f.Branch
+        }, actor.UserId);
+
+        var shift = await service.OpenShiftAsync(actor, new ShiftInput { BranchId = f.Branch });
+        var blocked = await Assert.ThrowsAsync<ValidationAppException>(() =>
+            service.CloseShiftAsync(actor, shift.Id));
+        Assert.Equal("validation.shift_employees_next_day_schedule", blocked.Code);
+
+        var formatter = new DisplayFormatter(_db.Settings());
+        var nextDay = formatter.ToUserTime(shift.OpenedAt).Date.AddDays(1);
+        var starts = new DateTimeOffset(
+            DateTime.SpecifyKind(nextDay, DateTimeKind.Unspecified),
+            formatter.Zone.GetUtcOffset(nextDay));
+        await _db.AppointmentRepo.CreateAsync(Guid.CreateVersion7(), new AppointmentInput
+        {
+            BranchId = f.Branch, EmployeeId = employeeId, StartsAt = starts,
+            EndsAt = starts.AddDays(1).AddTicks(-1), IsLeave = true,
+            Notes = "إجازة + اختبار"
+        }, actor.UserId);
+
+        var closed = await service.CloseShiftAsync(actor, shift.Id);
+        Assert.Equal(ShiftStatuses.Closed, closed.Status);
     }
 
     [Fact]

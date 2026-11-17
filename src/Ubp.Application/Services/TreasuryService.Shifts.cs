@@ -109,6 +109,27 @@ public sealed partial class TreasuryService
         IReadOnlyList<ShiftCashCountInput>? counts = null, CancellationToken ct = default)
     {
         await _permissions.RequireAsync(actor, ScreenCodes.TreasuryShifts, ActionCodes.Close, ct: ct);
+        var current = await _treasury.GetShiftAsync(shiftId, ct) ?? throw new NotFoundAppException();
+        if (current.Status == ShiftStatuses.Open)
+        {
+            // لا يُغلق الشفت قبل تجهيز اليوم التالي: موعد لكل موظف نشط أو تسجيل إجازة.
+            var localOpened = _formatter.ToUserTime(current.OpenedAt);
+            var targetDate = localOpened.Date.AddDays(1);
+            var offset = _formatter.Zone.GetUtcOffset(targetDate);
+            var from = new DateTimeOffset(DateTime.SpecifyKind(targetDate, DateTimeKind.Unspecified),
+                offset).ToUniversalTime();
+            var to = from.AddDays(1);
+            var missing = await _treasury.ListEmployeesWithoutDayScheduleAsync(current.BranchId,
+                from, to, ct);
+            if (missing.Count > 0)
+                throw new ValidationAppException("validation.shift_employees_next_day_schedule",
+                    new Dictionary<string, string>
+                    {
+                        ["date"] = targetDate.ToString("yyyy-MM-dd"),
+                        ["employees"] = string.Join("، ", missing)
+                    });
+        }
+
         Shift shift;
         try
         {

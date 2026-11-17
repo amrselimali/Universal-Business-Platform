@@ -72,7 +72,8 @@ public sealed partial class TestDb
         ServiceTransferRepo, Permissions(), new AuditService(AuditRepo));
 
     public TreasuryService TreasuryService() => new(
-        TreasuryRepo, AccountRepo, PartnerRepo, Permissions(), new AuditService(AuditRepo));
+        TreasuryRepo, AccountRepo, PartnerRepo, Permissions(), new AuditService(AuditRepo),
+        new DisplayFormatter(Settings()));
 
     public BookingService BookingService() => new(
         BookingRepo, Settings(), Permissions(), new AuditService(AuditRepo),

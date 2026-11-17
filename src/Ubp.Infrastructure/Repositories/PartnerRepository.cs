@@ -82,7 +82,14 @@ public sealed partial class PartnerRepository : IPartnerRepository
         if (categoryId.HasValue) where.Add("p.category_id = @categoryId");
         if (!isAdmin) where.Add("(p.scope_type = 'COMPANY' OR p.branch_id = ANY(@branchIds))");
         if (!string.IsNullOrWhiteSpace(request.Search))
-            where.Add("p.search_text LIKE '%' || normalize_search(@search) || '%'");
+        {
+            var search = "p.search_text LIKE '%' || normalize_search(@search) || '%'";
+            // الكود الورقي للعميل = رقم آخر حجز/مستند، ويُبحث به في اختيار العميل.
+            if (kind == PartnerKind.Customer)
+                search += " OR EXISTS (SELECT 1 FROM bookings b " +
+                          "WHERE b.customer_id = p.id AND b.doc_no ILIKE '%' || @search || '%')";
+            where.Add("(" + search + ")");
+        }
 
         var whereSql = where.Count == 0 ? "WHERE true" : "WHERE " + string.Join(" AND ", where);
         var order = SqlSort.Build(request.SortBy, SortMap, "p.code", request.Descending);

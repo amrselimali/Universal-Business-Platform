@@ -106,7 +106,15 @@
             var closed = await Treasury.CloseShiftAsync(actor, Shift.Id, counts);
             MudDialog.Close(DialogResult.Ok(closed));
         }
-        catch (AppException ex) { Snackbar.Add(T.T(ex.Code), Severity.Error); }
+        catch (AppException ex) { Snackbar.Add(ErrorText(ex), Severity.Error); }
         finally { _busy = false; }
+    }
+
+    private string ErrorText(AppException ex)
+    {
+        var text = T.T(ex.Code);
+        foreach (var arg in ex.Args)
+            text = text.Replace("{" + arg.Key + "}", arg.Value);
+        return text;
     }
 }

@@ -46,7 +46,8 @@ public sealed partial class AppointmentRepository : IAppointmentRepository
         SELECT a.id AS Id, a.branch_id AS BranchId, a.employee_id AS EmployeeId,
                e.name_ar AS EmployeeName, a.booking_id AS BookingId, b.doc_no AS BookingNo,
                a.customer_id AS CustomerId, c.name_ar AS CustomerName, a.starts_at AS StartsAt,
-               a.ends_at AS EndsAt, a.status AS Status, a.notes AS Notes, a.version AS Version
+               a.ends_at AS EndsAt, a.status AS Status, a.notes AS Notes,
+               a.is_leave AS IsLeave, a.version AS Version
         FROM appointments a
         JOIN employees e ON e.id = a.employee_id
         LEFT JOIN bookings b ON b.id = a.booking_id
@@ -66,13 +67,13 @@ public sealed partial class AppointmentRepository : IAppointmentRepository
         {
             await connection.ExecuteAsync(new CommandDefinition("""
                 INSERT INTO appointments (id, branch_id, employee_id, booking_id, customer_id,
-                    starts_at, ends_at, status, notes, created_by)
+                    starts_at, ends_at, status, notes, is_leave, created_by)
                 VALUES (@id, @BranchId, @EmployeeId, @BookingId, @CustomerId, @StartsAt, @EndsAt,
-                        'scheduled', @Notes, @userId)
+                        'scheduled', @Notes, @IsLeave, @userId)
                 """, new { id, input.BranchId, input.EmployeeId, input.BookingId, input.CustomerId,
                     StartsAt = Ubp.Infrastructure.Data.DbTime.Utc(input.StartsAt),
                     EndsAt = Ubp.Infrastructure.Data.DbTime.Utc(input.EndsAt), input.Notes,
-                    userId },
+                    input.IsLeave, userId },
                 cancellationToken: ct));
         }
         catch (PostgresException ex) when (ex.SqlState == "23P01")

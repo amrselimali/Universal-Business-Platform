@@ -15,12 +15,14 @@ public sealed partial class TreasuryService
     private readonly IPartnerRepository _partners;
     private readonly PermissionService _permissions;
     private readonly AuditService _audit;
+    private readonly IDisplayFormatter _formatter;
 
     public TreasuryService(ITreasuryRepository treasury, IAccountRepository accounts,
-        IPartnerRepository partners, PermissionService permissions, AuditService audit)
+        IPartnerRepository partners, PermissionService permissions, AuditService audit,
+        IDisplayFormatter formatter)
     {
         _treasury = treasury; _accounts = accounts; _partners = partners;
-        _permissions = permissions; _audit = audit;
+        _permissions = permissions; _audit = audit; _formatter = formatter;
     }
 
     private static bool IsTreasuryType(string value) =>
