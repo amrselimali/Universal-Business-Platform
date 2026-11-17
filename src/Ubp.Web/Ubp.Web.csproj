@@ -22,14 +22,22 @@
   <Target Name="CopyManualSources" AfterTargets="Build">
     <ItemGroup>
       <ManualPageSources Include="Pages\**\*.razor" />
+      <ManualPageCodeSources Include="Pages\**\*.razor.cs" />
       <ManualComponentSources Include="Components\**\*.razor" />
+      <ManualComponentCodeSources Include="Components\**\*.razor.cs" />
       <ManualServiceSources Include="..\Ubp.Application\Services\*.cs" />
     </ItemGroup>
     <Copy SourceFiles="@(ManualPageSources)"
           DestinationFiles="@(ManualPageSources->'$(OutDir)Code\Pages\%(RecursiveDir)%(Filename)%(Extension)')"
           SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(ManualPageCodeSources)"
+          DestinationFiles="@(ManualPageCodeSources->'$(OutDir)Code\Pages\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
     <Copy SourceFiles="@(ManualComponentSources)"
           DestinationFiles="@(ManualComponentSources->'$(OutDir)Code\Components\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(ManualComponentCodeSources)"
+          DestinationFiles="@(ManualComponentCodeSources->'$(OutDir)Code\Components\%(RecursiveDir)%(Filename)%(Extension)')"
           SkipUnchangedFiles="true" />
     <Copy SourceFiles="@(ManualServiceSources)"
           DestinationFiles="@(ManualServiceSources->'$(OutDir)Code\Services\%(Filename)%(Extension)')"
@@ -39,14 +47,22 @@
   <Target Name="CopyManualSourcesToPublish" AfterTargets="Publish">
     <ItemGroup>
       <ManualPageSourcesPublish Include="Pages\**\*.razor" />
+      <ManualPageCodeSourcesPublish Include="Pages\**\*.razor.cs" />
       <ManualComponentSourcesPublish Include="Components\**\*.razor" />
+      <ManualComponentCodeSourcesPublish Include="Components\**\*.razor.cs" />
       <ManualServiceSourcesPublish Include="..\Ubp.Application\Services\*.cs" />
     </ItemGroup>
     <Copy SourceFiles="@(ManualPageSourcesPublish)"
           DestinationFiles="@(ManualPageSourcesPublish->'$(PublishDir)Code\Pages\%(RecursiveDir)%(Filename)%(Extension)')"
           SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(ManualPageCodeSourcesPublish)"
+          DestinationFiles="@(ManualPageCodeSourcesPublish->'$(PublishDir)Code\Pages\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
     <Copy SourceFiles="@(ManualComponentSourcesPublish)"
           DestinationFiles="@(ManualComponentSourcesPublish->'$(PublishDir)Code\Components\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(ManualComponentCodeSourcesPublish)"
+          DestinationFiles="@(ManualComponentCodeSourcesPublish->'$(PublishDir)Code\Components\%(RecursiveDir)%(Filename)%(Extension)')"
           SkipUnchangedFiles="true" />
     <Copy SourceFiles="@(ManualServiceSourcesPublish)"
           DestinationFiles="@(ManualServiceSourcesPublish->'$(PublishDir)Code\Services\%(Filename)%(Extension)')"

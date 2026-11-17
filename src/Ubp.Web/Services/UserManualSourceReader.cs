@@ -27,9 +27,39 @@ public sealed class UserManualSourceReader
     }
 
     public ManualSourceSet Read() => new(
-        ReadFiles(FindRoot("Pages"), "*.razor"),
-        ReadFiles(FindRoot("Components"), "*.razor"),
+        ReadPages(FindRoot("Pages")),
+        ReadPages(FindRoot("Components")),
         ReadFiles(FindServicesRoot(), "*.cs"));
+
+    private IReadOnlyList<ManualSourceFile> ReadPages(string? root)
+    {
+        var files = ReadFiles(root, "*.razor");
+        if (root is null || files.Count == 0) return files;
+
+        var merged = new List<ManualSourceFile>(files.Count);
+        foreach (var file in files)
+        {
+            var codePath = Path.Combine(root, file.RelativePath + ".cs");
+            if (!File.Exists(codePath))
+            {
+                merged.Add(file);
+                continue;
+            }
+            try
+            {
+                merged.Add(file with
+                {
+                    Text = file.Text + "\n\n// ===== code-behind =====\n" + File.ReadAllText(codePath)
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not read the code-behind at {Path}", codePath);
+                merged.Add(file);
+            }
+        }
+        return merged;
+    }
 
     private string? FindRoot(string name)
     {

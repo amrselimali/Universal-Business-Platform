@@ -14,10 +14,27 @@ public sealed partial class UserManualGenerator
         "Subtitle=\"@T\\.T\\(\"([^\"]+)\"\\)\"", RegexOptions.Compiled);
     private static readonly Regex ColumnRegex = new(@"<MudTh[^>]*>(.*?)</MudTh>",
         RegexOptions.Singleline | RegexOptions.Compiled);
-    private static readonly Regex TagAttributeRegex = new(
-        "([A-Za-z_@][\\w:-]*)\\s*=\\s*\"([^\"]*)\"", RegexOptions.Compiled);
     private static readonly Regex PermissionRegex = new(@"Can\(ActionCodes\.(\w+)\)",
         RegexOptions.Compiled);
+    private static readonly Regex DisabledRegex = new("Disabled\\s*=\\s*\"([^\"]*)\"",
+        RegexOptions.Compiled);
+    private static readonly Regex MethodDeclarationRegex = new(
+        @"(?:async\s+)?(?:Task(?:<[^>]+>)?|void)\s+([A-Za-z_]\w*)\s*\(", RegexOptions.Compiled);
+    private static readonly Regex DialogShowRegex = new(
+        @"Show(?:Async)?\s*<\s*([A-Za-z_][\w\.]*)\s*>", RegexOptions.Compiled);
+    private static readonly Regex NavigationRegex = new(
+        "NavigateTo\\s*\\(\\s*\\$?\"([^\"]+)\"", RegexOptions.Compiled);
+    private static readonly Regex ServiceCallRegex = new(
+        @"([A-Za-z_]\w*)\s*\.\s*([A-Za-z_]\w*)\s*\(", RegexOptions.Compiled);
+    private static readonly Regex DialogTitleRegex = new(
+        @"<TitleContent>(.*?)</TitleContent>", RegexOptions.Singleline | RegexOptions.Compiled);
+
+    private static readonly string[] FieldTags =
+    [
+        "MudTextField", "MudSelect", "MudAutocomplete", "MudDatePicker", "MudTimePicker",
+        "MudNumericField", "MudCheckBox", "MudSwitch", "MudRadioGroup", "MudFileUpload",
+        "MudColorPicker", "MudRating", "MudSlider", "MudMask", "MudRangeInput"
+    ];
 
     private static readonly IReadOnlyDictionary<string, string> GroupPurpose =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -46,14 +63,24 @@ public sealed partial class UserManualGenerator
             var file = FindSource(screen.Route, pageRoutes);
             var purpose = file is null ? "" : FindPurpose(file.Text, language);
             var columns = file is null ? [] : FindColumns(file.Text, language);
-            var buttons = file is null ? [] : ParseButtons(file.Text, language, screen.Code);
+            var buttons = file is null ? [] : ParseButtons(file.Text, language, screen);
             if (buttons.Count == 0) buttons = FallbackButtons(screen, language);
+            var fields = file is null ? [] : FindFields(file.Text, language);
+            var tabs = file is null ? [] : FindTabs(file.Text, language);
+            var notes = file is null ? [] : BuildNotes(file.Text, columns, fields, tabs, buttons);
+            var limits = BuildScreenLimits(file?.Text ?? "", screen, buttons);
 
             screens.Add(new ManualScreenDoc(screen.Code, screen.Route,
                 _translator.Get(language, screen.TitleKey),
                 screen.GroupKey, _translator.Get(language, screen.GroupKey),
                 purpose, columns, buttons,
-                screen.Actions.Select(a => a.Code).ToList(), file is not null));
+                screen.Actions.Select(a => a.Code).ToList(), file is not null)
+            {
+                Fields = fields,
+                Tabs = tabs,
+                Notes = notes,
+                Limits = limits
+            });
         }
         return screens;
     }
@@ -92,20 +119,27 @@ public sealed partial class UserManualGenerator
     {
         var clean = Regex.Replace(text, "<[^>]+>", " ");
         clean = Regex.Replace(clean, @"\s+", " ").Trim();
-        var match = Regex.Match(clean, "^@T\\.T\\(\"([^\"]+)\"\\)$");
-        return match.Success ? _translator.Get(language, match.Groups[1].Value) : clean;
+        var match = Regex.Match(clean, "^@T\\.T\\(\\s*\"([^\"]+)\"\\s*\\)$");
+        if (match.Success) return _translator.Get(language, match.Groups[1].Value);
+        var keys = Regex.Matches(clean, "T\\.T\\(\\s*\"([^\"]+)\"\\s*\\)");
+        if (keys.Count > 0)
+        {
+            var parts = keys.Select(key => _translator.Get(language, key.Groups[1].Value))
+                .Where(part => !string.IsNullOrWhiteSpace(part))
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+            if (parts.Count > 0) return string.Join(" / ", parts);
+        }
+        return clean;
     }
 
-    private List<ManualButtonDoc> ParseButtons(string text, string language, string screenCode)
+    private List<ManualButtonDoc> ParseButtons(string text, string language, ScreenDefinition? screen)
     {
         var lines = text.Replace("\r\n", "\n").Split('\n');
         var buttons = new List<ManualButtonDoc>();
         foreach (var tag in ExtractTags(text, "MudButton", "MudIconButton", "MudMenuItem"))
         {
-            var attrs = TagAttributeRegex.Matches(tag.Tag)
-                .Cast<Match>()
-                .ToDictionary(m => m.Groups[1].Value, m => m.Groups[2].Value,
-                    StringComparer.OrdinalIgnoreCase);
+            var attrs = ReadAttributes(tag.Tag);
             var label = ResolveText(tag.Inner, language);
             if (string.IsNullOrWhiteSpace(label) && attrs.TryGetValue("Label", out var labelAttr))
                 label = ResolveText(labelAttr, language);
@@ -116,20 +150,51 @@ public sealed partial class UserManualGenerator
             if (string.IsNullOrWhiteSpace(label)) label = "زر";
 
             var actionCode = FindPermission(lines, tag.Line, tag.Tag);
-            var permission = string.IsNullOrWhiteSpace(actionCode)
-                ? "—"
-                : (string.IsNullOrWhiteSpace(screenCode) ? actionCode : $"{screenCode}/{actionCode}");
             attrs.TryGetValue("OnClick", out var onClick);
             attrs.TryGetValue("Href", out var href);
             onClick ??= ""; href ??= "";
+            if (string.IsNullOrWhiteSpace(actionCode) && screen is not null)
+                actionCode = InferAction(onClick, label);
+            var permission = string.IsNullOrWhiteSpace(actionCode)
+                ? "—"
+                : (screen is null ? actionCode : screen.PermissionKey(actionCode));
             var behavior = BehaviorFor(actionCode, onClick, href, label);
             var destination = DestinationFor(onClick, href);
+            var appears = AppearsFor(text, onClick, href);
+            var limits = LimitsFor(actionCode, onClick, label, tag.Tag);
+            var audit = AuditFor(actionCode, onClick);
             if (buttons.Any(b => b.Label == label && b.Permission == permission &&
                                  b.Handler == onClick && b.Destination == destination)) continue;
-            buttons.Add(new ManualButtonDoc(label, permission, onClick, behavior, destination));
+            buttons.Add(new ManualButtonDoc(label, permission, onClick, behavior, destination)
+            {
+                Appears = appears,
+                Limits = limits,
+                Audit = audit
+            });
             if (buttons.Count >= 40) break;
         }
         return buttons;
+    }
+
+    private static string InferAction(string onClick, string label)
+    {
+        var handler = onClick.ToLowerInvariant();
+        if (handler.Contains("cancel") || handler.Contains("close") || handler.Contains("mudialog"))
+            return "";
+        if (handler.Contains("delete")) return ActionCodes.Delete;
+        if (handler.Contains("toggle")) return ActionCodes.ToggleActive;
+        if (handler.Contains("reverse")) return ActionCodes.Reverse;
+        if (handler.Contains("receive")) return ActionCodes.Receive;
+        if (handler.Contains("post")) return ActionCodes.Post;
+        if (handler.Contains("confirm")) return ActionCodes.Confirm;
+        if (handler.Contains("print")) return ActionCodes.Print;
+        if (handler.Contains("export")) return ActionCodes.Export;
+        if (handler.Contains("add") || handler.Contains("create") ||
+            label.Contains("إضافة") || label.Contains("جديد")) return ActionCodes.Add;
+        if (handler.Contains("edit") || handler.Contains("update") || label.Contains("تعديل"))
+            return ActionCodes.Edit;
+        if (handler.Contains("save")) return ActionCodes.Save;
+        return "";
     }
 
     private static string FindPermission(IReadOnlyList<string> lines, int line, string tag)
@@ -162,7 +227,7 @@ public sealed partial class UserManualGenerator
         if (handler == "cancel" || handler.Contains("mudialog.cancel"))
             return "يغلق الحوار دون حفظ.";
         if (handler.Contains("cancelasync"))
-            return "يلغي السجل بعد التأكيد. **القيود:** حسب الحالة؛ قد يتطلب عكسًا إذا كان مرحّلًا.";
+            return "يلغي السجل بعد التأكيد.";
         if (handler == "close" || handler.Contains("mudialog.close"))
             return "يغلق الحوار.";
         if (handler.Contains("confirm"))
@@ -174,17 +239,16 @@ public sealed partial class UserManualGenerator
         if (handler.Contains("addline") || handler.Contains("removeline") ||
             handler.Contains("addrow") || handler.Contains("remove")) return "يعدّل البنود في الذاكرة قبل الحفظ.";
         if (handler.Contains("save"))
-            return "يحفظ النموذج بعد التحقق من الحقول. **القيود:** تعارض النسخة يمنع الحفظ إذا عُدّل السجل من مستخدم آخر.";
+            return "يحفظ النموذج بعد التحقق من الحقول.";
         if (handler.Contains("cancel"))
-            return "يلغي السجل بعد التأكيد. **القيود:** حسب الحالة؛ قد يتطلب عكسًا إذا كان مرحّلًا.";
+            return "يلغي السجل بعد التأكيد.";
         if (!string.IsNullOrWhiteSpace(actionCode) && Guide.TryGetValue(actionCode, out var guide))
-            return $"{guide.Does} **القيود:** {guide.Limits}";
+            return guide.Does;
         if (handler.Contains("delete")) return "يحذف/يعطّل السجل بعد التأكيد.";
         if (handler.Contains("post")) return "يرحّل المستند/القيد.";
         if (handler.Contains("reverse")) return "يعكس الأثر.";
         return label.Contains("إضافة") || label.Contains("تعديل") ? "يفتح حوارًا ويحفظ بعد التحقق." : "ينفّذ إجراءً على الشاشة.";
     }
-
     private static string DestinationFor(string onClick, string href)
     {
         if (!string.IsNullOrWhiteSpace(href)) return href;
@@ -196,103 +260,18 @@ public sealed partial class UserManualGenerator
     }
 
     private List<ManualButtonDoc> FallbackButtons(ScreenDefinition screen, string language) =>
-        screen.Actions.Select(action => new ManualButtonDoc(
-            ActionTitle(action.Code, language),
-            $"{screen.Code}/{action.Code}", "",
-            Guide.TryGetValue(action.Code, out var guide) ? $"{guide.Does} **القيود:** {guide.Limits}" : "إجراء مسجل.",
-            "حسب الشاشة")).ToList();
-
-    private void AppendScreenSections(StringBuilder md, IReadOnlyList<ManualScreenDoc> screens,
-        string language)
-    {
-        md.AppendLine("## 4. دليل الشاشات والأزرار");
-        md.AppendLine();
-        md.AppendLine("الأزرار مستخرجة من ملفات `.razor` الحالية. لكل زر: الصلاحية، القيود/السلوك، والانتقال. " +
-                      "الأزرار التي لا يوجد لها مصدر تُعرض من أفعال `AppRegistry`.");
-        md.AppendLine();
-        foreach (var group in screens.GroupBy(s => (s.GroupKey, s.GroupTitle)))
+        screen.Actions.Select(action =>
         {
-            md.AppendLine($"### {group.Key.GroupTitle}");
-            md.AppendLine();
-            if (GroupPurpose.TryGetValue(group.Key.GroupKey, out var purpose))
+            var known = Guide.TryGetValue(action.Code, out var guide);
+            return new ManualButtonDoc(
+                ActionTitle(action.Code, language),
+                screen.PermissionKey(action.Code), "",
+                known ? guide.Does : "إجراء مسجل.",
+                "حسب الشاشة")
             {
-                md.AppendLine(purpose);
-                md.AppendLine();
-            }
-            foreach (var screen in group)
-            {
-                md.AppendLine($"#### `{screen.Route}` — {screen.Title}");
-                md.AppendLine();
-                md.AppendLine(screen.Purpose.Length > 0 ? screen.Purpose : $"شاشة {screen.Title}.");
-                md.AppendLine();
-                if (screen.Columns.Count > 0)
-                    md.AppendLine($"**الأعمدة:** {string.Join(" · ", screen.Columns)}");
-                md.AppendLine();
-                md.AppendLine("| الزر | الصلاحية | ماذا يفعل / القيود | إلى أين |");
-                md.AppendLine("|---|---|---|---|");
-                foreach (var button in screen.Buttons)
-                    md.AppendLine($"| {button.Label} | `{button.Permission}` | {button.Behavior} | {button.Destination} |");
-                if (screen.Buttons.Count == 0) md.AppendLine("| — | — | لا توجد أزرار تنفيذية. | — |");
-                md.AppendLine();
-                if (!screen.SourceAvailable)
-                    md.AppendLine("> ملف المصدر غير متاح لهذه الشاشة في نسخة النشر؛ الأزرار معروضة من `AppRegistry`.");
-                md.AppendLine();
-            }
-        }
-    }
-
-    private void AppendPermissionMatrix(StringBuilder md, IReadOnlyList<ManualScreenDoc> screens,
-        string language)
-    {
-        md.AppendLine("## 7. مصفوفة الصلاحيات");
-        md.AppendLine();
-        md.AppendLine("| الشاشة | المسار | الأكواد المتاحة |");
-        md.AppendLine("|---|---|---|");
-        foreach (var screen in screens)
-        {
-            var actions = string.Join(", ", screen.Actions.Select(a => $"`{screen.Code}/{a}`"));
-            md.AppendLine($"| {screen.Title} | `{screen.Route}` | {actions} |");
-        }
-        md.AppendLine();
-        md.AppendLine("> المدير `IsAdmin` يتجاوز كل هذه الأكواد؛ Super Admin يضيف إدارة أعلام المديرين وقاعدة البيانات.");
-        md.AppendLine();
-    }
-
-    private sealed record RazorTag(string Tag, string Inner, int Line);
-
-    private static IEnumerable<RazorTag> ExtractTags(string text, params string[] names)
-    {
-        foreach (var name in names)
-        {
-            var search = "<" + name;
-            var index = 0;
-            while ((index = text.IndexOf(search, index, StringComparison.Ordinal)) >= 0)
-            {
-                var start = index;
-                var i = index + search.Length;
-                if (i < text.Length && !char.IsWhiteSpace(text[i]) && text[i] != '>' && text[i] != '/')
-                {
-                    index += search.Length;
-                    continue;
-                }
-                var j = i;
-                char? quote = null;
-                while (j < text.Length)
-                {
-                    var c = text[j];
-                    if (quote is not null) { if (c == quote) quote = null; }
-                    else if (c is '"' or '\'') quote = c;
-                    else if (c == '>') break;
-                    j++;
-                }
-                if (j >= text.Length) break;
-                var tag = text[start..(j + 1)];
-                var close = text.IndexOf("</" + name + ">", j, StringComparison.Ordinal);
-                var inner = close >= 0 ? text[(j + 1)..close] : "";
-                var line = text[..start].Count(c => c == '\n') + 1;
-                yield return new RazorTag(tag, inner, line);
-                index = close >= 0 ? close + name.Length + 3 : j + 1;
-            }
-        }
-    }
+                Appears = "حسب الشاشة/الحوار المرتبط.",
+                Limits = known ? guide.Limits : "راجع الخدمة/الشاشة.",
+                Audit = known ? guide.Audit : "حسب الخدمة"
+            };
+        }).ToList();
 }

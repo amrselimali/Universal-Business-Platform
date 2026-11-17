@@ -62,6 +62,14 @@ public sealed class UserManualTests
         Assert.Contains("## 3. دورات العمل", result.Markdown);
         Assert.Contains("```flow", result.Markdown);
         Assert.Contains("## 4. دليل الشاشات والأزرار", result.Markdown);
+        Assert.Contains("### فهرس الشاشات", result.Markdown);
+        Assert.Contains("**ما يظهر على الشاشة**", result.Markdown);
+        Assert.Contains("**ملاحظات على الظاهر**", result.Markdown);
+        Assert.Contains("**الأزرار — ماذا يظهر عند الضغط، القيود، والسجل**", result.Markdown);
+        Assert.Contains("**قيود الصفحة والصلاحيات**", result.Markdown);
+        Assert.Contains("عند الضغط يظهر", result.Markdown);
+        Assert.Contains("يفتح حوار **ItemDialog**", result.Markdown);
+        Assert.Contains("**الحقول الظاهرة:**", result.Markdown);
         Assert.Contains("### الحوارات", result.Markdown);
         Assert.Contains("AccountDialog", result.Markdown);
         Assert.Contains("STOCK_DOCUMENTS/POST", result.Markdown);
@@ -77,6 +85,27 @@ public sealed class UserManualTests
         Assert.Equal(1, result.TableCount);
         Assert.True(result.SchemaAvailable);
         Assert.True(result.SourceAvailable);
+
+        var itemsStart = result.Markdown.IndexOf("#### `/inventory/items`", StringComparison.Ordinal);
+        var itemsEnd = result.Markdown.IndexOf("#### `/inventory/documents`", itemsStart,
+            StringComparison.Ordinal);
+        Assert.True(itemsStart > 0 && itemsEnd > itemsStart);
+        var items = result.Markdown[itemsStart..itemsEnd];
+        Assert.Contains("**الحقول/الفلاتر:** بحث", items);
+        Assert.Contains("التصنيف", items);
+        Assert.DoesNotContain("@T.T(", items);
+        Assert.Contains("| إضافة | `ITEMS/ADD` | يفتح حوار **ItemDialog**", items);
+        Assert.Contains("الحوارات التي تُفتح من هذه الشاشة", items);
+        Assert.Contains("الصلاحيات المتاحة على الشاشة", items);
+        Assert.Contains("---", items);
+
+        var dialogStart = result.Markdown.IndexOf("#### ItemDialog", StringComparison.Ordinal);
+        var dialogEnd = result.Markdown.IndexOf("#### ", dialogStart + 5, StringComparison.Ordinal);
+        Assert.True(dialogStart > 0 && dialogEnd > dialogStart);
+        var dialog = result.Markdown[dialogStart..dialogEnd];
+        Assert.Contains("**النوع:** حوار نموذج", dialog);
+        Assert.Contains("**الحقول الظاهرة:** الكود", dialog);
+        Assert.Contains("حوار ItemDialog — تعديل / إضافة", dialog);
 
         var html = MarkdownRenderer.Render(result.Markdown);
         Assert.Contains("ubp-flow", html);

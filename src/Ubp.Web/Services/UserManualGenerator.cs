@@ -51,7 +51,7 @@ public sealed partial class UserManualGenerator
             AppendHowItWorks(md);
             AppendSystemMap(md, screens, language);
             AppendWorkflowSections(md, language);
-            AppendScreenSections(md, screens, language);
+            AppendScreenSections(md, screens, dialogs, language);
             AppendDialogSections(md, dialogs);
             AppendDatabaseSection(md, tables, language);
             AppendActionGuide(md, language);
