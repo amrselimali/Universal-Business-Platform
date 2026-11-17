@@ -12,15 +12,12 @@
                         <MudSelectItem T="Guid" Value="@branch.Id">@branch.NameAr</MudSelectItem>
                     }
                 </MudSelect>
-                <MudSelect T="Guid" @bind-Value="_input.CustomerId" Label="@T.T("sales.customer")"
-                           Variant="Variant.Outlined" Required="true">
-                    @foreach (var customer in _customers)
-                    {
-                        <MudSelectItem T="Guid" Value="@customer.Id">
-                            @customer.Code — @customer.NameAr
-                        </MudSelectItem>
-                    }
-                </MudSelect>
+                <MudAutocomplete T="Partner" Value="_selectedCustomer"
+                                 ValueChanged="OnCustomerChanged"
+                                 SearchFunc="SearchCustomers" ToStringFunc="CustomerLabel"
+                                 Label="@T.T("sales.customer")" Variant="Variant.Outlined"
+                                 Required="true" MinCharacters="1" DebounceInterval="300"
+                                 ResetValueOnEmptyText="true" CoerceValue="true" />
                 <MudDatePicker @bind-Date="_date" Label="@T.T("sales.booking_date")"
                                Variant="Variant.Outlined" Required="true" />
                 <MudTimePicker @bind-Time="_startTime" Label="@T.T("sales.from")"
@@ -106,6 +103,7 @@
     private TimeSpan? _endTime = new(10, 30, 0);
     private List<LineModel> _lines = new();
     private IReadOnlyList<Partner> _customers = Array.Empty<Partner>();
+    private Partner? _selectedCustomer;
     private IReadOnlyList<Employee> _employees = Array.Empty<Employee>();
     private IReadOnlyList<ItemOption> _items = Array.Empty<ItemOption>();
     private IReadOnlyList<Warehouse> _warehouses = Array.Empty<Warehouse>();
@@ -137,7 +135,40 @@
                 Quantity = l.Quantity <= 0 ? 1 : l.Quantity, UnitPrice = l.UnitPrice
             }).ToList();
         }
+        if (_input.CustomerId != Guid.Empty)
+            _selectedCustomer = _customers.FirstOrDefault(c => c.Id == _input.CustomerId)
+                ?? new Partner
+                {
+                    Id = _input.CustomerId, Code = "",
+                    NameAr = Model?.CustomerName ?? ""
+                };
         if (_lines.Count == 0) AddLine();
+    }
+
+    private async Task<IEnumerable<Partner>> SearchCustomers(string? search,
+        CancellationToken ct)
+    {
+        var actor = await UserContext.GetAsync();
+        if (actor is null) return Array.Empty<Partner>();
+        return await Lookup.PartnersAsync(actor, PartnerKind.Customer, search, ct, _input.BranchId);
+    }
+
+    private void OnCustomerChanged(Partner? customer)
+    {
+        _selectedCustomer = customer;
+        _input.CustomerId = customer?.Id ?? Guid.Empty;
+    }
+
+    private static string CustomerLabel(Partner? customer)
+    {
+        if (customer is null) return "";
+        var paper = customer.CustomFields?.FirstOrDefault(pair =>
+            pair.Key.Contains("paper", StringComparison.OrdinalIgnoreCase) ||
+            pair.Key.Contains("ورق", StringComparison.OrdinalIgnoreCase)).Value?.ToString();
+        var label = $"{customer.Code} — {customer.NameAr}";
+        if (!string.IsNullOrWhiteSpace(customer.Phone)) label += $" — {customer.Phone}";
+        if (!string.IsNullOrWhiteSpace(paper)) label += $" — {paper}";
+        return label;
     }
 
     private async Task OnBranchChanged(Guid value)
