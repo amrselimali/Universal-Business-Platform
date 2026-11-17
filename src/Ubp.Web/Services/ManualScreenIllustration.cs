@@ -19,7 +19,7 @@ public static class ManualScreenIllustration
         var sb = new StringBuilder(12 * 1024);
         sb.Append($"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {Width} {height}\" " +
                   $"role=\"img\" aria-label=\"{Esc(screen.Title)}\" " +
-                  "style=\"width:100%;height:auto;display:block;background:#F3F6F8;font-family:Cairo,Segoe UI,sans-serif\">");
+                  "style=\"width:100%;max-width:900px;margin-inline:auto;height:auto;display:block;background:#F3F6F8;font-family:Cairo,Segoe UI,sans-serif\">");
         var shadowId = "shadow-" + screen.Code;
         sb.Append($"<defs><filter id=\"{shadowId}\" x=\"-5%\" y=\"-5%\" width=\"110%\" height=\"110%\">" +
                   "<feDropShadow dx=\"0\" dy=\"3\" stdDeviation=\"6\" flood-color=\"#0F172A\" flood-opacity=\"0.10\"/>" +

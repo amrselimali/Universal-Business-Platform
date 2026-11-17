@@ -207,8 +207,10 @@
 .ubp-shot-head strong { font-size: 1rem; }
 .ubp-shot-head .ubp-code { margin-inline-start: 8px; }
 .ubp-shot-actions { display: flex; align-items: center; gap: 6px; }
+.ubp-shot-link { display: block; text-align: center; }
 .ubp-shot-image {
-    width: 100%; height: auto; display: block;
+    display: block; margin-inline: auto; max-width: 900px; max-height: 600px;
+    width: auto; height: auto; cursor: zoom-in;
     border: 1px solid var(--ubp-line); border-radius: 10px;
 }
 .ubp-shot-hint { display: block; margin-top: 6px; }

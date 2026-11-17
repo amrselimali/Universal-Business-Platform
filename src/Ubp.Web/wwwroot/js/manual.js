@@ -43,122 +43,113 @@ window.ubpManual = (function () {
         return doc.querySelector('.ubp-page') || doc.body;
     }
 
-    function wrap(context, text, maxWidth) {
-        const words = String(text || '').split(/\s+/);
-        const lines = [];
-        let line = '';
-        for (const word of words) {
-            const candidate = line ? line + ' ' + word : word;
-            if (context.measureText(candidate).width > maxWidth && line) {
-                lines.push(line);
-                line = word;
-            } else {
-                line = candidate;
-            }
-        }
-        if (line) lines.push(line);
-        return lines.length ? lines : [''];
+    function esc(value) {
+        return String(value || '').replace(/[&<>"']/g, (ch) => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        }[ch]));
     }
 
-    function marker(context, x, y, number) {
-        context.beginPath();
-        context.arc(x, y, 16, 0, Math.PI * 2);
-        context.fillStyle = 'rgba(15,118,110,0.94)';
-        context.fill();
-        context.lineWidth = 2;
-        context.strokeStyle = '#FFFFFF';
-        context.stroke();
-        context.fillStyle = '#FFFFFF';
-        context.font = 'bold 15px Cairo, Segoe UI, sans-serif';
-        context.textAlign = 'center';
-        context.textBaseline = 'middle';
-        context.fillText(String(number), x, y + 1);
-    }
+    async function compose(shot, annotations, points, title, route, options) {
+        const scale = options.scale || 0.72;
+        const totalWidth = shot.width + panelWidth;
+        const container = document.createElement('div');
+        container.dir = 'rtl';
+        container.style.cssText = 'position:fixed;left:-30000px;top:0;width:' + totalWidth +
+            'px;background:#FFFFFF;font-family:Cairo,"Segoe UI",Tahoma,sans-serif;';
 
-    function compose(shot, annotations, points, title, route) {
-        const measure = document.createElement('canvas').getContext('2d');
-        measure.font = '15px Cairo, Segoe UI, sans-serif';
-        const legend = [];
-        let legendHeight = 78;
-        annotations.forEach((annotation, index) => {
-            const lines = wrap(measure, annotation.text, panelWidth - pad * 2 - 46);
-            legend.push(lines);
-            legendHeight += lines.length * 22 + 18;
+        const header = document.createElement('div');
+        header.style.cssText = 'height:' + headerHeight + 'px;background:#0F766E;color:#FFFFFF;' +
+            'padding:12px 26px;box-sizing:border-box;display:flex;align-items:center;' +
+            'justify-content:space-between;gap:18px;';
+        header.innerHTML =
+            '<div style="font-size:22px;font-weight:700;line-height:1.3">' + esc(title) + '</div>' +
+            '<div dir="ltr" style="font-size:14px;color:#CCFBF1;white-space:nowrap">' +
+            esc(route) + '</div>';
+
+        const body = document.createElement('div');
+        body.style.cssText = 'display:flex;align-items:flex-start;';
+        const panel = document.createElement('div');
+        panel.style.cssText = 'width:' + panelWidth + 'px;flex:none;padding:16px 20px;' +
+            'box-sizing:border-box;background:#F8FAFC;border-left:1px solid #E2E8F0;direction:rtl;';
+        panel.innerHTML =
+            '<div style="font-size:17px;font-weight:700;color:#0F766E">الشرح المكتوب على الصورة</div>' +
+            '<div style="font-size:12px;color:#64748B;margin:4px 0 12px">كل رقم يشير إلى الجزء الموضح</div>' +
+            annotations.map((annotation, index) =>
+                '<div data-note="' + index + '" style="display:flex;gap:8px;align-items:flex-start;' +
+                'padding:5px 0;font-size:14px;line-height:1.65;color:#0F172A">' +
+                '<span style="flex:none;width:26px;height:26px;border-radius:50%;background:#0F766E;' +
+                'color:#FFFFFF;font-weight:700;font-size:13px;display:flex;align-items:center;' +
+                'justify-content:center">' + (index + 1) + '</span><span>' +
+                esc(annotation.text) + '</span></div>').join('');
+
+        const shotWrap = document.createElement('div');
+        shotWrap.style.cssText = 'position:relative;flex:none;width:' + shot.width +
+            'px;background:#FFFFFF;';
+        const image = document.createElement('img');
+        image.src = shot.toDataURL('image/png');
+        image.width = shot.width;
+        image.height = shot.height;
+        image.style.cssText = 'display:block;width:' + shot.width + 'px;height:' + shot.height + 'px;';
+        shotWrap.appendChild(image);
+
+        points.forEach((point, index) => {
+            if (!point) return;
+            const px = Math.max(18, Math.min(shot.width - 18, point.x));
+            const py = Math.max(18, Math.min(shot.height - 18, point.y));
+            const badge = document.createElement('span');
+            badge.textContent = String(index + 1);
+            badge.style.cssText = 'position:absolute;left:' + (px - 16) + 'px;top:' + (py - 16) +
+                'px;width:32px;height:32px;border-radius:50%;background:rgba(15,118,110,0.94);' +
+                'color:#FFFFFF;font-weight:700;font-size:15px;display:flex;align-items:center;' +
+                'justify-content:center;border:2px solid #FFFFFF;box-sizing:border-box;z-index:2;';
+            shotWrap.appendChild(badge);
         });
 
-        const canvas = document.createElement('canvas');
-        canvas.width = shot.width + panelWidth;
-        canvas.height = Math.max(shot.height + headerHeight + pad, headerHeight + legendHeight + pad);
-        const context = canvas.getContext('2d');
-        context.fillStyle = '#FFFFFF';
-        context.fillRect(0, 0, canvas.width, canvas.height);
-        context.drawImage(shot, 0, headerHeight);
-        context.strokeStyle = '#E2E8F0';
-        context.strokeRect(0.5, headerHeight + 0.5, shot.width - 1, shot.height - 1);
+        body.appendChild(panel);
+        body.appendChild(shotWrap);
+        container.appendChild(header);
+        container.appendChild(body);
+        document.body.appendChild(container);
 
-        context.fillStyle = '#0F766E';
-        context.fillRect(0, 0, canvas.width, headerHeight);
-        context.direction = 'rtl';
-        context.textAlign = 'right';
-        context.textBaseline = 'middle';
-        context.fillStyle = '#FFFFFF';
-        context.font = 'bold 22px Cairo, Segoe UI, sans-serif';
-        context.fillText(title || '', canvas.width - pad, 30);
-        context.fillStyle = '#CCFBF1';
-        context.font = '14px Cairo, Segoe UI, sans-serif';
-        context.direction = 'ltr';
-        context.fillText(route || '', canvas.width - pad, 58);
-        context.direction = 'rtl';
-
-        context.fillStyle = '#F8FAFC';
-        context.fillRect(shot.width, headerHeight, panelWidth, canvas.height - headerHeight);
-        context.beginPath();
-        context.moveTo(shot.width + 0.5, headerHeight);
-        context.lineTo(shot.width + 0.5, canvas.height);
-        context.strokeStyle = '#E2E8F0';
-        context.stroke();
-
-        context.textAlign = 'right';
-        context.textBaseline = 'middle';
-        context.direction = 'rtl';
-        context.fillStyle = '#0F766E';
-        context.font = 'bold 17px Cairo, Segoe UI, sans-serif';
-        context.fillText('الشرح المكتوب على الصورة',
-            shot.width + panelWidth - pad, headerHeight + 28);
-        context.fillStyle = '#64748B';
-        context.font = '12px Cairo, Segoe UI, sans-serif';
-        context.fillText('كل رقم يشير إلى الجزء الموضح',
-            shot.width + panelWidth - pad, headerHeight + 50);
-
-        let y = headerHeight + 72;
-        legend.forEach((lines, index) => {
-            const badgeX = shot.width + panelWidth - pad - 15;
-            marker(context, badgeX, y + 9, index + 1);
-            context.textAlign = 'right';
-            context.textBaseline = 'middle';
-            context.fillStyle = '#0F172A';
-            context.font = '15px Cairo, Segoe UI, sans-serif';
-            lines.forEach((line, lineIndex) => {
-                context.fillText(line, shot.width + panelWidth - pad - 38, y + 10 + lineIndex * 22);
+        try {
+            await image.decode().catch(() => { });
+            await sleep(30);
+            const base = container.getBoundingClientRect();
+            const shotRect = shotWrap.getBoundingClientRect();
+            const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            svg.setAttribute('width', String(totalWidth));
+            svg.setAttribute('height', String(container.offsetHeight));
+            svg.style.cssText = 'position:absolute;left:0;top:0;pointer-events:none;z-index:1;';
+            points.forEach((point, index) => {
+                if (!point) return;
+                const note = panel.querySelector('[data-note="' + index + '"]');
+                if (!note) return;
+                const noteRect = note.getBoundingClientRect();
+                const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                line.setAttribute('x1', String(shotRect.left - base.left + point.x));
+                line.setAttribute('y1', String(shotRect.top - base.top + point.y));
+                line.setAttribute('x2', String(noteRect.left - base.left + 13));
+                line.setAttribute('y2', String(noteRect.top - base.top + 13));
+                line.setAttribute('stroke', 'rgba(15,118,110,0.45)');
+                line.setAttribute('stroke-width', '1.5');
+                svg.appendChild(line);
             });
+            container.insertBefore(svg, container.firstChild);
 
-            const point = points[index];
-            if (point) {
-                const px = Math.max(20, Math.min(shot.width - 20, point.x));
-                const py = Math.max(headerHeight + 20, Math.min(headerHeight + shot.height - 20,
-                    point.y + headerHeight));
-                context.strokeStyle = 'rgba(15,118,110,0.55)';
-                context.lineWidth = 1.5;
-                context.beginPath();
-                context.moveTo(px + 18, py);
-                context.lineTo(shot.width + panelWidth - pad - 32, y + 9);
-                context.stroke();
-                marker(context, px, py, index + 1);
-            }
-            y += lines.length * 22 + 18;
-        });
-
-        return canvas.toDataURL('image/png');
+            const canvas = await html2canvas(container, {
+                backgroundColor: '#FFFFFF',
+                scale: scale,
+                logging: false,
+                useCORS: true,
+                width: totalWidth,
+                height: container.offsetHeight,
+                windowWidth: totalWidth,
+                windowHeight: container.offsetHeight
+            });
+            return canvas.toDataURL('image/png');
+        } finally {
+            container.remove();
+        }
     }
 
     async function capture(route, options) {
@@ -206,7 +197,8 @@ window.ubpManual = (function () {
                     y: rect.top - targetRect.top + rect.height / 2
                 };
             });
-            return compose(shot, annotations, points, options.title || '', options.route || route);
+            return compose(shot, annotations, points, options.title || '', options.route || route,
+                options);
         } finally {
             iframe.remove();
         }

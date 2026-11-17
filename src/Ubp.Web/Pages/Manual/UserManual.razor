@@ -137,7 +137,9 @@ else
 
                             @if (_shotUrls.TryGetValue(screen.Code, out var url))
                             {
-                                <img class="ubp-shot-image" src="@url" alt="@screen.Title" loading="lazy" />
+                                <a class="ubp-shot-link" href="@url" target="_blank" rel="noopener">
+                                    <img class="ubp-shot-image" src="@url" alt="@screen.Title" loading="lazy" />
+                                </a>
                             }
                             else
                             {
