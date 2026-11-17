@@ -202,7 +202,7 @@ window.ubpManual = (function () {
         document.body.appendChild(iframe);
         try {
             await new Promise((resolve, reject) => {
-                const timer = setTimeout(() => reject(new Error('iframe_timeout')), 20000);
+                const timer = setTimeout(() => reject(new Error('iframe_timeout')), 30000);
                 iframe.onload = () => {
                     clearTimeout(timer);
                     resolve();
@@ -233,19 +233,54 @@ window.ubpManual = (function () {
         }
     }
 
-    async function captureElement(element, background, windowWidth, windowHeight) {
-        const width = Math.min(element.scrollWidth, 1600);
-        const height = Math.min(element.scrollHeight, 3600);
-        if (window.modernScreenshot && typeof window.modernScreenshot.domToCanvas === 'function') {
-            return await window.modernScreenshot.domToCanvas(element, {
-                width: width,
-                height: height,
-                scale: 1,
-                backgroundColor: background,
-                font: false,
-                timeout: 20000
-            });
+    function isBlankCanvas(canvas) {
+        try {
+            const probe = document.createElement('canvas');
+            probe.width = 20; probe.height = 20;
+            const ctx = probe.getContext('2d');
+            ctx.drawImage(canvas, 0, 0, 20, 20);
+            const data = ctx.getImageData(0, 0, 20, 20).data;
+            const colors = new Set();
+            for (let i = 0; i < data.length; i += 4)
+                colors.add(data[i] + ',' + data[i + 1] + ',' + data[i + 2]);
+            return colors.size <= 1;
+        } catch (error) {
+            return false;
         }
+    }
+
+    async function captureElement(element, background, windowWidth, windowHeight) {
+        const width = Math.min(element.scrollWidth, 1800);
+        const height = Math.min(element.scrollHeight, 2400);
+        if (window.modernScreenshot && typeof window.modernScreenshot.domToCanvas === 'function') {
+            try {
+                const canvas = await window.modernScreenshot.domToCanvas(element, {
+                    width: width,
+                    height: height,
+                    scale: 1,
+                    backgroundColor: background,
+                    font: false,
+                    timeout: 20000
+                });
+                if (canvas && canvas.width > 0 && canvas.height > 0 && !isBlankCanvas(canvas))
+                    return canvas;
+            } catch (error) {
+                console.warn('modern-screenshot failed; retrying without size limits', error);
+            }
+            try {
+                const canvas = await window.modernScreenshot.domToCanvas(element, {
+                    scale: 1,
+                    backgroundColor: background,
+                    font: false,
+                    timeout: 30000
+                });
+                if (canvas && canvas.width > 0 && canvas.height > 0 && !isBlankCanvas(canvas))
+                    return canvas;
+            } catch (error) {
+                console.warn('modern-screenshot retry failed; falling back to html2canvas', error);
+            }
+        }
+        if (typeof html2canvas !== 'function') throw new Error('screenshot_unavailable');
         return await html2canvas(element, {
             backgroundColor: background,
             scale: 1,
@@ -263,16 +298,29 @@ window.ubpManual = (function () {
     async function waitForDialog(doc) {
         const deadline = Date.now() + 12000;
         while (Date.now() < deadline) {
-            const dialog = doc.querySelector('.mud-dialog, .mud-dialog-content, [role="dialog"]');
-            if (dialog && visible(dialog) && norm(dialog.innerText).length > 0)
-                return dialog;
+            const dialogs = doc.querySelectorAll(
+                '.mud-dialog, .mud-dialog-content, [role="dialog"]');
+            for (let index = dialogs.length - 1; index >= 0; index--) {
+                const dialog = dialogs[index];
+                if (visible(dialog) && norm(dialog.innerText).length > 0) return dialog;
+            }
             await sleep(250);
         }
         return null;
     }
 
+    async function waitForTrigger(doc, label, timeout) {
+        const deadline = Date.now() + (timeout || 6000);
+        while (Date.now() < deadline) {
+            const trigger = findTarget(doc, label);
+            if (trigger && visible(trigger)) return trigger;
+            await sleep(300);
+        }
+        return null;
+    }
+
     async function openDialog(doc, triggerLabel) {
-        let trigger = findTarget(doc, triggerLabel);
+        let trigger = await waitForTrigger(doc, triggerLabel, 5000);
         if (trigger && visible(trigger)) {
             trigger.click();
             return true;
@@ -281,8 +329,8 @@ window.ubpManual = (function () {
         for (const activator of activators) {
             if (!visible(activator)) continue;
             activator.click();
-            await sleep(280);
-            trigger = findTarget(doc, triggerLabel);
+            await sleep(350);
+            trigger = await waitForTrigger(doc, triggerLabel, 1500);
             if (trigger && visible(trigger)) {
                 trigger.click();
                 return true;
@@ -291,8 +339,11 @@ window.ubpManual = (function () {
         return false;
     }
 
-    async function captureDialog(route, triggerLabel, options) {
+    async function captureDialog(route, triggerLabels, options) {
         options = options || {};
+        const labels = (Array.isArray(triggerLabels) ? triggerLabels : [triggerLabels])
+            .filter((label) => label && String(label).trim().length > 0);
+        if (labels.length === 0) throw new Error('trigger_not_found');
         const width = 1440;
         const height = 1100;
         const iframe = document.createElement('iframe');
@@ -302,7 +353,7 @@ window.ubpManual = (function () {
         document.body.appendChild(iframe);
         try {
             await new Promise((resolve, reject) => {
-                const timer = setTimeout(() => reject(new Error('iframe_timeout')), 20000);
+                const timer = setTimeout(() => reject(new Error('iframe_timeout')), 30000);
                 iframe.onload = () => {
                     clearTimeout(timer);
                     resolve();
@@ -312,7 +363,14 @@ window.ubpManual = (function () {
             const doc = iframe.contentDocument;
             await waitForPage(doc);
             await sleep(400);
-            if (!await openDialog(doc, triggerLabel)) throw new Error('trigger_not_found');
+            for (let index = 0; index < labels.length; index++) {
+                if (!await openDialog(doc, labels[index]))
+                    throw new Error('trigger_not_found:' + labels[index]);
+                if (index < labels.length - 1) {
+                    if (!await waitForDialog(doc)) throw new Error('dialog_not_found');
+                    await sleep(400);
+                }
+            }
             const dialogEl = await waitForDialog(doc);
             if (!dialogEl) throw new Error('dialog_not_found');
             await sleep(600);
@@ -335,8 +393,26 @@ window.ubpManual = (function () {
         }
     }
 
+    async function shrinkDataUrl(dataUrl, ratio) {
+        const image = new Image();
+        image.src = dataUrl;
+        await image.decode();
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(image.naturalWidth * ratio));
+        canvas.height = Math.max(1, Math.round(image.naturalHeight * ratio));
+        const context = canvas.getContext('2d');
+        context.fillStyle = '#FFFFFF';
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        return canvas.toDataURL('image/png');
+    }
+
     async function upload(code, dataUrl) {
-        const blob = await (await fetch(dataUrl)).blob();
+        let blob = await (await fetch(dataUrl)).blob();
+        if (blob.size > 11 * 1024 * 1024) {
+            dataUrl = await shrinkDataUrl(dataUrl, 0.6);
+            blob = await (await fetch(dataUrl)).blob();
+        }
         if (blob.size > 11 * 1024 * 1024) throw new Error('image_too_large');
         const response = await fetch('/api/v1/manual/screenshots/' + encodeURIComponent(code), {
             method: 'POST',

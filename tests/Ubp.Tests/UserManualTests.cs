@@ -95,6 +95,13 @@ public sealed class UserManualTests
         var itemsScreen = result.Screens.Single(screen => screen.Code == ScreenCodes.Items);
         Assert.Contains(itemsScreen.Buttons, button =>
             button.DialogNames.Contains("ItemDialog", StringComparer.OrdinalIgnoreCase));
+        var shiftsScreen = result.Screens.Single(screen => screen.Code == ScreenCodes.TreasuryShifts);
+        Assert.Contains(shiftsScreen.Buttons, button =>
+            button.DialogNames.Contains("OpenShiftDialog", StringComparer.OrdinalIgnoreCase) ||
+            button.DialogNames.Contains("CloseShiftDialog", StringComparer.OrdinalIgnoreCase));
+        var closeShiftDialog = result.Dialogs.Single(dialog => dialog.Name == "CloseShiftDialog");
+        Assert.Contains(closeShiftDialog.Buttons, button =>
+            button.DialogNames.Contains("ShiftEditDialog", StringComparer.OrdinalIgnoreCase));
 
         var itemsStart = result.Markdown.IndexOf("#### `/inventory/items`", StringComparison.Ordinal);
         var itemsEnd = result.Markdown.IndexOf("#### `/inventory/documents`", itemsStart,

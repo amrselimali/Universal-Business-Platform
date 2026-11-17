@@ -170,7 +170,7 @@ else
                                     @foreach (var dialog in relatedDialogs)
                                     {
                                         var dialogCode = DialogCode(screen, dialog);
-                                        var trigger = TriggerFor(screen, dialog);
+                                        var triggerPath = TriggerPathFor(screen, dialog);
                                         var hasDialogShot = _shotUrls.TryGetValue(dialogCode, out var dialogUrl);
                                         <div class="ubp-dialog-card">
                                             <div class="ubp-dialog-head">
@@ -183,7 +183,7 @@ else
                                                     <MudButton Size="Size.Small" Variant="Variant.Outlined"
                                                                Color="Color.Primary"
                                                                StartIcon="@Icons.Material.Filled.PhotoCamera"
-                                                               Disabled="_capturing || string.IsNullOrWhiteSpace(trigger)"
+                                                               Disabled="_capturing || triggerPath.Count == 0"
                                                                OnClick="() => CaptureDialogAsync(screen, dialog)">
                                                         @T.T("user_manual.capture_dialog")
                                                     </MudButton>
@@ -196,6 +196,12 @@ else
                                                 </div>
                                             </div>
                                             <MudText Typo="Typo.caption" Class="ubp-muted">@dialog.Purpose</MudText>
+                                            @if (triggerPath.Count > 1)
+                                            {
+                                                <MudText Typo="Typo.caption" Class="ubp-muted">
+                                                    @T.T("user_manual.dialog_path"): @string.Join(" ← ", triggerPath)
+                                                </MudText>
+                                            }
                                             <div class="ubp-dialog-shot">
                                                 @if (hasDialogShot)
                                                 {

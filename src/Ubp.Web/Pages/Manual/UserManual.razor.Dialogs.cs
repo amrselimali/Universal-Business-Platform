@@ -7,24 +7,52 @@ namespace Ubp.Web.Pages.Manual;
 public partial class UserManual
 {
     private IReadOnlyList<ManualDialogDoc> DialogsFor(ManualScreenDoc screen) =>
-        _dialogs.Where(dialog => screen.Buttons.Any(button =>
-                button.DialogNames.Contains(dialog.Name, StringComparer.OrdinalIgnoreCase) ||
-                button.Appears.Contains($"**{dialog.Name}**", StringComparison.Ordinal) ||
-                button.Appears.Contains($"**{DialogTitle(dialog)}**", StringComparison.Ordinal)))
+        _dialogs.Where(dialog => TriggerPathFor(screen, dialog).Count > 0)
             .Take(8)
             .ToList();
 
-    private static string? TriggerFor(ManualScreenDoc screen, ManualDialogDoc dialog)
-    {
-        var triggers = screen.Buttons.Where(button =>
+    private static List<ManualButtonDoc> DirectTriggers(ManualScreenDoc screen,
+        ManualDialogDoc dialog) => screen.Buttons.Where(button =>
             button.DialogNames.Contains(dialog.Name, StringComparer.OrdinalIgnoreCase) ||
             button.Appears.Contains($"**{dialog.Name}**", StringComparison.Ordinal) ||
             button.Appears.Contains($"**{DialogTitle(dialog)}**", StringComparison.Ordinal)).ToList();
-        var preferred = triggers.FirstOrDefault(button =>
-            button.Label.Contains("إضافة") || button.Label.Contains("جديد") ||
-            button.Label.Contains("Add", StringComparison.OrdinalIgnoreCase) ||
-            button.Label.Contains("Create", StringComparison.OrdinalIgnoreCase));
-        return (preferred ?? triggers.FirstOrDefault())?.Label;
+
+    private IReadOnlyList<string> TriggerPathFor(ManualScreenDoc screen, ManualDialogDoc dialog) =>
+        TriggerPathFor(screen, dialog, new HashSet<string>(StringComparer.OrdinalIgnoreCase)) ?? [];
+
+    private List<string>? TriggerPathFor(ManualScreenDoc screen, ManualDialogDoc dialog,
+        HashSet<string> path)
+    {
+        if (!path.Add(dialog.Name)) return null;
+        try
+        {
+            var direct = DirectTriggers(screen, dialog);
+            if (direct.Count > 0)
+            {
+                var preferred = direct.FirstOrDefault(button =>
+                    button.Label.Contains("إضافة") || button.Label.Contains("جديد") ||
+                    button.Label.Contains("Add", StringComparison.OrdinalIgnoreCase) ||
+                    button.Label.Contains("Create", StringComparison.OrdinalIgnoreCase))
+                    ?? direct[0];
+                return [preferred.Label];
+            }
+
+            foreach (var parent in _dialogs)
+            {
+                var childButton = parent.Buttons.FirstOrDefault(button =>
+                    button.DialogNames.Contains(dialog.Name, StringComparer.OrdinalIgnoreCase));
+                if (childButton is null) continue;
+                var parentPath = TriggerPathFor(screen, parent, path);
+                if (parentPath is null) continue;
+                parentPath.Add(childButton.Label);
+                return parentPath;
+            }
+            return null;
+        }
+        finally
+        {
+            path.Remove(dialog.Name);
+        }
     }
 
     private static string DialogTitle(ManualDialogDoc dialog) =>
@@ -43,8 +71,8 @@ public partial class UserManual
     private async Task CaptureDialogAsync(ManualScreenDoc screen, ManualDialogDoc dialog)
     {
         if (_capturing) return;
-        var trigger = TriggerFor(screen, dialog);
-        if (string.IsNullOrWhiteSpace(trigger))
+        var triggerPath = TriggerPathFor(screen, dialog);
+        if (triggerPath.Count == 0)
         {
             Snackbar.Add(T.T("user_manual.dialog_trigger_missing"), Severity.Warning);
             return;
@@ -63,7 +91,7 @@ public partial class UserManual
                     ManualDialogAnnotations.Build(dialog))
             };
             var result = await JS.InvokeAsync<ManualShotSaveResult>(
-                "ubpManual.captureDialogAndSave", code, screen.Route, trigger, payload);
+                "ubpManual.captureDialogAndSave", code, screen.Route, triggerPath, payload);
             if (result is { Ok: true } && !string.IsNullOrWhiteSpace(result.Url))
             {
                 _shotUrls[code] = result.Url!;
@@ -71,11 +99,15 @@ public partial class UserManual
             }
             else
             {
-                Logger.LogWarning("Dialog screenshot failed for {Code}: {Error}", code, result?.Error);
-                Snackbar.Add(T.T(result?.Error == "trigger_not_found"
-                        ? "user_manual.dialog_trigger_missing"
-                        : "user_manual.capture_failed"),
-                    result?.Error == "trigger_not_found" ? Severity.Warning : Severity.Error);
+                var error = result?.Error ?? "";
+                Logger.LogWarning("Dialog screenshot failed for {Code}: {Error}", code, error);
+                var key = error.StartsWith("trigger_not_found", StringComparison.Ordinal)
+                    ? "user_manual.dialog_trigger_missing"
+                    : error == "dialog_not_found"
+                        ? "user_manual.dialog_not_found"
+                        : "user_manual.capture_failed";
+                Snackbar.Add(T.T(key), key == "user_manual.capture_failed"
+                    ? Severity.Error : Severity.Warning);
             }
         }
         catch (Exception ex)

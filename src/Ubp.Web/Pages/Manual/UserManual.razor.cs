@@ -178,9 +178,19 @@ public partial class UserManual
             }
             else
             {
+                var error = result?.Error ?? "";
                 Logger.LogWarning("Manual screenshot failed for {Code}: {Error}",
-                    screen.Code, result?.Error);
-                Snackbar.Add(T.T("user_manual.capture_failed"), Severity.Error);
+                    screen.Code, error);
+                var key = error switch
+                {
+                    "iframe_timeout" => "user_manual.capture_timeout",
+                    "image_too_large" => "user_manual.capture_too_large",
+                    "screenshot_unavailable" => "user_manual.capture_unavailable",
+                    _ when error.StartsWith("save_failed", StringComparison.Ordinal)
+                        => "user_manual.capture_save_failed",
+                    _ => "user_manual.capture_failed"
+                };
+                Snackbar.Add(T.T(key), Severity.Error);
             }
         }
         catch (Exception ex)
