@@ -118,7 +118,6 @@ else
                             <div class="ubp-shot-head">
                                 <div>
                                     <strong>@screen.Title</strong>
-                                    <span class="ubp-code">@screen.Route</span>
                                 </div>
                                 <div class="ubp-shot-actions">
                                     <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
@@ -231,10 +230,10 @@ else
                                                             {
                                                                 <tr>
                                                                     <td>@button.Label</td>
-                                                                    <td><code>@button.Permission</code></td>
-                                                                    <td>@button.Appears</td>
-                                                                    <td>@button.Limits</td>
-                                                                    <td>@button.Audit</td>
+                                                                    <td>@ManualText.Permission(button.Permission)</td>
+                                                                    <td>@ManualText.Simplify(button.Appears)</td>
+                                                                    <td>@ManualText.Simplify(button.Limits)</td>
+                                                                    <td>@ManualText.Audit(button.Audit)</td>
                                                                 </tr>
                                                             }
                                                         </tbody>

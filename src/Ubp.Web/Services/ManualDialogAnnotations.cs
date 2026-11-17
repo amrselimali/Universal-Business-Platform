@@ -26,12 +26,12 @@ public static class ManualDialogAnnotations
             annotations.Add(new(button.Label,
                 $"زر «{button.Label}»: {Trim(button.Appears, 150)} " +
                 $"{Trim(button.Behavior, 120)} القيود: {Trim(button.Limits, 120)} " +
-                $"السجل: {Trim(button.Audit, 60)}."));
+                $"السجل: {ManualText.Audit(button.Audit)}."));
 
         return annotations.Take(12)
             .Select(annotation => annotation with
             {
-                Text = ManualScreenshotAnnotations.Clean(annotation.Text)
+                Text = ManualText.Simplify(annotation.Text)
             })
             .ToList();
     }

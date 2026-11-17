@@ -61,10 +61,10 @@ public sealed partial class UserManualGenerator
         if (buttons.Count == 0)
             notes.Add("شاشة عرض فقط: لا توجد أزرار تنفيذية ظاهرة.");
         else
-            notes.Add("كل زر يظهر فقط عند امتلاك صلاحيته (Default Deny).");
+            notes.Add("كل زر يظهر فقط عند امتلاك صلاحيته (المنع افتراضيًا).");
         var withoutPermission = buttons.Count(b => b.Permission == "—");
         if (withoutPermission > 0)
-            notes.Add($"يوجد {withoutPermission} زر/أزرار بلا كود صلاحية صريح في الواجهة؛ تحقق من `AppRegistry`.");
+            notes.Add($"يوجد {withoutPermission} زر/أزرار بلا صلاحية محددة في الواجهة؛ راجع تعريفات النظام.");
         return notes;
     }
 
@@ -73,7 +73,7 @@ public sealed partial class UserManualGenerator
     {
         var limits = new List<string>
         {
-            $"صلاحية العرض: `{screen.PermissionKey(ActionCodes.View)}` — بدونها لا تظهر الشاشة.",
+            "صلاحية العرض مطلوبة: بدونها لا تظهر الشاشة.",
             "البيانات مقصوصة على نطاق الصلاحية (`0` سجلاتي، `1` فروعي، `2` الكل) والفرع النشط."
         };
 
@@ -81,7 +81,7 @@ public sealed partial class UserManualGenerator
         if (actions.Contains(ActionCodes.Post) || actions.Contains(ActionCodes.Reverse))
             limits.Add("بعد الترحيل لا يُعدَّل المستند؛ التصحيح بعكس القيد/المستند فقط.");
         if (actions.Contains(ActionCodes.Delete))
-            limits.Add("الحذف قد يتحول تلقائيًا إلى تعطيل (`UPDATE`) إذا كان السجل مستخدمًا وله تاريخ.");
+            limits.Add("الحذف قد يتحول تلقائيًا إلى تعطيل إذا كان السجل مستخدمًا وله تاريخ.");
         if (actions.Contains(ActionCodes.ClosePeriod) || actions.Contains(ActionCodes.ReopenPeriod))
             limits.Add("الفترة المغلقة تمنع الترحيل/العكس داخلها.");
         if (text.Contains("ShowMessageBoxAsync", StringComparison.Ordinal))
@@ -93,8 +93,8 @@ public sealed partial class UserManualGenerator
         if (disabled > 0)
             limits.Add($"يوجد {disabled} زر/أزرار تظهر معطّلة حسب حالة السجل أو الصلاحية.");
 
-        var permissions = string.Join(", ", screen.Actions.Select(a => $"`{screen.PermissionKey(a.Code)}`"));
-        if (permissions.Length > 0) limits.Add($"الصلاحيات المتاحة على الشاشة: {permissions}.");
+        if (screen.Actions.Count > 0)
+            limits.Add($"عدد الصلاحيات المتاحة على الشاشة: {screen.Actions.Count}.");
         return limits;
     }
 

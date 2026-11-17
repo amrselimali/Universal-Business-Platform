@@ -57,6 +57,7 @@ public partial class UserManual
             var payload = new
             {
                 title = $"{DialogTitle(dialog)} — {screen.Title}",
+                subtitle = $"نافذة تفتح من شاشة {screen.Title}",
                 route = screen.Route,
                 annotations = ManualScreenshotAnnotations.ToJsPayload(
                     ManualDialogAnnotations.Build(dialog))

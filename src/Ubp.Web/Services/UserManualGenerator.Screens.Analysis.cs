@@ -11,8 +11,8 @@ public sealed partial class UserManualGenerator
     {
         if (!string.IsNullOrWhiteSpace(href))
             return href.StartsWith("http", StringComparison.OrdinalIgnoreCase)
-                ? $"يفتح/ينزّل الرابط `{href}`."
-                : $"ينتقل إلى `{href}`.";
+                ? "يفتح رابطًا خارجيًا."
+                : "ينتقل إلى شاشة أخرى.";
 
         var handler = onClick.ToLowerInvariant();
         if (string.IsNullOrWhiteSpace(onClick)) return "—";
@@ -28,20 +28,9 @@ public sealed partial class UserManualGenerator
             return $"يفتح حوار {dialogs}.";
         }
         if (effects.Confirm) return "نافذة تأكيد (نعم/إلغاء) ثم تنفيذ العملية.";
-        if (effects.Navigate.Length > 0) return $"ينتقل إلى `{effects.Navigate}`.";
+        if (effects.Navigate.Length > 0) return "ينتقل إلى شاشة أخرى.";
         if (effects.Services.Count > 0)
-        {
-            var mutation = effects.Services.FirstOrDefault(service =>
-                service.Contains("Create", StringComparison.OrdinalIgnoreCase) ||
-                service.Contains("Update", StringComparison.OrdinalIgnoreCase) ||
-                service.Contains("Delete", StringComparison.OrdinalIgnoreCase) ||
-                service.Contains("Save", StringComparison.OrdinalIgnoreCase) ||
-                service.Contains("Post", StringComparison.OrdinalIgnoreCase) ||
-                service.Contains("Reverse", StringComparison.OrdinalIgnoreCase) ||
-                service.Contains("Set", StringComparison.OrdinalIgnoreCase) ||
-                service.Contains("Confirm", StringComparison.OrdinalIgnoreCase)) ?? effects.Services[0];
-            return $"لا يفتح حوارًا؛ ينفّذ `{mutation}` ويعرض رسالة نجاح/خطأ.";
-        }
+            return "ينفّذ الإجراء مباشرة داخل الشاشة ويعرض رسالة نجاح أو خطأ.";
         if (handler == "cancel" || handler.Contains("mudialog.cancel") ||
             handler == "close" || handler.Contains("mudialog.close"))
             return "يغلق الحوار.";

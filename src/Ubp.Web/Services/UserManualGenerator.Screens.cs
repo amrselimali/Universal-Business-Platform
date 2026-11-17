@@ -225,7 +225,10 @@ public sealed partial class UserManualGenerator
 
     private static string BehaviorFor(string actionCode, string onClick, string href, string label)
     {
-        if (!string.IsNullOrWhiteSpace(href)) return $"ينتقل إلى `{href}`.";
+        if (!string.IsNullOrWhiteSpace(href))
+            return href.StartsWith("http", StringComparison.OrdinalIgnoreCase)
+                ? "ينتقل إلى رابط خارجي."
+                : "ينتقل إلى شاشة أخرى.";
 
         var handler = onClick.ToLowerInvariant();
         if (handler == "cancel" || handler.Contains("mudialog.cancel"))
@@ -255,7 +258,10 @@ public sealed partial class UserManualGenerator
     }
     private static string DestinationFor(string onClick, string href)
     {
-        if (!string.IsNullOrWhiteSpace(href)) return href;
+        if (!string.IsNullOrWhiteSpace(href))
+            return href.StartsWith("http", StringComparison.OrdinalIgnoreCase)
+                ? "رابط خارجي"
+                : "شاشة أخرى";
         var handler = onClick.ToLowerInvariant();
         if (handler.Contains("reload") || handler.Contains("refresh") || handler.Contains("load") ||
             handler.Contains("search")) return "يبقى في الصفحة";

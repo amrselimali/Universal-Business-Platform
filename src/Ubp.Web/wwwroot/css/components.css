@@ -209,7 +209,7 @@
 .ubp-shot-actions { display: flex; align-items: center; gap: 6px; }
 .ubp-shot-link { display: block; text-align: center; }
 .ubp-shot-image {
-    display: block; margin-inline: auto; max-width: 900px; max-height: 600px;
+    display: block; margin-inline: auto; max-width: 1100px; max-height: 800px;
     width: auto; height: auto; cursor: zoom-in;
     border: 1px solid var(--ubp-line); border-radius: 10px;
 }
@@ -236,7 +236,7 @@
 }
 .ubp-dialog-head strong { margin-inline-end: 8px; }
 .ubp-dialog-shot { margin-top: 8px; }
-.ubp-dialog-shot .ubp-shot-image { max-width: 820px; max-height: 560px; }
+.ubp-dialog-shot .ubp-shot-image { max-width: 1000px; max-height: 700px; }
 .ubp-dialog-fields { margin: 6px 0; font-size: .85rem; }
 @media print {
     .ubp-shot-actions, .ubp-shot-toolbar { display: none !important; }

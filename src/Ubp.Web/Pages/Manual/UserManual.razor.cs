@@ -165,6 +165,7 @@ public partial class UserManual
             var payload = new
             {
                 title = screen.Title,
+                subtitle = screen.GroupTitle,
                 route = screen.Route,
                 annotations = ManualScreenshotAnnotations.ToJsPayload(annotations)
             };

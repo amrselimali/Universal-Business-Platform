@@ -27,7 +27,7 @@ public static class ManualScreenshotAnnotations
         foreach (var button in screen.Buttons.Where(b => !string.IsNullOrWhiteSpace(b.Label)).Take(6))
             annotations.Add(new(button.Label,
                 $"زر «{button.Label}»: عند الضغط {Trim(button.Appears, 140)} " +
-                $"القيود: {Trim(button.Limits, 120)} السجل: {Trim(button.Audit, 60)}."));
+                $"القيود: {Trim(button.Limits, 120)} السجل: {ManualText.Audit(button.Audit)}."));
 
         if (screen.Limits.Count > 0)
             annotations.Add(new("", $"قيود الصفحة: {Join(screen.Limits, 3)}."));
@@ -35,11 +35,10 @@ public static class ManualScreenshotAnnotations
             annotations.Add(new("", $"ملاحظات الظاهر: {Join(screen.Notes, 3)}."));
 
         return annotations.Take(12)
-            .Select(annotation => annotation with { Text = Clean(annotation.Text) })
+            .Select(annotation => annotation with { Text = ManualText.Simplify(annotation.Text) })
             .ToList();
     }
 
-    internal static string Clean(string text) => text.Replace("**", "").Replace("`", "");
 
     private static string Join(IReadOnlyList<string> values, int max)
     {

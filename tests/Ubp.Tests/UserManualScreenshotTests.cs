@@ -109,7 +109,7 @@ public sealed class UserManualScreenshotTests
         Assert.Contains("زر «إضافة»:", text);
         Assert.Contains("يفتح حوار تعديل / إضافة", text);
         Assert.Contains("القيود: حقول إلزامية", text);
-        Assert.Contains("السجل: INSERT", text);
+        Assert.Contains("السجل: إضافة سجل جديد", text);
         Assert.Contains("زر «حذف»", text);
         Assert.Contains("قيود الصفحة:", text);
         Assert.Contains(annotations, annotation => annotation.Target == "إضافة");
@@ -125,7 +125,7 @@ public sealed class UserManualScreenshotTests
         Assert.Contains("حقول الحوار: الكود", text);
         Assert.Contains("زر «حفظ»:", text);
         Assert.Contains("القيود: حقول إلزامية", text);
-        Assert.Contains("السجل: UPDATE", text);
+        Assert.Contains("السجل: تعديل السجل", text);
     }
 
     [Fact]
@@ -169,8 +169,8 @@ public sealed class UserManualScreenshotTests
         Assert.EndsWith("</svg>", svg);
         Assert.Contains("الشرح المكتوب على الصورة", svg);
         Assert.Contains("الأصناف", svg);
-        Assert.Contains("/inventory/items", svg);
-        Assert.Contains("ITEMS", svg);
+        Assert.Contains("المخزون", svg);
+        Assert.Contains("الأصناف", svg);
         Assert.Contains("<circle", svg);
         Assert.Contains("direction=\"rtl\"", svg);
         Assert.DoesNotContain("<script", svg);

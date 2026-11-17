@@ -99,57 +99,55 @@ window.ubpManual = (function () {
     }
 
     async function compose(shot, annotations, points, title, route, options) {
-        const scale = options.scale || 0.72;
-        const totalWidth = shot.width + panelWidth;
+        const scale = options.scale || 1;
+        const totalWidth = Math.max(shot.width, 1000);
+        const margin = 24;
+        const headerHeight = 86;
+        const imageX = Math.round((totalWidth - shot.width) / 2);
+        const legendWidth = totalWidth - margin * 2;
         const measure = document.createElement('canvas').getContext('2d');
-        measure.font = '14px Cairo, "Segoe UI", Tahoma, sans-serif';
+        measure.font = '15px Cairo, "Segoe UI", Tahoma, sans-serif';
         const legend = annotations.map((annotation) =>
-            wrapLines(measure, annotation.text, panelWidth - 76));
-        let legendHeight = 78;
-        legend.forEach((lines) => { legendHeight += 20 + lines.length * 20; });
-        const height = Math.max(shot.height + headerHeight + 26,
-            headerHeight + legendHeight + 20);
+            wrapLines(measure, annotation.text, legendWidth - 76));
+        let legendHeight = 62;
+        legend.forEach((lines) => { legendHeight += lines.length * 21 + 16; });
+        const legendY = headerHeight + shot.height + 26;
+        const height = legendY + legendHeight + 20;
 
         let svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + totalWidth +
             '" height="' + height + '" viewBox="0 0 ' + totalWidth + ' ' + height + '">';
         svg += '<rect width="' + totalWidth + '" height="' + height + '" fill="#FFFFFF"/>';
-        svg += '<image href="' + shot.toDataURL('image/png') + '" x="0" y="' + headerHeight +
-            '" width="' + shot.width + '" height="' + shot.height + '"/>';
-        svg += '<rect x="0.5" y="' + (headerHeight + 0.5) + '" width="' + (shot.width - 1) +
-            '" height="' + (shot.height - 1) + '" fill="none" stroke="#E2E8F0"/>';
         svg += '<rect width="' + totalWidth + '" height="' + headerHeight + '" fill="#0F766E"/>';
-        svg += svgText(totalWidth - 24, 32, title, 22, '#FFFFFF', 'bold', 'right');
-        svg += svgCode(totalWidth - 24, 58, route, 14, '#CCFBF1');
-        svg += '<rect x="' + shot.width + '" y="' + headerHeight + '" width="' + panelWidth +
-            '" height="' + (height - headerHeight) + '" fill="#F8FAFC"/>';
-        svg += '<line x1="' + (shot.width + 0.5) + '" y1="' + headerHeight + '" x2="' +
-            (shot.width + 0.5) + '" y2="' + height + '" stroke="#E2E8F0"/>';
-        svg += svgText(totalWidth - 22, headerHeight + 30, 'الشرح المكتوب على الصورة',
-            17, '#0F766E', 'bold', 'right');
-        svg += svgText(totalWidth - 22, headerHeight + 52, 'كل رقم يشير إلى الجزء الموضح',
-            12, '#64748B', null, 'right');
+        svg += svgText(totalWidth - margin, 34, title, 23, '#FFFFFF', 'bold', 'right');
+        svg += svgText(totalWidth - margin, 60, options.subtitle || '', 14, '#CCFBF1', null, 'right');
+        svg += '<image href="' + shot.toDataURL('image/png') + '" x="' + imageX + '" y="' +
+            headerHeight + '" width="' + shot.width + '" height="' + shot.height + '"/>';
+        svg += '<rect x="' + (imageX + 0.5) + '" y="' + (headerHeight + 0.5) + '" width="' +
+            (shot.width - 1) + '" height="' + (shot.height - 1) +
+            '" fill="none" stroke="#E2E8F0"/>';
 
-        let y = headerHeight + 80;
+        svg += '<rect x="' + margin + '" y="' + legendY + '" width="' + legendWidth +
+            '" height="' + legendHeight + '" rx="14" fill="#F8FAFC" stroke="#E2E8F0"/>';
+        const right = totalWidth - margin - 22;
+        svg += svgText(right, legendY + 30, 'الشرح المكتوب على الصورة', 18,
+            '#0F766E', 'bold', 'right');
+        svg += svgText(right, legendY + 52, 'كل رقم يشير إلى الجزء الموضح', 12,
+            '#64748B', null, 'right');
+
+        let y = legendY + 76;
         annotations.forEach((annotation, index) => {
             const lines = legend[index];
-            if (points[index]) {
-                const px = Math.max(18, Math.min(shot.width - 18, points[index].x));
-                const py = headerHeight + Math.max(18,
-                    Math.min(shot.height - 18, points[index].y));
-                svg += '<line x1="' + px + '" y1="' + py + '" x2="' + (totalWidth - 42) +
-                    '" y2="' + (y + 9) + '" stroke="rgba(15,118,110,0.45)" stroke-width="1.5"/>';
-            }
-            svg += svgMarker(totalWidth - 30, y + 9, index + 1);
+            svg += svgMarker(right - 14, y + 9, index + 1);
             lines.forEach((line, lineIndex) => {
-                svg += svgText(totalWidth - 50, y + 14 + lineIndex * 20, line, 14,
+                svg += svgText(right - 40, y + 15 + lineIndex * 21, line, 15,
                     '#0F172A', null, 'right');
             });
-            y += 20 + lines.length * 20;
+            y += lines.length * 21 + 16;
         });
 
         points.forEach((point, index) => {
             if (!point) return;
-            const px = Math.max(18, Math.min(shot.width - 18, point.x));
+            const px = imageX + Math.max(18, Math.min(shot.width - 18, point.x));
             const py = headerHeight + Math.max(18, Math.min(shot.height - 18, point.y));
             svg += svgMarker(px, py, index + 1);
         });
@@ -195,18 +193,8 @@ window.ubpManual = (function () {
             const doc = iframe.contentDocument;
             const target = await waitForPage(doc);
             await sleep(700);
-            const shot = await html2canvas(target, {
-                backgroundColor: options.background || '#F3F6F8',
-                scale: 1,
-                logging: false,
-                useCORS: true,
-                width: Math.min(target.scrollWidth, 1600),
-                height: Math.min(target.scrollHeight, 3600),
-                windowWidth: width,
-                windowHeight: height,
-                scrollX: 0,
-                scrollY: 0
-            });
+            const shot = await captureElement(target, options.background || '#F3F6F8',
+                width, height);
 
             const annotations = options.annotations || [];
             const targetRect = target.getBoundingClientRect();
@@ -215,7 +203,7 @@ window.ubpManual = (function () {
                 if (!element) return null;
                 const rect = element.getBoundingClientRect();
                 return {
-                    x: rect.left - targetRect.left + rect.width / 2,
+                    x: rect.left - targetRect.left - 14,
                     y: rect.top - targetRect.top + rect.height / 2
                 };
             });
@@ -224,6 +212,33 @@ window.ubpManual = (function () {
         } finally {
             iframe.remove();
         }
+    }
+
+    async function captureElement(element, background, windowWidth, windowHeight) {
+        const width = Math.min(element.scrollWidth, 1600);
+        const height = Math.min(element.scrollHeight, 3600);
+        if (window.modernScreenshot && typeof window.modernScreenshot.domToCanvas === 'function') {
+            return await window.modernScreenshot.domToCanvas(element, {
+                width: width,
+                height: height,
+                scale: 1,
+                backgroundColor: background,
+                font: false,
+                timeout: 20000
+            });
+        }
+        return await html2canvas(element, {
+            backgroundColor: background,
+            scale: 1,
+            logging: false,
+            useCORS: true,
+            width: width,
+            height: height,
+            windowWidth: windowWidth,
+            windowHeight: windowHeight,
+            scrollX: 0,
+            scrollY: 0
+        });
     }
 
     async function waitForDialog(doc) {
@@ -282,16 +297,7 @@ window.ubpManual = (function () {
             const dialogEl = await waitForDialog(doc);
             if (!dialogEl) throw new Error('dialog_not_found');
             await sleep(600);
-            const shot = await html2canvas(dialogEl, {
-                backgroundColor: '#FFFFFF',
-                scale: 1,
-                logging: false,
-                useCORS: true,
-                width: Math.min(dialogEl.scrollWidth, 1200),
-                height: Math.min(dialogEl.scrollHeight, 1600),
-                windowWidth: width,
-                windowHeight: height
-            });
+            const shot = await captureElement(dialogEl, '#FFFFFF', width, height);
             const annotations = options.annotations || [];
             const rect = dialogEl.getBoundingClientRect();
             const points = annotations.map((annotation) => {
@@ -299,7 +305,7 @@ window.ubpManual = (function () {
                 if (!element) return null;
                 const box = element.getBoundingClientRect();
                 return {
-                    x: box.left - rect.left + box.width / 2,
+                    x: box.left - rect.left - 14,
                     y: box.top - rect.top + box.height / 2
                 };
             });

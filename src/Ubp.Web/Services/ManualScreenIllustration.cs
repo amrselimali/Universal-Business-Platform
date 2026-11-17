@@ -37,7 +37,7 @@ public static class ManualScreenIllustration
     {
         sb.Append("<rect width=\"").Append(Width).Append("\" height=\"82\" fill=\"#0F766E\"/>");
         Txt(sb, Width - 24, 32, screen.Title, 24, "#FFFFFF", "bold", "end");
-        TxtCode(sb, Width - 24, 62, $"{screen.Code} · {screen.Route}", 14, "#CCFBF1", "end");
+        Txt(sb, Width - 24, 62, screen.GroupTitle, 14, "#CCFBF1", null, "end");
         Txt(sb, 24, 40, "مخطط توضيحي — الشرح مكتوب على الصورة", 15, "#FFFFFF", "bold", "start");
         Txt(sb, 24, 62, "التقط لقطة حقيقية من الزر أعلى البطاقة", 12, "#CCFBF1", null, "start");
     }
