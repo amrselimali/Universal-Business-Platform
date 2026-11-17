@@ -1,11 +1,6 @@
 @page "/system/user-manual"
 @attribute [Authorize]
 @inherits SecurePageBase
-@using Microsoft.Extensions.Logging
-@inject IJSRuntime JS
-@inject UserManualSource Manual
-@inject UserManualGenerator Generator
-@inject ILogger<UserManual> Logger
 <PageTitle>@T.T("screen.user_manual")</PageTitle>
 
 @if (Denied)
@@ -47,6 +42,10 @@ else
             </MudChip>
             <span>@T.T("user_manual.counts", _screenCount, _buttonCount, _tableCount)</span>
             <span>@T.T("user_manual.updated_at"): @updated.ToString("yyyy-MM-dd HH:mm")</span>
+            @if (_screens.Count > 0)
+            {
+                <span>@T.T("user_manual.shot_count", _shotUrls.Count, _screens.Count)</span>
+            }
             @if (!_schemaAvailable)
             {
                 <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined">
@@ -68,88 +67,104 @@ else
             @T.T("user_manual.missing")
         </MudAlert>
     }
-    else
+    else if (_screens.Count == 0)
     {
         <MudPaper Elevation="0" Class="ubp-card ubp-manual">
             @((MarkupString)_html)
         </MudPaper>
     }
-}
-
-@code {
-    private string _html = "";
-    private bool _missing;
-    private bool _busy;
-    private bool _generated;
-    private bool _schemaAvailable;
-    private bool _sourceAvailable;
-    private int _screenCount;
-    private int _buttonCount;
-    private int _tableCount;
-    private DateTimeOffset? _updatedAt;
-
-    protected override string ScreenCode => ScreenCodes.UserManual;
-
-    protected override async Task OnLoadAsync() => await GenerateAsync(force: false);
-
-    private async Task GenerateAsync(bool force)
+    else
     {
-        _busy = true;
-        try
-        {
-            try
-            {
-                var generation = await Generator.GenerateAsync(Actor!, force);
-                if (!string.IsNullOrWhiteSpace(generation.Markdown))
+        <MudTabs Elevation="0" Rounded="true" PanelClass="pt-3" @bind-ActivePanelIndex="_tab">
+            <MudTabPanel Text="@T.T("user_manual.gallery")" Icon="@Icons.Material.Filled.PhotoCamera">
+                <div class="ubp-shot-toolbar">
+                    <MudSelect T="string" Value="_group" ValueChanged="OnGroupChanged"
+                               Label="@T.T("user_manual.group")" Variant="Variant.Outlined"
+                               Margin="Margin.Dense">
+                        @foreach (var group in _groups)
+                        {
+                            <MudSelectItem T="string" Value="@group.Key">@group.Value</MudSelectItem>
+                        }
+                    </MudSelect>
+                    <MudTextField @bind-Value="_search" Placeholder="@T.T("common.search")"
+                                  Immediate="true" DebounceInterval="300"
+                                  OnDebounceIntervalElapsed="OnSearchChanged"
+                                  Adornment="Adornment.Start"
+                                  AdornmentIcon="@Icons.Material.Filled.Search"
+                                  Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                             Color="@(_capturing ? Color.Warning : Color.Primary)">
+                        @T.T("user_manual.shots_loaded", _shotUrls.Count, _screens.Count)
+                    </MudChip>
+                </div>
+
+                @if (_capturing)
                 {
-                    _html = MarkdownRenderer.Render(generation.Markdown);
-                    _updatedAt = generation.GeneratedAt;
-                    _screenCount = generation.ScreenCount;
-                    _buttonCount = generation.ButtonCount;
-                    _tableCount = generation.TableCount;
-                    _schemaAvailable = generation.SchemaAvailable;
-                    _sourceAvailable = generation.SourceAvailable;
-                    _generated = true;
-                    _missing = false;
-                    return;
+                    <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-3" />
+                    <MudText Typo="Typo.caption" Class="ubp-muted mb-3">@T.T("user_manual.capturing")</MudText>
                 }
-            }
-            catch (Exception ex)
-            {
-                Logger.LogWarning(ex, "User manual generation failed; falling back to the static copy.");
-            }
 
-            var content = await Manual.LoadAsync();
-            if (content.IsEmpty)
-            {
-                _missing = true;
-                _html = "";
-                _updatedAt = null;
-                return;
-            }
+                @if (FilteredScreens.Count == 0)
+                {
+                    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
+                        @T.T("user_manual.no_results")
+                    </MudAlert>
+                }
+                else
+                {
+                    @foreach (var screen in FilteredScreens)
+                    {
+                        <div class="ubp-shot-card">
+                            <div class="ubp-shot-head">
+                                <div>
+                                    <strong>@screen.Title</strong>
+                                    <span class="ubp-code">@screen.Route</span>
+                                </div>
+                                <div class="ubp-shot-actions">
+                                    <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
+                                               StartIcon="@Icons.Material.Filled.PhotoCamera"
+                                               Disabled="_capturing" OnClick="() => CaptureAsync(screen)">
+                                        @T.T("user_manual.capture")
+                                    </MudButton>
+                                    @if (_shotUrls.ContainsKey(screen.Code))
+                                    {
+                                        <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Delete"
+                                                       Color="Color.Error" Disabled="_capturing"
+                                                       OnClick="() => DeleteAsync(screen)" />
+                                    }
+                                </div>
+                            </div>
 
-            _html = MarkdownRenderer.Render(content.Markdown);
-            _updatedAt = content.UpdatedAt;
-            _generated = false;
-            _schemaAvailable = false;
-            _sourceAvailable = false;
-            _screenCount = AppRegistry.Screens.Count;
-            _buttonCount = 0;
-            _tableCount = 0;
-            _missing = false;
-        }
-        finally
-        {
-            _busy = false;
-        }
+                            @if (_shotUrls.TryGetValue(screen.Code, out var url))
+                            {
+                                <img class="ubp-shot-image" src="@url" alt="@screen.Title" loading="lazy" />
+                            }
+                            else
+                            {
+                                @((MarkupString)ManualScreenIllustration.Render(screen))
+                                <MudText Typo="Typo.caption" Class="ubp-shot-hint">
+                                    @T.T("user_manual.illustration_hint")
+                                </MudText>
+                            }
+
+                            <details class="ubp-shot-notes" open>
+                                <summary>@T.T("user_manual.annotations")</summary>
+                                <ol>
+                                    @foreach (var annotation in ManualScreenshotAnnotations.Build(screen))
+                                    {
+                                        <li>@annotation.Text</li>
+                                    }
+                                </ol>
+                            </details>
+                        </div>
+                    }
+                }
+            </MudTabPanel>
+            <MudTabPanel Text="@T.T("user_manual.text_manual")" Icon="@Icons.Material.Filled.Article">
+                <MudPaper Elevation="0" Class="ubp-card ubp-manual">
+                    @((MarkupString)_html)
+                </MudPaper>
+            </MudTabPanel>
+        </MudTabs>
     }
-
-    private async Task RefreshAsync() =>
-        await RunAsync(async () =>
-        {
-            await GenerateAsync(force: true);
-            if (!_missing) ShowSuccess("user_manual.reloaded");
-        });
-
-    private async Task PrintAsync() => await JS.InvokeVoidAsync("print");
 }

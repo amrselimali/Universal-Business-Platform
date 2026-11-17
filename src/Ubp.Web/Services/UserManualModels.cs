@@ -49,7 +49,11 @@ public sealed record UserManualGeneration(
     int ButtonCount,
     int TableCount,
     bool SchemaAvailable,
-    bool SourceAvailable);
+    bool SourceAvailable)
+{
+    /// <summary>بيانات كل شاشة لمعرض الصور والشرح المكتوب على اللقطات.</summary>
+    public IReadOnlyList<ManualScreenDoc> Screens { get; init; } = [];
+}
 
 public sealed record ManualColumnDoc(string Name, string DataType, bool Nullable);
 public sealed record ManualTableDoc(string Name, long RowCount, IReadOnlyList<ManualColumnDoc> Columns);
@@ -65,3 +69,9 @@ public sealed record ManualDialogDoc(string Name, string Purpose, IReadOnlyList<
     /// <summary>نوع الحوار: نموذج/تأكيد/مكوّن.</summary>
     public string Kind { get; init; } = "";
 }
+
+/// <summary>نتيجة التقاط صورة الشاشة من JavaScript وحفظها على الخادم.</summary>
+public sealed record ManualShotSaveResult(
+    [property: System.Text.Json.Serialization.JsonPropertyName("ok")] bool Ok,
+    [property: System.Text.Json.Serialization.JsonPropertyName("url")] string? Url,
+    [property: System.Text.Json.Serialization.JsonPropertyName("error")] string? Error);

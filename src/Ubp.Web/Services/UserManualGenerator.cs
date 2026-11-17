@@ -62,7 +62,10 @@ public sealed partial class UserManualGenerator
             var result = new UserManualGeneration(md.ToString(), DateTimeOffset.Now,
                 screens.Count, screens.Sum(screen => screen.Buttons.Count) +
                               dialogs.Sum(dialog => dialog.Buttons.Count),
-                tables.Count, tables.Count > 0, source.HasAny);
+                tables.Count, tables.Count > 0, source.HasAny)
+            {
+                Screens = screens
+            };
             Cache[language] = result;
             return result;
         }

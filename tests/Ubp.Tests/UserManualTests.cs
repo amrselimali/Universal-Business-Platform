@@ -85,6 +85,9 @@ public sealed class UserManualTests
         Assert.Equal(1, result.TableCount);
         Assert.True(result.SchemaAvailable);
         Assert.True(result.SourceAvailable);
+        Assert.True(result.Screens.Count > 50);
+        Assert.Contains(result.Screens, screen =>
+            screen.Code == ScreenCodes.Items && screen.Buttons.Count > 0 && screen.Fields.Count > 0);
 
         var itemsStart = result.Markdown.IndexOf("#### `/inventory/items`", StringComparison.Ordinal);
         var itemsEnd = result.Markdown.IndexOf("#### `/inventory/documents`", itemsStart,

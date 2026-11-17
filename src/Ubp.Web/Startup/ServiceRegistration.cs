@@ -60,6 +60,7 @@ public static class ServiceRegistration
         services.AddScoped<UserContext>();
         services.AddScoped<UiCulture>();
         services.AddSingleton<DatabaseExportFileStore>();
+        services.AddSingleton<ManualScreenshotStore>();
         services.AddSingleton<Translator>();
         services.AddTransient<MudLocalizer, UbpMudLocalizer>();
 
