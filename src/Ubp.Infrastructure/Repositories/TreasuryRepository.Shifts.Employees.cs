@@ -5,16 +5,17 @@ namespace Ubp.Infrastructure.Repositories;
 public sealed partial class TreasuryRepository
 {
     /// <summary>
-    /// جميع الموظفين النشطين الذين ليس لهم موعد ولا إجازة داخل الفرع تغطي يوم
-    /// الإغلاق المطلوب. تُستخدم لمنع إغلاق الشفت قبل تجهيز اليوم التالي.
+    /// الموظفون النشطون في فرع الشفت (أو على مستوى الشركة) الذين ليس لهم موعد
+    /// ولا إجازة داخل الفرع تغطي يوم الإغلاق المطلوب — أيًا كان دورهم أو وظيفتهم.
     /// </summary>
     public async Task<IReadOnlyList<string>> ListEmployeesWithoutDayScheduleAsync(Guid branchId,
         DateTimeOffset fromUtc, DateTimeOffset toUtc, CancellationToken ct = default)
     {
         const string sql = """
-            SELECT e.name_ar
+            SELECT e.code || ' — ' || e.name_ar
             FROM employees e
             WHERE e.is_active
+              AND (e.branch_id = @branchId OR e.branch_id IS NULL)
               AND NOT EXISTS (
                     SELECT 1 FROM appointments a
                     WHERE a.employee_id = e.id
