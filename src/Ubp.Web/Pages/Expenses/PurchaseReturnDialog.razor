@@ -1,0 +1,101 @@
+@inherits ComponentBase
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">مرتجع مشتريات</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudForm @ref="_form">
+            <div class="ubp-form-grid">
+                <MudAutocomplete T="Partner" Value="_supplier" ValueChanged="OnSupplierChanged"
+                                 SearchFunc="SearchSuppliers" ToStringFunc="SupplierLabel"
+                                 Label="المورد" Variant="Variant.Outlined" Required="true"
+                                 MinCharacters="1" DebounceInterval="300"
+                                 ResetValueOnEmptyText="true" CoerceValue="true" />
+                <MudAutocomplete T="PurchaseReturnInvoiceOption" Value="_invoice"
+                                 ValueChanged="OnInvoiceChanged" SearchFunc="SearchInvoices"
+                                 ToStringFunc="InvoiceLabel" Label="الفاتورة الأصلية"
+                                 Variant="Variant.Outlined" Required="true" MinCharacters="0"
+                                 Disabled="_supplier is null" DebounceInterval="300"
+                                 ResetValueOnEmptyText="true" CoerceValue="true" />
+                <MudDatePicker @bind-Date="_date" Label="تاريخ المرتجع"
+                               Variant="Variant.Outlined" Required="true" />
+                <MudSelect T="string" @bind-Value="_method" Label="طريقة الارتجاع"
+                           Variant="Variant.Outlined">
+                    <MudSelectItem T="string" Value="@PurchaseReturnMethods.Supplier">
+                        خصم من حساب المورد
+                    </MudSelectItem>
+                    <MudSelectItem T="string" Value="@PurchaseReturnMethods.Cash">
+                        استرداد من خزينة
+                    </MudSelectItem>
+                </MudSelect>
+                @if (_method == PurchaseReturnMethods.Cash)
+                {
+                    <MudSelect T="Guid?" @bind-Value="_treasuryId" Label="الخزينة"
+                               Variant="Variant.Outlined" Required="true">
+                        @foreach (var treasury in _treasuries)
+                        {
+                            <MudSelectItem T="Guid?" Value="@((Guid?)treasury.Id)">
+                                @treasury.Code — @treasury.NameAr
+                            </MudSelectItem>
+                        }
+                    </MudSelect>
+                }
+                <MudTextField @bind-Value="_notes" Label="ملاحظات"
+                              Variant="Variant.Outlined" MaxLength="500" Class="ubp-span-2" />
+            </div>
+        </MudForm>
+
+        @if (_invoice is null)
+        {
+            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Class="mt-3">
+                اختر المورد ثم الفاتورة الأصلية لعرض الأصناف والكميات القابلة للإرجاع.
+            </MudAlert>
+        }
+        else
+        {
+            <div style="overflow-x:auto" class="mt-3">
+                <table class="ubp-table" style="width:100%">
+                    <thead>
+                        <tr>
+                            <th>الصنف</th>
+                            <th>كمية الفاتورة</th>
+                            <th>مرتجع سابقًا</th>
+                            <th>المتاح للإرجاع</th>
+                            <th>كمية المرتجع</th>
+                            <th>سعر الوحدة</th>
+                            <th>قيمة المرتجع</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var line in _lines)
+                        {
+                            <tr>
+                                <td><span class="ubp-code">@line.ItemCode</span> — @line.ItemName</td>
+                                <td>@line.OriginalQty.ToString("N2")</td>
+                                <td>@line.ReturnedQty.ToString("N2")</td>
+                                <td>@line.ReturnableQty.ToString("N2")</td>
+                                <td style="min-width:120px">
+                                    <MudNumericField T="decimal" @bind-Value="line.Quantity"
+                                                     Min="0m" Max="@line.ReturnableQty"
+                                                     Format="N2" Dense="true"
+                                                     Variant="Variant.Outlined" />
+                                </td>
+                                <td>@line.UnitPrice.ToString("N2")</td>
+                                <td>@line.Amount.ToString("N2")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            <MudText Typo="Typo.body2" Class="mt-3">
+                إجمالي قيمة المرتجع: <b>@Total.ToString("N2")</b>
+            </MudText>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel" Disabled="_busy">@T.T("common.cancel")</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync"
+                   Disabled="_busy">حفظ مسودة</MudButton>
+    </DialogActions>
+</MudDialog>

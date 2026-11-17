@@ -73,7 +73,7 @@ public sealed partial class TestDb
 
     public TreasuryService TreasuryService() => new(
         TreasuryRepo, AccountRepo, PartnerRepo, Permissions(), new AuditService(AuditRepo),
-        new DisplayFormatter(Settings()));
+        new DisplayFormatter(Settings()), PurchaseReturns());
 
     public BookingService BookingService() => new(
         BookingRepo, Settings(), Permissions(), new AuditService(AuditRepo),
@@ -99,6 +99,10 @@ public sealed partial class TestDb
 
     public OperatingExpenseService OperatingExpenses() => new(
         OperatingExpensesRepo, Settings(), Permissions(), new AuditService(AuditRepo));
+
+    public PurchaseReturnRepository PurchaseReturnsRepo => new(Factory);
+    public PurchaseReturnService PurchaseReturns() => new(
+        PurchaseReturnsRepo, TreasuryRepo, Settings(), Permissions(), new AuditService(AuditRepo));
 
     public BookingCollectionRepository BookingCollectionsRepo => new(Factory);
 

@@ -255,6 +255,8 @@ public static class ServiceRegistration
         services.AddScoped<PosService>();
         services.AddScoped<FollowUpService>();
         services.AddScoped<OperatingExpenseService>();
+        services.AddScoped<IPurchaseReturnRepository, PurchaseReturnRepository>();
+        services.AddScoped<PurchaseReturnService>();
         services.AddScoped<ServiceTransferService>();
         services.AddScoped<EmployeeAdvanceService>();
         services.AddScoped<ReviewAdjustmentService>();

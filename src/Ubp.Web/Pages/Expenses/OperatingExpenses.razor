@@ -24,6 +24,9 @@ else
                 <MudButton Variant="Variant.Outlined" Color="Color.Info"
                            StartIcon="@Icons.Material.Filled.SwapHoriz"
                            OnClick="TransferAsync">@T.T("expenses.item_transfer")</MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Secondary"
+                           StartIcon="@Icons.Material.Filled.Undo"
+                           OnClick="AddReturnAsync">مرتجعات مشتريات</MudButton>
             }
         </Actions>
     </PageHeader>
@@ -117,6 +120,32 @@ else
             <PagerContent>
                 <MudTablePager PageSizeOptions="new[] { 25 }" RowsPerPageString="@T.T("common.rows_per_page")" />
             </PagerContent>
+        </MudTable>
+    </MudPaper>
+
+    <MudPaper Elevation="0" Class="ubp-card mt-3">
+        <MudText Typo="Typo.subtitle2" Class="pa-3">مرتجعات مشتريات (مسودة — تُرحَّل مع الشفت)</MudText>
+        <MudTable Items="_returns" Dense="true" Hover="true" Elevation="0" Class="ubp-table">
+            <HeaderContent>
+                <MudTh>المستند</MudTh><MudTh>التاريخ</MudTh><MudTh>المورد</MudTh>
+                <MudTh>الفاتورة الأصلية</MudTh><MudTh>طريقة الارتجاع</MudTh>
+                <MudTh Align="Right">القيمة</MudTh><MudTh>الحالة</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd><span class="ubp-code">@(context.DocNo ?? "—")</span></MudTd>
+                <MudTd>@context.DocDate.ToString("yyyy-MM-dd")</MudTd>
+                <MudTd>@context.SupplierName</MudTd>
+                <MudTd>@context.OriginalDocNo</MudTd>
+                <MudTd>@(context.IsCash ? "استرداد خزينة" : "خصم من حساب المورد")</MudTd>
+                <MudTd Align="Right">@context.TotalAmount.ToString("N2")</MudTd>
+                <MudTd>
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                             Color="@(context.IsDraft ? Color.Default : Color.Success)">
+                        @T.T(context.IsDraft ? "accounting.status_draft" : "accounting.status_posted")
+                    </MudChip>
+                </MudTd>
+            </RowTemplate>
+            <NoRecordsContent><MudText Class="ubp-muted pa-4">لا توجد مرتجعات</MudText></NoRecordsContent>
         </MudTable>
     </MudPaper>
 }

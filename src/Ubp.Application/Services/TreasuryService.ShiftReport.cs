@@ -35,6 +35,8 @@ public sealed partial class TreasuryService
             ct: ct);
         var shift = await _treasury.GetShiftAsync(shiftId, ct) ?? throw new NotFoundAppException();
         BranchScope.Ensure(actor, shift.BranchId);
+        // ترحيل مرتجعات المشتريات المسودة مع الشفت (مخزون + قيد + خصم مورد/خزينة).
+        await _purchaseReturns.PostDraftsForShiftAsync(actor, shiftId, ct);
         if (!await _treasury.PostShiftAsync(shiftId, actor.UserId, ct))
             throw new ValidationAppException("validation.shift_not_closed");
         await _audit.WriteAsync(actor, "cashier_shifts", shiftId.ToString(), "UPDATE", null,

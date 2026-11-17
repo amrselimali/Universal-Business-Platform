@@ -277,6 +277,22 @@ public sealed partial class TreasuryRepository
             ORDER BY o.doc_date, o.doc_no, el.line_no
             """, args, cancellationToken: ct))).ToList();
 
+        // مرتجعات المشتريات: تُطرح من مصروفات الشفت (قيمة سالبة) وتظهر مسودة/مرحّلة.
+        report.Expenses.AddRange(await connection.QueryAsync<ShiftExpenseRow>(new CommandDefinition("""
+            SELECT t.treasury_type AS TreasuryType, t.name_ar AS TreasuryName,
+                   -prl.amount AS Amount, i.name_ar AS ItemName, prl.quantity AS Quantity,
+                   prl.unit_price AS UnitPrice,
+                   ('مرتجع مشتريات ' || COALESCE(pr.doc_no, '')) AS Description,
+                   pr.status AS Status
+            FROM purchase_returns pr
+            JOIN purchase_return_lines prl ON prl.return_id = pr.id
+            LEFT JOIN treasuries t ON t.id = pr.treasury_id
+            LEFT JOIN items i ON i.id = prl.item_id
+            WHERE pr.branch_id = @branchId AND pr.created_at >= @openedAt
+              AND (@until::timestamptz IS NULL OR pr.created_at <= @until::timestamptz)
+            ORDER BY pr.doc_date, pr.doc_no, prl.line_no
+            """, args, cancellationToken: ct)));
+
         // تسليمات النقدية للحساب الوسيط تظهر كمصروف في الشفت (0080).
         report.Expenses.AddRange(await connection.QueryAsync<ShiftExpenseRow>(new CommandDefinition("""
             SELECT t.treasury_type AS TreasuryType, t.name_ar AS TreasuryName,

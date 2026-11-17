@@ -10,8 +10,10 @@ namespace Ubp.Web.Pages.Expenses;
 public partial class OperatingExpenses
 {
     [Inject] private BranchService BranchApi { get; set; } = default!;
+    [Inject] private PurchaseReturnService PurchaseReturns { get; set; } = default!;
 
     private IReadOnlyList<OperatingExpense> _items = Array.Empty<OperatingExpense>();
+    private IReadOnlyList<PurchaseReturn> _returns = Array.Empty<PurchaseReturn>();
     private IReadOnlyList<Branch> _branches = Array.Empty<Branch>();
     private Guid? _branchId;
     private DateTime? _from;
@@ -32,6 +34,7 @@ public partial class OperatingExpenses
         await RunAsync(async () =>
         {
             _items = await Expenses.ListAsync(Actor!, _branchId, null, _from, _to, _status);
+            _returns = await PurchaseReturns.ListAsync(Actor!, _branchId, null, null);
         });
 
     private async Task OnBranchChanged(Guid? branchId)
@@ -65,6 +68,20 @@ public partial class OperatingExpenses
     }
 
     /// <summary>تسليم نقدية من خزينة إلى حساب وسيط لنقدية الفرع (0080).</summary>
+    private async Task AddReturnAsync()
+    {
+        var branchId = _branchId ?? Actor!.CurrentBranchId;
+        if (branchId is null) return;
+        var dialog = await Dialogs.ShowAsync<PurchaseReturnDialog>("مرتجع مشتريات",
+            new DialogParameters { ["BranchId"] = branchId.Value },
+            new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true });
+        if ((await dialog.Result) is { Canceled: false })
+        {
+            await ReloadAsync();
+            ShowSuccess("common.saved");
+        }
+    }
+
     private async Task HandoverAsync()
     {
         var branchId = _branchId ?? Actor!.CurrentBranchId;
