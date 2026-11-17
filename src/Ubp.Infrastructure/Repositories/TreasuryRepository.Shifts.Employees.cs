@@ -5,8 +5,8 @@ namespace Ubp.Infrastructure.Repositories;
 public sealed partial class TreasuryRepository
 {
     /// <summary>
-    /// الموظفون النشطون في فرع الشفت (أو على مستوى الشركة) الذين ليس لهم موعد
-    /// ولا إجازة داخل الفرع تغطي يوم الإغلاق المطلوب — أيًا كان دورهم أو وظيفتهم.
+    /// الموظفون النشطون في فرع الشفت فقط (بدون موظفي الشركة الذين branch_id فارغ)
+    /// الذين ليس لهم موعد ولا إجازة داخل الفرع تغطي يوم الإغلاق المطلوب.
     /// </summary>
     public async Task<IReadOnlyList<string>> ListEmployeesWithoutDayScheduleAsync(Guid branchId,
         DateTimeOffset fromUtc, DateTimeOffset toUtc, CancellationToken ct = default)
@@ -15,7 +15,7 @@ public sealed partial class TreasuryRepository
             SELECT e.code || ' — ' || e.name_ar
             FROM employees e
             WHERE e.is_active
-              AND (e.branch_id = @branchId OR e.branch_id IS NULL)
+              AND e.branch_id = @branchId
               AND NOT EXISTS (
                     SELECT 1 FROM appointments a
                     WHERE a.employee_id = e.id
