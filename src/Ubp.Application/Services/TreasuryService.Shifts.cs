@@ -162,9 +162,6 @@ public sealed partial class TreasuryService
         {
             try
             {
-                // الإغلاق التلقائي لا يتجاوز شرط تجهيز اليوم التالي؛ يُترك الشفت مفتوحًا
-                // حتى يُسجَّل موعد/إجازة لكل موظف نشط.
-                await EnsureNextDayScheduleAsync(shift, ct);
                 await _treasury.CloseShiftAsync(shift.Id, counts: null, shift.UserId,
                     autoClosed: true, ct);
                 closed++;

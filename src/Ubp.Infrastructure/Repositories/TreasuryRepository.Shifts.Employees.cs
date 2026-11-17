@@ -19,6 +19,7 @@ public sealed partial class TreasuryRepository
               AND NOT EXISTS (
                     SELECT 1 FROM appointments a
                     WHERE a.employee_id = e.id
+                      AND a.branch_id = @branchId
                       AND a.status <> 'cancelled'
                       AND a.starts_at < @toUtc AND a.ends_at > @fromUtc
               )
