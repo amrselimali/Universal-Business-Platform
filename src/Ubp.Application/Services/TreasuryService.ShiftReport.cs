@@ -37,6 +37,9 @@ public sealed partial class TreasuryService
         BranchScope.Ensure(actor, shift.BranchId);
         // ترحيل مرتجعات المشتريات المسودة مع الشفت (مخزون + قيد + خصم مورد/خزينة).
         await _purchaseReturns.PostDraftsForShiftAsync(actor, shiftId, ct);
+        // ترحيل إيصالات POS المسودة المعدّلة/المؤجلة مع الشفت؛ العكسي لا يُرحّل منفرداً.
+        foreach (var voucherId in await _treasury.ListDraftReceiptIdsForShiftAsync(shiftId, ct))
+            await _treasury.PostVoucherAsync(voucherId, actor.UserId, ct);
         if (!await _treasury.PostShiftAsync(shiftId, actor.UserId, ct))
             throw new ValidationAppException("validation.shift_not_closed");
         await _audit.WriteAsync(actor, "cashier_shifts", shiftId.ToString(), "UPDATE", null,

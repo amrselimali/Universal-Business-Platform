@@ -18,6 +18,8 @@ public interface IPosRepository
         Guid voucherId, CancellationToken ct = default);
     /// <summary>تفاصيل إيصال قبض (سطور طرق الدفع/العمولة) لعرضه أو طباعته.</summary>
     Task<Voucher?> GetReceiptDetailAsync(Guid voucherId, CancellationToken ct = default);
+    Task<Guid> EditDraftReceiptAsync(Guid id, ReceiptEditInput input, Guid userId,
+        CancellationToken ct = default);
 }
 
 /// <summary>
@@ -159,10 +161,12 @@ public sealed partial class PosRepository : IPosRepository
             await connection.ExecuteAsync(new CommandDefinition("""
                 INSERT INTO vouchers (id, branch_id, doc_date, doc_no, status, voucher_type,
                     party_type, party_id, party_name, treasury_id, total_amount, fee_total,
-                    created_by)
+                    shift_id, created_by)
                 VALUES (@voucherId, @BranchId, @docDate, @voucherNo, 'draft', 'receipt', 'C',
                         @CustomerId, (SELECT name_ar FROM customers WHERE id = @CustomerId),
-                        @TreasuryId, @amount, @groupFee, @userId)
+                        @TreasuryId, @amount, @groupFee,
+                        (SELECT id FROM cashier_shifts
+                         WHERE branch_id = @BranchId AND status = 'open' LIMIT 1), @userId)
                 """, new { voucherId, input.BranchId, docDate = input.DocDate.Date,
                     input.CustomerId, treasuryId = group.Key, amount, groupFee, voucherNo,
                     userId }, tx,

@@ -1793,6 +1793,8 @@
   "validation.user_branch_required": "المستخدم غير المدير يجب أن يُربط بفرع واحد على الأقل",
   "validation.username_invalid": "اسم المستخدم يجب أن يكون 3-150 حرفاً (حروف وأرقام و . _ @ -)",
   "validation.username_taken": "اسم المستخدم مستخدم بالفعل",
+  "validation.receipt_not_editable": "لا يمكن تعديل هذا الإيصال: يجب أن يكون مسودة أصلية أو معدّلة غير معكوسة.",
+  "validation.receipt_shift_closed": "لا يمكن تعديل الإيصال بعد إغلاق الشفت.",
   "validation.voucher_amount": "مبلغ السطر يجب أن يكون أكبر من صفر",
   "validation.voucher_not_draft": "السند ليس مسودة",
   "validation.voucher_not_posted": "يجب ترحيل السند قبل التخصيص",

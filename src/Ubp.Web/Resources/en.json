@@ -1793,6 +1793,8 @@
   "validation.user_branch_required": "A non-admin user must be linked to at least one branch",
   "validation.username_invalid": "Username must be 3-150 characters (letters, digits, . _ @ -)",
   "validation.username_taken": "Username is already taken",
+  "validation.receipt_not_editable": "This receipt cannot be edited: it must be an original or adjusted draft that is not reversed.",
+  "validation.receipt_shift_closed": "The receipt cannot be edited after the shift is closed.",
   "validation.voucher_amount": "Line amount must be greater than zero",
   "validation.voucher_not_draft": "Voucher is not a draft",
   "validation.voucher_not_posted": "Voucher must be posted before allocation",

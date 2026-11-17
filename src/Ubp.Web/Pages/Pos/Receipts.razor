@@ -4,6 +4,7 @@
 @inject PosService Pos
 @inject BranchService Branches
 @inject IDialogService Dialogs
+@inject PermissionService Permissions
 <PageTitle>@T.T("screen.pos_receipts")</PageTitle>
 
 @if (Denied) { <ForbiddenView /> }
@@ -59,6 +60,14 @@ else
                     <MudIconButton Icon="@Icons.Material.Filled.Send" Size="Size.Small"
                                    Title="@T.T("pos.send_whatsapp")" Color="Color.Success"
                                    OnClick="@(() => SendWhatsAppAsync(context))" />
+                    @if (_canEdit && context.IsDraft && !context.IsReversed &&
+                         context.ReceiptType != VoucherReceiptTypes.Reversal && context.ShiftOpen &&
+                         !context.IsSettlementReceipt)
+                    {
+                        <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
+                                       Title="تعديل الإيصال" Color="Color.Warning"
+                                       OnClick="@(() => EditAsync(context))" />
+                    }
                 </MudTd>
             </RowTemplate>
             <NoRecordsContent>
@@ -82,6 +91,7 @@ else
     private Guid? _branchId;
     private DateTime? _from = DateTime.Today;
     private DateTime? _to = DateTime.Today;
+    private bool _canEdit;
 
     protected override string ScreenCode => ScreenCodes.PosReceipts;
 
@@ -89,6 +99,8 @@ else
     {
         _branches = await Branches.OptionsAsync(Actor!);
         _branchId = Actor!.CurrentBranchId ?? _branches.FirstOrDefault()?.Id;
+        _canEdit = await Permissions.HasAsync(Actor!, ScreenCodes.PosTerminal,
+            ActionCodes.SaveDraft);
         await ReloadAsync();
     }
 
@@ -104,6 +116,18 @@ else
     private async Task ViewAsync(CommercialDocument doc) =>
         await Dialogs.ShowAsync<ViewReceiptDialog>(T.T("pos.view_receipt"),
             new DialogParameters { ["VoucherId"] = doc.Id });
+
+    private async Task EditAsync(CommercialDocument doc)
+    {
+        var dialog = await Dialogs.ShowAsync<ReceiptEditDialog>("تعديل إيصال POS",
+            new DialogParameters { ["VoucherId"] = doc.Id },
+            new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true });
+        if ((await dialog.Result) is { Canceled: false })
+        {
+            await ReloadAsync();
+            ShowSuccess("common.saved");
+        }
+    }
 
     private async Task SendWhatsAppAsync(CommercialDocument doc) => await RunAsync(async () =>
     {

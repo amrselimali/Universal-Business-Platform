@@ -1,0 +1,81 @@
+@inherits ComponentBase
+
+<MudDialog>
+    <TitleContent><MudText Typo="Typo.h6">تعديل إيصال POS</MudText></TitleContent>
+    <DialogContent>
+        @if (_loading)
+        {
+            <MudProgressLinear Indeterminate="true" />
+        }
+        else if (_original is null)
+        {
+            <MudAlert Severity="Severity.Warning">تعذر تحميل الإيصال.</MudAlert>
+        }
+        else
+        {
+            <MudPaper Outlined="true" Class="pa-3 mb-3">
+                <MudText Typo="Typo.subtitle2" Class="mb-2">البيانات الأصلية (للقراءة فقط)</MudText>
+                <div class="ubp-form-grid">
+                    <MudTextField Value="@_original.DocNo" Label="رقم الإيصال" ReadOnly="true"
+                                  Variant="Variant.Outlined" />
+                    <MudTextField Value="@_original.DocDate.ToString("yyyy-MM-dd")" Label="التاريخ"
+                                  ReadOnly="true" Variant="Variant.Outlined" />
+                    <MudTextField Value="@_original.PartyName" Label="العميل" ReadOnly="true"
+                                  Variant="Variant.Outlined" />
+                    <MudTextField Value="@_original.TreasuryName" Label="الخزينة" ReadOnly="true"
+                                  Variant="Variant.Outlined" />
+                    <MudTextField Value="@_original.TotalAmount.ToString("N2")" Label="المبلغ الإجمالي"
+                                  ReadOnly="true" Variant="Variant.Outlined" />
+                    <MudTextField Value="@_original.FeeTotal.ToString("N2")" Label="عمولة التحصيل"
+                                  ReadOnly="true" Variant="Variant.Outlined" />
+                    <MudTextField Value="@_original.NetAmount.ToString("N2")" Label="صافي المبلغ"
+                                  ReadOnly="true" Variant="Variant.Outlined" />
+                </div>
+            </MudPaper>
+
+            <MudPaper Outlined="true" Class="pa-3">
+                <MudText Typo="Typo.subtitle2" Class="mb-2">البيانات الجديدة (قابلة للتعديل)</MudText>
+                <MudForm @ref="_form">
+                    <div class="ubp-form-grid">
+                        <MudAutocomplete T="Partner" Value="_customer"
+                                         ValueChanged="@((Partner? p) => _customer = p)"
+                                         SearchFunc="SearchCustomers" ToStringFunc="CustomerLabel"
+                                         Label="العميل" Variant="Variant.Outlined"
+                                         Required="true" MinCharacters="1" DebounceInterval="300" />
+                        <MudSelect T="Guid?" Value="_treasuryId" ValueChanged="OnTreasuryChanged"
+                                   Label="الخزينة" Variant="Variant.Outlined" Required="true">
+                            @foreach (var treasury in _treasuries)
+                            {
+                                <MudSelectItem T="Guid?" Value="@((Guid?)treasury.Id)">
+                                    @treasury.Code — @treasury.NameAr
+                                </MudSelectItem>
+                            }
+                        </MudSelect>
+                        <MudSelect T="Guid" @bind-Value="_methodId" Label="طريقة الدفع"
+                                   Variant="Variant.Outlined" Required="true">
+                            @foreach (var method in _methods.Where(m => m.TreasuryId == _treasuryId))
+                            {
+                                <MudSelectItem T="Guid" Value="@method.Id">
+                                    @method.Code — @method.NameAr
+                                </MudSelectItem>
+                            }
+                        </MudSelect>
+                        <MudNumericField T="decimal" @bind-Value="_amount" Label="المبلغ الإجمالي"
+                                         Min="0.01m" Format="N2" Variant="Variant.Outlined" />
+                        <MudNumericField T="decimal" @bind-Value="_fee" Label="عمولة التحصيل"
+                                         Min="0m" Format="N2" Variant="Variant.Outlined" />
+                        <MudTextField Value="@Net.ToString("N2")" Label="صافي المبلغ"
+                                      ReadOnly="true" Variant="Variant.Outlined" />
+                        <MudTextField @bind-Value="_notes" Label="ملاحظات"
+                                      Variant="Variant.Outlined" MaxLength="500" Class="ubp-span-2" />
+                    </div>
+                </MudForm>
+            </MudPaper>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel" Disabled="_busy">@T.T("common.cancel")</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync"
+                   Disabled="_busy || _original is null">تسجيل</MudButton>
+    </DialogActions>
+</MudDialog>

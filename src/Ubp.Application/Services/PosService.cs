@@ -70,6 +70,25 @@ public sealed class PosService
             limit, ct);
     }
 
+    /// <summary>تعديل إيصال POS مسودة داخل الشفت المفتوح (عكسي + معدّل).</summary>
+    public async Task<Voucher> EditReceiptAsync(ActorContext actor, ReceiptEditInput input,
+        CancellationToken ct = default)
+    {
+        await _permissions.RequireAsync(actor, ScreenCodes.PosTerminal, ActionCodes.SaveDraft,
+            ct: ct);
+        var head = await _pos.GetReceiptHeaderAsync(input.VoucherId, ct);
+        if (head.CustomerId is null) throw new NotFoundAppException();
+        BranchScope.Ensure(actor, head.BranchId);
+        Guid adjustedId;
+        try { adjustedId = await _pos.EditDraftReceiptAsync(input.VoucherId, input, actor.UserId, ct); }
+        catch (PostgresException ex) { throw DbErrorMapper.Map(ex); }
+        await _audit.WriteAsync(actor, "vouchers", input.VoucherId.ToString(), "UPDATE",
+            new { status = VoucherStatuses.Draft, head.Total },
+            new { status = VoucherStatuses.Reversed, AdjustedId = adjustedId, input.Amount,
+                  input.FeeAmount, input.CustomerId, input.TreasuryId }, ct);
+        return await _pos.GetReceiptDetailAsync(adjustedId, ct) ?? throw new NotFoundAppException();
+    }
+
     /// <summary>إعادة إرسال إيصال قبض إلى العميل عبر واتساب (من شاشة إيصالات POS).</summary>
     public async Task<bool> SendReceiptWhatsAppAsync(ActorContext actor, Guid voucherId,
         CancellationToken ct = default)

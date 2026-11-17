@@ -76,6 +76,13 @@ public sealed class CommercialDocument
     public string? TreasuryName { get; set; }
     /// <summary>مضمون جدول الإيصال في خلية واحدة: الخدمة×الكمية والسعر أو رقم الحجز — 0095.</summary>
     public string? Description { get; set; }
+    public string ReceiptType { get; set; } = VoucherReceiptTypes.Original;
+    public bool IsReversed { get; set; }
+    public Guid? ParentReceiptId { get; set; }
+    public Guid? ShiftId { get; set; }
+    public bool ShiftOpen { get; set; }
+    /// <summary>إيصال تسوية حساب عميل — لا يدخل في تعديل إيصالات POS.</summary>
+    public bool IsSettlementReceipt { get; set; }
 
     public bool IsDraft => Status == CommercialStatuses.Draft;
     public bool IsPosted => Status == CommercialStatuses.Posted;

@@ -7,13 +7,11 @@ using Ubp.Infrastructure.Data;
 
 namespace Ubp.Infrastructure.Repositories;
 
-public interface ITreasuryRepository : IShiftGate
+public partial interface ITreasuryRepository : IShiftGate
 {
     Task<Guid> CreateTreasuryAsync(Guid id, TreasuryInput input, Guid userId, CancellationToken ct = default);
-    /// <summary>تعديل خزينة مسجّلة — 0093.</summary>
     Task<bool> UpdateTreasuryAsync(Guid id, TreasuryInput input, Guid userId,
         CancellationToken ct = default);
-    /// <summary>أرشفة/استرجاع خزينة (إخفاء من الشاشات دون حذف حركاتها) — 0093.</summary>
     Task<bool> SetTreasuryActiveAsync(Guid id, bool isActive, Guid userId,
         CancellationToken ct = default);
     /// <summary>متابعة الخزينة في الشفت (رصيدها = أول مدة عند فتح الشفت) — 0093.</summary>

@@ -34,14 +34,22 @@ public static class VoucherTypes
     };
 }
 
+public static class VoucherReceiptTypes
+{
+    public const string Original = "ORIGINAL";
+    public const string Reversal = "REVERSAL";
+    public const string Adjusted = "ADJUSTED";
+}
+
 public static class VoucherStatuses
 {
     public const string Draft = "draft";
     public const string Posted = "posted";
     public const string Cancelled = "cancelled";
+    public const string Reversed = "reversed";
 
     public static bool IsValid(string? value) =>
-        value is Draft or Posted or Cancelled;
+        value is Draft or Posted or Cancelled or Reversed;
 }
 
 public static class ShiftStatuses
@@ -170,6 +178,12 @@ public sealed class Voucher
     public string? ToTreasuryName { get; set; }
     public decimal TotalAmount { get; set; }
     public decimal FeeTotal { get; set; }
+    public string ReceiptType { get; set; } = VoucherReceiptTypes.Original;
+    public bool IsReversed { get; set; }
+    public Guid? ParentReceiptId { get; set; }
+    public Guid? ShiftId { get; set; }
+    public bool ShiftOpen { get; set; }
+    public DateTimeOffset? ReversedAt { get; set; }
     public Guid? JournalEntryId { get; set; }
     public string? JournalNo { get; set; }
     public string? Notes { get; set; }

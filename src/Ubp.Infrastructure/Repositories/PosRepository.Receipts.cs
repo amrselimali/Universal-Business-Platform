@@ -30,6 +30,12 @@ public sealed partial class PosRepository
             SELECT v.id AS Id, v.voucher_type AS DocType, v.doc_no AS DocNo, v.doc_date AS DocDate,
                    v.status AS Status, v.branch_id AS BranchId, v.party_name AS PartyName,
                    v.total_amount AS Total, v.fee_total AS AllocatedTotal,
+                   v.receipt_type AS ReceiptType, v.is_reversed AS IsReversed,
+                   v.parent_receipt_id AS ParentReceiptId, v.shift_id AS ShiftId,
+                   EXISTS (SELECT 1 FROM customer_account_settlements bs
+                           WHERE bs.voucher_id = v.id) AS IsSettlementReceipt,
+                   EXISTS (SELECT 1 FROM cashier_shifts s
+                           WHERE s.id = v.shift_id AND s.status = 'open') AS ShiftOpen,
                    v.journal_entry_id AS JournalEntryId,
                    t.name_ar AS TreasuryName,
                    -- مضمون جدول الإيصال في خلية واحدة: تسوية/خدمات البيع/حجوزات السداد — 0096.
@@ -117,7 +123,12 @@ public sealed partial class PosRepository
                    v.party_type AS PartyType, v.party_name AS PartyName, v.party_id AS PartyId,
                    v.treasury_id AS TreasuryId, t.code AS TreasuryCode,
                    t.name_ar AS TreasuryName, v.total_amount AS TotalAmount,
-                   v.fee_total AS FeeTotal, v.notes AS Notes, v.posted_at AS PostedAt,
+                   v.fee_total AS FeeTotal, v.receipt_type AS ReceiptType,
+                   v.is_reversed AS IsReversed, v.parent_receipt_id AS ParentReceiptId,
+                   v.shift_id AS ShiftId,
+                   EXISTS (SELECT 1 FROM cashier_shifts s
+                           WHERE s.id = v.shift_id AND s.status = 'open') AS ShiftOpen,
+                   v.reversed_at AS ReversedAt, v.notes AS Notes, v.posted_at AS PostedAt,
                    v.version AS Version
             FROM vouchers v JOIN treasuries t ON t.id = v.treasury_id
             WHERE v.id = @id AND v.voucher_type = 'receipt' AND v.party_type = 'C'

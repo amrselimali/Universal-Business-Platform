@@ -51,6 +51,17 @@ public sealed class PosPaymentResult
     public int Lines { get; set; }
 }
 
+public sealed class ReceiptEditInput
+{
+    public Guid VoucherId { get; set; }
+    public Guid CustomerId { get; set; }
+    public Guid TreasuryId { get; set; }
+    public Guid TreasuryMethodId { get; set; }
+    public decimal Amount { get; set; }
+    public decimal FeeAmount { get; set; }
+    public string? Notes { get; set; }
+}
+
 public sealed class PosReceipt
 {
     public Guid BookingId { get; set; }

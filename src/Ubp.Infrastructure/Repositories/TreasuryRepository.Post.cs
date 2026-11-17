@@ -51,6 +51,19 @@ public sealed partial class TreasuryRepository
     /// صرف = Dr دفعات الموردين + Dr مصاريف / Cr خزينة/وسيط،
     /// تحويل = Dr الوجهة / Cr المصدر (وبين الفروع عبر حساب التسوية).
     /// </summary>
+    public async Task<IReadOnlyList<Guid>> ListDraftReceiptIdsForShiftAsync(Guid shiftId,
+        CancellationToken ct = default)
+    {
+        await using var connection = await _factory.OpenAsync(ct);
+        var ids = await connection.QueryAsync<Guid>(new CommandDefinition("""
+            SELECT id FROM vouchers
+            WHERE voucher_type = 'receipt' AND status = 'draft' AND shift_id = @shiftId
+              AND receipt_type <> 'REVERSAL'
+            ORDER BY created_at, id
+            """, new { shiftId }, cancellationToken: ct));
+        return ids.ToList();
+    }
+
     public async Task<Guid> PostVoucherAsync(Guid id, Guid userId, CancellationToken ct = default)
     {
         await using var connection = await _factory.OpenAsync(ct);
