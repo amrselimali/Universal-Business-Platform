@@ -99,20 +99,21 @@ window.ubpManual = (function () {
     }
 
     async function compose(shot, annotations, points, title, route, options) {
-        const scale = options.scale || 1;
-        const totalWidth = Math.max(shot.width, 1000);
+        const scale = options.scale || 0.9;
         const margin = 24;
+        const gap = 18;
         const headerHeight = 86;
-        const imageX = Math.round((totalWidth - shot.width) / 2);
-        const legendWidth = totalWidth - margin * 2;
+        const imageX = margin;
+        const panelX = imageX + shot.width + gap;
+        const totalWidth = panelX + panelWidth + margin;
         const measure = document.createElement('canvas').getContext('2d');
         measure.font = '15px Cairo, "Segoe UI", Tahoma, sans-serif';
         const legend = annotations.map((annotation) =>
-            wrapLines(measure, annotation.text, legendWidth - 76));
-        let legendHeight = 62;
-        legend.forEach((lines) => { legendHeight += lines.length * 21 + 16; });
-        const legendY = headerHeight + shot.height + 26;
-        const height = legendY + legendHeight + 20;
+            wrapLines(measure, annotation.text, panelWidth - 66));
+        let legendHeight = 78;
+        legend.forEach((lines) => { legendHeight += lines.length * 20 + 16; });
+        const bodyHeight = Math.max(shot.height, legendHeight);
+        const height = headerHeight + bodyHeight + margin;
 
         let svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + totalWidth +
             '" height="' + height + '" viewBox="0 0 ' + totalWidth + ' ' + height + '">';
@@ -120,29 +121,47 @@ window.ubpManual = (function () {
         svg += '<rect width="' + totalWidth + '" height="' + headerHeight + '" fill="#0F766E"/>';
         svg += svgText(totalWidth - margin, 34, title, 23, '#FFFFFF', 'bold', 'right');
         svg += svgText(totalWidth - margin, 60, options.subtitle || '', 14, '#CCFBF1', null, 'right');
+        svg += '<rect x="' + imageX + '" y="' + headerHeight + '" width="' + shot.width +
+            '" height="' + bodyHeight + '" fill="#F3F6F8"/>';
         svg += '<image href="' + shot.toDataURL('image/png') + '" x="' + imageX + '" y="' +
             headerHeight + '" width="' + shot.width + '" height="' + shot.height + '"/>';
         svg += '<rect x="' + (imageX + 0.5) + '" y="' + (headerHeight + 0.5) + '" width="' +
             (shot.width - 1) + '" height="' + (shot.height - 1) +
             '" fill="none" stroke="#E2E8F0"/>';
 
-        svg += '<rect x="' + margin + '" y="' + legendY + '" width="' + legendWidth +
-            '" height="' + legendHeight + '" rx="14" fill="#F8FAFC" stroke="#E2E8F0"/>';
-        const right = totalWidth - margin - 22;
-        svg += svgText(right, legendY + 30, 'الشرح المكتوب على الصورة', 18,
+        svg += '<rect x="' + panelX + '" y="' + headerHeight + '" width="' + panelWidth +
+            '" height="' + bodyHeight + '" rx="14" fill="#F8FAFC" stroke="#E2E8F0"/>';
+        const panelRight = panelX + panelWidth - 18;
+        svg += svgText(panelRight, headerHeight + 32, 'الشرح المكتوب على الصورة', 18,
             '#0F766E', 'bold', 'right');
-        svg += svgText(right, legendY + 52, 'كل رقم يشير إلى الجزء الموضح', 12,
+        svg += svgText(panelRight, headerHeight + 54, 'كل رقم متصل بالجزء الموضح', 12,
             '#64748B', null, 'right');
 
-        let y = legendY + 76;
+        const noteYs = [];
+        let y = headerHeight + 80;
+        annotations.forEach((annotation, index) => {
+            noteYs.push(y);
+            y += legend[index].length * 20 + 16;
+        });
+
+        annotations.forEach((annotation, index) => {
+            const point = points[index];
+            if (!point) return;
+            const px = imageX + Math.max(18, Math.min(shot.width - 18, point.x));
+            const py = headerHeight + Math.max(18, Math.min(shot.height - 18, point.y));
+            svg += '<line x1="' + px + '" y1="' + py + '" x2="' + (panelX + 22) +
+                '" y2="' + (noteYs[index] + 9) +
+                '" stroke="rgba(15,118,110,0.55)" stroke-width="1.6"/>';
+        });
+
         annotations.forEach((annotation, index) => {
             const lines = legend[index];
-            svg += svgMarker(right - 14, y + 9, index + 1);
+            const noteY = noteYs[index];
+            svg += svgMarker(panelX + 22, noteY + 9, index + 1);
             lines.forEach((line, lineIndex) => {
-                svg += svgText(right - 40, y + 15 + lineIndex * 21, line, 15,
+                svg += svgText(panelRight, noteY + 15 + lineIndex * 20, line, 15,
                     '#0F172A', null, 'right');
             });
-            y += lines.length * 21 + 16;
         });
 
         points.forEach((point, index) => {

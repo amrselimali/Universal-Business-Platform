@@ -209,7 +209,7 @@
 .ubp-shot-actions { display: flex; align-items: center; gap: 6px; }
 .ubp-shot-link { display: block; text-align: center; }
 .ubp-shot-image {
-    display: block; margin-inline: auto; max-width: 1100px; max-height: 800px;
+    display: block; margin-inline: auto; max-width: 1300px; max-height: 900px;
     width: auto; height: auto; cursor: zoom-in;
     border: 1px solid var(--ubp-line); border-radius: 10px;
 }
