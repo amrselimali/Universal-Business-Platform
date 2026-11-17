@@ -11,7 +11,7 @@ namespace Ubp.Web.Services;
 public sealed class ManualScreenshotStore
 {
     private const string FolderName = "manual-screenshots";
-    private const string RendererVersion = "r2";
+    private const string RendererVersion = "r3";
     private static readonly Regex CodePattern = new("^[A-Za-z0-9_]{1,80}$",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private readonly IWebHostEnvironment _environment;
