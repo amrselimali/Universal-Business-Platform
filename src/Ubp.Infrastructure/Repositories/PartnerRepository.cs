@@ -29,6 +29,21 @@ public interface IPartnerRepository
     /// <summary>هل رقم الهاتف مستخدم بالفعل لطرف آخر (لاستثناء الـ id عند التعديل).</summary>
     Task<bool> PhoneExistsAsync(PartnerKind kind, string phone, Guid? excludeId,
         CancellationToken ct = default);
+    /// <summary>تكرار الهاتف داخل نفس الفرع/النطاق فقط.</summary>
+    Task<bool> PhoneExistsInScopeAsync(PartnerKind kind, string phone, string scopeType,
+        Guid? branchId, Guid? excludeId, CancellationToken ct = default);
+    /// <summary>تكرار الواتساب داخل نفس الفرع/النطاق فقط.</summary>
+    Task<bool> WhatsAppExistsInScopeAsync(PartnerKind kind, string whatsapp, string scopeType,
+        Guid? branchId, Guid? excludeId, CancellationToken ct = default);
+    /// <summary>تكرار قيمة حقل مخصص (مثل الكود الورقي) داخل نفس الفرع/النطاق.</summary>
+    Task<bool> CustomFieldExistsAsync(PartnerKind kind, string fieldKey, string value,
+        string scopeType, Guid? branchId, Guid? excludeId, CancellationToken ct = default);
+    /// <summary>تعديل جزئي لبيانات الاتصال فقط (هاتف/واتساب).</summary>
+    Task<Partner?> UpdateContactAsync(PartnerKind kind, Guid id, int version, string? phone,
+        string? whatsapp, CancellationToken ct = default);
+    /// <summary>عملاء مربوطون بدكتور خارجي في الفرع (أو بنطاق الشركة) — لاختيار شفت الدكتور.</summary>
+    Task<IReadOnlyList<Partner>> ListExternalDoctorsAsync(Guid branchId,
+        CancellationToken ct = default);
 
     Task<IReadOnlyList<PartnerCategory>> ListCategoriesAsync(PartnerKind kind, bool includeInactive,
         CancellationToken ct = default);
@@ -69,6 +84,7 @@ public sealed partial class PartnerRepository : IPartnerRepository
             p.phone AS Phone, p.phone2 AS Phone2, p.whatsapp_phone AS WhatsAppPhone,
             p.email AS Email, p.address AS Address, p.tax_number AS TaxNumber,
             p.credit_limit AS CreditLimit, p.notes AS Notes, p.is_active AS IsActive,
+            p.is_external_doctor AS IsExternalDoctor,
             p.custom_fields::text AS CustomFieldsJson,
             p.created_at AS CreatedAt, p.updated_at AS UpdatedAt, p.version AS Version
             """;
@@ -137,6 +153,7 @@ public sealed partial class PartnerRepository : IPartnerRepository
         Phone = row.Phone, Phone2 = row.Phone2, WhatsAppPhone = row.WhatsAppPhone,
         Email = row.Email, Address = row.Address, TaxNumber = row.TaxNumber,
         CreditLimit = row.CreditLimit, Notes = row.Notes, IsActive = row.IsActive,
+        IsExternalDoctor = row.IsExternalDoctor,
         CustomFields = string.IsNullOrWhiteSpace(row.CustomFieldsJson)
             ? new() : System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object?>>(row.CustomFieldsJson) ?? new(),
         CreatedAt = row.CreatedAt, UpdatedAt = row.UpdatedAt, Version = row.Version
@@ -162,6 +179,7 @@ public sealed partial class PartnerRepository : IPartnerRepository
         public decimal CreditLimit { get; set; }
         public string? Notes { get; set; }
         public bool IsActive { get; set; }
+        public bool IsExternalDoctor { get; set; }
         public string? CustomFieldsJson { get; set; }
         public DateTimeOffset CreatedAt { get; set; }
         public DateTimeOffset UpdatedAt { get; set; }

@@ -13,17 +13,21 @@ namespace Ubp.Application.Services;
 public sealed class BookingCollectionService
 {
     private readonly IBookingCollectionRepository _collections;
+    private readonly ITreasuryRepository _treasury;
+    private readonly IPartnerRepository _partners;
     private readonly PermissionService _permissions;
     private readonly AuditService _audit;
     private readonly IReceiptNotifier _notifier;
     private readonly IShiftGate? _shiftGate;
 
     public BookingCollectionService(IBookingCollectionRepository collections,
-        PermissionService permissions, AuditService audit, IReceiptNotifier notifier,
-        IShiftGate? shiftGate = null)
+        ITreasuryRepository treasury, IPartnerRepository partners,
+        PermissionService permissions, AuditService audit,
+        IReceiptNotifier notifier, IShiftGate? shiftGate = null)
     {
-        _collections = collections; _permissions = permissions; _audit = audit;
-        _notifier = notifier; _shiftGate = shiftGate;
+        _collections = collections; _treasury = treasury; _partners = partners;
+        _permissions = permissions; _audit = audit; _notifier = notifier;
+        _shiftGate = shiftGate;
     }
 
     /// <summary>
@@ -37,6 +41,62 @@ public sealed class BookingCollectionService
         if (_shiftGate is null) return true;
         return await _shiftGate.HasOpenShiftAsync(actor.UserId, branchId,
             actor.AllowedBranchIds, ct);
+    }
+
+    /// <summary>
+    /// هل يمكن أخذ دفعة مقدمة بلا خدمة محجوزة؟ فقط داخل شفت دكتور خارجي
+    /// والعميل المختار هو العميل المربوط بالشفت — 0112.
+    /// </summary>
+    public async Task<bool> CanTakeAdvanceAsync(ActorContext actor, Guid branchId,
+        Guid customerId, CancellationToken ct = default)
+    {
+        if (!await _permissions.HasAsync(actor, ScreenCodes.PosTerminal, ActionCodes.Collect, ct))
+            return false;
+        if (!actor.CanAccessBranch(branchId) || customerId == Guid.Empty) return false;
+        var shift = await _treasury.GetOpenShiftAsync(branchId, ct);
+        return shift is { IsExternalDoctor: true } &&
+               shift.ExternalDoctorCustomerId == customerId;
+    }
+
+    /// <summary>إنشاء سند قبض دفعة مقدمة (Customer advances) داخل شفت الدكتور الخارجي.</summary>
+    public async Task<Guid> CollectAdvanceAsync(ActorContext actor, AdvancePaymentInput input,
+        CancellationToken ct = default)
+    {
+        await _permissions.RequireAsync(actor, ScreenCodes.PosTerminal, ActionCodes.Collect,
+            ct: ct);
+        BranchScope.Ensure(actor, input.BranchId);
+        if (input.Amount <= 0) throw new ValidationAppException("validation.voucher_amount");
+        var shift = await _treasury.GetOpenShiftAsync(input.BranchId, ct);
+        if (shift is not { IsExternalDoctor: true } ||
+            shift.ExternalDoctorCustomerId != input.CustomerId)
+            throw new ValidationAppException("validation.external_doctor_advance_not_allowed");
+        if (input.TreasuryId == Guid.Empty || input.TreasuryMethodId == Guid.Empty)
+            throw new ValidationAppException("validation.required_fields");
+        var customer = (await _partners.GetAsync(PartnerKind.Customer, input.CustomerId, ct))
+                       ?? throw new ValidationAppException("validation.customer_not_found");
+
+        var voucherId = Guid.CreateVersion7();
+        try
+        {
+            await _treasury.CreateVoucherAsync(voucherId, new VoucherInput
+            {
+                VoucherType = VoucherTypes.Receipt, BranchId = input.BranchId,
+                DocDate = DateTime.Today, PartyType = "C", PartyId = input.CustomerId,
+                PartyName = customer.NameAr, TreasuryId = input.TreasuryId,
+                Notes = string.IsNullOrWhiteSpace(input.Notes)
+                    ? "دفعة مقدمة — شفت دكتور خارجى" : input.Notes.Trim(),
+                Lines =
+                {
+                    new VoucherLineInput
+                    { TreasuryMethodId = input.TreasuryMethodId, Amount = input.Amount }
+                }
+            }, actor.UserId, ct);
+            await _treasury.SetVoucherShiftAsync(voucherId, shift.Id, ct);
+        }
+        catch (PostgresException ex) { throw DbErrorMapper.Map(ex); }
+        await _audit.WriteAsync(actor, "vouchers", voucherId.ToString(), "INSERT", null,
+            new { input.CustomerId, input.Amount, ShiftId = shift.Id }, ct);
+        return voucherId;
     }
 
     public async Task<IReadOnlyList<BookingCollectionRow>> ListOutstandingAsync(

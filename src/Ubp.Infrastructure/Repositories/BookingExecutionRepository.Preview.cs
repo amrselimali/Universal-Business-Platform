@@ -11,6 +11,9 @@ public interface IBookingExecutionRepository
         CancellationToken ct = default);
     Task<BookingExecutionResult> ExecuteAsync(BookingExecutionInput input, Guid userId,
         bool allowNegative, CancellationToken ct = default);
+    /// <summary>ترحيل تنفيذات الشفت المسودة (الأصلي/العكسي/المعدّل) مع الشفت.</summary>
+    Task<int> PostDraftsForShiftAsync(Guid shiftId, Guid userId, bool allowNegative,
+        CancellationToken ct = default);
 }
 
 public sealed partial class BookingExecutionRepository : IBookingExecutionRepository

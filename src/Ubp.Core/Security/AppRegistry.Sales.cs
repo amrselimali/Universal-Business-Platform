@@ -12,8 +12,8 @@ public static partial class AppRegistry
     private static IReadOnlyList<ScreenDefinition> SalesExtraScreens => new List<ScreenDefinition>
     {
         new(Reservations, "/sales/reservations", "BookmarkAdded", "screen.reservations", GroupSales,
-            new[] { SA(View), SA(Execute), SA(ReleaseReservation), SA(ExtendReservation),
-                    SA(SettleAccount), SA(ExportCsv), SA(Print) }),
+            new[] { SA(View), SA(Execute), SA(EditExecuted), SA(ReleaseReservation),
+                    SA(ExtendReservation), SA(SettleAccount), SA(ExportCsv), SA(Print) }),
 
 
         // نقطة البيع وإيصالاتها (نُقلت هنا للحفاظ على سقف 300 سطر في AppRegistry.cs).
@@ -22,6 +22,6 @@ public static partial class AppRegistry
                     SA(CompleteCollection), SA(TransferService) }, "pos.terminal"),
 
         new(PosReceipts, "/pos/receipts", "ReceiptLong", "screen.pos_receipts", GroupSales,
-            new[] { SA(View), SA(Print) }, "pos.receipts")
+            new[] { SA(View), SA(Print), SA(EditReceipt) }, "pos.receipts")
     };
 }

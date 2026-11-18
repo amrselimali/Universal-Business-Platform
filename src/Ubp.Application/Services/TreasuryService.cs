@@ -17,14 +17,17 @@ public sealed partial class TreasuryService
     private readonly AuditService _audit;
     private readonly IDisplayFormatter _formatter;
     private readonly PurchaseReturnService _purchaseReturns;
+    private readonly IBookingExecutionRepository _executions;
+    private readonly ISettingsService _settings;
 
     public TreasuryService(ITreasuryRepository treasury, IAccountRepository accounts,
         IPartnerRepository partners, PermissionService permissions, AuditService audit,
-        IDisplayFormatter formatter, PurchaseReturnService purchaseReturns)
+        IDisplayFormatter formatter, PurchaseReturnService purchaseReturns,
+        IBookingExecutionRepository executions, ISettingsService settings)
     {
         _treasury = treasury; _accounts = accounts; _partners = partners;
         _permissions = permissions; _audit = audit; _formatter = formatter;
-        _purchaseReturns = purchaseReturns;
+        _purchaseReturns = purchaseReturns; _executions = executions; _settings = settings;
     }
 
     private static bool IsTreasuryType(string value) =>

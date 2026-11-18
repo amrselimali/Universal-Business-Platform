@@ -60,9 +60,9 @@ else
                     <MudIconButton Icon="@Icons.Material.Filled.Send" Size="Size.Small"
                                    Title="@T.T("pos.send_whatsapp")" Color="Color.Success"
                                    OnClick="@(() => SendWhatsAppAsync(context))" />
-                    @if (_canEdit && context.IsDraft && !context.IsReversed &&
-                         context.ReceiptType != VoucherReceiptTypes.Reversal && context.ShiftOpen &&
-                         !context.IsSettlementReceipt)
+                    @if (_canEdit && !context.IsReversed &&
+                         context.ReceiptType != VoucherReceiptTypes.Reversal &&
+                         !context.IsSettlementReceipt && context.Status != "cancelled")
                     {
                         <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
                                        Title="تعديل الإيصال" Color="Color.Warning"
@@ -99,8 +99,8 @@ else
     {
         _branches = await Branches.OptionsAsync(Actor!);
         _branchId = Actor!.CurrentBranchId ?? _branches.FirstOrDefault()?.Id;
-        _canEdit = await Permissions.HasAsync(Actor!, ScreenCodes.PosTerminal,
-            ActionCodes.SaveDraft);
+        _canEdit = await Permissions.HasAsync(Actor!, ScreenCodes.PosReceipts,
+            ActionCodes.EditReceipt);
         await ReloadAsync();
     }
 

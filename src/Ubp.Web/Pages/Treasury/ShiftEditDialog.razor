@@ -10,11 +10,12 @@
     <DialogContent>
         <MudAlert Severity="Severity.Info" Dense="true" Class="mb-2">
             اضغط ✏️ بجانب السطر لتحويل خلاياه القابلة للتعديل إلى حقول ثم «حفظ». يعدّل المستند
-            الأصلي وكل آثاره. اليوزر العادي أثناء الشفت المفتوح، والمحاسب قبل الترحيل.
+            الأصلي وكل آثاره. الإيصالات تُعدّل بصلاحية مستقلة بعد الترحيل، والخدمات المنفذة
+            تُعكس وتُضاف كمستند معدّل يُرحَّل مع الشفت — دون اشتراط مسودة أو شفت مفتوح.
         </MudAlert>
         @if (_rows.Count == 0)
         {
-            <MudAlert Severity="Severity.Normal" Dense="true">لا توجد سطور مسودة قابلة للتعديل.</MudAlert>
+            <MudAlert Severity="Severity.Normal" Dense="true">لا توجد سطور قابلة للتعديل.</MudAlert>
         }
         else
         {
@@ -181,7 +182,8 @@
     private static string EntityLabel(string t) => t switch
     {
         "voucher" => "إيصال/سند", "operating_expense" => "مصروف", "commercial_document" => "مستند",
-        "booking" => "حجز", "service_transfer" => "تحويل خدمات", _ => t
+        "booking" => "حجز", "booking_execution" => "خدمة منفذة",
+        "service_transfer" => "تحويل خدمات", _ => t
     };
 
     private string? AccountName(Row r) =>

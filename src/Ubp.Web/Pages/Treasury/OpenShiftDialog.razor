@@ -57,6 +57,41 @@
                     }
                 </MudGrid>
             }
+
+            <MudDivider Class="my-4" />
+            <MudText Typo="Typo.subtitle2" Class="mb-2">نوع الشفت</MudText>
+            <div class="d-flex flex-wrap gap-4">
+                <MudSwitch T="bool" Value="_input.NormalShift" Label="شفت عادى"
+                           Color="Color.Primary" ValueChanged="OnNormalShiftChanged" />
+                <MudSwitch T="bool" Value="_input.ExternalDoctorShift" Label="شفت دكتور خارجى"
+                           Color="Color.Info" ValueChanged="OnExternalDoctorShiftChanged" />
+            </div>
+            @if (_input.NormalShift == _input.ExternalDoctorShift)
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2">
+                    يجب تفعيل خيار واحد فقط: شفت عادى أو شفت دكتور خارجى.
+                </MudAlert>
+            }
+            @if (_input.ExternalDoctorShift)
+            {
+                <MudSelect T="Guid?" Value="_input.ExternalDoctorCustomerId"
+                           Label="العميل المربوط بالشفت (دكتور خارجى)"
+                           Variant="Variant.Outlined" Required="true" Class="mt-2"
+                           ValueChanged="OnExternalDoctorChanged">
+                    @foreach (var doctor in _externalDoctors)
+                    {
+                        <MudSelectItem T="Guid?" Value="@((Guid?)doctor.Id)">
+                            @doctor.Code — @doctor.NameAr
+                        </MudSelectItem>
+                    }
+                </MudSelect>
+                @if (_externalDoctors.Count == 0)
+                {
+                    <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2">
+                        لا يوجد عملاء مربوطون بدكتور خارجى فى هذا الفرع. اربط العميل من شاشة العملاء أولاً.
+                    </MudAlert>
+                }
+            }
         }
         else
         {
@@ -85,6 +120,7 @@
     [Parameter] public Guid? DefaultBranchId { get; set; }
 
     [Inject] private TreasuryService Treasury { get; set; } = default!;
+    [Inject] private LookupService Lookup { get; set; } = default!;
     [Inject] private UserContext UserContext { get; set; } = default!;
     [Inject] private UiCulture T { get; set; } = default!;
     [Inject] private ISnackbar Snackbar { get; set; } = default!;
@@ -94,6 +130,7 @@
     private ShiftOpeningBalances? _balances;
     private Shift? _openShift;
     private bool _busy;
+    private IReadOnlyList<Partner> _externalDoctors = Array.Empty<Partner>();
 
     private string PendingReviewHint => _balances is null
         ? ""
@@ -101,6 +138,9 @@
 
     protected override async Task OnInitializedAsync()
     {
+        // كلا الخيارين غير مفعّل افتراضيًا؛ لا يُفتح الشفت إلا بتفعيل واحد فقط.
+        _input.NormalShift = false;
+        _input.ExternalDoctorShift = false;
         _input.BranchId = DefaultBranchId ?? Branches.FirstOrDefault()?.Id ?? Guid.Empty;
         await LoadAsync();
     }
@@ -116,6 +156,8 @@
             var actor = await UserContext.RequireAsync();
             _balances = await Treasury.GetOpeningBalancesAsync(actor, _input.BranchId);
             _openShift = await Treasury.GetOpenShiftAsync(actor, _input.BranchId);
+            _externalDoctors = await Lookup.ExternalDoctorsAsync(actor, _input.BranchId);
+            _input.ExternalDoctorCustomerId = null;
         }
         catch (AppException ex) { Snackbar.Add(T.T(ex.Code), Severity.Error); }
         finally { StateHasChanged(); }
@@ -127,6 +169,24 @@
         return LoadAsync();
     }
 
+    private void OnNormalShiftChanged(bool value)
+    {
+        _input.NormalShift = value;
+        if (value) _input.ExternalDoctorShift = false;
+        if (value) _input.ExternalDoctorCustomerId = null;
+        StateHasChanged();
+    }
+
+    private void OnExternalDoctorShiftChanged(bool value)
+    {
+        _input.ExternalDoctorShift = value;
+        if (value) _input.NormalShift = false;
+        if (!value) _input.ExternalDoctorCustomerId = null;
+        StateHasChanged();
+    }
+
+    private void OnExternalDoctorChanged(Guid? value) => _input.ExternalDoctorCustomerId = value;
+
     private void Cancel() => MudDialog.Cancel();
 
     private async Task SaveAsync()
@@ -135,6 +195,16 @@
         if (!_form.IsValid || _input.BranchId == Guid.Empty)
         {
             Snackbar.Add(T.T("validation.required_fields"), Severity.Warning);
+            return;
+        }
+        if (_input.NormalShift == _input.ExternalDoctorShift)
+        {
+            Snackbar.Add("يجب تفعيل خيار واحد فقط: شفت عادى أو شفت دكتور خارجى.", Severity.Warning);
+            return;
+        }
+        if (_input.ExternalDoctorShift && _input.ExternalDoctorCustomerId is null)
+        {
+            Snackbar.Add("اختر العميل المربوط بالشفت (دكتور خارجى).", Severity.Warning);
             return;
         }
 

@@ -38,6 +38,13 @@ public sealed partial class TreasuryRepository
         public string ReviewStatus { get; set; } = ShiftReviewStatuses.None;
         public bool AutoClosed { get; set; }
         public DateTimeOffset? ReviewedAt { get; set; }
+        public string ShiftType { get; set; } = ShiftTypes.Normal;
+        public Guid? ExternalDoctorCustomerId { get; set; }
+        public string? ExternalDoctorCustomerName { get; set; }
+        public Guid? SettlementVoucherId { get; set; }
+        public decimal SettlementAmount { get; set; }
+        public decimal SettlementTreasuryAmount { get; set; }
+        public string? SettlementMode { get; set; }
     }
 
     private const string ShiftSelect = """
@@ -53,6 +60,14 @@ public sealed partial class TreasuryRepository
                s.notes AS Notes, s.reopened_at AS ReopenedAt, s.reopen_reason AS ReopenReason,
                s.review_status AS ReviewStatus, s.auto_closed AS AutoClosed,
                s.reviewed_at AS ReviewedAt,
+               s.shift_type AS ShiftType,
+               s.external_doctor_customer_id AS ExternalDoctorCustomerId,
+               (SELECT c.name_ar FROM customers c
+                WHERE c.id = s.external_doctor_customer_id) AS ExternalDoctorCustomerName,
+               s.settlement_voucher_id AS SettlementVoucherId,
+               s.settlement_amount AS SettlementAmount,
+               s.settlement_treasury_amount AS SettlementTreasuryAmount,
+               s.settlement_mode AS SettlementMode,
                COALESCE((SELECT SUM(CASE WHEN EXISTS (
                              SELECT 1 FROM customer_account_settlements bs WHERE bs.voucher_id = v.id)
                          THEN -v.total_amount ELSE v.total_amount END)
@@ -80,6 +95,12 @@ public sealed partial class TreasuryRepository
         await using var connection = await _factory.OpenAsync(ct);
         await using var tx = await connection.BeginTransactionAsync(ct);
 
+        if (input.NormalShift == input.ExternalDoctorShift)
+            throw new ValidationAppException("validation.shift_type_required");
+        if (input.ExternalDoctorShift && input.ExternalDoctorCustomerId is null)
+            throw new ValidationAppException("validation.external_doctor_customer_required");
+        var shiftType = input.ExternalDoctorShift ? ShiftTypes.ExternalDoctor : ShiftTypes.Normal;
+
         var branchExists = await connection.ExecuteScalarAsync<bool>(new CommandDefinition(
             "SELECT EXISTS (SELECT 1 FROM branches WHERE id = @branchId AND is_active)",
             new { branchId = input.BranchId }, tx, cancellationToken: ct));
@@ -103,14 +124,16 @@ public sealed partial class TreasuryRepository
         {
             await connection.ExecuteAsync(new CommandDefinition("""
                 INSERT INTO cashier_shifts (id, branch_id, user_id, code, opened_at, opening_cash,
-                    carried_balance, review_balance, meter_balance, status, notes, created_by)
+                    carried_balance, review_balance, meter_balance, status, notes, created_by,
+                    shift_type, external_doctor_customer_id)
                 VALUES (@id, @BranchId, @userId, @code, now(), @openingCash, @carried, @review,
-                        @meter, 'open', @Notes, @userId)
+                        @meter, 'open', @Notes, @userId, @shiftType, @ExternalDoctorCustomerId)
                 """, new
             {
                 id, input.BranchId, userId, code, openingCash = balances.OpeningCash,
                 carried = balances.CarriedFromAccounts, review = balances.PendingReview,
-                meter = balances.MeterBalance, input.Notes
+                meter = balances.MeterBalance, input.Notes, shiftType,
+                input.ExternalDoctorCustomerId
             }, tx, cancellationToken: ct));
         }
         catch (PostgresException ex) when (ex.ConstraintName == "ux_shift_open")
@@ -202,7 +225,11 @@ public sealed partial class TreasuryRepository
         ReceiptsTotal = row.ReceiptsTotal, TreasuryBalance = row.TreasuryBalance,
         Status = row.Status, Notes = row.Notes, ReopenedAt = row.ReopenedAt,
         ReopenReason = row.ReopenReason, ReviewStatus = row.ReviewStatus,
-        AutoClosed = row.AutoClosed, ReviewedAt = row.ReviewedAt
+        AutoClosed = row.AutoClosed, ReviewedAt = row.ReviewedAt,
+        ShiftType = row.ShiftType, ExternalDoctorCustomerId = row.ExternalDoctorCustomerId,
+        ExternalDoctorCustomerName = row.ExternalDoctorCustomerName,
+        SettlementVoucherId = row.SettlementVoucherId, SettlementAmount = row.SettlementAmount,
+        SettlementTreasuryAmount = row.SettlementTreasuryAmount, SettlementMode = row.SettlementMode
     };
 
     public async Task<IReadOnlyList<Shift>> ListShiftsAsync(Guid? branchId, DateTime? from,

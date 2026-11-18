@@ -22,6 +22,7 @@ public sealed partial class TreasuryRepository
         public string? PartyName { get; set; }
         public decimal TotalAmount { get; set; }
         public decimal FeeTotal { get; set; }
+        public string ReceiptType { get; set; } = VoucherReceiptTypes.Original;
         public Guid? JournalEntryId { get; set; }
     }
 
@@ -58,10 +59,19 @@ public sealed partial class TreasuryRepository
         var ids = await connection.QueryAsync<Guid>(new CommandDefinition("""
             SELECT id FROM vouchers
             WHERE voucher_type = 'receipt' AND status = 'draft' AND shift_id = @shiftId
-              AND receipt_type <> 'REVERSAL'
-            ORDER BY created_at, id
+            ORDER BY CASE WHEN receipt_type = 'REVERSAL' THEN 0 ELSE 1 END, created_at, id
             """, new { shiftId }, cancellationToken: ct));
         return ids.ToList();
+    }
+
+    public async Task SetVoucherShiftAsync(Guid voucherId, Guid shiftId,
+        CancellationToken ct = default)
+    {
+        await using var connection = await _factory.OpenAsync(ct);
+        await connection.ExecuteAsync(new CommandDefinition("""
+            UPDATE vouchers SET shift_id = @shiftId
+            WHERE id = @voucherId AND status = 'draft' AND shift_id IS NULL
+            """, new { voucherId, shiftId }, cancellationToken: ct));
     }
 
     public async Task<Guid> PostVoucherAsync(Guid id, Guid userId, CancellationToken ct = default)
@@ -74,6 +84,7 @@ public sealed partial class TreasuryRepository
                    doc_date AS DocDate, status AS Status, doc_no AS DocNo, treasury_id AS TreasuryId,
                    to_treasury_id AS ToTreasuryId, party_type::text AS PartyType, party_id AS PartyId,
                    party_name AS PartyName, total_amount AS TotalAmount, fee_total AS FeeTotal,
+                   receipt_type AS ReceiptType,
                    journal_entry_id AS JournalEntryId
             FROM vouchers WHERE id = @id FOR UPDATE
             """, new { id }, tx, cancellationToken: ct)) ?? throw new NotFoundAppException();
@@ -182,6 +193,17 @@ public sealed partial class TreasuryRepository
 
         switch (head.VoucherType)
         {
+            // الإيصال العكسي يُرحّل بمدين/دائن معكوسين بقيم موجبة (وليس بمبالغ سالبة).
+            case VoucherTypes.Receipt when head.ReceiptType == VoucherReceiptTypes.Reversal:
+                Add(need(PostingKeys.CustomerAdvances), Math.Abs(head.TotalAmount), 0,
+                    asCustomer: true);
+                foreach (var line in lines)
+                    Add(line.ClearingAccountId ?? source.AccountId, 0,
+                        Math.Abs(line.Amount - line.FeeAmount));
+                if (head.FeeTotal != 0)
+                    Add(need(PostingKeys.PaymentFees), 0, Math.Abs(head.FeeTotal));
+                break;
+
             case VoucherTypes.Receipt:
                 foreach (var line in lines)
                     Add(line.ClearingAccountId ?? source.AccountId, line.Amount - line.FeeAmount, 0);

@@ -24,7 +24,9 @@ public sealed partial class ShiftEditRepository
         await using var connection = await _factory.OpenAsync(ct);
         await using var tx = await connection.BeginTransactionAsync(ct);
         var s = await LoadShiftAsync(connection, input.ShiftId, tx, ct);
-        if (s.Status != ShiftStatuses.Open && s.ReviewStatus != ShiftReviewStatuses.Pending)
+        // تعديل خدمة منفذة يعمل بصلاحية مستقلة ولا يشترط أن يكون الشفت مفتوحًا أو الخدمة مسودة.
+        if (input.EntityType != "booking_execution" &&
+            s.Status != ShiftStatuses.Open && s.ReviewStatus != ShiftReviewStatuses.Pending)
             throw new ValidationAppException("validation.shift_edit_locked");
 
         var applied = input.EntityType switch
@@ -33,6 +35,7 @@ public sealed partial class ShiftEditRepository
             "operating_expense" => await ApplyExpenseAsync(connection, tx, input, userId, ct),
             "commercial_document" => await ApplyCommercialAsync(connection, tx, input, ct),
             "booking" => await ApplyBookingAsync(connection, tx, input, ct),
+            "booking_execution" => await ApplyExecutionAsync(connection, tx, input, userId, ct),
             "service_transfer" => await ApplyTransferAsync(connection, tx, input, ct),
             _ => throw new ValidationAppException("validation.review_field_not_editable")
         };

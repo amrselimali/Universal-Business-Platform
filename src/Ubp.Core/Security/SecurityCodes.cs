@@ -90,6 +90,8 @@ public static class ActionCodes
     public const string Create = "CREATE";
     /// <summary>صلاحية مستقلة: إضافة الأرصدة الافتتاحية للعملاء — 0104.</summary>
     public const string AddOpeningBalances = "ADD_OPENING_BALANCES";
+    /// <summary>تعديل جزئي لبيانات اتصال العميل (الهاتف/واتساب) دون صلاحية التعديل الكاملة.</summary>
+    public const string EditContact = "EDIT_CONTACT";
     public const string Edit = "EDIT";
     public const string Delete = "DELETE";
     public const string ToggleActive = "TOGGLE_ACTIVE";
@@ -122,6 +124,10 @@ public static class ActionCodes
     public const string Copy = "COPY";
     public const string CancelEntry = "CANCEL";
     public const string SaveDraft = "SAVE_DRAFT";
+    /// <summary>تعديل إيصال قبض بعد الترحيل أو بعد إغلاق الشفت — صلاحية مستقلة عن حفظ المسودة.</summary>
+    public const string EditReceipt = "EDIT_RECEIPT";
+    /// <summary>تعديل خدمة منفذة (عكس + إيصال تنفيذ معدّل) — صلاحية مستقلة عن التنفيذ.</summary>
+    public const string EditExecuted = "EDIT_EXECUTED";
     public const string AddLine = "ADD_LINE";
     public const string DeleteLine = "DELETE_LINE";
     public const string AutoBalance = "AUTO_BALANCE";

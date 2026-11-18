@@ -44,7 +44,8 @@ public sealed partial class TreasuryRepository
                           JOIN items i ON i.id = bl.item_id
                           WHERE bp.voucher_id = v.id)) AS ItemName,
                        0::numeric AS UnitPrice,
-                       CASE WHEN EXISTS (SELECT 1 FROM customer_account_settlements bs
+                       CASE WHEN v.is_shift_settlement THEN 'تسوية دكتور خارجى'::varchar
+                            WHEN EXISTS (SELECT 1 FROM customer_account_settlements bs
                                          WHERE bs.voucher_id = v.id)
                             THEN 'تسوية حساب عميل'::varchar
                             ELSE 'تحصيل/قبض'::varchar END AS Source,
@@ -68,12 +69,12 @@ public sealed partial class TreasuryRepository
             ), executions AS (
                 SELECT c.name_ar AS CustomerName, NULL::varchar AS TreasuryType,
                        0::numeric AS Collected,
-                       -- إيراد التنفيذ = صافي سطر الحجز بنسبة الكمية المنفَّذة (الهدية بلا إيراد).
+                       -- إيراد التنفيذ المحفوظ على السطر (سالب للعكس)، والهدية بلا إيراد.
                        CASE WHEN bl.operation_type = 'gift' THEN 0::numeric
-                            ELSE ROUND(bl.net_amount * el.quantity /
-                                       NULLIF(bl.quantity, 0), 2) END AS Revenue,
+                            ELSE el.net_amount END AS Revenue,
                        el.quantity AS Quantity, el.meter_units AS MeterUnits,
-                       exe.name_ar AS EmployeeName, i.name_ar AS ItemName, bl.unit_price AS UnitPrice,
+                       exe.name_ar AS EmployeeName, i.name_ar AS ItemName,
+                       el.unit_price AS UnitPrice,
                        CASE WHEN bl.operation_type = 'treatment' THEN 'خدمة علاجية'
                             WHEN bl.operation_type = 'gift' THEN 'جلسة هدية'
                             ELSE 'تنفيذ خدمة محجوزة' END AS Source,
@@ -89,7 +90,7 @@ public sealed partial class TreasuryRepository
                 LEFT JOIN employees exe ON exe.id = el.employee_id
                 -- متسبب الشكوى: الموظف المسجّل على بند الحجز عند تسجيل الخدمة العلاجية.
                 LEFT JOIN employees cause ON cause.id = bl.employee_id
-                WHERE be.branch_id = @branchId AND be.status = 'posted'
+                WHERE be.branch_id = @branchId AND be.status IN ('draft', 'posted')
                   AND be.created_at >= @openedAt
                   AND (@until::timestamptz IS NULL OR be.created_at <= @until::timestamptz)
             ), transfers AS (
@@ -137,12 +138,26 @@ public sealed partial class TreasuryRepository
                   AND s.created_at >= @openedAt
                   AND (@until::timestamptz IS NULL OR s.created_at <= @until::timestamptz)
                 GROUP BY c.name_ar
+            ), doctor_refunds AS (
+                -- تسوية دكتور خارجي سالبة: تُعرض كتحصيل سالب حتى يتساوى الإيراد والتحصيل.
+                SELECT v.party_name AS CustomerName, NULL::varchar AS TreasuryType,
+                       (-v.total_amount) AS Collected, 0::numeric AS Revenue,
+                       0::numeric AS Quantity, 0::numeric AS MeterUnits,
+                       NULL::text AS EmployeeName, NULL::text AS ItemName,
+                       0::numeric AS UnitPrice, 'تسوية دكتور خارجى'::varchar AS Source,
+                       NULL::text AS ComplaintEmployeeName
+                FROM vouchers v
+                WHERE v.branch_id = @branchId AND v.voucher_type = 'payment'
+                  AND v.is_shift_settlement AND v.status <> 'cancelled'
+                  AND v.created_at >= @openedAt
+                  AND (@until::timestamptz IS NULL OR v.created_at <= @until::timestamptz)
             )
             SELECT * FROM receipts
             UNION ALL SELECT * FROM revenues
             UNION ALL SELECT * FROM executions
             UNION ALL SELECT * FROM transfers
             UNION ALL SELECT * FROM settlements
+            UNION ALL SELECT * FROM doctor_refunds
             ORDER BY CustomerName
             """, args, cancellationToken: ct))).ToList();
 
@@ -253,7 +268,7 @@ public sealed partial class TreasuryRepository
                 SELECT SUM(el.meter_units) AS consumed
                 FROM booking_execution_lines el
                 JOIN booking_executions be ON be.id = el.execution_id
-                WHERE el.metered_asset_id = fa.id AND be.status = 'posted'
+                WHERE el.metered_asset_id = fa.id AND be.status IN ('draft', 'posted')
                   AND be.created_at >= @openedAt
                   AND (@until::timestamptz IS NULL OR be.created_at <= @until::timestamptz)
             ) cons ON true
@@ -320,6 +335,7 @@ public sealed partial class TreasuryRepository
             JOIN treasuries t ON t.id = v.treasury_id
             WHERE v.branch_id = @branchId AND v.voucher_type = 'receipt'
               AND v.status <> 'cancelled'
+              AND NOT v.is_shift_settlement
               AND NOT EXISTS (SELECT 1 FROM customer_account_settlements bs WHERE bs.voucher_id = v.id)
               AND v.created_at >= @openedAt
               AND (@until::timestamptz IS NULL OR v.created_at <= @until::timestamptz)

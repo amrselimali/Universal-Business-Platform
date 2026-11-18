@@ -105,6 +105,14 @@ else
                                 @T.T("pos.collect_services")
                             </MudButton>
                         }
+                        @if (_advanceAllowed && Can(ActionCodes.Collect))
+                        {
+                            <MudButton Variant="Variant.Filled" Color="Color.Info" Size="Size.Small"
+                                       StartIcon="@Icons.Material.Filled.AccountBalanceWallet"
+                                       OnClick="OpenAdvanceAsync" Disabled="@_busy">
+                                دفعة مقدمة
+                            </MudButton>
+                        }
                         @if (Can(ActionCodes.TransferService))
                         {
                             <MudButton Variant="Variant.Outlined" Color="Color.Secondary" Size="Size.Small"

@@ -1,0 +1,107 @@
+@using TreasuryModel = Ubp.Core.Models.Treasury
+@using Ubp.Core.Results
+@inject BookingCollectionService Collections
+@inject LookupService Lookup
+@inject UserContext UserContext
+@inject UiCulture T
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <TitleContent><MudText Typo="Typo.h6">دفعة مقدمة — @CustomerName</MudText></TitleContent>
+    <DialogContent>
+        <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
+            دفعة مقدمة بلا خدمة محجوزة داخل شفت الدكتور الخارجى (تُرَحَّل ضمن دفعات العملاء المقدمة).
+        </MudAlert>
+        <div class="ubp-form-grid">
+            <MudNumericField T="decimal" @bind-Value="_amount" Label="مبلغ الدفعة"
+                             Min="0.01m" Format="N2" Variant="Variant.Outlined" />
+            <MudSelect T="Guid?" Value="_treasuryId" Label="الخزينة"
+                       Variant="Variant.Outlined" ValueChanged="OnTreasuryChanged">
+                @foreach (var treasury in Treasuries)
+                {
+                    <MudSelectItem T="Guid?" Value="@((Guid?)treasury.Id)">
+                        @treasury.Code — @treasury.NameAr
+                    </MudSelectItem>
+                }
+            </MudSelect>
+            <MudSelect T="Guid" @bind-Value="_methodId" Label="طريقة الدفع"
+                       Variant="Variant.Outlined">
+                @foreach (var method in _methods)
+                {
+                    <MudSelectItem T="Guid" Value="@method.Id">@method.Code — @method.NameAr</MudSelectItem>
+                }
+            </MudSelect>
+            <MudTextField @bind-Value="_notes" Label="ملاحظات" Variant="Variant.Outlined"
+                          MaxLength="500" Class="ubp-span-2" />
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel" Disabled="_busy">@T.T("common.cancel")</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync"
+                   Disabled="@(_busy || _amount <= 0 || _treasuryId is null || _methodId == Guid.Empty)">
+            @T.T("common.save")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public Guid BranchId { get; set; }
+    [Parameter] public Guid CustomerId { get; set; }
+    [Parameter] public string? CustomerName { get; set; }
+    [Parameter] public IReadOnlyList<TreasuryModel> Treasuries { get; set; } =
+        Array.Empty<TreasuryModel>();
+
+    private decimal _amount;
+    private Guid? _treasuryId;
+    private Guid _methodId;
+    private string? _notes;
+    private IReadOnlyList<TreasuryMethod> _methods = Array.Empty<TreasuryMethod>();
+    private bool _busy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _treasuryId = Treasuries.FirstOrDefault()?.Id;
+        await LoadMethodsAsync();
+    }
+
+    private async Task OnTreasuryChanged(Guid? treasuryId)
+    {
+        _treasuryId = treasuryId;
+        await LoadMethodsAsync();
+    }
+
+    private async Task LoadMethodsAsync()
+    {
+        var actor = await UserContext.GetAsync();
+        if (actor is null || _treasuryId is null)
+        {
+            _methods = Array.Empty<TreasuryMethod>();
+            _methodId = Guid.Empty;
+            return;
+        }
+        _methods = (await Lookup.TreasuryMethodsAsync(actor, BranchId))
+            .Where(m => m.TreasuryId == _treasuryId).ToList();
+        _methodId = _methods.FirstOrDefault()?.Id ?? Guid.Empty;
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private async Task SaveAsync()
+    {
+        if (_treasuryId is null || _methodId == Guid.Empty || _amount <= 0) return;
+        _busy = true;
+        try
+        {
+            var actor = await UserContext.RequireAsync();
+            var voucherId = await Collections.CollectAdvanceAsync(actor, new AdvancePaymentInput
+            {
+                BranchId = BranchId, CustomerId = CustomerId, TreasuryId = _treasuryId.Value,
+                TreasuryMethodId = _methodId, Amount = _amount, Notes = _notes
+            });
+            MudDialog.Close(DialogResult.Ok(voucherId));
+        }
+        catch (AppException ex) { Snackbar.Add(T.T(ex.Code), Severity.Error); }
+        finally { _busy = false; }
+    }
+}

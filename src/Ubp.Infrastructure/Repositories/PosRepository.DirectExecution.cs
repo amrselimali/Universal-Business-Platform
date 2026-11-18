@@ -106,9 +106,12 @@ public sealed partial class PosRepository
 
         await connection.ExecuteAsync(new CommandDefinition("""
             INSERT INTO booking_executions
-                (id, branch_id, doc_no, execution_date, booking_id, status, stock_document_id,
-                 journal_entry_id, notes, created_by)
-            VALUES (@id, @branchId, @docNo, @date, @bookingId, 'posted',
+                (id, branch_id, doc_no, execution_date, booking_id, status, execution_type,
+                 shift_id, stock_document_id, journal_entry_id, notes, created_by)
+            VALUES (@id, @branchId, @docNo, @date, @bookingId, 'posted', 'ORIGINAL',
+                    (SELECT id FROM cashier_shifts
+                     WHERE branch_id = @branchId AND status = 'open'
+                     ORDER BY opened_at DESC LIMIT 1),
                     (SELECT document_id FROM stock_document_lines WHERE id = @stockLineId),
                     @journalEntryId, 'تنفيذ مباشر من نقطة البيع', @userId)
             """, new
@@ -120,16 +123,21 @@ public sealed partial class PosRepository
 
         await connection.ExecuteAsync(new CommandDefinition("""
             INSERT INTO booking_execution_lines
-                (id, execution_id, booking_line_id, item_id, unit_id, quantity, unit_cost,
-                 cost_total, stock_document_line_id, employee_id)
-            VALUES (@id, @executionId, @bookingLineId, @itemId, @unitId, @quantity, @unitCost,
-                    @cost, @stockLineId, @employeeId)
+                (id, execution_id, booking_line_id, item_id, unit_id, warehouse_id, quantity,
+                 unit_cost, cost_total, stock_document_line_id, employee_id, unit_price,
+                 net_amount, tax_amount, total_amount)
+            VALUES (@id, @executionId, @bookingLineId, @itemId, @unitId, @warehouseId, @quantity,
+                    @unitCost, @cost, @stockLineId, @employeeId, @unitPrice, @net, @tax, @total)
             """, new
         {
             id = executionLineId, executionId, bookingLineId = line.BookingLineId,
-            itemId = line.ItemId, unitId = line.UnitId, quantity = line.Quantity,
+            itemId = line.ItemId, unitId = line.UnitId,
+            warehouseId = stockWarehouseId == Guid.Empty ? (Guid?)null : stockWarehouseId,
+            quantity = line.Quantity,
             unitCost = line.Quantity == 0 ? 0 : Math.Round(cost / line.Quantity, 6), cost,
-            stockLineId = stockDocumentLineId, employeeId = line.EmployeeId
+            stockLineId = stockDocumentLineId, employeeId = line.EmployeeId,
+            unitPrice = line.UnitPrice, net = line.NetAmount, tax = line.TaxAmount,
+            total = line.TotalAmount
         }, tx, cancellationToken: ct));
 
         await connection.ExecuteAsync(new CommandDefinition("""

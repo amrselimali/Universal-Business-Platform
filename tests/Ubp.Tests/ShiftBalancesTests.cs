@@ -126,7 +126,7 @@ public sealed class ShiftBalancesTests : IClassFixture<TestDb>
         // حساب زيادة/عجز مخصص للخزينة (بديل الافتراضي 5490) = حساب مصاريف التحصيل 5200.
         await service.SetTreasuryOverShortAccountAsync(actor, f.TreasuryId, f.Chart["5200"].Id);
 
-        var shift = await service.OpenShiftAsync(actor, new ShiftInput { BranchId = f.Branch });
+        var shift = await service.OpenShiftAsync(actor, new ShiftInput { NormalShift = true, BranchId = f.Branch });
         await PostReceiptAsync(f, 100);
         await service.CloseShiftAsync(actor, shift.Id, new List<ShiftCashCountInput>
         { new() { TreasuryId = f.TreasuryId, CountedCash = 90 } });
@@ -153,7 +153,7 @@ public sealed class ShiftBalancesTests : IClassFixture<TestDb>
         var admin = await _db.AdminActorAsync();
         var f = await SetupAsync("9");
         await _db.TreasuryRepo.OpenShiftAsync(Guid.CreateVersion7(),
-            new ShiftInput { BranchId = f.Branch }, admin.UserId);
+            new ShiftInput { NormalShift = true, BranchId = f.Branch }, admin.UserId);
 
         // شفت الفرع تكفي أي مستخدم فيه، وشفت المستخدم نفسه تكفيه في أي فرع.
         Assert.True(await _db.TreasuryRepo.HasOpenShiftAsync(Guid.NewGuid(), f.Branch,

@@ -46,6 +46,15 @@ public sealed class LookupService
             .ToList();
     }
 
+    /// <summary>عملاء مربوطون بدكتور خارجي في الفرع (لاختيار عميل شفت الدكتور الخارجي).</summary>
+    public async Task<IReadOnlyList<Partner>> ExternalDoctorsAsync(ActorContext actor,
+        Guid branchId, CancellationToken ct = default)
+    {
+        EnsureActor(actor);
+        BranchScope.Ensure(actor, branchId);
+        return await _partners.ListExternalDoctorsAsync(branchId, ct);
+    }
+
     /// <summary>أصناف للاختيار (حد أقصى آمن داخل المستودع)، مع فلتر تصنيف اختياري.</summary>
     public Task<IReadOnlyList<ItemOption>> ItemsAsync(ActorContext actor, string? search,
         int take = 50, bool sellableOnly = false, Guid? categoryId = null,

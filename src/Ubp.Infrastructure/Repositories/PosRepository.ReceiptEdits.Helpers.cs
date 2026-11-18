@@ -16,17 +16,20 @@ public sealed partial class PosRepository
                    v.party_id AS CustomerId, v.party_name AS PartyName,
                    v.treasury_id AS TreasuryId, v.total_amount AS TotalAmount,
                    v.fee_total AS FeeTotal, v.shift_id AS ShiftId, v.status AS Status,
-                   v.is_reversed AS IsReversed, v.receipt_type AS ReceiptType
+                   v.is_reversed AS IsReversed, v.receipt_type AS ReceiptType,
+                   COALESCE((SELECT s.review_status FROM cashier_shifts s
+                             WHERE s.id = v.shift_id), '') AS ShiftReviewStatus
             FROM vouchers v
             WHERE v.id = @id AND v.voucher_type = 'receipt' FOR UPDATE OF v
             """, new { id }, tx, cancellationToken: ct)) ?? throw new NotFoundAppException();
-        if (original.Status != VoucherStatuses.Draft || original.IsReversed ||
-            original.ReceiptType == VoucherReceiptTypes.Reversal || original.ShiftId is null)
+        // التعديل صار بصلاحية مستقلة: يقبل المسودة والمُرحّل، ولا يشترط بقاء شفت الأصل مفتوحًا.
+        if (original.Status is not (VoucherStatuses.Draft or VoucherStatuses.Posted) ||
+            original.IsReversed || original.ReceiptType == VoucherReceiptTypes.Reversal)
             throw new ValidationAppException("validation.receipt_not_editable");
-        var shiftOpen = await connection.ExecuteScalarAsync<bool>(new CommandDefinition(
-            "SELECT EXISTS (SELECT 1 FROM cashier_shifts WHERE id = @shiftId AND status = 'open')",
-            new { shiftId = original.ShiftId }, tx, cancellationToken: ct));
-        if (!shiftOpen) throw new ValidationAppException("validation.receipt_shift_closed");
+        var isSettlement = await connection.ExecuteScalarAsync<bool>(new CommandDefinition(
+            "SELECT EXISTS (SELECT 1 FROM customer_account_settlements WHERE voucher_id = @id)",
+            new { id }, tx, cancellationToken: ct));
+        if (isSettlement) throw new ValidationAppException("validation.receipt_not_editable");
         return original;
     }
 
@@ -40,20 +43,21 @@ public sealed partial class PosRepository
     private static Task InsertEditedVoucherAsync(NpgsqlConnection connection,
         NpgsqlTransaction tx, Guid voucherId, string docNo, ReceiptEditRow original,
         Guid customerId, string customerName, Guid treasuryId, decimal amount, decimal fee,
-        string receiptType, Guid parentId, Guid userId, string notes, CancellationToken ct) =>
+        string receiptType, Guid parentId, Guid? shiftId, string status, Guid userId,
+        string notes, CancellationToken ct) =>
         connection.ExecuteAsync(new CommandDefinition("""
             INSERT INTO vouchers
                 (id, branch_id, doc_date, doc_no, status, voucher_type, party_type, party_id,
                  party_name, treasury_id, total_amount, fee_total, receipt_type,
                  parent_receipt_id, shift_id, notes, created_by)
-            VALUES (@voucherId, @branchId, @docDate, @docNo, 'draft', 'receipt', 'C', @customerId,
-                    @customerName, @treasuryId, @amount, @fee, @receiptType, @parentId,
-                    @shiftId, @notes, @userId)
+            VALUES (@voucherId, @branchId, @docDate, @docNo, @status, 'receipt', 'C',
+                    @customerId, @customerName, @treasuryId, @amount, @fee, @receiptType,
+                    @parentId, @shiftId, @notes, @userId)
             """, new
         {
             voucherId, branchId = original.BranchId, docDate = original.DocDate.Date, docNo,
-            customerId, customerName, treasuryId, amount, fee, receiptType, parentId,
-            shiftId = original.ShiftId, notes, userId
+            status, customerId, customerName, treasuryId, amount, fee, receiptType, parentId,
+            shiftId, notes, userId
         }, tx, cancellationToken: ct));
 
     private static Task InsertEditedLineAsync(NpgsqlConnection connection,
@@ -73,7 +77,7 @@ public sealed partial class PosRepository
         var rows = (await connection.QueryAsync<(Guid BookingId, decimal Amount)>(
             new CommandDefinition("""
             SELECT booking_id AS BookingId, amount AS Amount
-            FROM booking_payments WHERE voucher_id = @voucherId ORDER BY created_at, booking_id
+            FROM booking_payments WHERE voucher_id = @voucherId ORDER BY paid_at, booking_id
             """, new { voucherId = originalId }, tx, cancellationToken: ct))).ToList();
         if (rows.Count == 0) return;
 
@@ -115,5 +119,6 @@ public sealed partial class PosRepository
         public string Status { get; set; } = "";
         public bool IsReversed { get; set; }
         public string ReceiptType { get; set; } = VoucherReceiptTypes.Original;
+        public string ShiftReviewStatus { get; set; } = "";
     }
 }

@@ -1,5 +1,20 @@
 namespace Ubp.Core.Models;
 
+public static class ExecutionTypes
+{
+    public const string Original = "ORIGINAL";
+    public const string Reversal = "REVERSAL";
+    public const string Adjusted = "ADJUSTED";
+}
+
+public static class ExecutionStatuses
+{
+    public const string Draft = "draft";
+    public const string Posted = "posted";
+    public const string Cancelled = "cancelled";
+    public const string Reversed = "reversed";
+}
+
 /// <summary>بيانات شاشة تنفيذ الحجز: قراءة فقط عدا الكمية ووحدات العدّاد.</summary>
 public sealed class BookingExecutionPreview
 {

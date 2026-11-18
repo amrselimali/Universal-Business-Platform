@@ -23,8 +23,7 @@ public sealed class ShiftEditTests : IClassFixture<TestDb>
         { Code = "SE-S-" + suffix, NameAr = "مورد تعديل الشفت " + suffix });
         await _db.AccountingSettings().SetDefaultAsync(actor, PostingKeys.SupplierPayable,
             chart["2100"].Id);
-        var shift = await _db.TreasuryService().OpenShiftAsync(actor, new ShiftInput
-        { BranchId = branch });
+        var shift = await _db.TreasuryService().OpenShiftAsync(actor, new ShiftInput { NormalShift = true, BranchId = branch });
 
         var expenseId = Guid.CreateVersion7();
         var lineId = Guid.CreateVersion7();

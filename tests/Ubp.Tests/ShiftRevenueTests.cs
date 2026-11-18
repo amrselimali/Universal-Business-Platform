@@ -84,7 +84,7 @@ public sealed class ShiftRevenueTests : IClassFixture<TestDb>
         var actor = await _db.AdminActorAsync();
         var f = await SetupAsync("1");
         var shifts = _db.TreasuryService();
-        var shift = await shifts.OpenShiftAsync(actor, new ShiftInput { BranchId = f.Branch });
+        var shift = await shifts.OpenShiftAsync(actor, new ShiftInput { NormalShift = true, BranchId = f.Branch });
 
         var receipt = await CheckoutAsync(f, 4, paid: 0);
         Assert.True(receipt.Executed);
@@ -100,7 +100,7 @@ public sealed class ShiftRevenueTests : IClassFixture<TestDb>
     {
         var actor = await _db.AdminActorAsync();
         var f = await SetupAsync("2");
-        await _db.TreasuryService().OpenShiftAsync(actor, new ShiftInput { BranchId = f.Branch });
+        await _db.TreasuryService().OpenShiftAsync(actor, new ShiftInput { NormalShift = true, BranchId = f.Branch });
         var receipt = await CheckoutAsync(f, 2, paid: 200);
         Assert.Single(receipt.Vouchers);
 

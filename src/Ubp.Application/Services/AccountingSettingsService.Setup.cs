@@ -112,6 +112,7 @@ public sealed partial class AccountingSettingsService
             [PostingKeys.RoundingDifference] = "5490",
             [PostingKeys.CustomerAdvances] = "1110",
             [PostingKeys.SupplierAdvances] = "2100",
+            [PostingKeys.ExternalDoctor] = "1110",
             [PostingKeys.PaymentFees] = "5200",
             [PostingKeys.CashOverShort] = "5490",
             [PostingKeys.InterBranchClearing] = "1130"

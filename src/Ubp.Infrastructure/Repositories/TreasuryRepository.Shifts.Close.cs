@@ -13,8 +13,8 @@ public sealed partial class TreasuryRepository
     /// ترحيل للحسابات؛ الترحيل يتم باعتماد المحاسب. counts = null يعني إغلاقاً آلياً.
     /// </summary>
     public async Task<Shift> CloseShiftAsync(Guid shiftId,
-        IReadOnlyList<ShiftCashCountInput>? counts, Guid userId, bool autoClosed,
-        CancellationToken ct = default)
+        IReadOnlyList<ShiftCashCountInput>? counts, ShiftSettlementInput? settlement,
+        Guid userId, bool autoClosed, CancellationToken ct = default)
     {
         if (counts is not null && counts.Any(c => c.CountedCash < 0))
             throw new ValidationAppException("validation.shift_counted_cash");
@@ -27,6 +27,10 @@ public sealed partial class TreasuryRepository
             cancellationToken: ct)) ?? throw new NotFoundAppException();
         if (shift.Status != ShiftStatuses.Open)
             throw new ValidationAppException("validation.shift_not_open");
+
+        // إنشاء تسوية الدكتور قبل حساب النقد المتوقع حتى يدخل الجزء المسدد من الخزينة في الحركة.
+        await CreateExternalDoctorSettlementAsync(connection, tx, shift, settlement, userId,
+            autoClosed, ct);
 
         var rows = (await QueryCashCountsAsync(connection, shiftId, tx, ct)).ToList();
         decimal totalExpected = 0, totalCounted = 0, totalVariance = 0;
@@ -95,6 +99,12 @@ public sealed partial class TreasuryRepository
         NpgsqlTransaction? tx, Guid treasuryId, DateTimeOffset openedAt, CancellationToken ct) =>
         await connection.ExecuteScalarAsync<decimal>(new CommandDefinition("""
             SELECT COALESCE(SUM(CASE
+                       WHEN v.treasury_id = @treasuryId AND v.is_shift_settlement
+                            AND v.voucher_type = 'receipt'
+                           THEN v.settlement_treasury_amount
+                       WHEN v.treasury_id = @treasuryId AND v.is_shift_settlement
+                            AND v.voucher_type = 'payment'
+                           THEN -v.settlement_treasury_amount
                        WHEN v.treasury_id = @treasuryId AND v.voucher_type = 'receipt'
                             AND EXISTS (SELECT 1 FROM customer_account_settlements bs
                                         WHERE bs.voucher_id = v.id)
@@ -200,6 +210,7 @@ public sealed partial class TreasuryRepository
             FROM vouchers v
             JOIN treasuries t ON t.id = v.treasury_id
             WHERE t.id = @treasuryId AND v.voucher_type = 'receipt' AND v.status <> 'cancelled'
+              AND NOT v.is_shift_settlement
               AND NOT EXISTS (SELECT 1 FROM customer_account_settlements bs WHERE bs.voucher_id = v.id)
               AND v.created_at >= @openedAt
               AND (@until::timestamptz IS NULL OR v.created_at <= @until::timestamptz)

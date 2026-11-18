@@ -50,7 +50,7 @@ public sealed class ShiftReportSummaryTests : IClassFixture<TestDb>
         }
 
         var shifts = _db.TreasuryService();
-        var shift = await shifts.OpenShiftAsync(actor, new ShiftInput { BranchId = branch });
+        var shift = await shifts.OpenShiftAsync(actor, new ShiftInput { NormalShift = true, BranchId = branch });
         var report = await shifts.GetShiftReportAsync(actor, shift.Id);
 
         // حجوزات الغد: المؤكد فقط (المُلغى مستبعد)، وغير المؤكد بجانبه (مسودة).
@@ -81,7 +81,7 @@ public sealed class ShiftReportSummaryTests : IClassFixture<TestDb>
         }, actor.UserId);
 
         var shifts = _db.TreasuryService();
-        var shift = await shifts.OpenShiftAsync(actor, new ShiftInput { BranchId = branch });
+        var shift = await shifts.OpenShiftAsync(actor, new ShiftInput { NormalShift = true, BranchId = branch });
 
         // يُحفظ فور الكتابة (بلا إغلاق الشفت) — 0095.
         await shifts.SaveCountedCashAsync(actor, shift.Id, treasuryId, 190);

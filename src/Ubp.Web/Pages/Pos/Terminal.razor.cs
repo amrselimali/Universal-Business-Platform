@@ -56,6 +56,7 @@ public partial class Terminal : SecurePageBase
     private Guid _branchId;
     private Guid _customerId;
     private string? _customerName;
+    private bool _advanceAllowed;
     /// <summary>رقم الإيصال المطبوع: رقم سند القبض الناتج (أو رقم الحجز كبديل).</summary>
     private string ReceiptNo =>
         _receipt?.Vouchers.FirstOrDefault(v => !string.IsNullOrWhiteSpace(v.VoucherNo))?.VoucherNo
@@ -210,7 +211,12 @@ public partial class Terminal : SecurePageBase
 
         // تحديث الخزائن (طرق الدفع) المكوَّدة في شاشة الخزائن عند اختيار العميل.
         if (_branchId != Guid.Empty)
+        {
             await LoadTreasuriesAsync();
+            _advanceAllowed = await Collections.CanTakeAdvanceAsync(Actor!, _branchId,
+                customerId);
+        }
+        else _advanceAllowed = false;
         StateHasChanged();
     }
 
@@ -229,6 +235,9 @@ public partial class Terminal : SecurePageBase
     {
         _branchId = value;
         _cart.Clear();
+        _customerId = Guid.Empty;
+        _customerName = null;
+        _advanceAllowed = false;
         await LoadBranchAsync();
         await SearchCustomersAsync();
         StateHasChanged();
@@ -307,6 +316,27 @@ public partial class Terminal : SecurePageBase
             .OrderByDescending(m => m.Code == "DEFAULT")
             .Select(m => m.Id)
             .FirstOrDefault();
+
+    private async Task OpenAdvanceAsync()
+    {
+        if (_customerId == Guid.Empty || _branchId == Guid.Empty) return;
+        if (_treasuries.Count == 0)
+        {
+            Snackbar.Add(T.T("pos.no_collection_methods"), Severity.Warning);
+            return;
+        }
+        var dialog = await Dialogs.ShowAsync<AdvancePaymentDialog>("دفعة مقدمة",
+            new DialogParameters
+            {
+                ["BranchId"] = _branchId, ["CustomerId"] = _customerId,
+                ["CustomerName"] = _customerName, ["Treasuries"] = _treasuries
+            });
+        if ((await dialog.Result) is { Canceled: false })
+        {
+            ShowSuccess("common.saved");
+            StateHasChanged();
+        }
+    }
 
     private async Task CollectBookingsAsync()
     {

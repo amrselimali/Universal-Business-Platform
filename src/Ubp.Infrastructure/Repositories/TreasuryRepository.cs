@@ -42,6 +42,8 @@ public partial interface ITreasuryRepository : IShiftGate
     Task<IReadOnlyList<Voucher>> ListVouchersAsync(Guid? branchId, string? voucherType, string? status,
         int limit, CancellationToken ct = default);
     Task<Guid> PostVoucherAsync(Guid id, Guid userId, CancellationToken ct = default);
+    /// <summary>ربط سند قبض مسودة بالشفت المفتوح (دفعة مقدمة دكتور خارجي) للترحيل مع الشفت.</summary>
+    Task SetVoucherShiftAsync(Guid voucherId, Guid shiftId, CancellationToken ct = default);
     Task<bool> DeleteVoucherAsync(Guid id, CancellationToken ct = default);
     Task<bool> CancelVoucherAsync(Guid id, CancellationToken ct = default);
     Task<IReadOnlyList<OpenDocument>> ListOpenDocumentsAsync(string partyType, Guid partyId,
@@ -54,7 +56,11 @@ public partial interface ITreasuryRepository : IShiftGate
     Task<Guid> OpenShiftAsync(Guid id, ShiftInput input, Guid userId, CancellationToken ct = default);
     /// <summary>إغلاق شفت الفرع بعدّ نقدية لكل خزينة (مسودة)؛ counts = null إغلاق آلي.</summary>
     Task<Shift> CloseShiftAsync(Guid shiftId, IReadOnlyList<ShiftCashCountInput>? counts,
-        Guid userId, bool autoClosed, CancellationToken ct = default);
+        ShiftSettlementInput? settlement, Guid userId, bool autoClosed,
+        CancellationToken ct = default);
+    /// <summary>معاينة تسوية شفت الدكتور الخارجي (إيرادات − تحصيلات).</summary>
+    Task<ExternalDoctorSettlementPreview> GetExternalDoctorSettlementAsync(Guid shiftId,
+        CancellationToken ct = default);
     /// <summary>عدّ النقدية المسجّل لكل خزينة في الشفت — 0076.</summary>
     Task<IReadOnlyList<ShiftCashCount>> ListCashCountsAsync(Guid shiftId,
         CancellationToken ct = default);

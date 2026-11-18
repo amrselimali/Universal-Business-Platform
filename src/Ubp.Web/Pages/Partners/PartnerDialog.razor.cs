@@ -79,9 +79,10 @@ public partial class PartnerDialog
         {
             Code = Model.Code, NameAr = Model.NameAr, NameEn = Model.NameEn,
             CategoryId = Model.CategoryId, ScopeType = Model.ScopeType, BranchId = Model.BranchId,
-            Phone = Model.Phone, Email = Model.Email, Address = Model.Address,
+            Phone = Model.Phone, Phone2 = Model.Phone2, WhatsAppPhone = Model.WhatsAppPhone,
+            Email = Model.Email, Address = Model.Address,
             TaxNumber = Model.TaxNumber, CreditLimit = Model.CreditLimit, Notes = Model.Notes,
-            IsActive = Model.IsActive
+            IsActive = Model.IsActive, IsExternalDoctor = Model.IsExternalDoctor
         };
         foreach (var pair in Model.CustomFields)
             _values[pair.Key] = pair.Value?.ToString();

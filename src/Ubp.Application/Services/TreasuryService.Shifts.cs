@@ -88,6 +88,23 @@ public sealed partial class TreasuryService
         if (input.BranchId == Guid.Empty)
             throw new ValidationAppException("validation.required_fields");
         BranchScope.Ensure(actor, input.BranchId);
+        if (input.NormalShift == input.ExternalDoctorShift)
+            throw new ValidationAppException("validation.shift_type_required");
+        if (input.ExternalDoctorShift)
+        {
+            if (input.ExternalDoctorCustomerId is not { } doctorId)
+                throw new ValidationAppException("validation.external_doctor_customer_required");
+            var doctor = await _partners.GetAsync(PartnerKind.Customer, doctorId, ct)
+                         ?? throw new ValidationAppException("validation.customer_not_found");
+            if (!doctor.IsActive || !doctor.IsExternalDoctor)
+                throw new ValidationAppException("validation.external_doctor_customer_required");
+            if (doctor.ScopeType == "BRANCH" && doctor.BranchId != input.BranchId)
+                throw new ValidationAppException("validation.customer_not_found");
+        }
+        else
+        {
+            input.ExternalDoctorCustomerId = null;
+        }
 
         var id = Guid.CreateVersion7();
         try
@@ -106,7 +123,8 @@ public sealed partial class TreasuryService
     /// countedCash = null يعني إغلاقاً آلياً (5 صباحاً) بمطابقة المتوقع.
     /// </summary>
     public async Task<Shift> CloseShiftAsync(ActorContext actor, Guid shiftId,
-        IReadOnlyList<ShiftCashCountInput>? counts = null, CancellationToken ct = default)
+        IReadOnlyList<ShiftCashCountInput>? counts = null,
+        ShiftSettlementInput? settlement = null, CancellationToken ct = default)
     {
         await _permissions.RequireAsync(actor, ScreenCodes.TreasuryShifts, ActionCodes.Close, ct: ct);
         var current = await _treasury.GetShiftAsync(shiftId, ct) ?? throw new NotFoundAppException();
@@ -115,7 +133,7 @@ public sealed partial class TreasuryService
         Shift shift;
         try
         {
-            shift = await _treasury.CloseShiftAsync(shiftId, counts, actor.UserId,
+            shift = await _treasury.CloseShiftAsync(shiftId, counts, settlement, actor.UserId,
                 autoClosed: false, ct);
         }
         catch (PostgresException ex) { throw DbErrorMapper.Map(ex); }
@@ -166,8 +184,9 @@ public sealed partial class TreasuryService
         {
             try
             {
-                await _treasury.CloseShiftAsync(shift.Id, counts: null, shift.UserId,
-                    autoClosed: true, ct);
+                await _treasury.CloseShiftAsync(shift.Id, counts: null,
+                    new ShiftSettlementInput { Mode = ShiftSettlementModes.Doctor },
+                    shift.UserId, autoClosed: true, ct);
                 closed++;
             }
             catch (AppException)

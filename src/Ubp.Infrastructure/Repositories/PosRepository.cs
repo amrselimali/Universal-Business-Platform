@@ -20,6 +20,9 @@ public interface IPosRepository
     Task<Voucher?> GetReceiptDetailAsync(Guid voucherId, CancellationToken ct = default);
     Task<Guid> EditDraftReceiptAsync(Guid id, ReceiptEditInput input, Guid userId,
         CancellationToken ct = default);
+    /// <summary>تعديل إيصال (مسودة أو مُرحّل) بإيصال عكسي + معدّل — صلاحية مستقلة.</summary>
+    Task<ReceiptEditResult> EditReceiptAsync(Guid id, ReceiptEditInput input, Guid userId,
+        CancellationToken ct = default);
 }
 
 /// <summary>

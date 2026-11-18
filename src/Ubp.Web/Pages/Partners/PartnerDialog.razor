@@ -57,6 +57,14 @@
                 <MudTextField @bind-Value="_input.Address" Label="@T.T("common.address")" Variant="Variant.Outlined" Class="ubp-span-2" />
                 <MudTextField @bind-Value="_input.Notes" Label="@T.T("common.notes")" Variant="Variant.Outlined" Lines="2" Class="ubp-span-2" />
                 <MudSwitch @bind-Value="_input.IsActive" Label="@T.T("common.active")" Color="Color.Success" />
+                @if (Kind == PartnerKind.Customer)
+                {
+                    <MudSwitch T="bool" @bind-Value="_input.IsExternalDoctor"
+                               Label="ربط بدكتور خارجى" Color="Color.Info" />
+                    <MudText Typo="Typo.caption" Class="ubp-muted ubp-span-2">
+                        عميل مربوط بدكتور خارجى: يظهر فى شفت الدكتور الخارجى ويقبل دفعة مقدمة.
+                    </MudText>
+                }
                 @if (Kind == PartnerKind.Customer && !IsEdit)
                 {
                     <MudSwitch T="bool" Value="_noOpeningBalance"

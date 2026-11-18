@@ -84,8 +84,8 @@ public static partial class AppRegistry
 
         new(ScreenCodes.Customers, "/partners/customers", "People", "screen.customers", GroupPartners,
             new[] { A(ActionCodes.View), A(ActionCodes.Add), A(ActionCodes.AddOpeningBalances),
-                    A(ActionCodes.Edit), A(ActionCodes.Delete), A(ActionCodes.ToggleActive),
-                    A(ActionCodes.ManageCategories) }),
+                    A(ActionCodes.Edit), A(ActionCodes.EditContact), A(ActionCodes.Delete),
+                    A(ActionCodes.ToggleActive), A(ActionCodes.ManageCategories) }),
 
         new(ScreenCodes.Suppliers, "/partners/suppliers", "LocalShipping", "screen.suppliers", GroupPartners,
             new[] { A(ActionCodes.View), A(ActionCodes.Add), A(ActionCodes.Edit),

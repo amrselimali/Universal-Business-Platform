@@ -83,6 +83,12 @@ else
                         {
                             <MudMenuItem OnClick="@(() => EditAsync(context))" Icon="@Icons.Material.Filled.Edit">@T.T("common.edit")</MudMenuItem>
                         }
+                        @if (Kind == PartnerKind.Customer && Can(ActionCodes.EditContact))
+                        {
+                            <MudMenuItem OnClick="@(() => EditContactAsync(context))" Icon="@Icons.Material.Filled.Phone">
+                                تعديل بيانات الاتصال
+                            </MudMenuItem>
+                        }
                         @if (Can(ActionCodes.Delete))
                         {
                             <MudMenuItem OnClick="@(() => DeleteAsync(context))" Icon="@Icons.Material.Filled.Delete">@T.T("common.delete")</MudMenuItem>

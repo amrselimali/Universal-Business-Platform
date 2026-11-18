@@ -10,7 +10,7 @@
                 <MudAutocomplete T="Partner" Value="_supplier" ValueChanged="OnSupplierChanged"
                                  SearchFunc="SearchSuppliers" ToStringFunc="SupplierLabel"
                                  Label="المورد" Variant="Variant.Outlined" Required="true"
-                                 MinCharacters="1" DebounceInterval="300"
+                                 MinCharacters="0" DebounceInterval="300" OpenOnFocus="true"
                                  ResetValueOnEmptyText="true" CoerceValue="true" />
                 <MudAutocomplete T="PurchaseReturnInvoiceOption" Value="_invoice"
                                  ValueChanged="OnInvoiceChanged" SearchFunc="SearchInvoices"

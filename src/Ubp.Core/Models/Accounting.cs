@@ -77,6 +77,8 @@ public static class PostingKeys
     public const string CashHandoverCommission = "cash_handover_commission";
     /// <summary>حساب المصروف التشغيلي الافتراضي (عند إلغاء خلية الحساب) — 0093.</summary>
     public const string OperatingExpense = "operating_expense";
+    /// <summary>حساب الدكتور الخارجي: يُحمَّل عليه فرق تسوية شفت الدكتور الخارجي.</summary>
+    public const string ExternalDoctor = "external_doctor";
 
     public static readonly string[] All =
     {
@@ -84,7 +86,8 @@ public static class PostingKeys
         OpeningEquity, Rounding, SalesRevenue, VatOutput, VatInput, CustomerReceivable,
         SupplierPayable, PurchaseVariance, RoundingDifference, CustomerAdvances,
         SupplierAdvances, EmployeeAdvances, PaymentFees, CashOverShort, InterBranchClearing,
-        BookingForfeitIncome, CashClearing, CashHandoverCommission, OperatingExpense
+        BookingForfeitIncome, CashClearing, CashHandoverCommission, OperatingExpense,
+        ExternalDoctor
     };
 }
 

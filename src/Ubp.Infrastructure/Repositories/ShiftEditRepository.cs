@@ -48,7 +48,8 @@ public sealed partial class ShiftEditRepository : IShiftEditRepository
     {
         await using var connection = await _factory.OpenAsync(ct);
         var s = await LoadShiftAsync(connection, shiftId, null, ct);
-        var args = new { branchId = s.BranchId, openedAt = s.OpenedAt, until = s.ClosedAt };
+        var args = new { branchId = s.BranchId, openedAt = s.OpenedAt, until = s.ClosedAt,
+            shiftId = shiftId };
         var rows = new List<ShiftEditableLine>();
 
         rows.AddRange(await connection.QueryAsync<ShiftEditableLine>(new CommandDefinition("""
@@ -119,6 +120,29 @@ public sealed partial class ShiftEditRepository : IShiftEditRepository
               AND b.created_at >= @openedAt
               AND (@until::timestamptz IS NULL OR b.created_at <= @until::timestamptz)
               AND l.delivered_qty = 0
+            """, args, cancellationToken: ct)));
+
+        rows.AddRange(await connection.QueryAsync<ShiftEditableLine>(new CommandDefinition("""
+            SELECT 'booking_execution' AS EntityType, be.id AS DocId, be.doc_no AS DocNo,
+                   be.execution_date AS DocDate, el.id AS LineId, c.name_ar AS PartyName,
+                   i.name_ar AS ItemName, exe.name_ar AS EmployeeName,
+                   NULL::text AS TreasuryName, el.quantity AS Quantity,
+                   el.unit_price AS UnitPrice, el.total_amount AS Amount,
+                   NULL::text AS Description, 'quantity,unit_price,employee' AS FieldsCsv,
+                   NULL::uuid AS TreasuryId, NULL::uuid AS AccountId, el.employee_id AS EmployeeId,
+                   be.status AS DocStatus, bl.id AS BookingLineId, be.shift_id AS ShiftId
+            FROM booking_executions be
+            JOIN booking_execution_lines el ON el.execution_id = be.id
+            JOIN booking_lines bl ON bl.id = el.booking_line_id
+            JOIN bookings b ON b.id = bl.booking_id
+            JOIN customers c ON c.id = b.customer_id
+            JOIN items i ON i.id = el.item_id
+            LEFT JOIN employees exe ON exe.id = el.employee_id
+            WHERE be.branch_id = @branchId AND be.status IN ('draft', 'posted')
+              AND NOT be.is_reversed AND be.execution_type <> 'REVERSAL'
+              AND (be.shift_id = @shiftId
+                   OR (be.shift_id IS NULL AND be.created_at >= @openedAt
+                       AND (@until::timestamptz IS NULL OR be.created_at <= @until::timestamptz)))
             """, args, cancellationToken: ct)));
 
         rows.AddRange(await connection.QueryAsync<ShiftEditableLine>(new CommandDefinition("""

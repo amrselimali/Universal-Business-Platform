@@ -71,13 +71,12 @@ public sealed class TreasuryShiftTests : IClassFixture<TestDb>
         var service = _db.TreasuryService();
         var f = await SetupAsync("1");
 
-        var first = await service.OpenShiftAsync(actor, new ShiftInput
-        { BranchId = f.Branch });
+        var first = await service.OpenShiftAsync(actor, new ShiftInput { NormalShift = true, BranchId = f.Branch });
         Assert.True(first.IsOpen);
         Assert.StartsWith("SHIFT-", first.Code);
 
         var second = await Assert.ThrowsAsync<ValidationAppException>(() =>
-            service.OpenShiftAsync(actor, new ShiftInput { BranchId = f.Branch }));
+            service.OpenShiftAsync(actor, new ShiftInput { NormalShift = true, BranchId = f.Branch }));
         Assert.Equal("validation.shift_already_open", second.Code);
 
         var open = await service.GetOpenShiftAsync(actor, f.Branch);
@@ -96,7 +95,7 @@ public sealed class TreasuryShiftTests : IClassFixture<TestDb>
             Code = "TS-E-LEAVE", NameAr = "موظف إجازة", BranchId = f.Branch
         }, actor.UserId);
 
-        var shift = await service.OpenShiftAsync(actor, new ShiftInput { BranchId = f.Branch });
+        var shift = await service.OpenShiftAsync(actor, new ShiftInput { NormalShift = true, BranchId = f.Branch });
         var blocked = await Assert.ThrowsAsync<ValidationAppException>(() =>
             service.CloseShiftAsync(actor, shift.Id));
         Assert.Equal("validation.shift_employees_next_day_schedule", blocked.Code);
@@ -124,8 +123,7 @@ public sealed class TreasuryShiftTests : IClassFixture<TestDb>
         var service = _db.TreasuryService();
         var f = await SetupAsync("2");
 
-        var shift = await service.OpenShiftAsync(actor, new ShiftInput
-        { BranchId = f.Branch });
+        var shift = await service.OpenShiftAsync(actor, new ShiftInput { NormalShift = true, BranchId = f.Branch });
 
         await PostVoucherAsync(f, VoucherTypes.Receipt, f.Customer, 300);
         await PostVoucherAsync(f, VoucherTypes.Payment, f.Supplier, 100);
@@ -190,7 +188,7 @@ public sealed class TreasuryShiftTests : IClassFixture<TestDb>
         Assert.Equal(0m, balances.MeterBalance);
         Assert.Equal(400m, balances.OpeningCash);
 
-        var shift = await service.OpenShiftAsync(actor, new ShiftInput { BranchId = f.Branch });
+        var shift = await service.OpenShiftAsync(actor, new ShiftInput { NormalShift = true, BranchId = f.Branch });
         Assert.Equal(400m, shift.CarriedBalance);
         Assert.Equal(400m, shift.OpeningCash);
         Assert.Null(shift.TreasuryId);
@@ -203,7 +201,7 @@ public sealed class TreasuryShiftTests : IClassFixture<TestDb>
         var service = _db.TreasuryService();
         var f = await SetupAsync("4");
 
-        var shift = await service.OpenShiftAsync(actor, new ShiftInput { BranchId = f.Branch });
+        var shift = await service.OpenShiftAsync(actor, new ShiftInput { NormalShift = true, BranchId = f.Branch });
         var draft = await service.CreateVoucherAsync(actor, new VoucherInput
         {
             VoucherType = VoucherTypes.Receipt, BranchId = f.Branch, DocDate = DateTime.Today,
@@ -232,7 +230,7 @@ public sealed class TreasuryShiftTests : IClassFixture<TestDb>
         var service = _db.TreasuryService();
         var f = await SetupAsync("6");
 
-        var first = await service.OpenShiftAsync(actor, new ShiftInput { BranchId = f.Branch });
+        var first = await service.OpenShiftAsync(actor, new ShiftInput { NormalShift = true, BranchId = f.Branch });
         await service.CreateVoucherAsync(actor, new VoucherInput
         {
             VoucherType = VoucherTypes.Receipt, BranchId = f.Branch, DocDate = DateTime.Today,
@@ -247,7 +245,7 @@ public sealed class TreasuryShiftTests : IClassFixture<TestDb>
         Assert.Equal(1, balances.PendingReviewShifts);
         Assert.Equal(75m, balances.OpeningCash);
 
-        var second = await service.OpenShiftAsync(actor, new ShiftInput { BranchId = f.Branch });
+        var second = await service.OpenShiftAsync(actor, new ShiftInput { NormalShift = true, BranchId = f.Branch });
         Assert.Equal(75m, second.ReviewBalance);
         Assert.Equal(75m, second.OpeningCash);
     }
@@ -259,7 +257,7 @@ public sealed class TreasuryShiftTests : IClassFixture<TestDb>
         var service = _db.TreasuryService();
         var f = await SetupAsync("5");
 
-        var shift = await service.OpenShiftAsync(actor, new ShiftInput { BranchId = f.Branch });
+        var shift = await service.OpenShiftAsync(actor, new ShiftInput { NormalShift = true, BranchId = f.Branch });
         await PostVoucherAsync(f, VoucherTypes.Receipt, f.Customer, 120);
 
         var due = await _db.TreasuryRepo.ListShiftsDueForAutoCloseAsync(

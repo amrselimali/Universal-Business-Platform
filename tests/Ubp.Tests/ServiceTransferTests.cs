@@ -50,7 +50,7 @@ public sealed class ServiceTransferTests : IClassFixture<TestDb>
         var line = (await _db.BookingService().GetAsync(actor, booking.Id)).Lines.Single();
 
         var shift = await _db.TreasuryService()
-            .OpenShiftAsync(actor, new ShiftInput { BranchId = branch });
+            .OpenShiftAsync(actor, new ShiftInput { NormalShift = true, BranchId = branch });
 
         return new Fixture(branch, warehouse, service, from, to, line.Id, shift.Id);
     }

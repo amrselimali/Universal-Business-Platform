@@ -10,16 +10,18 @@ namespace Ubp.Application.Services;
 public sealed class PosService
 {
     private readonly IPosRepository _pos;
+    private readonly ITreasuryRepository _treasury;
     private readonly ISettingsService _settings;
     private readonly PermissionService _permissions;
     private readonly AuditService _audit;
     private readonly IReceiptNotifier _notifier;
 
-    public PosService(IPosRepository pos, ISettingsService settings, PermissionService permissions,
+    public PosService(IPosRepository pos, ITreasuryRepository treasury,
+        ISettingsService settings, PermissionService permissions,
         AuditService audit, IReceiptNotifier notifier)
     {
-        _pos = pos; _settings = settings; _permissions = permissions; _audit = audit;
-        _notifier = notifier;
+        _pos = pos; _treasury = treasury; _settings = settings; _permissions = permissions;
+        _audit = audit; _notifier = notifier;
     }
 
     public async Task<PosReceipt> CheckoutAsync(ActorContext actor, PosCheckoutInput input,
@@ -74,19 +76,28 @@ public sealed class PosService
     public async Task<Voucher> EditReceiptAsync(ActorContext actor, ReceiptEditInput input,
         CancellationToken ct = default)
     {
-        await _permissions.RequireAsync(actor, ScreenCodes.PosTerminal, ActionCodes.SaveDraft,
+        await _permissions.RequireAsync(actor, ScreenCodes.PosReceipts, ActionCodes.EditReceipt,
             ct: ct);
         var head = await _pos.GetReceiptHeaderAsync(input.VoucherId, ct);
         if (head.CustomerId is null) throw new NotFoundAppException();
         BranchScope.Ensure(actor, head.BranchId);
-        Guid adjustedId;
-        try { adjustedId = await _pos.EditDraftReceiptAsync(input.VoucherId, input, actor.UserId, ct); }
+        ReceiptEditResult result;
+        try { result = await _pos.EditReceiptAsync(input.VoucherId, input, actor.UserId, ct); }
         catch (PostgresException ex) { throw DbErrorMapper.Map(ex); }
+
+        if (result.NeedsImmediatePosting)
+        {
+            if (result.ReversalCreated)
+                await _treasury.PostVoucherAsync(result.ReversalId, actor.UserId, ct);
+            await _treasury.PostVoucherAsync(result.AdjustedId, actor.UserId, ct);
+        }
+
         await _audit.WriteAsync(actor, "vouchers", input.VoucherId.ToString(), "UPDATE",
-            new { status = VoucherStatuses.Draft, head.Total },
-            new { status = VoucherStatuses.Reversed, AdjustedId = adjustedId, input.Amount,
-                  input.FeeAmount, input.CustomerId, input.TreasuryId }, ct);
-        return await _pos.GetReceiptDetailAsync(adjustedId, ct) ?? throw new NotFoundAppException();
+            new { status = VoucherStatuses.Posted, head.Total },
+            new { status = VoucherStatuses.Reversed, result.AdjustedId, result.ReversalId,
+                  input.Amount, input.FeeAmount, input.CustomerId, input.TreasuryId }, ct);
+        return await _pos.GetReceiptDetailAsync(result.AdjustedId, ct)
+               ?? throw new NotFoundAppException();
     }
 
     /// <summary>إعادة إرسال إيصال قبض إلى العميل عبر واتساب (من شاشة إيصالات POS).</summary>

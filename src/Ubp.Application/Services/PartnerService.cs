@@ -192,10 +192,7 @@ public sealed partial class PartnerService
             if (input.WhatsAppPhone is null)
                 throw new ValidationAppException("validation.customer_whatsapp_required");
         }
-        // رقم هاتف العميل لا يقبل التكرار عند التكويد/التعديل (يُستثنى نفس العميل).
-        if (kind == PartnerKind.Customer && input.Phone is not null &&
-            await _repository.PhoneExistsAsync(kind, input.Phone, excludeId, ct))
-            throw new ValidationAppException("validation.customer_phone_duplicate");
+        // رقم هاتف العميل لا يقبل التكرار داخل نفس الفرع/النطاق (يُستثنى نفس العميل).
         input.Email = string.IsNullOrWhiteSpace(input.Email) ? null : input.Email.Trim().ToLowerInvariant();
         input.Address = string.IsNullOrWhiteSpace(input.Address) ? null : input.Address.Trim();
         input.TaxNumber = string.IsNullOrWhiteSpace(input.TaxNumber) ? null : input.TaxNumber.Trim();
@@ -234,6 +231,16 @@ public sealed partial class PartnerService
             // تعديل بلا كود: يُبقى كود العميل الحالي بدلاً من تصفيره.
             input.Code = (await _repository.GetAsync(kind, excludeId!.Value, ct))?.Code ?? input.Code;
 
+        // التكرار مسموح بين الفروع، وممنوع داخل نفس الفرع/النطاق فقط — الهاتف والواتساب.
+        if (kind == PartnerKind.Customer && input.Phone is not null &&
+            await _repository.PhoneExistsInScopeAsync(kind, input.Phone, input.ScopeType,
+                input.BranchId, excludeId, ct))
+            throw new ValidationAppException("validation.customer_phone_duplicate");
+        if (kind == PartnerKind.Customer && input.WhatsAppPhone is not null &&
+            await _repository.WhatsAppExistsInScopeAsync(kind, input.WhatsAppPhone,
+                input.ScopeType, input.BranchId, excludeId, ct))
+            throw new ValidationAppException("validation.customer_whatsapp_duplicate");
+
         if (input.CategoryId.HasValue)
         {
             var category = await _repository.GetCategoryAsync(kind, input.CategoryId.Value, ct)
@@ -249,6 +256,21 @@ public sealed partial class PartnerService
 
         var entity = kind == PartnerKind.Customer ? "customers" : "suppliers";
         input.CustomFields = await _customFields.ValidateValuesAsync(entity, input.CustomFields, ct);
+
+        // الكود الورقي (حقل مخصص) لا يتكرر داخل نفس الفرع، ويُسمح به في فرع آخر.
+        if (kind == PartnerKind.Customer)
+        {
+            foreach (var field in input.CustomFields)
+            {
+                if (!field.Key.Contains("paper", StringComparison.OrdinalIgnoreCase) &&
+                    !field.Key.Contains("ورق")) continue;
+                var value = field.Value?.ToString();
+                if (string.IsNullOrWhiteSpace(value)) continue;
+                if (await _repository.CustomFieldExistsAsync(kind, field.Key, value.Trim(),
+                        input.ScopeType, input.BranchId, excludeId, ct))
+                    throw new ValidationAppException("validation.customer_paper_code_duplicate");
+            }
+        }
     }
 
     private static void EnsureAccess(ActorContext actor, Partner partner)

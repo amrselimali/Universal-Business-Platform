@@ -32,12 +32,23 @@ public sealed class ShiftEditService
     public async Task<ShiftEditOutcome> ApplyAsync(ActorContext actor, ShiftLineEditInput input,
         CancellationToken ct = default)
     {
-        await _permissions.RequireAsync(actor, ScreenCodes.TreasuryShifts, ActionCodes.Edit, ct: ct);
+        var isExecution = input.EntityType == "booking_execution";
+        if (isExecution)
+        {
+            // صلاحية مستقلة لتعديل الخدمات المنفذة؛ لا تشترط حالة الشفت أو مسودة التنفيذ.
+            await _permissions.RequireAsync(actor, ScreenCodes.Reservations,
+                ActionCodes.EditExecuted, ct: ct);
+        }
+        else
+        {
+            await _permissions.RequireAsync(actor, ScreenCodes.TreasuryShifts, ActionCodes.Edit,
+                ct: ct);
+        }
         var shift = await _treasury.GetShiftAsync(input.ShiftId, ct)
                     ?? throw new NotFoundAppException();
         BranchScope.Ensure(actor, shift.BranchId);
 
-        if (!shift.IsOpen)
+        if (!isExecution && !shift.IsOpen)
         {
             // بعد الإغلاق: فقط المحاسب (اعتماد المراجعة) وقبل الترحيل.
             await _permissions.RequireAsync(actor, ScreenCodes.TreasuryShifts, ActionCodes.Approve,

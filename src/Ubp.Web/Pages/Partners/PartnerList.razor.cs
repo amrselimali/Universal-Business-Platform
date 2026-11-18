@@ -59,6 +59,13 @@ public partial class PartnerList
         if ((await dialog.Result) is { Canceled: false }) { await ReloadAsync(); ShowSuccess("common.saved"); }
     }
 
+    private async Task EditContactAsync(Partner partner)
+    {
+        var dialog = await DialogService.ShowAsync<PartnerContactDialog>("تعديل بيانات الاتصال",
+            new DialogParameters { ["Model"] = partner });
+        if ((await dialog.Result) is { Canceled: false }) { await ReloadAsync(); ShowSuccess("common.saved"); }
+    }
+
     private async Task ManageCategoriesAsync()
     {
         var dialog = await DialogService.ShowAsync<PartnerCategoryDialog>(T.T("partners.categories"),

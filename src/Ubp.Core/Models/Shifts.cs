@@ -7,6 +7,19 @@ public static class ShiftReviewStatuses
     public const string Reviewed = "reviewed";
 }
 
+public static class ShiftTypes
+{
+    public const string Normal = "normal";
+    public const string ExternalDoctor = "external_doctor";
+}
+
+public static class ShiftSettlementModes
+{
+    public const string Doctor = "doctor";
+    public const string Treasury = "treasury";
+    public const string Mixed = "mixed";
+}
+
 /// <summary>
 /// شفت على مستوى الفرع: تغطي كل شاشات التطبيق (لا خزينة واحدة)، وواحدة فقط
 /// مفتوحة لكل فرع، وتُغلق آلياً 5 صباحاً كل يوم (الترحيل 0074).
@@ -45,6 +58,15 @@ public sealed class Shift
     public string ReviewStatus { get; set; } = ShiftReviewStatuses.None;
     public bool AutoClosed { get; set; }
     public DateTimeOffset? ReviewedAt { get; set; }
+    /// <summary>نوع الشفت: عادي أو دكتور خارجي.</summary>
+    public string ShiftType { get; set; } = ShiftTypes.Normal;
+    public Guid? ExternalDoctorCustomerId { get; set; }
+    public string? ExternalDoctorCustomerName { get; set; }
+    public Guid? SettlementVoucherId { get; set; }
+    public decimal SettlementAmount { get; set; }
+    public decimal SettlementTreasuryAmount { get; set; }
+    public string? SettlementMode { get; set; }
+    public bool IsExternalDoctor => ShiftType == ShiftTypes.ExternalDoctor;
     public List<ShiftDenomination> Denominations { get; set; } = new();
     /// <summary>أرصدة الخزائن المتابَعة في الشفت (اسم وحدث رصيد) — 0097.</summary>
     public List<ShiftTreasuryBalance> TreasuryBalances { get; set; } = new();
@@ -60,6 +82,34 @@ public sealed class ShiftInput
 {
     public Guid BranchId { get; set; }
     public string? Notes { get; set; }
+    /// <summary>الوضع الافتراضي غير مفعل: يجب اختيار واحد فقط (عادي أو دكتور خارجي).</summary>
+    public bool NormalShift { get; set; }
+    public bool ExternalDoctorShift { get; set; }
+    /// <summary>العميل المربوط بالشفت عند اختيار شفت دكتور خارجي.</summary>
+    public Guid? ExternalDoctorCustomerId { get; set; }
+}
+
+/// <summary>طلب تسوية شفت الدكتور الخارجي عند الإقفال اليدوي.</summary>
+public sealed class ShiftSettlementInput
+{
+    /// <summary>doctor = كل الفرق على حساب الدكتور، treasury = خزينة، mixed = جزء خزينة والباقي دكتور.</summary>
+    public string Mode { get; set; } = ShiftSettlementModes.Doctor;
+    public Guid? TreasuryId { get; set; }
+    /// <summary>الجزء المسدد من الخزينة (للـ mixed أو treasury).</summary>
+    public decimal TreasuryAmount { get; set; }
+}
+
+/// <summary>معاينة تسوية شفت الدكتور الخارجي قبل الإقفال.</summary>
+public sealed class ExternalDoctorSettlementPreview
+{
+    public Guid ShiftId { get; set; }
+    public Guid CustomerId { get; set; }
+    public string CustomerName { get; set; } = "";
+    public decimal Revenues { get; set; }
+    public decimal Collections { get; set; }
+    /// <summary>إيرادات − تحصيلات (موجب = مطلوب تحصيله، سالب = مسترد).</summary>
+    public decimal Amount { get; set; }
+    public bool RequiresDecision => Amount != 0;
 }
 
 /// <summary>لقطة أرصدة الافتتاح: كلها محسوبة من النظام للفرع، غير قابلة للتعديل.</summary>

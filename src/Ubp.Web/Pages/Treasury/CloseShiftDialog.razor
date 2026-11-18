@@ -1,3 +1,4 @@
+@using TreasuryModel = Ubp.Core.Models.Treasury
 @inherits ComponentBase
 
 <MudDialog>
@@ -18,10 +19,56 @@
         {
             <ShiftReportView @ref="_view" Report="_report" Editable="@(CanEdit)" />
         }
+
+        @if (_settlement is { RequiresDecision: true })
+        {
+            <MudPaper Outlined="true" Class="pa-3 mt-3">
+                <MudText Typo="Typo.subtitle2" Class="mb-2">تسوية شفت الدكتور الخارجى</MudText>
+                <MudText Typo="Typo.body2">
+                    العميل: <b>@_settlement.CustomerName</b> — الإيرادات:
+                    <b>@_settlement.Revenues.ToString("N2")</b> — التحصيلات:
+                    <b>@_settlement.Collections.ToString("N2")</b> — قيمة التسوية:
+                    <b>@_settlement.Amount.ToString("N2")</b>
+                </MudText>
+                <MudSelect T="string" Value="_settlementMode" Label="طريقة التسوية"
+                           Variant="Variant.Outlined" Class="mt-2"
+                           ValueChanged="OnSettlementModeChanged">
+                    <MudSelectItem T="string" Value="@ShiftSettlementModes.Doctor">
+                        تحميل الكل على حساب الدكتور الخارجى
+                    </MudSelectItem>
+                    <MudSelectItem T="string" Value="@ShiftSettlementModes.Treasury">
+                        سداد الكل من خزينة
+                    </MudSelectItem>
+                    <MudSelectItem T="string" Value="@ShiftSettlementModes.Mixed">
+                        جزء من خزينة والباقى على حساب الدكتور
+                    </MudSelectItem>
+                </MudSelect>
+                @if (_settlementMode is ShiftSettlementModes.Treasury or ShiftSettlementModes.Mixed)
+                {
+                    <MudSelect T="Guid?" Value="_settlementTreasuryId" Label="الخزينة"
+                               Variant="Variant.Outlined" Required="true" Class="mt-2"
+                               ValueChanged="OnSettlementTreasuryChanged">
+                        @foreach (var treasury in _settlementTreasuries)
+                        {
+                            <MudSelectItem T="Guid?" Value="@((Guid?)treasury.Id)">
+                                @treasury.Code — @treasury.NameAr
+                            </MudSelectItem>
+                        }
+                    </MudSelect>
+                    <MudNumericField T="decimal" @bind-Value="_settlementTreasuryAmount"
+                                     Label="المسدد من الخزينة" Min="0m"
+                                     Max="@Math.Abs(_settlement.Amount)" Format="N2"
+                                     Variant="Variant.Outlined" Class="mt-2"
+                                     Disabled="@(_settlementMode == ShiftSettlementModes.Treasury)" />
+                    <MudText Typo="Typo.caption" Class="ubp-muted d-block mt-1">
+                        المتبقى على حساب الدكتور: @SettlementDoctorPart.ToString("N2")
+                    </MudText>
+                }
+            </MudPaper>
+        }
     </DialogContent>
     <DialogActions>
-        @if (_canEditShift && _report is not null &&
-             (_report.Shift.IsOpen || _report.Shift.IsPendingReview))
+        @if (_canEditShift && _report is not null)
         {
             <MudButton Variant="Variant.Outlined" Color="Color.Primary"
                        StartIcon="@Icons.Material.Filled.Edit" OnClick="OpenEditAsync"
@@ -44,6 +91,7 @@
     [Parameter] public bool ReadOnly { get; set; }
 
     [Inject] private TreasuryService Treasury { get; set; } = default!;
+    [Inject] private LookupService Lookup { get; set; } = default!;
     [Inject] private UserContext UserContext { get; set; } = default!;
     [Inject] private PermissionService Permissions { get; set; } = default!;
     [Inject] private IDialogService Dialogs { get; set; } = default!;
@@ -54,6 +102,14 @@
     private ShiftReportView? _view;
     private bool _busy;
     private bool _canEditShift;
+    private ExternalDoctorSettlementPreview? _settlement;
+    private IReadOnlyList<TreasuryModel> _settlementTreasuries = Array.Empty<TreasuryModel>();
+    private string? _settlementMode;
+    private Guid? _settlementTreasuryId;
+    private decimal _settlementTreasuryAmount;
+    private decimal SettlementDoctorPart => _settlement is null ? 0m
+        : Math.Max(Math.Round(Math.Abs(_settlement.Amount) - _settlementTreasuryAmount, 2,
+            MidpointRounding.AwayFromZero), 0m);
 
     // العرض والإغلاق كلاهما يسمح بإدخال النقد المعدود/الملاحظات/القراءات للشفت المفتوح.
     private bool CanEdit => Shift.IsOpen;
@@ -63,10 +119,18 @@
         try
         {
             var actor = await UserContext.RequireAsync();
-            // زر «تعديل بيانات الشفت» ضمن الصلاحيات (تعطيل/تشغيل حسب المستخدم).
+            // زر «تعديل بيانات الشفت»: صلاحية الشفتات أو صلاحية تعديل خدمة منفذة.
             _canEditShift = await Permissions.HasAsync(actor, ScreenCodes.TreasuryShifts,
-                ActionCodes.Edit);
+                ActionCodes.Edit)
+                || await Permissions.HasAsync(actor, ScreenCodes.Reservations,
+                    ActionCodes.EditExecuted);
             _report = await Treasury.GetShiftReportAsync(actor, Shift.Id);
+            if (Shift.IsExternalDoctor)
+            {
+                _settlement = await Treasury.GetExternalDoctorSettlementAsync(actor, Shift.Id);
+                _settlementTreasuries = await Lookup.TreasuriesAsync(actor, Shift.BranchId);
+                _settlementTreasuryId = _settlementTreasuries.FirstOrDefault()?.Id;
+            }
             if (CanEdit)
                 foreach (var row in _report.CashCounts)
                     row.CountedCash ??= row.ExpectedCash;
@@ -91,6 +155,23 @@
 
     private void Cancel() => MudDialog.Cancel();
 
+    private void OnSettlementModeChanged(string? mode)
+    {
+        _settlementMode = mode;
+        if (_settlement is null) return;
+        _settlementTreasuryAmount = mode == ShiftSettlementModes.Treasury
+            ? Math.Abs(_settlement.Amount)
+            : mode == ShiftSettlementModes.Doctor ? 0m : _settlementTreasuryAmount;
+    }
+
+    private void OnSettlementTreasuryChanged(Guid? treasuryId)
+    {
+        _settlementTreasuryId = treasuryId;
+        _settlementTreasuryAmount = _settlementMode == ShiftSettlementModes.Treasury &&
+                                    _settlement is not null
+            ? Math.Abs(_settlement.Amount) : _settlementTreasuryAmount;
+    }
+
     private async Task ConfirmAsync()
     {
         _busy = true;
@@ -103,7 +184,30 @@
                     TreasuryId = c.TreasuryId, CountedCash = c.CountedCash ?? c.ExpectedCash
                 })
                 .ToList();
-            var closed = await Treasury.CloseShiftAsync(actor, Shift.Id, counts);
+            ShiftSettlementInput? settlement = null;
+            if (_settlement is { RequiresDecision: true })
+            {
+                if (string.IsNullOrWhiteSpace(_settlementMode))
+                {
+                    Snackbar.Add("اختر طريقة تسوية شفت الدكتور الخارجى قبل الإقفال.", Severity.Warning);
+                    return;
+                }
+                if (_settlementMode is ShiftSettlementModes.Treasury or ShiftSettlementModes.Mixed
+                    && _settlementTreasuryId is null)
+                {
+                    Snackbar.Add("اختر الخزينة التى سيتم السداد منها.", Severity.Warning);
+                    return;
+                }
+                settlement = new ShiftSettlementInput
+                {
+                    Mode = _settlementMode,
+                    TreasuryId = _settlementMode == ShiftSettlementModes.Doctor
+                        ? null : _settlementTreasuryId,
+                    TreasuryAmount = _settlementMode == ShiftSettlementModes.Doctor
+                        ? 0m : _settlementTreasuryAmount
+                };
+            }
+            var closed = await Treasury.CloseShiftAsync(actor, Shift.Id, counts, settlement);
             MudDialog.Close(DialogResult.Ok(closed));
         }
         catch (AppException ex) { Snackbar.Add(ErrorText(ex), Severity.Error); }

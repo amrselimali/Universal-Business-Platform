@@ -47,7 +47,7 @@ public partial class PurchaseReturnDialog
     {
         var actor = await UserContext.GetAsync();
         if (actor is null) return Array.Empty<Partner>();
-        return await Lookup.PartnersAsync(actor, PartnerKind.Supplier, search, ct, BranchId);
+        return await Lookup.PartnersAsync(actor, PartnerKind.Supplier, search, ct);
     }
 
     private async Task<IEnumerable<PurchaseReturnInvoiceOption>> SearchInvoices(string? search,

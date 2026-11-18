@@ -129,9 +129,7 @@ public sealed partial class BookingSettlementTests : IClassFixture<TestDb>
     {
         var actor = await _db.AdminActorAsync();
         var f = await SetupAsync("SHIFT", pay: 200);
-        var shift = await _db.TreasuryService().OpenShiftAsync(actor, new ShiftInput
-        {
-            BranchId = f.Branch
+        var shift = await _db.TreasuryService().OpenShiftAsync(actor, new ShiftInput { NormalShift = true, BranchId = f.Branch
         });
         var result = await SettleAsync(f, actor);
 

@@ -26,6 +26,8 @@ public sealed class Partner
     public decimal CreditLimit { get; set; }
     public string? Notes { get; set; }
     public bool IsActive { get; set; } = true;
+    /// <summary>عميل مربوط بدكتور خارجي (يظهر في شفت الدكتور الخارجي ويقبل دفعة مقدمة).</summary>
+    public bool IsExternalDoctor { get; set; }
     public Dictionary<string, object?> CustomFields { get; set; } = new();
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
@@ -49,6 +51,8 @@ public sealed class PartnerInput
     public decimal CreditLimit { get; set; }
     public string? Notes { get; set; }
     public bool IsActive { get; set; } = true;
+    /// <summary>ربط العميل بدكتور خارجي — يظهر في اختيار عميل شفت الدكتور الخارجي.</summary>
+    public bool IsExternalDoctor { get; set; }
     public Dictionary<string, object?> CustomFields { get; set; } = new();
     /// <summary>أرصدة افتتاحية لخدمات العميل تُسجَّل مع إنشائه كحجوزات مؤكدة — 0104.</summary>
     public List<ServiceOpeningBalanceInput> OpeningBalances { get; set; } = new();

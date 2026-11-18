@@ -30,11 +30,11 @@ public sealed partial class PartnerRepository
             INSERT INTO {Table(kind)}
                 (code, name_ar, name_en, category_id, scope_type, branch_id, phone, phone2,
                  whatsapp_phone, email, address, tax_number, credit_limit, notes, is_active,
-                 custom_fields)
+                 is_external_doctor, custom_fields)
             VALUES
                 (@Code, @NameAr, @NameEn, @CategoryId, @ScopeType, @BranchId, @Phone, @Phone2,
                  @WhatsAppPhone, @Email, @Address, @TaxNumber, @CreditLimit, @Notes, @IsActive,
-                  CAST(@CustomFields AS jsonb))
+                  @IsExternalDoctor, CAST(@CustomFields AS jsonb))
             RETURNING id
             """;
         return await connection.ExecuteScalarAsync<Guid>(new CommandDefinition(sql, new
@@ -42,7 +42,7 @@ public sealed partial class PartnerRepository
             input.Code, input.NameAr, input.NameEn, input.CategoryId, input.ScopeType,
             input.BranchId, input.Phone, input.Phone2, input.WhatsAppPhone, input.Email,
             input.Address, input.TaxNumber,
-            input.CreditLimit, input.Notes, input.IsActive,
+            input.CreditLimit, input.Notes, input.IsActive, input.IsExternalDoctor,
             CustomFields = JsonSerializer.Serialize(input.CustomFields)
         }, tx, cancellationToken: ct));
     }

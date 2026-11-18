@@ -73,7 +73,7 @@ public sealed class TreasuryReconcileTests : IClassFixture<TestDb>
         var service = _db.TreasuryService();
         var f = await TreasuryFixtures.CreateAsync(_db, "R3");
 
-        var shift = await service.OpenShiftAsync(actor, new ShiftInput { BranchId = f.Branch });
+        var shift = await service.OpenShiftAsync(actor, new ShiftInput { NormalShift = true, BranchId = f.Branch });
 
         var receipt = await service.CreateVoucherAsync(actor, TreasuryFixtures.Receipt(f,
             new VoucherLineInput { TreasuryMethodId = f.CashMethod, Amount = 300 }));

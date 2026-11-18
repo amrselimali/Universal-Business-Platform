@@ -62,6 +62,30 @@ public sealed class ReceiptEditInput
     public string? Notes { get; set; }
 }
 
+/// <summary>دفعة مقدمة من عميل مربوط بدكتور خارجي داخل شفت الدكتور (بلا خدمة محجوزة).</summary>
+public sealed class AdvancePaymentInput
+{
+    public Guid BranchId { get; set; }
+    public Guid CustomerId { get; set; }
+    public Guid TreasuryId { get; set; }
+    public Guid TreasuryMethodId { get; set; }
+    public decimal Amount { get; set; }
+    public string? Notes { get; set; }
+}
+
+/// <summary>نتيجة تعديل الإيصال: الإيصال المعدّل والعكسي وحاجة المستند للترحيل الفوري.</summary>
+public sealed class ReceiptEditResult
+{
+    public Guid AdjustedId { get; set; }
+    public Guid ReversalId { get; set; }
+    /// <summary>الأصل كان مُرحّلًا قبل التعديل (يلزم عكسه محاسبيًا).</summary>
+    public bool OriginalWasPosted { get; set; }
+    /// <summary>لا يوجد شفت مفتوح لترحيل المستندات معه؛ تُرحَّل فورًا.</summary>
+    public bool NeedsImmediatePosting { get; set; }
+    /// <summary>هل أُنشئ الإيصال العكسي فعلًا (لا يُنشأ للبديل الملغى).</summary>
+    public bool ReversalCreated { get; set; }
+}
+
 public sealed class PosReceipt
 {
     public Guid BookingId { get; set; }

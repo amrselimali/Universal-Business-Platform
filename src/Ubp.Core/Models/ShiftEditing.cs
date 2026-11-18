@@ -8,6 +8,10 @@ public sealed class ShiftEditableLine
     public string? DocNo { get; set; }
     public DateTime? DocDate { get; set; }
     public Guid? LineId { get; set; }
+    /// <summary>بند الحجز الأصلي (لخدمة منفذة) — 0111.</summary>
+    public Guid? BookingLineId { get; set; }
+    /// <summary>الشفت الذي سُجّل فيه المستند.</summary>
+    public Guid? ShiftId { get; set; }
     public string? PartyName { get; set; }
     public string? ItemName { get; set; }
     public string? EmployeeName { get; set; }

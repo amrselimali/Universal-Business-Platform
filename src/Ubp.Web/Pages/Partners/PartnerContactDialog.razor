@@ -1,0 +1,65 @@
+@using Ubp.Core.Results
+@inherits ComponentBase
+
+<MudDialog>
+    <TitleContent><MudText Typo="Typo.h6">تعديل بيانات الاتصال</MudText></TitleContent>
+    <DialogContent>
+        <MudAlert Severity="Severity.Info" Dense="true" Class="mb-2">
+            صلاحية تعديل بيانات الاتصال تسمح بتغيير رقم التليفون ورقم الواتساب فقط.
+        </MudAlert>
+        <div class="ubp-form-grid">
+            <MudTextField @bind-Value="_phone" Label="@T.T("common.phone")"
+                          Variant="Variant.Outlined" Required="true" />
+            <MudTextField @bind-Value="_whatsapp" Label="@T.T("partners.whatsapp_phone")"
+                          Variant="Variant.Outlined" Required="true" />
+        </div>
+        <MudText Typo="Typo.caption" Class="ubp-muted mt-2">
+            لا يتكرر رقم التليفون أو الواتساب داخل نفس الفرع، ويُسمح بالتكرار في فرع آخر.
+        </MudText>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel" Disabled="_busy">@T.T("common.cancel")</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync"
+                   Disabled="_busy">@T.T("common.save")</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter, EditorRequired] public Partner Model { get; set; } = default!;
+    [Inject] private PartnerService Partners { get; set; } = default!;
+    [Inject] private UserContext UserContext { get; set; } = default!;
+    [Inject] private UiCulture T { get; set; } = default!;
+    [Inject] private ISnackbar Snackbar { get; set; } = default!;
+
+    private string? _phone;
+    private string? _whatsapp;
+    private bool _busy;
+
+    protected override void OnInitialized()
+    {
+        _phone = Model.Phone;
+        _whatsapp = Model.WhatsAppPhone;
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private async Task SaveAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_phone) || string.IsNullOrWhiteSpace(_whatsapp))
+        {
+            Snackbar.Add(T.T("validation.required_fields"), Severity.Warning);
+            return;
+        }
+        _busy = true;
+        try
+        {
+            var actor = await UserContext.RequireAsync();
+            var saved = await Partners.UpdateContactAsync(actor, Model.Id, Model.Version,
+                _phone, _whatsapp);
+            MudDialog.Close(DialogResult.Ok(saved));
+        }
+        catch (AppException ex) { Snackbar.Add(T.T(ex.Code), Severity.Error); }
+        finally { _busy = false; }
+    }
+}
