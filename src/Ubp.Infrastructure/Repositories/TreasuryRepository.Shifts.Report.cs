@@ -187,7 +187,7 @@ public sealed partial class TreasuryRepository
                                                         AND e.branch_id = CASE
                                                             WHEN t.is_company_wide THEN @branchId
                                                             ELSE t.branch_id END
-                                 WHERE e.status = 'posted' AND l.account_id = t.account_id), 0)
+                                 WHERE e.status = 'posted' AND e.created_at < @openedAt AND l.account_id = t.account_id), 0)
                        AS balance
             ) gl ON true
             WHERE (t.is_company_wide OR t.branch_id = @branchId) AND t.is_active
@@ -223,7 +223,7 @@ public sealed partial class TreasuryRepository
                                                             AND e.branch_id = CASE
                                                                 WHEN t.is_company_wide THEN @branchId
                                                                 ELSE t.branch_id END
-                                     WHERE e.status = 'posted' AND l.account_id = t.account_id), 0)
+                                     WHERE e.status = 'posted' AND e.created_at < @openedAt AND l.account_id = t.account_id), 0)
                            AS balance
                 ) gl ON true
                 WHERE (t.is_company_wide OR t.branch_id = @branchId) AND t.is_active
@@ -323,13 +323,12 @@ public sealed partial class TreasuryRepository
             ORDER BY h.created_at
             """, args, cancellationToken: ct)));
 
-        // عمولة التحصيل المحمَّلة على العميل بنسبة الخزينة (0081/0093): تدخل مصروفاً في الشفت.
+        // عمولة التحصيل المحمَّلة على العميل: مصروف سالب (إيراد) ويُضاف لرصيد الخزينة.
         report.Expenses.AddRange(await connection.QueryAsync<ShiftExpenseRow>(new CommandDefinition("""
             SELECT t.treasury_type AS TreasuryType, t.name_ar AS TreasuryName,
-                   ROUND(SUM(v.total_amount) * MAX(t.collection_fee_percent) / 100, 2) AS Amount,
+                   (-ROUND(SUM(v.fee_total), 2)) AS Amount,
                    NULL::text AS ItemName, 0::numeric AS Quantity, 0::numeric AS UnitPrice,
-                   'عمولة تحصيل محملة على العميل ' || MAX(t.collection_fee_percent) || '%'
-                       AS Description,
+                   'عمولة تحصيل محملة على العميل' AS Description,
                    'POSTED'::varchar AS Status
             FROM vouchers v
             JOIN treasuries t ON t.id = v.treasury_id
@@ -339,8 +338,26 @@ public sealed partial class TreasuryRepository
               AND NOT EXISTS (SELECT 1 FROM customer_account_settlements bs WHERE bs.voucher_id = v.id)
               AND v.created_at >= @openedAt
               AND (@until::timestamptz IS NULL OR v.created_at <= @until::timestamptz)
-              AND t.collection_fee_percent > 0
-            GROUP BY t.treasury_type, t.name_ar, t.collection_fee_percent
+            GROUP BY t.treasury_type, t.name_ar
+            HAVING SUM(v.fee_total) > 0
+            """, args, cancellationToken: ct)));
+
+        // عمولة مزود الخدمة: مصروف موجب يُخصم من رصيد الخزينة ولا يظهر في إيصال العميل.
+        report.Expenses.AddRange(await connection.QueryAsync<ShiftExpenseRow>(new CommandDefinition("""
+            SELECT t.treasury_type AS TreasuryType, t.name_ar AS TreasuryName,
+                   ROUND(SUM(v.provider_fee_total), 2) AS Amount,
+                   NULL::text AS ItemName, 0::numeric AS Quantity, 0::numeric AS UnitPrice,
+                   'عمولة مزود الخدمة' AS Description,
+                   'POSTED'::varchar AS Status
+            FROM vouchers v
+            JOIN treasuries t ON t.id = v.treasury_id
+            WHERE v.branch_id = @branchId AND v.voucher_type = 'receipt'
+              AND v.status <> 'cancelled'
+              AND NOT v.is_shift_settlement
+              AND v.created_at >= @openedAt
+              AND (@until::timestamptz IS NULL OR v.created_at <= @until::timestamptz)
+            GROUP BY t.treasury_type, t.name_ar
+            HAVING SUM(v.provider_fee_total) > 0
             """, args, cancellationToken: ct)));
 
         // عمولة تسليم النقدية (0082): مصروف إضافي في الشفت.

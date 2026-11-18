@@ -125,7 +125,7 @@ public partial class CollectBookingsDialog
     {
         var treasury = Treasuries.FirstOrDefault(t => t.Id == treasuryId);
         return treasury is null ? 0m
-            : Math.Round(total * treasury.ProviderFeePercent / 100m + treasury.ProviderFeeAmount,
+            : Math.Round(total * treasury.CollectionFeePercent / 100m,
                 2, MidpointRounding.AwayFromZero);
     }
 

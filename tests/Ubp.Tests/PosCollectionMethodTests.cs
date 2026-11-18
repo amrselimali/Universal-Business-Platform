@@ -45,7 +45,7 @@ public sealed class PosCollectionMethodTests : IClassFixture<TestDb>
         {
             BranchId = branch, Code = "PM-T" + suffix, NameAr = "خزينة طرق التحصيل " + suffix,
             TreasuryType = TreasuryTypes.Bank, AccountId = chart["1130"].Id,
-            ProviderFeePercent = feePercent, ProviderFeeAccountId = feeAccountId
+            CollectionFeePercent = feePercent, CollectionFeeAccountId = feeAccountId
         }, actor.UserId);
         var methodId = Guid.CreateVersion7();
         await _db.TreasuryRepo.CreateMethodAsync(methodId, new TreasuryMethodInput
@@ -82,7 +82,7 @@ public sealed class PosCollectionMethodTests : IClassFixture<TestDb>
         });
 
     [Fact]
-    public async Task Pos_fee_posts_to_the_method_fee_account()
+    public async Task Pos_customer_fee_is_stored_for_shift_review()
     {
         var actor = await _db.AdminActorAsync();
         var chart = await _db.SeedAccountingAsync();
@@ -101,14 +101,16 @@ public sealed class PosCollectionMethodTests : IClassFixture<TestDb>
             WHERE l.entry_id = (SELECT journal_entry_id FROM vouchers WHERE id = @id)
             """, new { id = voucher.VoucherId })).ToList();
 
-        Assert.Contains(entries, l => l.Code == chart["5490"].Code && l.Debit == 1m);
+        // عمولة العميل لا تُرحَّل كمصروف عند البيع؛ تُطبَّق عند مراجعة الشفت بالإشارة السالبة.
+        Assert.DoesNotContain(entries, l => l.Code == chart["5490"].Code);
         Assert.DoesNotContain(entries, l => l.Code == "5200");
 
         var detail = await _db.Pos().GetReceiptAsync(actor, voucher.VoucherId);
         Assert.Equal(voucher.VoucherId, detail.Id);
         var line = Assert.Single(detail.Lines);
-        Assert.Equal(1m, line.FeeAmount);
+        Assert.Equal(0.99m, line.FeeAmount);
         Assert.Equal(100m, line.Amount);
+        Assert.Equal(0.99m, detail.FeeTotal);
     }
 
     [Fact]

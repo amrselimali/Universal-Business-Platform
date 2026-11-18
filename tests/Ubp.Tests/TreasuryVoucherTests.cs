@@ -42,8 +42,8 @@ public sealed class TreasuryVoucherTests : IClassFixture<TestDb>
 
         Assert.Equal(1000m, lines.Single(x => x.Code == "1101").Debit);
         Assert.Equal(490m, lines.Single(x => x.Code == "1130").Debit);
-        Assert.Equal(10m, lines.Single(x => x.Code == "5200").Debit);
-        Assert.Equal(1500m, lines.Single(x => x.Code == "1110").Credit);
+        Assert.DoesNotContain(lines, x => x.Code == "5200");
+        Assert.Equal(1490m, lines.Single(x => x.Code == "1110").Credit);
 
         var entry = await connection.QuerySingleAsync<(decimal Debit, decimal Credit, string Status)>(
             "SELECT total_debit, total_credit, status FROM journal_entries WHERE id = @id",
@@ -54,7 +54,7 @@ public sealed class TreasuryVoucherTests : IClassFixture<TestDb>
         var customerBalance = await connection.ExecuteScalarAsync<decimal>(
             "SELECT coalesce(sum(debit - credit), 0) FROM party_balances " +
             "WHERE party_type = 'C' AND party_id = @id", new { id = f.Customer.Id });
-        Assert.Equal(-1500m, customerBalance);
+        Assert.Equal(-1490m, customerBalance);
     }
 
     [Fact]

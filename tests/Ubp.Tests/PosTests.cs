@@ -53,7 +53,7 @@ public sealed class PosTests : IClassFixture<TestDb>
         {
             BranchId = branch, Code = "POS-TC-" + suffix, NameAr = "خزينة بطاقة " + suffix,
             TreasuryType = TreasuryTypes.Bank, AccountId = chart["1130"].Id,
-            ProviderFeePercent = 2m
+            CollectionFeePercent = 2m
         }, actor.UserId);
 
         return new Fixture(branch, warehouse, item, customer, treasuryId, cash, card,
@@ -200,9 +200,9 @@ public sealed class PosTests : IClassFixture<TestDb>
             new PosPaymentInput { TreasuryId = f.TreasuryId, TreasuryMethodId = f.CashMethod,
                 Amount = 60 },
             new PosPaymentInput { TreasuryId = f.CardTreasuryId, TreasuryMethodId = Guid.Empty,
-                Amount = 40 });
+                Amount = 40.8m });
 
-        Assert.Equal(100m, receipt.Paid);
+        Assert.Equal(100.8m, receipt.Paid);
         Assert.Equal(0.8m, receipt.FeeTotal);
         Assert.Equal(2, receipt.Vouchers.Count);
         Assert.All(receipt.Vouchers, v => Assert.Equal(1, v.Lines));
@@ -224,9 +224,9 @@ public sealed class PosTests : IClassFixture<TestDb>
             "(SELECT journal_entry_id FROM vouchers WHERE id = @id)",
             new { id = receipt.Vouchers[1].VoucherId })).ToList();
 
-        Assert.Contains(cardEntries, l => l.Code == "1130" && l.Debit == 39.2m);
-        Assert.Contains(cardEntries, l => l.Code == "5200" && l.Debit == 0.8m);
+        Assert.Contains(cardEntries, l => l.Code == "1130" && l.Debit == 40m);
         Assert.Contains(cardEntries, l => l.Code == "1110" && l.Credit == 40m);
+        Assert.DoesNotContain(cardEntries, l => l.Code == "5200");
     }
 
     [Fact]

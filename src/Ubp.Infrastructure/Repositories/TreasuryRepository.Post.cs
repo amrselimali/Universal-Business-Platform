@@ -195,20 +195,18 @@ public sealed partial class TreasuryRepository
         {
             // الإيصال العكسي يُرحّل بمدين/دائن معكوسين بقيم موجبة (وليس بمبالغ سالبة).
             case VoucherTypes.Receipt when head.ReceiptType == VoucherReceiptTypes.Reversal:
-                Add(need(PostingKeys.CustomerAdvances), Math.Abs(head.TotalAmount), 0,
-                    asCustomer: true);
+                Add(need(PostingKeys.CustomerAdvances),
+                    Math.Abs(head.TotalAmount - head.FeeTotal), 0, asCustomer: true);
                 foreach (var line in lines)
                     Add(line.ClearingAccountId ?? source.AccountId, 0,
                         Math.Abs(line.Amount - line.FeeAmount));
-                if (head.FeeTotal != 0)
-                    Add(need(PostingKeys.PaymentFees), 0, Math.Abs(head.FeeTotal));
                 break;
 
             case VoucherTypes.Receipt:
                 foreach (var line in lines)
                     Add(line.ClearingAccountId ?? source.AccountId, line.Amount - line.FeeAmount, 0);
-                if (head.FeeTotal > 0) Add(need(PostingKeys.PaymentFees), head.FeeTotal, 0);
-                Add(need(PostingKeys.CustomerAdvances), 0, head.TotalAmount, asCustomer: true);
+                Add(need(PostingKeys.CustomerAdvances), 0, head.TotalAmount - head.FeeTotal,
+                    asCustomer: true);
                 break;
 
             case VoucherTypes.Payment:

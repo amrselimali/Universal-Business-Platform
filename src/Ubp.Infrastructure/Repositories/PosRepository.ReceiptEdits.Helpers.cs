@@ -15,7 +15,8 @@ public sealed partial class PosRepository
             SELECT v.id AS Id, v.branch_id AS BranchId, v.doc_date AS DocDate,
                    v.party_id AS CustomerId, v.party_name AS PartyName,
                    v.treasury_id AS TreasuryId, v.total_amount AS TotalAmount,
-                   v.fee_total AS FeeTotal, v.shift_id AS ShiftId, v.status AS Status,
+                   v.fee_total AS FeeTotal, v.provider_fee_total AS ProviderFeeTotal,
+                   v.shift_id AS ShiftId, v.status AS Status,
                    v.is_reversed AS IsReversed, v.receipt_type AS ReceiptType,
                    COALESCE((SELECT s.review_status FROM cashier_shifts s
                              WHERE s.id = v.shift_id), '') AS ShiftReviewStatus
@@ -43,21 +44,21 @@ public sealed partial class PosRepository
     private static Task InsertEditedVoucherAsync(NpgsqlConnection connection,
         NpgsqlTransaction tx, Guid voucherId, string docNo, ReceiptEditRow original,
         Guid customerId, string customerName, Guid treasuryId, decimal amount, decimal fee,
-        string receiptType, Guid parentId, Guid? shiftId, string status, Guid userId,
-        string notes, CancellationToken ct) =>
+        decimal providerFee, string receiptType, Guid parentId, Guid? shiftId, string status,
+        Guid userId, string notes, CancellationToken ct) =>
         connection.ExecuteAsync(new CommandDefinition("""
             INSERT INTO vouchers
                 (id, branch_id, doc_date, doc_no, status, voucher_type, party_type, party_id,
-                 party_name, treasury_id, total_amount, fee_total, receipt_type,
-                 parent_receipt_id, shift_id, notes, created_by)
+                 party_name, treasury_id, total_amount, fee_total, provider_fee_total,
+                 receipt_type, parent_receipt_id, shift_id, notes, created_by)
             VALUES (@voucherId, @branchId, @docDate, @docNo, @status, 'receipt', 'C',
-                    @customerId, @customerName, @treasuryId, @amount, @fee, @receiptType,
-                    @parentId, @shiftId, @notes, @userId)
+                    @customerId, @customerName, @treasuryId, @amount, @fee, @providerFee,
+                    @receiptType, @parentId, @shiftId, @notes, @userId)
             """, new
         {
             voucherId, branchId = original.BranchId, docDate = original.DocDate.Date, docNo,
-            status, customerId, customerName, treasuryId, amount, fee, receiptType, parentId,
-            shiftId, notes, userId
+            status, customerId, customerName, treasuryId, amount, fee, providerFee, receiptType,
+            parentId, shiftId, notes, userId
         }, tx, cancellationToken: ct));
 
     private static Task InsertEditedLineAsync(NpgsqlConnection connection,
@@ -115,6 +116,7 @@ public sealed partial class PosRepository
         public Guid TreasuryId { get; set; }
         public decimal TotalAmount { get; set; }
         public decimal FeeTotal { get; set; }
+        public decimal ProviderFeeTotal { get; set; }
         public Guid? ShiftId { get; set; }
         public string Status { get; set; } = "";
         public bool IsReversed { get; set; }

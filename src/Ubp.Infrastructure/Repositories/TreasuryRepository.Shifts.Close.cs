@@ -110,7 +110,7 @@ public sealed partial class TreasuryRepository
                                         WHERE bs.voucher_id = v.id)
                            THEN -v.total_amount
                        WHEN v.treasury_id = @treasuryId AND v.voucher_type = 'receipt'
-                           THEN v.total_amount
+                           THEN v.total_amount - v.fee_total
                        WHEN v.treasury_id = @treasuryId AND v.voucher_type = 'payment'
                            THEN -v.total_amount
                        WHEN v.treasury_id = @treasuryId AND v.voucher_type = 'transfer'
@@ -201,16 +201,15 @@ public sealed partial class TreasuryRepository
         return await QueryCashCountsAsync(connection, shiftId, null, ct);
     }
 
-    /// <summary>عمولة التحصيل لكل خزينة = مجموع تحصيلات الشفت × نسبة العمولة — 0081.</summary>
+    /// <summary>صافي أثر العمولات على نقدية الخزينة = عمولة المزود − عمولة العميل.</summary>
     private static async Task<decimal> CollectionFeeAsync(NpgsqlConnection connection,
         NpgsqlTransaction? tx, Guid treasuryId, DateTimeOffset openedAt, DateTimeOffset? until,
         CancellationToken ct) =>
         await connection.ExecuteScalarAsync<decimal>(new CommandDefinition("""
-            SELECT COALESCE(ROUND(SUM(v.total_amount) * MAX(t.collection_fee_percent) / 100, 2), 0)
+            SELECT COALESCE(SUM(v.provider_fee_total - v.fee_total), 0)
             FROM vouchers v
-            JOIN treasuries t ON t.id = v.treasury_id
-            WHERE t.id = @treasuryId AND v.voucher_type = 'receipt' AND v.status <> 'cancelled'
-              AND NOT v.is_shift_settlement
+            WHERE v.treasury_id = @treasuryId AND v.voucher_type = 'receipt'
+              AND v.status <> 'cancelled' AND NOT v.is_shift_settlement
               AND NOT EXISTS (SELECT 1 FROM customer_account_settlements bs WHERE bs.voucher_id = v.id)
               AND v.created_at >= @openedAt
               AND (@until::timestamptz IS NULL OR v.created_at <= @until::timestamptz)

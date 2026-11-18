@@ -68,9 +68,13 @@ public sealed partial class PosRepository : IPosRepository
         public Guid? FeeAccountId { get; set; }
         public decimal FeePercent { get; set; }
         public decimal FeeFixed { get; set; }
+        public Guid? ProviderFeeAccountId { get; set; }
+        public decimal ProviderFeePercent { get; set; }
+        public decimal ProviderFeeFixed { get; set; }
         public bool RequiresReference { get; set; }
         public decimal Amount { get; set; }
         public decimal Fee { get; set; }
+        public decimal ProviderFee { get; set; }
         public string? Reference { get; set; }
     }
 
@@ -155,8 +159,10 @@ public sealed partial class PosRepository : IPosRepository
         {
             var voucherId = Guid.CreateVersion7();
             var amount = group.Sum(p => p.Amount);
-            // عمولة التحصيل تُحفظ على الإيصال نفسه لتظهر في عرضه/طباعته مثل شاشة التسجيل — 0095.
+            // عمولة التحصيل المحملة على العميل تظهر على الإيصال؛ عمولة المزود تُحفظ منفصلة.
             var groupFee = Math.Round(group.Sum(p => p.Fee), 2, MidpointRounding.AwayFromZero);
+            var groupProviderFee = Math.Round(group.Sum(p => p.ProviderFee), 2,
+                MidpointRounding.AwayFromZero);
             var treasuryType = group.First().TreasuryType;
             var voucherNo = await NextNumberAsync(connection, tx, "RCV", input.BranchId,
                 input.DocDate, "RCV", ct);
@@ -164,15 +170,15 @@ public sealed partial class PosRepository : IPosRepository
             await connection.ExecuteAsync(new CommandDefinition("""
                 INSERT INTO vouchers (id, branch_id, doc_date, doc_no, status, voucher_type,
                     party_type, party_id, party_name, treasury_id, total_amount, fee_total,
-                    shift_id, created_by)
+                    provider_fee_total, shift_id, created_by)
                 VALUES (@voucherId, @BranchId, @docDate, @voucherNo, 'draft', 'receipt', 'C',
                         @CustomerId, (SELECT name_ar FROM customers WHERE id = @CustomerId),
-                        @TreasuryId, @amount, @groupFee,
+                        @TreasuryId, @amount, @groupFee, @groupProviderFee,
                         (SELECT id FROM cashier_shifts
                          WHERE branch_id = @BranchId AND status = 'open' LIMIT 1), @userId)
                 """, new { voucherId, input.BranchId, docDate = input.DocDate.Date,
-                    input.CustomerId, treasuryId = group.Key, amount, groupFee, voucherNo,
-                    userId }, tx,
+                    input.CustomerId, treasuryId = group.Key, amount, groupFee, groupProviderFee,
+                    voucherNo, userId }, tx,
                 cancellationToken: ct));
 
             var gl = new List<EntryLine>();
@@ -194,13 +200,12 @@ public sealed partial class PosRepository : IPosRepository
 
                 gl.Add(new EntryLine(payment.ClearingAccountId ?? payment.AccountId,
                     payment.Amount - fee, 0));
-                if (fee > 0)
-                    gl.Add(new EntryLine(payment.FeeAccountId ??
-                        await NeedAsync(connection, tx, PostingKeys.PaymentFees, ct), fee, 0));
+                // عمولة العميل وعمولة المزود تُرحَّلان عند مراجعة الشفت بالإشارة الصحيحة.
             }
 
             gl.Add(new EntryLine(
-                await NeedAsync(connection, tx, PostingKeys.CustomerAdvances, ct), 0, amount,
+                await NeedAsync(connection, tx, PostingKeys.CustomerAdvances, ct), 0,
+                Math.Round(amount - groupFee, 2, MidpointRounding.AwayFromZero),
                 input.CustomerId));
 
             if (!input.DraftOnly)
@@ -268,9 +273,11 @@ public sealed partial class PosRepository : IPosRepository
                        t.is_company_wide AS IsCompanyWide,
                        t.treasury_type AS TreasuryType, t.account_id AS AccountId,
                        m.clearing_account_id AS ClearingAccountId,
-                       t.provider_fee_account_id AS FeeAccountId,
-                       t.provider_fee_percent AS FeePercent,
-                       t.provider_fee_amount AS FeeFixed,
+                       t.collection_fee_account_id AS FeeAccountId,
+                       t.collection_fee_percent AS FeePercent, 0::numeric AS FeeFixed,
+                       t.provider_fee_account_id AS ProviderFeeAccountId,
+                       t.provider_fee_percent AS ProviderFeePercent,
+                       t.provider_fee_amount AS ProviderFeeFixed,
                        COALESCE(m.requires_reference, false) AS RequiresReference
                 FROM treasuries t
                 LEFT JOIN LATERAL (
@@ -294,8 +301,18 @@ public sealed partial class PosRepository : IPosRepository
 
             account.Amount = payment.Amount;
             account.Reference = payment.Reference;
-            account.Fee = Math.Round(payment.Amount * account.FeePercent / 100m +
-                account.FeeFixed, 2, MidpointRounding.AwayFromZero);
+            // العمولة المحملة على العميل تُحسب من الإجمالي المدفوع (شامل العمولة)،
+            // وعمولة المزود تُحسب على صافي قيمة الخدمة بعد عمولة العميل.
+            account.Fee = account.FeePercent <= 0 ? 0m : Math.Round(
+                payment.Amount * account.FeePercent / (100m + account.FeePercent), 2,
+                MidpointRounding.AwayFromZero);
+            var serviceBase = payment.Amount - account.Fee;
+            account.ProviderFee = Math.Round(serviceBase * account.ProviderFeePercent / 100m +
+                account.ProviderFeeFixed, 2, MidpointRounding.AwayFromZero);
+            if (account.Fee < 0 || account.Fee >= payment.Amount)
+                throw new ValidationAppException("validation.invalid_fee");
+            if (account.ProviderFee < 0 || account.ProviderFee >= payment.Amount)
+                throw new ValidationAppException("validation.invalid_fee");
             payment.TreasuryMethodId = account.TreasuryMethodId;
             result.Add(account);
         }

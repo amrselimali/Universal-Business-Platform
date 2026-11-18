@@ -63,8 +63,9 @@ public sealed partial class PosRepository
         // الأصل المسودة لم يُرحَّل بعد، فلا حاجة لترحيل العكسي: يُحفظ ملغى للأثر فقط.
         await InsertEditedVoucherAsync(connection, tx, reversalId, reversalNo, original,
             input.CustomerId, customer.Name, input.TreasuryId, -original.TotalAmount,
-            -original.FeeTotal, VoucherReceiptTypes.Reversal, original.Id, targetShiftId,
-            VoucherStatuses.Draft, userId, $"عكس إيصال {original.Id:N} — تعديل", ct);
+            -original.FeeTotal, -original.ProviderFeeTotal, VoucherReceiptTypes.Reversal,
+            original.Id, targetShiftId, VoucherStatuses.Draft, userId,
+            $"عكس إيصال {original.Id:N} — تعديل", ct);
         foreach (var line in lines)
             await InsertEditedLineAsync(connection, tx, reversalId, line.LineNo, line.MethodId,
                 -line.Amount, -line.Fee, line.Reference, ct);
@@ -75,9 +76,9 @@ public sealed partial class PosRepository
 
         await InsertEditedVoucherAsync(connection, tx, adjustedId, adjustedNo, original,
             input.CustomerId, customer.Name, input.TreasuryId, input.Amount, input.FeeAmount,
-            VoucherReceiptTypes.Adjusted, original.Id, targetShiftId, VoucherStatuses.Draft,
-            userId, string.IsNullOrWhiteSpace(input.Notes) ? "إيصال معدّل" : input.Notes.Trim(),
-            ct);
+            original.ProviderFeeTotal, VoucherReceiptTypes.Adjusted, original.Id, targetShiftId,
+            VoucherStatuses.Draft, userId,
+            string.IsNullOrWhiteSpace(input.Notes) ? "إيصال معدّل" : input.Notes.Trim(), ct);
         await InsertEditedLineAsync(connection, tx, adjustedId, 1, input.TreasuryMethodId,
             input.Amount, input.FeeAmount, null, ct);
 

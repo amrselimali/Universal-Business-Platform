@@ -8,8 +8,8 @@ namespace Ubp.Infrastructure.Repositories;
 public sealed partial class BookingCollectionRepository
 {
     private sealed record PayRow(Guid TreasuryId, Guid MethodId, decimal Amount, decimal Fee,
-        decimal Collected, Guid AccountId, string TreasuryType, Guid? ClearingAccountId,
-        Guid? FeeAccountId);
+        decimal ProviderFee, decimal Collected, Guid AccountId, string TreasuryType,
+        Guid? ClearingAccountId, Guid? FeeAccountId);
 
     public async Task<BookingCollectionResult> CollectAsync(Guid voucherId,
         BookingCollectionInput input, Guid userId, CancellationToken ct = default)
@@ -47,11 +47,14 @@ public sealed partial class BookingCollectionRepository
         {
             var m = await connection.QuerySingleOrDefaultAsync<(Guid TreasuryId, Guid MethodId,
                 Guid AccountId, string TreasuryType, Guid? ClearingAccountId, Guid? FeeAccountId,
-                decimal FeePercent, decimal FeeFixed)>(new CommandDefinition("""
+                decimal FeePercent, decimal ProviderFeePercent, decimal ProviderFeeFixed)>(
+                new CommandDefinition("""
                 SELECT t.id AS TreasuryId, m.id AS MethodId, t.account_id AS AccountId,
                        t.treasury_type AS TreasuryType, m.clearing_account_id AS ClearingAccountId,
-                       t.provider_fee_account_id AS FeeAccountId,
-                       t.provider_fee_percent AS FeePercent, t.provider_fee_amount AS FeeFixed
+                       t.collection_fee_account_id AS FeeAccountId,
+                       t.collection_fee_percent AS FeePercent,
+                       t.provider_fee_percent AS ProviderFeePercent,
+                       t.provider_fee_amount AS ProviderFeeFixed
                 FROM treasuries t
                 LEFT JOIN LATERAL (
                     SELECT mm.id, mm.clearing_account_id
@@ -73,11 +76,17 @@ public sealed partial class BookingCollectionRepository
             if (m.MethodId == Guid.Empty || m.AccountId == Guid.Empty)
                 throw new ValidationAppException("validation.treasury_method_not_found");
 
-            var fee = Math.Round(payment.Amount * m.FeePercent / 100m + m.FeeFixed, 2,
+            var fee = m.FeePercent <= 0 ? 0m : Math.Round(
+                payment.Amount * m.FeePercent / (100m + m.FeePercent), 2,
                 MidpointRounding.AwayFromZero);
+            var serviceBase = payment.Amount - fee;
+            var providerFee = Math.Round(serviceBase * m.ProviderFeePercent / 100m +
+                m.ProviderFeeFixed, 2, MidpointRounding.AwayFromZero);
             if (fee < 0 || fee >= payment.Amount)
                 throw new ValidationAppException("validation.invalid_fee");
-            payRows.Add(new PayRow(m.TreasuryId, m.MethodId, payment.Amount, fee,
+            if (providerFee < 0 || providerFee >= payment.Amount)
+                throw new ValidationAppException("validation.invalid_fee");
+            payRows.Add(new PayRow(m.TreasuryId, m.MethodId, payment.Amount, fee, providerFee,
                 payment.Amount - fee, m.AccountId, m.TreasuryType, m.ClearingAccountId,
                 m.FeeAccountId));
         }
@@ -120,6 +129,8 @@ public sealed partial class BookingCollectionRepository
             var rows = group.ToList();
             var groupGross = Math.Round(rows.Sum(r => r.Amount), 2, MidpointRounding.AwayFromZero);
             var groupFee = Math.Round(rows.Sum(r => r.Fee), 2, MidpointRounding.AwayFromZero);
+            var groupProviderFee = Math.Round(rows.Sum(r => r.ProviderFee), 2,
+                MidpointRounding.AwayFromZero);
             var groupCollected = Math.Round(rows.Sum(r => r.Collected), 2,
                 MidpointRounding.AwayFromZero);
 
@@ -131,14 +142,15 @@ public sealed partial class BookingCollectionRepository
             var id = Guid.CreateVersion7();
             await connection.ExecuteAsync(new CommandDefinition("""
                 INSERT INTO vouchers (id, branch_id, doc_date, doc_no, status, voucher_type,
-                    party_type, party_id, party_name, treasury_id, total_amount, fee_total, notes,
-                    created_by)
+                    party_type, party_id, party_name, treasury_id, total_amount, fee_total,
+                    provider_fee_total, notes, created_by)
                 VALUES (@id, @branchId, @docDate, @no, 'draft', 'receipt', 'C', @customerId,
                         (SELECT name_ar FROM customers WHERE id = @customerId), @treasuryId,
-                        @groupGross, @groupFee, @notes, @userId)
+                        @groupGross, @groupFee, @groupProviderFee, @notes, @userId)
                 """, new { id, branchId = input.BranchId, docDate, no,
                     customerId = input.CustomerId, treasuryId = group.Key, groupGross,
-                    groupFee, notes = input.Notes, userId }, tx, cancellationToken: ct));
+                    groupFee, groupProviderFee, notes = input.Notes, userId }, tx,
+                cancellationToken: ct));
 
             var lineNo = 0;
             var gl = new List<EntryLine>();
@@ -153,12 +165,10 @@ public sealed partial class BookingCollectionRepository
                         fee = row.Fee }, tx, cancellationToken: ct));
 
                 gl.Add(new EntryLine(row.ClearingAccountId ?? row.AccountId, row.Collected, 0));
-                if (row.Fee > 0)
-                    gl.Add(new EntryLine(row.FeeAccountId ??
-                        await NeedAsync(connection, tx, PostingKeys.PaymentFees, ct), row.Fee, 0));
+                // عمولة العميل وعمولة المزود تُرحَّلان عند مراجعة الشفت بالإشارة الصحيحة.
             }
             gl.Add(new EntryLine(await NeedAsync(connection, tx, PostingKeys.CustomerAdvances, ct),
-                0, groupGross, input.CustomerId));
+                0, groupCollected, input.CustomerId));
 
             if (!input.DraftOnly)
             {

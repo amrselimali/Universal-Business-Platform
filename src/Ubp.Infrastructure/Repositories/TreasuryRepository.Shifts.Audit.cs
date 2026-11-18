@@ -134,26 +134,56 @@ public sealed partial class TreasuryRepository
                 """, new { userId, entryId, id = row.Id }, tx, cancellationToken: ct));
         }
 
-        // ترحيل عمولة التحصيل المحمَّلة على العميل إلى حسابها المربوط (0081/0093).
-        var fees = await connection.QueryAsync<(Guid TreasuryAccountId, Guid FeeAccountId,
+        // عمولة التحصيل المحمَّلة على العميل: دائن حساب العمولة (مصروف سالب) ومدين الخزينة.
+        var customerFees = await connection.QueryAsync<(Guid TreasuryAccountId, Guid FeeAccountId,
             string TreasuryType, decimal Fee)>(new CommandDefinition("""
             SELECT t.account_id, t.collection_fee_account_id, t.treasury_type,
-                   ROUND(SUM(v.total_amount) * MAX(t.collection_fee_percent) / 100, 2) AS fee
+                   ROUND(SUM(v.fee_total), 2) AS fee
             FROM shift_cash_counts c
             JOIN cashier_shifts s ON s.id = c.shift_id
             JOIN treasuries t ON t.id = c.treasury_id
             JOIN vouchers v ON v.branch_id = s.branch_id AND v.treasury_id = t.id
                  AND v.voucher_type = 'receipt' AND v.status <> 'cancelled'
+                 AND NOT v.is_shift_settlement
                  AND NOT EXISTS (SELECT 1 FROM customer_account_settlements bs WHERE bs.voucher_id = v.id)
                  AND v.created_at >= s.opened_at
                  AND (s.closed_at IS NULL OR v.created_at <= s.closed_at)
-            WHERE c.shift_id = @shiftId AND t.collection_fee_percent > 0
-              AND t.collection_fee_account_id IS NOT NULL
+            WHERE c.shift_id = @shiftId AND t.collection_fee_account_id IS NOT NULL
             GROUP BY t.account_id, t.collection_fee_account_id, t.treasury_type
-            HAVING ROUND(SUM(v.total_amount) * MAX(t.collection_fee_percent) / 100, 2) > 0
+            HAVING ROUND(SUM(v.fee_total), 2) > 0
             """, new { shiftId }, tx, cancellationToken: ct));
 
-        foreach (var fee in fees)
+        foreach (var fee in customerFees)
+        {
+            var feeGl = new List<JournalLine>
+            {
+                new(fee.TreasuryAccountId, fee.Fee, 0), new(fee.FeeAccountId, 0, fee.Fee)
+            };
+            await CreateVoucherEntryAsync(connection, tx, Guid.CreateVersion7(),
+                fee.TreasuryType, shift.BranchId, DateTime.Today, shift.Code,
+                $"عمولة تحصيل محملة على العميل {shift.Code}", feeGl, userId, null, ct,
+                "cash_shift");
+        }
+
+        // عمولة مزود الخدمة: مدين حساب العمولة (مصروف موجب) ودائن الخزينة (تُخصم منها).
+        var providerFees = await connection.QueryAsync<(Guid TreasuryAccountId, Guid FeeAccountId,
+            string TreasuryType, decimal Fee)>(new CommandDefinition("""
+            SELECT t.account_id, t.provider_fee_account_id, t.treasury_type,
+                   ROUND(SUM(v.provider_fee_total), 2) AS fee
+            FROM shift_cash_counts c
+            JOIN cashier_shifts s ON s.id = c.shift_id
+            JOIN treasuries t ON t.id = c.treasury_id
+            JOIN vouchers v ON v.branch_id = s.branch_id AND v.treasury_id = t.id
+                 AND v.voucher_type = 'receipt' AND v.status <> 'cancelled'
+                 AND NOT v.is_shift_settlement
+                 AND v.created_at >= s.opened_at
+                 AND (s.closed_at IS NULL OR v.created_at <= s.closed_at)
+            WHERE c.shift_id = @shiftId AND t.provider_fee_account_id IS NOT NULL
+            GROUP BY t.account_id, t.provider_fee_account_id, t.treasury_type
+            HAVING ROUND(SUM(v.provider_fee_total), 2) > 0
+            """, new { shiftId }, tx, cancellationToken: ct));
+
+        foreach (var fee in providerFees)
         {
             var feeGl = new List<JournalLine>
             {
@@ -161,7 +191,7 @@ public sealed partial class TreasuryRepository
             };
             await CreateVoucherEntryAsync(connection, tx, Guid.CreateVersion7(),
                 fee.TreasuryType, shift.BranchId, DateTime.Today, shift.Code,
-                $"عمولة تحصيل محملة على العميل {shift.Code}", feeGl, userId, null, ct, "cash_shift");
+                $"عمولة مزود الخدمة {shift.Code}", feeGl, userId, null, ct, "cash_shift");
         }
 
         // تطبيق تعديلات المراجعة على المستندات الأصلية وإنشاء قيود الفرق (موجب/سالب) — 0084.

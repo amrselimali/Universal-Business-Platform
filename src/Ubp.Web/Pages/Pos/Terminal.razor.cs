@@ -273,8 +273,8 @@ public partial class Terminal : SecurePageBase
     {
         var treasury = _treasuries.FirstOrDefault(t => t.Id == payment.TreasuryId);
         return treasury is null ? 0m
-            : Math.Round(payment.Total * treasury.ProviderFeePercent / 100m +
-                treasury.ProviderFeeAmount, 2, MidpointRounding.AwayFromZero);
+            : Math.Round(payment.Total * treasury.CollectionFeePercent / 100m,
+                2, MidpointRounding.AwayFromZero);
     }
 
     private void SetTotal(PaymentModel payment, decimal total)
@@ -300,8 +300,8 @@ public partial class Terminal : SecurePageBase
             return;
         }
         var remaining = Math.Max(Total - _payments.Sum(p => p.Collected), 0);
-        var fee = Math.Round(remaining * treasury.ProviderFeePercent / 100m +
-            treasury.ProviderFeeAmount, 2, MidpointRounding.AwayFromZero);
+        var fee = Math.Round(remaining * treasury.CollectionFeePercent / 100m,
+            2, MidpointRounding.AwayFromZero);
         _payments.Add(new PaymentModel
         {
             TreasuryId = treasury.Id,
