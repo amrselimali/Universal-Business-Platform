@@ -1791,7 +1791,7 @@
   "validation.treasury_method_not_found": "Payment method not found for this treasury",
   "validation.treasury_not_found": "Treasury not found or inactive",
   "validation.treasury_required": "No active treasury for this branch",
-  "validation.invoice_not_found": "The original invoice was not found, is not posted, or does not belong to this supplier/branch.",
+  "validation.invoice_not_found": "The original invoice was not found, is cancelled, or does not belong to this supplier/branch.",
   "validation.invoice_line_not_found": "The original invoice line was not found.",
   "validation.return_quantity_exceeds": "The return quantity exceeds the available returnable quantity.",
   "validation.treasury_type": "Unsupported treasury type",

@@ -1791,7 +1791,7 @@
   "validation.treasury_method_not_found": "طريقة الدفع غير موجودة لهذه الخزينة",
   "validation.treasury_not_found": "الخزينة غير موجودة أو غير نشطة",
   "validation.treasury_required": "لا توجد خزينة مفعّلة لهذا الفرع",
-  "validation.invoice_not_found": "الفاتورة الأصلية غير موجودة أو غير مرحّلة أو لا تخص هذا المورد/الفرع.",
+  "validation.invoice_not_found": "الفاتورة الأصلية غير موجودة أو ملغاة أو لا تخص هذا المورد/الفرع.",
   "validation.invoice_line_not_found": "بند الفاتورة الأصلية غير موجود.",
   "validation.return_quantity_exceeds": "كمية المرتجع أكبر من الكمية المتاحة للإرجاع.",
   "validation.treasury_type": "نوع خزينة غير مدعوم",

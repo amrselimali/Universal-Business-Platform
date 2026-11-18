@@ -31,7 +31,7 @@ public sealed partial class PurchaseReturnRepository
                 FROM commercial_documents WHERE id = @id
                 """, new { id = input.OriginalDocumentId }, tx, cancellationToken: ct));
         if (invoice.Id == Guid.Empty || invoice.DocType != "purchase_invoice" ||
-            invoice.Status != "posted" || invoice.BranchId != input.BranchId ||
+            invoice.Status is not ("draft" or "posted") || invoice.BranchId != input.BranchId ||
             invoice.SupplierId != input.SupplierId || invoice.WarehouseId is null)
             throw new ValidationAppException("validation.invoice_not_found");
 

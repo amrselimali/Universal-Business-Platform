@@ -63,7 +63,9 @@ public partial class PurchaseReturnDialog
         supplier is null ? "" : $"{supplier.Code} — {supplier.NameAr}";
 
     private static string InvoiceLabel(PurchaseReturnInvoiceOption? invoice) =>
-        invoice is null ? "" : $"{invoice.DocNo} — {invoice.DocDate:yyyy-MM-dd} — {invoice.Total:N2}";
+        invoice is null ? "" :
+        $"{invoice.DocNo} — {invoice.DocDate:yyyy-MM-dd} — {invoice.Total:N2}" +
+        (invoice.Status == "draft" ? " (مسودة)" : "");
 
     private void OnSupplierChanged(Partner? supplier)
     {

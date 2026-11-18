@@ -94,11 +94,13 @@ public sealed partial class PurchaseReturnRepository : IPurchaseReturnRepository
         var headers = (await connection.QueryAsync<PurchaseReturnInvoiceOption>(
             new CommandDefinition("""
                 SELECT d.id AS Id, d.doc_no AS DocNo, d.doc_date AS DocDate,
-                       d.supplier_id AS SupplierId, s.name_ar AS SupplierName, d.total AS Total
+                       d.supplier_id AS SupplierId, s.name_ar AS SupplierName, d.total AS Total,
+                       d.status AS Status
                 FROM commercial_documents d
                 JOIN suppliers s ON s.id = d.supplier_id
                 WHERE d.branch_id = @branchId AND d.supplier_id = @supplierId
-                  AND d.doc_type = 'purchase_invoice' AND d.status = 'posted'
+                  AND d.doc_type = 'purchase_invoice'
+                  AND d.status IN ('draft', 'posted')
                   AND (@search::varchar IS NULL OR d.doc_no ILIKE '%' || @search || '%')
                 ORDER BY d.doc_date DESC, d.doc_no DESC
                 LIMIT 100

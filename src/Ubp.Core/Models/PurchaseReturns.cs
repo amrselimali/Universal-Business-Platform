@@ -105,6 +105,8 @@ public sealed class PurchaseReturnInvoiceOption
     public Guid SupplierId { get; set; }
     public string? SupplierName { get; set; }
     public decimal Total { get; set; }
+    /// <summary>حالة الفاتورة الأصلية: draft / posted.</summary>
+    public string Status { get; set; } = "posted";
     public IReadOnlyList<PurchaseReturnInvoiceLineOption> Lines { get; set; } =
         Array.Empty<PurchaseReturnInvoiceLineOption>();
 }
