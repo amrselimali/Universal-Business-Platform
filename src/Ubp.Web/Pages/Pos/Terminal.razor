@@ -301,5 +301,6 @@ else
 
     <PosFinalReceipt Receipt="_receipt" Lines="_lastLines.Select(l => new PosReceiptLine(l.Name, l.Qty2, l.Total)).ToList()" CustomerName="_customerName"
                      ReceiptNo="ReceiptNo" Net="_lastNet" WhatsAppUrl="WhatsAppUrl"
+                     ShowExpiryDate="@_lastLines.Any(l => !l.IsDirect)"
                      OnPrint="PrintAsync" />
 }

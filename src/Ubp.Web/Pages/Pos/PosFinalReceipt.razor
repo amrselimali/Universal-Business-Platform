@@ -50,6 +50,12 @@
                     <div><span>@T.T("pos.paid_amount")</span><span>@Receipt.Paid.ToString("N2")</span></div>
                     <div><span>@T.T("pos.remaining")</span><span>@Math.Max(Receipt.Total + Receipt.FeeTotal - Receipt.Paid, 0).ToString("N2")</span></div>
                 </div>
+                @if (ShowExpiryDate && Receipt.ExpiresAt is { } expiryDate)
+                {
+                    <div class="pos-receipt-note">
+                        @T.T("sales.offer_expiry"): @expiryDate.ToString("yyyy-MM-dd")
+                    </div>
+                }
             </div>
         </MudPaper>
 }
