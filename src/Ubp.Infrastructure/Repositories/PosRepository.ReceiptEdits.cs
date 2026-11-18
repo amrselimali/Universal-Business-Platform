@@ -24,9 +24,12 @@ public sealed partial class PosRepository
         await using var tx = await connection.BeginTransactionAsync(ct);
         var original = await LoadEditableAsync(connection, tx, id, ct);
 
-        var treasury = await connection.QuerySingleOrDefaultAsync<(Guid Id, Guid BranchId)>(
+        var treasury = await connection.QuerySingleOrDefaultAsync<(
+            Guid Id, Guid BranchId, decimal ProviderFeePercent, decimal ProviderFeeFixed)>(
             new CommandDefinition("""
-            SELECT t.id AS Id, t.branch_id AS BranchId
+            SELECT t.id AS Id, t.branch_id AS BranchId,
+                   t.provider_fee_percent AS ProviderFeePercent,
+                   t.provider_fee_amount AS ProviderFeeFixed
             FROM treasuries t JOIN treasury_methods m ON m.treasury_id = t.id AND m.id = @methodId
             WHERE t.id = @treasuryId AND t.is_active
             """, new { treasuryId = input.TreasuryId, methodId = input.TreasuryMethodId }, tx,
@@ -39,6 +42,13 @@ public sealed partial class PosRepository
                 tx, cancellationToken: ct));
         if (customer.Id == Guid.Empty)
             throw new ValidationAppException("validation.customer_not_found");
+
+        var serviceBase = input.Amount;
+        var providerFee = Math.Round(
+            serviceBase * treasury.ProviderFeePercent / 100m + treasury.ProviderFeeFixed,
+            2, MidpointRounding.AwayFromZero);
+        if (providerFee < 0 || providerFee >= input.Amount)
+            throw new ValidationAppException("validation.invalid_fee");
 
         var lines = (await connection.QueryAsync<(int LineNo, Guid MethodId, decimal Amount,
             decimal Fee, string? Reference)>(new CommandDefinition("""
@@ -62,12 +72,13 @@ public sealed partial class PosRepository
 
         // الأصل المسودة لم يُرحَّل بعد، فلا حاجة لترحيل العكسي: يُحفظ ملغى للأثر فقط.
         await InsertEditedVoucherAsync(connection, tx, reversalId, reversalNo, original,
-            input.CustomerId, customer.Name, input.TreasuryId, -original.TotalAmount,
+            input.CustomerId, customer.Name, original.TreasuryId, -original.TotalAmount,
             -original.FeeTotal, -original.ProviderFeeTotal, VoucherReceiptTypes.Reversal,
             original.Id, targetShiftId, VoucherStatuses.Draft, userId,
             $"عكس إيصال {original.Id:N} — تعديل", ct);
         foreach (var line in lines)
-            await InsertEditedLineAsync(connection, tx, reversalId, line.LineNo, line.MethodId,
+            await InsertEditedLineAsync(connection, tx, reversalId, line.LineNo,
+                line.MethodId,
                 -line.Amount, -line.Fee, line.Reference, ct);
         if (!originalWasPosted)
             await connection.ExecuteAsync(new CommandDefinition(
@@ -76,7 +87,7 @@ public sealed partial class PosRepository
 
         await InsertEditedVoucherAsync(connection, tx, adjustedId, adjustedNo, original,
             input.CustomerId, customer.Name, input.TreasuryId, input.Amount, input.FeeAmount,
-            original.ProviderFeeTotal, VoucherReceiptTypes.Adjusted, original.Id, targetShiftId,
+            providerFee, VoucherReceiptTypes.Adjusted, original.Id, targetShiftId,
             VoucherStatuses.Draft, userId,
             string.IsNullOrWhiteSpace(input.Notes) ? "إيصال معدّل" : input.Notes.Trim(), ct);
         await InsertEditedLineAsync(connection, tx, adjustedId, 1, input.TreasuryMethodId,

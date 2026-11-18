@@ -79,7 +79,7 @@ public sealed partial class BookingCollectionRepository
             var fee = m.FeePercent <= 0 ? 0m : Math.Round(
                 payment.Amount * m.FeePercent / (100m + m.FeePercent), 2,
                 MidpointRounding.AwayFromZero);
-            var serviceBase = payment.Amount - fee;
+            var serviceBase = payment.Amount;
             var providerFee = Math.Round(serviceBase * m.ProviderFeePercent / 100m +
                 m.ProviderFeeFixed, 2, MidpointRounding.AwayFromZero);
             if (fee < 0 || fee >= payment.Amount)

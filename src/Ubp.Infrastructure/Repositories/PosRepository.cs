@@ -301,12 +301,11 @@ public sealed partial class PosRepository : IPosRepository
 
             account.Amount = payment.Amount;
             account.Reference = payment.Reference;
-            // العمولة المحملة على العميل تُحسب من الإجمالي المدفوع (شامل العمولة)،
-            // وعمولة المزود تُحسب على صافي قيمة الخدمة بعد عمولة العميل.
+            // تُحسب عمولة العميل وعمولة المزود من إجمالي المبلغ المسدد.
             account.Fee = account.FeePercent <= 0 ? 0m : Math.Round(
                 payment.Amount * account.FeePercent / (100m + account.FeePercent), 2,
                 MidpointRounding.AwayFromZero);
-            var serviceBase = payment.Amount - account.Fee;
+            var serviceBase = payment.Amount;
             account.ProviderFee = Math.Round(serviceBase * account.ProviderFeePercent / 100m +
                 account.ProviderFeeFixed, 2, MidpointRounding.AwayFromZero);
             if (account.Fee < 0 || account.Fee >= payment.Amount)

@@ -304,6 +304,7 @@ public sealed class ShiftCollectionRow
 {
     public string CustomerName { get; set; } = "";
     public string? TreasuryType { get; set; }
+    public string? TreasuryName { get; set; }
     public decimal Collected { get; set; }
     /// <summary>عمولة التحصيل المخصومة من الخزينة وتُضاف للمصروف — 0080.</summary>
     public decimal Fee { get; set; }
