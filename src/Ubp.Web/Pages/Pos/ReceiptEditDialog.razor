@@ -41,7 +41,7 @@
                                          ValueChanged="@((Partner? p) => _customer = p)"
                                          SearchFunc="SearchCustomers" ToStringFunc="CustomerLabel"
                                          Label="العميل" Variant="Variant.Outlined"
-                                         Required="true" MinCharacters="1" DebounceInterval="300" />
+                                         Required="true" Disabled="true" MinCharacters="1" DebounceInterval="300" />
                         <MudSelect T="Guid?" Value="_treasuryId" ValueChanged="OnTreasuryChanged"
                                    Label="الخزينة" Variant="Variant.Outlined" Required="true">
                             @foreach (var treasury in _treasuries)

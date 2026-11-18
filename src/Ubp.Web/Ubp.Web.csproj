@@ -7,6 +7,10 @@
     <ProjectReference Include="..\Ubp.Application\Ubp.Application.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="11.0.0">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
     <PackageReference Include="MudBlazor" Version="9.11.0" />
     <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
     <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
@@ -27,21 +31,11 @@
       <ManualComponentCodeSources Include="Components\**\*.razor.cs" />
       <ManualServiceSources Include="..\Ubp.Application\Services\*.cs" />
     </ItemGroup>
-    <Copy SourceFiles="@(ManualPageSources)"
-          DestinationFiles="@(ManualPageSources->'$(OutDir)Code\Pages\%(RecursiveDir)%(Filename)%(Extension)')"
-          SkipUnchangedFiles="true" />
-    <Copy SourceFiles="@(ManualPageCodeSources)"
-          DestinationFiles="@(ManualPageCodeSources->'$(OutDir)Code\Pages\%(RecursiveDir)%(Filename)%(Extension)')"
-          SkipUnchangedFiles="true" />
-    <Copy SourceFiles="@(ManualComponentSources)"
-          DestinationFiles="@(ManualComponentSources->'$(OutDir)Code\Components\%(RecursiveDir)%(Filename)%(Extension)')"
-          SkipUnchangedFiles="true" />
-    <Copy SourceFiles="@(ManualComponentCodeSources)"
-          DestinationFiles="@(ManualComponentCodeSources->'$(OutDir)Code\Components\%(RecursiveDir)%(Filename)%(Extension)')"
-          SkipUnchangedFiles="true" />
-    <Copy SourceFiles="@(ManualServiceSources)"
-          DestinationFiles="@(ManualServiceSources->'$(OutDir)Code\Services\%(Filename)%(Extension)')"
-          SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(ManualPageSources)" DestinationFiles="@(ManualPageSources->'$(OutDir)Code\Pages\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(ManualPageCodeSources)" DestinationFiles="@(ManualPageCodeSources->'$(OutDir)Code\Pages\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(ManualComponentSources)" DestinationFiles="@(ManualComponentSources->'$(OutDir)Code\Components\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(ManualComponentCodeSources)" DestinationFiles="@(ManualComponentCodeSources->'$(OutDir)Code\Components\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(ManualServiceSources)" DestinationFiles="@(ManualServiceSources->'$(OutDir)Code\Services\%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
   </Target>
 
   <Target Name="CopyManualSourcesToPublish" AfterTargets="Publish">
@@ -52,20 +46,10 @@
       <ManualComponentCodeSourcesPublish Include="Components\**\*.razor.cs" />
       <ManualServiceSourcesPublish Include="..\Ubp.Application\Services\*.cs" />
     </ItemGroup>
-    <Copy SourceFiles="@(ManualPageSourcesPublish)"
-          DestinationFiles="@(ManualPageSourcesPublish->'$(PublishDir)Code\Pages\%(RecursiveDir)%(Filename)%(Extension)')"
-          SkipUnchangedFiles="true" />
-    <Copy SourceFiles="@(ManualPageCodeSourcesPublish)"
-          DestinationFiles="@(ManualPageCodeSourcesPublish->'$(PublishDir)Code\Pages\%(RecursiveDir)%(Filename)%(Extension)')"
-          SkipUnchangedFiles="true" />
-    <Copy SourceFiles="@(ManualComponentSourcesPublish)"
-          DestinationFiles="@(ManualComponentSourcesPublish->'$(PublishDir)Code\Components\%(RecursiveDir)%(Filename)%(Extension)')"
-          SkipUnchangedFiles="true" />
-    <Copy SourceFiles="@(ManualComponentCodeSourcesPublish)"
-          DestinationFiles="@(ManualComponentCodeSourcesPublish->'$(PublishDir)Code\Components\%(RecursiveDir)%(Filename)%(Extension)')"
-          SkipUnchangedFiles="true" />
-    <Copy SourceFiles="@(ManualServiceSourcesPublish)"
-          DestinationFiles="@(ManualServiceSourcesPublish->'$(PublishDir)Code\Services\%(Filename)%(Extension)')"
-          SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(ManualPageSourcesPublish)" DestinationFiles="@(ManualPageSourcesPublish->'$(PublishDir)Code\Pages\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(ManualPageCodeSourcesPublish)" DestinationFiles="@(ManualPageCodeSourcesPublish->'$(PublishDir)Code\Pages\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(ManualComponentSourcesPublish)" DestinationFiles="@(ManualComponentSourcesPublish->'$(PublishDir)Code\Components\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(ManualComponentCodeSourcesPublish)" DestinationFiles="@(ManualComponentCodeSourcesPublish->'$(PublishDir)Code\Components\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(ManualServiceSourcesPublish)" DestinationFiles="@(ManualServiceSourcesPublish->'$(PublishDir)Code\Services\%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
   </Target>
 </Project>
