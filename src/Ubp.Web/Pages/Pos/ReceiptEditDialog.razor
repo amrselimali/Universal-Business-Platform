@@ -37,11 +37,7 @@
                 <MudText Typo="Typo.subtitle2" Class="mb-2">البيانات الجديدة (قابلة للتعديل)</MudText>
                 <MudForm @ref="_form">
                     <div class="ubp-form-grid">
-                        <MudAutocomplete T="Partner" Value="_customer"
-                                         ValueChanged="@((Partner? p) => _customer = p)"
-                                         SearchFunc="SearchCustomers" ToStringFunc="CustomerLabel"
-                                         Label="العميل" Variant="Variant.Outlined"
-                                         Required="true" Disabled="true" MinCharacters="1" DebounceInterval="300" />
+
                         <MudSelect T="Guid?" Value="_treasuryId" ValueChanged="OnTreasuryChanged"
                                    Label="الخزينة" Variant="Variant.Outlined" Required="true">
                             @foreach (var treasury in _treasuries)
@@ -51,15 +47,7 @@
                                 </MudSelectItem>
                             }
                         </MudSelect>
-                        <MudSelect T="Guid" @bind-Value="_methodId" Label="طريقة الدفع"
-                                   Variant="Variant.Outlined" Required="true">
-                            @foreach (var method in _methods.Where(m => m.TreasuryId == _treasuryId))
-                            {
-                                <MudSelectItem T="Guid" Value="@method.Id">
-                                    @method.Code — @method.NameAr
-                                </MudSelectItem>
-                            }
-                        </MudSelect>
+                       
                         <MudNumericField T="decimal" @bind-Value="_amount" Label="المبلغ الإجمالي"
                                          Min="0.01m" Format="N2" Variant="Variant.Outlined" />
                         <MudNumericField T="decimal" @bind-Value="_fee" Label="عمولة التحصيل"
