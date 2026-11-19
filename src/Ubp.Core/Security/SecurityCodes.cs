@@ -79,6 +79,13 @@ public static class ScreenCodes
     public const string PosTerminal = "POS_TERMINAL";
     public const string PosReceipts = "POS_RECEIPTS";
     public const string FollowUps = "FOLLOW_UPS";
+    public const string PayrollItems = "PAYROLL_ITEMS";
+    public const string PayrollRuns = "PAYROLL_RUNS";
+    public const string PayrollNetCalculation = "PAYROLL_NET_CALCULATION";
+    public const string PayrollAttendance = "PAYROLL_ATTENDANCE";
+    public const string PayrollLeaves = "PAYROLL_LEAVES";
+    public const string PayrollAdjustments = "PAYROLL_ADJUSTMENTS";
+    public const string PayrollLoans = "PAYROLL_LOANS";
 }
 
 public static class ActionCodes

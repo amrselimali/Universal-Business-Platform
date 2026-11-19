@@ -18,6 +18,7 @@ public interface IEmployeeRepository
     /// <summary>كل الموظفين النشطين في الفروع المحددة (بلا شرط منفّذ الخدمة) — 0093.</summary>
     Task<IReadOnlyList<Employee>> ListActiveOptionsAsync(IReadOnlyCollection<Guid> branchIds,
         bool allBranches, CancellationToken ct = default);
+    Task<IReadOnlyList<Employee>> ListAllActiveAsync(CancellationToken ct = default);
     Task<Employee?> GetAsync(Guid id, CancellationToken ct = default);
     Task<Employee?> GetByCodeAsync(string code, CancellationToken ct = default);
     /// <summary>الكود التسلسلي التالي للموظف داخل فرعه (بدءًا من 1) — 0094.</summary>
@@ -89,6 +90,9 @@ public sealed class EmployeeRepository : IEmployeeRepository
             cancellationToken: ct));
         return rows.ToList();
     }
+
+    public Task<IReadOnlyList<Employee>> ListAllActiveAsync(CancellationToken ct = default) =>
+        ListActiveOptionsAsync(Array.Empty<Guid>(), true, ct);
 
     public async Task<IReadOnlyList<Employee>> ListOptionsAsync(
         IReadOnlyCollection<Guid> branchIds, bool allBranches, CancellationToken ct = default)

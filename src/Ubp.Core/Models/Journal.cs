@@ -15,6 +15,7 @@ public static class EntrySources
     public const string Opening = "opening";
     public const string Invoice = "invoice";
     public const string Voucher = "voucher";
+    public const string Payroll = "payroll";
 }
 
 public sealed class JournalEntry

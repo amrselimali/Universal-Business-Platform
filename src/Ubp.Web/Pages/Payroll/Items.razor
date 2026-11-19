@@ -1,0 +1,86 @@
+@page "/payroll/items"
+@attribute [Authorize]
+@inherits SecurePageBase
+@inject IPayrollConfigurationRepository PayrollConfiguration
+
+<PageTitle>بنود المرتبات</PageTitle>
+@if (Denied)
+{
+	<ForbiddenView />
+}
+else if (Loading)
+{
+	<div class="ubp-loading"><MudProgressCircular Indeterminate="true" /></div>
+}
+else
+{
+	<PageHeader Title="بنود المرتبات" Subtitle="تعريف البنود وإصداراتها وخصائص الخضوع">
+		<Actions>
+			<MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="ToggleCreate">إضافة بند</MudButton>
+		</Actions>
+	</PageHeader>
+	@if (_showCreate)
+	{
+		<MudPaper Elevation="0" Class="ubp-card mb-4">
+			<MudGrid>
+				<MudItem xs="12" md="3"><MudTextField @bind-Value="_newCode" Label="الكود" Variant="Variant.Outlined" /></MudItem>
+				<MudItem xs="12" md="3"><MudTextField @bind-Value="_newName" Label="الاسم العربي" Variant="Variant.Outlined" /></MudItem>
+				<MudItem xs="12" md="3"><MudTextField @bind-Value="_newCategory" Label="التصنيف" Variant="Variant.Outlined" /></MudItem>
+				<MudItem xs="12" md="3"><MudCheckBox @bind-Value="_newVariable" Label="بند متغير" /></MudItem>
+				<MudItem xs="12"><MudButton Variant="Variant.Filled" Color="Color.Success" OnClick="CreateAsync">حفظ</MudButton></MudItem>
+			</MudGrid>
+		</MudPaper>
+	}
+	<MudPaper Elevation="0" Class="ubp-card">
+		<MudTable Items="_items" Dense="true" Hover="true" Striped="true">
+			<HeaderContent>
+				<MudTh>الكود</MudTh><MudTh>الاسم</MudTh><MudTh>التصنيف</MudTh>
+				<MudTh>متغير</MudTh><MudTh>ضريبي</MudTh><MudTh>تأمينات</MudTh>
+			</HeaderContent>
+			<RowTemplate>
+				<MudTd><span class="ubp-code">@context.Code</span></MudTd>
+				<MudTd>@context.NameAr</MudTd>
+				<MudTd>@context.CategoryCode</MudTd>
+				<MudTd>@(context.IsVariable ? "نعم" : "لا")</MudTd>
+				<MudTd>@(context.IsTaxable ? "نعم" : "لا")</MudTd>
+				<MudTd>@(context.IsInsurable ? "نعم" : "لا")</MudTd>
+			</RowTemplate>
+		</MudTable>
+	</MudPaper>
+}
+
+@code {
+	private IReadOnlyList<PayrollItem> _items = Array.Empty<PayrollItem>();
+	private bool _showCreate;
+	private string _newCode = "";
+	private string _newName = "";
+	private string _newCategory = "earning";
+	private bool _newVariable;
+	protected override string ScreenCode => ScreenCodes.PayrollItems;
+
+	protected override async Task OnLoadAsync()
+	{
+		_items = await PayrollConfiguration.ListItemsAsync(false);
+	}
+
+	private void ToggleCreate() => _showCreate = !_showCreate;
+
+	private async Task CreateAsync()
+	{
+		try
+		{
+			await PayrollConfiguration.CreateItemAsync(new PayrollItem
+			{
+				Id = Guid.NewGuid(), Code = _newCode.Trim(), NameAr = _newName.Trim(),
+				CategoryCode = _newCategory.Trim(), IsVariable = _newVariable
+			});
+			_items = await PayrollConfiguration.ListItemsAsync(false);
+			_showCreate = false;
+			Snackbar.Add("تم حفظ بند المرتبات.", Severity.Success);
+		}
+		catch (Exception ex)
+		{
+			Snackbar.Add(ex.Message, Severity.Error);
+		}
+	}
+}

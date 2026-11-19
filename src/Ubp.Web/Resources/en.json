@@ -548,6 +548,7 @@
   "execution.service": "Service",
   "execution.title": "Execute booking",
   "group.accounting": "Accounting",
+  "group.employee_management": "Employee Management",
   "group.definitions": "Master Data",
   "group.inventory": "Inventory",
   "group.main": "Main",
@@ -2108,5 +2109,12 @@
   "qa.tests_title": "Available tests",
   "qa.run_full": "Run full audit",
   "consumption.note_transfer_in": "Quantity transferred in",
-  "consumption.note_transfer_out": "Quantity transferred out"
+  "consumption.note_transfer_out": "Quantity transferred out",
+  "screen.payroll_items": "Payroll items",
+  "screen.payroll_runs": "Payroll runs",
+  "screen.payroll_net_calculation": "Net salary calculation"
+  ,"screen.payroll_attendance": "Attendance"
+  ,"screen.payroll_leaves": "Leaves"
+  ,"screen.payroll_adjustments": "Payroll adjustments"
+  ,"screen.payroll_loans": "Employee loans"
 }

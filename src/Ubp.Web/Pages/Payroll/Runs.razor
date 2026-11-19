@@ -1,0 +1,264 @@
+@page "/payroll/runs"
+@attribute [Authorize]
+@inherits SecurePageBase
+@inject PayrollRunService PayrollRuns
+@inject PayrollRunCalculationService PayrollCalculation
+@inject PayrollPostingService PayrollPosting
+@inject ISnackbar Snackbar
+
+<PageTitle>دورات المرتبات</PageTitle>
+
+@if (Denied)
+{
+	<ForbiddenView />
+}
+else if (Loading)
+{
+	<div class="ubp-loading"><MudProgressCircular Indeterminate="true" /></div>
+}
+else
+{
+	<PageHeader Title="دورات المرتبات" Subtitle="إنشاء دورة جديدة وإدارتها عبر مراحل الاعتماد" />
+
+	<MudPaper Elevation="0" Class="ubp-card">
+		<MudGrid>
+			<MudItem xs="12" md="3"><MudTextField @bind-Value="_salaryFrom" Label="بداية المرتب" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="3"><MudTextField @bind-Value="_salaryTo" Label="نهاية المرتب" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="3"><MudTextField @bind-Value="_variablesFrom" Label="بداية المتغيرات" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="3"><MudTextField @bind-Value="_variablesTo" Label="نهاية المتغيرات" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12"><MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="CreateAsync">إنشاء دورة مسودة</MudButton></MudItem>
+		</MudGrid>
+
+		@if (_createdRun is not null)
+		{
+			<MudAlert Severity="Severity.Success" Class="mt-4">
+				تم إنشاء الدورة @(_createdRun.Id) بالحالة: @_createdRun.Status
+			</MudAlert>
+		}
+	</MudPaper>
+
+	<MudPaper Elevation="0" Class="ubp-card mt-4">
+		<MudText Typo="Typo.h6" Class="mb-3">الدورات السابقة</MudText>
+		<MudTable Items="_runs" Dense="true" Hover="true" Striped="true">
+			<HeaderContent>
+				<MudTh>الفترة</MudTh>
+				<MudTh>المتغيرات</MudTh>
+				<MudTh>الحالة</MudTh>
+				<MudTh>الإصدار</MudTh>
+				<MudTh>حساب</MudTh>
+				<MudTh>النتائج</MudTh>
+			</HeaderContent>
+			<RowTemplate>
+				<MudTd>@context.SalaryFrom - @context.SalaryTo</MudTd>
+				<MudTd>@context.VariablesFrom - @context.VariablesTo</MudTd>
+				<MudTd>@context.Status</MudTd>
+				<MudTd>@context.Version</MudTd>
+				<MudTd>
+					<MudButton Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined"
+							   Disabled="@(context.Status != PayrollRunStatuses.Draft || _calculating)"
+							   OnClick="@(() => CalculateRunAsync(context))">حساب</MudButton>
+				</MudTd>
+				<MudTd>
+					<MudButton Size="Size.Small" Variant="Variant.Text" OnClick="@(() => SelectRunAsync(context))">النتائج</MudButton>
+				</MudTd>
+			</RowTemplate>
+		</MudTable>
+	</MudPaper>
+
+	@if (_selectedRun is not null)
+	{
+		<MudPaper Elevation="0" Class="ubp-card mt-4">
+			<MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="mb-3">
+				<MudText Typo="Typo.h6">نتائج الدورة: @_selectedRun.SalaryFrom - @_selectedRun.SalaryTo</MudText>
+				<MudStack Row="true" Spacing="1">
+					@if (_selectedRun.Status == PayrollRunStatuses.Calculated)
+					{
+						<MudButton Size="Size.Small" Color="Color.Info" Variant="Variant.Filled" OnClick="@(() => TransitionAsync(PayrollRunStatuses.UnderReview))">إرسال للمراجعة</MudButton>
+					}
+					@if (_selectedRun.Status == PayrollRunStatuses.UnderReview)
+					{
+						<MudButton Size="Size.Small" Color="Color.Success" Variant="Variant.Filled" OnClick="@(() => TransitionAsync(PayrollRunStatuses.Approved))">اعتماد</MudButton>
+					}
+					@if (_selectedRun.Status == PayrollRunStatuses.Approved)
+					{
+						<MudButton Size="Size.Small" Color="Color.Warning" Variant="Variant.Filled" OnClick="PostAsync">ترحيل</MudButton>
+					}
+					@if (_selectedRun.Status == PayrollRunStatuses.Posted)
+					{
+						<MudButton Size="Size.Small" Color="Color.Success" Variant="Variant.Filled" OnClick="PayAsync">صرف المرتبات</MudButton>
+					}
+				</MudStack>
+			</MudStack>
+
+			<MudTable Items="_results" Dense="true" Hover="true" Striped="true">
+				<HeaderContent>
+					<MudTh>الموظف</MudTh>
+					<MudTh>العملة</MudTh>
+					<MudTh>الإجمالي</MudTh>
+					<MudTh>الخصومات</MudTh>
+					<MudTh>الصافي</MudTh>
+					<MudTh>الإصدار</MudTh>
+					<MudTh></MudTh>
+				</HeaderContent>
+				<RowTemplate>
+					<MudTd>@context.EmployeeId</MudTd>
+					<MudTd>@context.CurrencyCode</MudTd>
+					<MudTd>@context.GrossAmount.ToString("N2")</MudTd>
+					<MudTd>@context.DeductionsAmount.ToString("N2")</MudTd>
+					<MudTd>@context.NetAmount.ToString("N2")</MudTd>
+					<MudTd>@context.CalculationVersion</MudTd>
+					<MudTd><MudButton Size="Size.Small" Variant="Variant.Text" OnClick="@(() => SelectResultAsync(context))">التفاصيل</MudButton></MudTd>
+				</RowTemplate>
+			</MudTable>
+
+			@if (_selectedRun.Status == PayrollRunStatuses.Paid)
+			{
+				<MudAlert Severity="Severity.Success" Class="mt-3">تم صرف الدورة للموظفين المسجلين.</MudAlert>
+			}
+
+			@if (_selectedResult is not null)
+			{
+				<MudText Typo="Typo.subtitle2" Class="mt-4">تفاصيل الموظف @_selectedResult.EmployeeId</MudText>
+				<MudTable Items="_details" Dense="true">
+					<HeaderContent>
+						<MudTh>البند</MudTh>
+						<MudTh>المبلغ</MudTh>
+						<MudTh>المعادلة</MudTh>
+					</HeaderContent>
+					<RowTemplate>
+						<MudTd>@context.ItemCode</MudTd>
+						<MudTd>@context.Amount.ToString("N2")</MudTd>
+						<MudTd>@context.FormulaReference</MudTd>
+					</RowTemplate>
+				</MudTable>
+			}
+		</MudPaper>
+	}
+}
+
+@code {
+	private string _salaryFrom = DateTime.Today.ToString("yyyy-MM-dd");
+	private string _salaryTo = DateTime.Today.ToString("yyyy-MM-dd");
+	private string _variablesFrom = DateTime.Today.ToString("yyyy-MM-dd");
+	private string _variablesTo = DateTime.Today.ToString("yyyy-MM-dd");
+	private PayrollRun? _createdRun;
+	private IReadOnlyList<PayrollRun> _runs = Array.Empty<PayrollRun>();
+	private IReadOnlyList<PayrollResult> _results = Array.Empty<PayrollResult>();
+	private PayrollRun? _selectedRun;
+	private PayrollResult? _selectedResult;
+	private IReadOnlyList<PayrollResultDetail> _details = Array.Empty<PayrollResultDetail>();
+	private IReadOnlyList<PayrollPayment> _payments = Array.Empty<PayrollPayment>();
+	private bool _calculating;
+
+	protected override string ScreenCode => ScreenCodes.PayrollRuns;
+
+	protected override async Task OnLoadAsync() => _runs = await PayrollRuns.ListAsync();
+
+	private async Task CreateAsync()
+	{
+		if (!DateOnly.TryParse(_salaryFrom, out var salaryFrom) ||
+			!DateOnly.TryParse(_salaryTo, out var salaryTo) ||
+			!DateOnly.TryParse(_variablesFrom, out var variablesFrom) ||
+			!DateOnly.TryParse(_variablesTo, out var variablesTo))
+		{
+			Snackbar.Add("أدخل التواريخ بصيغة yyyy-MM-dd.", Severity.Error);
+			return;
+		}
+
+		try
+		{
+			_createdRun = new PayrollRun
+			{
+				Id = Guid.NewGuid(),
+				SalaryFrom = salaryFrom,
+				SalaryTo = salaryTo,
+				VariablesFrom = variablesFrom,
+				VariablesTo = variablesTo
+			};
+			await PayrollRuns.CreateAsync(_createdRun, Actor?.UserId);
+			_runs = await PayrollRuns.ListAsync();
+			Snackbar.Add("تم إنشاء دورة المرتبات.", Severity.Success);
+		}
+		catch (Exception ex)
+		{
+			Snackbar.Add(ex.Message, Severity.Error);
+			_createdRun = null;
+		}
+	}
+
+	private async Task SelectResultAsync(PayrollResult result)
+	{
+		_selectedResult = result;
+		_details = await PayrollRuns.ListResultDetailsAsync(result.Id);
+	}
+
+	private async Task CalculateRunAsync(PayrollRun run)
+	{
+		if (_calculating) return;
+		_calculating = true;
+		try
+		{
+			var summary = await PayrollCalculation.CalculateRunAsync(run.Id, $"ui-{DateTime.UtcNow:yyyyMMddHHmmss}");
+			_runs = await PayrollRuns.ListAsync();
+			Snackbar.Add($"تم حساب الدورة لـ {summary.CalculatedCount} موظف.", Severity.Success);
+		}
+		catch (Exception ex)
+		{
+			Snackbar.Add(ex.Message, Severity.Error);
+			_runs = await PayrollRuns.ListAsync();
+		}
+		finally
+		{
+			_calculating = false;
+		}
+	}
+
+	private async Task SelectRunAsync(PayrollRun run)
+	{
+		_selectedRun = run;
+		_selectedResult = null;
+		_details = Array.Empty<PayrollResultDetail>();
+		_results = await PayrollRuns.ListResultsAsync(run.Id);
+		_payments = await PayrollRuns.ListPaymentsAsync(run.Id);
+	}
+
+	private async Task PayAsync()
+	{
+		if (_selectedRun is null) return;
+		try
+		{
+			var count = await PayrollRuns.PayRunAsync(_selectedRun.Id, "bank_transfer");
+			_selectedRun = await PayrollRuns.GetAsync(_selectedRun.Id);
+			_runs = await PayrollRuns.ListAsync();
+			_payments = await PayrollRuns.ListPaymentsAsync(_selectedRun!.Id);
+			Snackbar.Add($"تم صرف {count} دفعة.", Severity.Success);
+		}
+		catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+	}
+
+	private async Task PostAsync()
+	{
+		if (_selectedRun is null || Actor?.UserId is not Guid userId) return;
+		try
+		{
+			var count = await PayrollPosting.PostRunAsync(_selectedRun.Id, userId);
+			_selectedRun = await PayrollRuns.GetAsync(_selectedRun.Id);
+			_runs = await PayrollRuns.ListAsync();
+			Snackbar.Add($"تم ترحيل {count} قيد مرتبات.", Severity.Success);
+		}
+		catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+	}
+
+	private async Task TransitionAsync(string targetStatus)
+	{
+		if (_selectedRun is null) return;
+		try
+		{
+			_selectedRun = await PayrollRuns.TransitionAsync(_selectedRun.Id, _selectedRun.Version,
+				targetStatus, Array.Empty<PayrollRunIssue>());
+			_runs = await PayrollRuns.ListAsync();
+			Snackbar.Add("تم تحديث حالة دورة المرتبات.", Severity.Success);
+		}
+		catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+	}
+}

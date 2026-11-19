@@ -548,6 +548,7 @@
   "execution.service": "الخدمة",
   "execution.title": "تنفيذ الحجز",
   "group.accounting": "المحاسبة",
+  "group.employee_management": "إدارة الموظفين",
   "group.definitions": "التعريفات الأساسية",
   "group.inventory": "المخزون",
   "group.main": "الرئيسية",
@@ -2108,5 +2109,12 @@
   "qa.live_db_note": "يعمل الفحص على قاعدة البيانات الحقيقية: الفحص المباشر داخل معاملة READ ONLY، واختبارات الكتابة داخل معاملة تُلغى دائمًا فلا تؤثر على بيانات التشغيل.",
   "qa.tests_title": "الاختبارات المتاحة",
   "consumption.note_transfer_in": "كمية محوَّلة إلى هذا العميل (وارد)",
-  "consumption.note_transfer_out": "كمية محوَّلة من هذا العميل (صادر)"
+  "consumption.note_transfer_out": "كمية محوَّلة من هذا العميل (صادر)",
+  "screen.payroll_items": "بنود المرتبات",
+  "screen.payroll_runs": "دورات المرتبات",
+  "screen.payroll_net_calculation": "حساب صافي المرتب"
+  ,"screen.payroll_attendance": "الحضور والانصراف"
+  ,"screen.payroll_leaves": "الإجازات"
+  ,"screen.payroll_adjustments": "تسويات المرتبات"
+  ,"screen.payroll_loans": "سلف وقروض الموظفين"
 }

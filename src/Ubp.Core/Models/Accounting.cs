@@ -79,6 +79,8 @@ public static class PostingKeys
     public const string OperatingExpense = "operating_expense";
     /// <summary>حساب الدكتور الخارجي: يُحمَّل عليه فرق تسوية شفت الدكتور الخارجي.</summary>
     public const string ExternalDoctor = "external_doctor";
+    public const string PayrollSalaryExpense = "payroll_salary_expense";
+    public const string PayrollPayable = "payroll_payable";
 
     public static readonly string[] All =
     {
@@ -87,7 +89,7 @@ public static class PostingKeys
         SupplierPayable, PurchaseVariance, RoundingDifference, CustomerAdvances,
         SupplierAdvances, EmployeeAdvances, PaymentFees, CashOverShort, InterBranchClearing,
         BookingForfeitIncome, CashClearing, CashHandoverCommission, OperatingExpense,
-        ExternalDoctor
+        ExternalDoctor, PayrollSalaryExpense, PayrollPayable
     };
 }
 

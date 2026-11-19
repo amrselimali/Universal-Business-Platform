@@ -32,6 +32,7 @@ public static partial class AppRegistry
     public const string GroupReports = "group.reports";
     public const string GroupAccounting = "group.accounting";
     public const string GroupSales = "group.sales";
+    public const string GroupEmployeeManagement = "group.employee_management";
 
     private static ScreenAction A(string code) => new(code, $"action.{code.ToLowerInvariant()}");
 
@@ -182,13 +183,34 @@ public static partial class AppRegistry
             "screen.stock_vs_gl", GroupReports,
             new[] { A(ActionCodes.View), A(ActionCodes.Print) }, "accounting.stock_vs_gl"),
 
-        new(ScreenCodes.Employees, "/settings/employees", "Badge", "screen.employees", GroupDefinitions,
+        new(ScreenCodes.Employees, "/settings/employees", "Badge", "screen.employees", GroupEmployeeManagement,
             new[] { A(ActionCodes.View), A(ActionCodes.Create), A(ActionCodes.Edit),
                     A(ActionCodes.ToggleActive), A(ActionCodes.Delete) }, "settings.employees"),
 
         new(ScreenCodes.Taxes, "/settings/taxes", "Percent", "screen.taxes", GroupDefinitions,
             new[] { A(ActionCodes.View), A(ActionCodes.Create), A(ActionCodes.Edit),
                     A(ActionCodes.ToggleActive), A(ActionCodes.Delete) }, "settings.taxes"),
+
+        new(ScreenCodes.PayrollItems, "/payroll/items", "RequestQuote", "screen.payroll_items", GroupEmployeeManagement,
+            new[] { A(ActionCodes.View), A(ActionCodes.Create), A(ActionCodes.Edit) }, "payroll.items"),
+
+        new(ScreenCodes.PayrollRuns, "/payroll/runs", "Calculate", "screen.payroll_runs", GroupEmployeeManagement,
+            new[] { A(ActionCodes.View), A(ActionCodes.Create), A(ActionCodes.Edit) }, "payroll.runs"),
+
+        new(ScreenCodes.PayrollNetCalculation, "/payroll/net-calculation", "Calculate", "screen.payroll_net_calculation", GroupEmployeeManagement,
+            new[] { A(ActionCodes.View) }, "payroll.net_calculation"),
+
+        new(ScreenCodes.PayrollAttendance, "/payroll/attendance", "AccessTime", "screen.payroll_attendance", GroupEmployeeManagement,
+            new[] { A(ActionCodes.View), A(ActionCodes.Create), A(ActionCodes.Edit) }, "payroll.attendance"),
+
+        new(ScreenCodes.PayrollLeaves, "/payroll/leaves", "EventAvailable", "screen.payroll_leaves", GroupEmployeeManagement,
+            new[] { A(ActionCodes.View), A(ActionCodes.Create), A(ActionCodes.Edit) }, "payroll.leaves"),
+
+        new(ScreenCodes.PayrollAdjustments, "/payroll/adjustments", "Tune", "screen.payroll_adjustments", GroupEmployeeManagement,
+            new[] { A(ActionCodes.View), A(ActionCodes.Create), A(ActionCodes.Edit) }, "payroll.adjustments"),
+
+        new(ScreenCodes.PayrollLoans, "/payroll/loans", "AccountBalance", "screen.payroll_loans", GroupEmployeeManagement,
+            new[] { A(ActionCodes.View), A(ActionCodes.Create), A(ActionCodes.Edit) }, "payroll.loans"),
 
         new(ScreenCodes.PaymentTerms, "/settings/payment-terms", "Schedule", "screen.payment_terms",
             GroupDefinitions,

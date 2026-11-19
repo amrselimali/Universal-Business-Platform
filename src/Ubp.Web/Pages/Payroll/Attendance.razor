@@ -1,0 +1,72 @@
+@page "/payroll/attendance"
+@attribute [Authorize]
+@inherits SecurePageBase
+@inject IPayrollOperationsRepository Operations
+
+<PageTitle>الحضور والانصراف</PageTitle>
+@if (Denied)
+{
+	<ForbiddenView />
+}
+else if (Loading)
+{
+	<div class="ubp-loading"><MudProgressCircular Indeterminate="true" /></div>
+}
+else
+{
+	<PageHeader Title="الحضور والانصراف" Subtitle="تسجيل المتغيرات اليومية المستخدمة في المرتبات" />
+	<MudPaper Elevation="0" Class="ubp-card mb-4">
+		<MudGrid>
+			<MudItem xs="12" md="3"><MudTextField @bind-Value="_employeeIdText" Label="معرف الموظف" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="2"><MudTextField @bind-Value="_workDateText" Label="التاريخ" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="2"><MudNumericField @bind-Value="_workedHours" Label="ساعات العمل" Min="0" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="2"><MudNumericField @bind-Value="_overtimeHours" Label="الإضافي" Min="0" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="2"><MudNumericField @bind-Value="_absenceHours" Label="الغياب" Min="0" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="1"><MudButton OnClick="SaveAsync" Color="Color.Primary" Variant="Variant.Filled">حفظ</MudButton></MudItem>
+		</MudGrid>
+	</MudPaper>
+	<MudPaper Elevation="0" Class="ubp-card">
+		<MudTable Items="_rows" Dense="true" Hover="true" Striped="true">
+			<HeaderContent><MudTh>الموظف</MudTh><MudTh>التاريخ</MudTh><MudTh>العمل</MudTh><MudTh>الإضافي</MudTh><MudTh>الغياب</MudTh><MudTh>الحالة</MudTh></HeaderContent>
+			<RowTemplate><MudTd>@context.EmployeeId</MudTd><MudTd>@context.WorkDate</MudTd><MudTd>@context.WorkedHours.ToString("N2")</MudTd><MudTd>@context.OvertimeHours.ToString("N2")</MudTd><MudTd>@context.AbsenceHours.ToString("N2")</MudTd><MudTd>@context.Status</MudTd></RowTemplate>
+		</MudTable>
+	</MudPaper>
+}
+
+@code {
+	private IReadOnlyList<PayrollAttendanceDaily> _rows = Array.Empty<PayrollAttendanceDaily>();
+	private string _employeeIdText = "";
+	private string _workDateText = DateTime.Today.ToString("yyyy-MM-dd");
+	private decimal _workedHours;
+	private decimal _overtimeHours;
+	private decimal _absenceHours;
+	protected override string ScreenCode => ScreenCodes.PayrollAttendance;
+	protected override async Task OnLoadAsync() => await LoadAsync();
+
+	private async Task LoadAsync()
+	{
+		var date = DateOnly.FromDateTime(DateTime.Today);
+		_rows = await Operations.ListAttendanceAsync(date.AddDays(-31), date);
+	}
+
+	private async Task SaveAsync()
+	{
+		if (!Guid.TryParse(_employeeIdText, out var employeeId) || !DateOnly.TryParse(_workDateText, out var workDate))
+		{
+			Snackbar.Add("أدخل معرف موظف وتاريخاً صحيحاً.", Severity.Error);
+			return;
+		}
+		try
+		{
+			await Operations.UpsertAttendanceAsync(new PayrollAttendanceDaily
+			{
+				Id = Guid.NewGuid(), EmployeeId = employeeId, WorkDate = workDate,
+				WorkedHours = _workedHours, OvertimeHours = _overtimeHours,
+				AbsenceHours = _absenceHours, Status = "processed"
+			});
+			await LoadAsync();
+			Snackbar.Add("تم حفظ حركة الحضور.", Severity.Success);
+		}
+		catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+	}
+}

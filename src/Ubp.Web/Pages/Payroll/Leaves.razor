@@ -1,0 +1,72 @@
+@page "/payroll/leaves"
+@attribute [Authorize]
+@inherits SecurePageBase
+@inject IPayrollOperationsRepository Operations
+
+<PageTitle>الإجازات</PageTitle>
+@if (Denied)
+{
+	<ForbiddenView />
+}
+else if (Loading)
+{
+	<div class="ubp-loading"><MudProgressCircular Indeterminate="true" /></div>
+}
+else
+{
+	<PageHeader Title="الإجازات" Subtitle="تسجيل الإجازات وربطها بدورة المرتبات" />
+	<MudPaper Elevation="0" Class="ubp-card mb-4">
+		<MudGrid>
+			<MudItem xs="12" md="3"><MudTextField @bind-Value="_employeeIdText" Label="معرف الموظف" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="2"><MudTextField @bind-Value="_leaveType" Label="نوع الإجازة" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="2"><MudTextField @bind-Value="_fromText" Label="من" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="2"><MudTextField @bind-Value="_toText" Label="إلى" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="2"><MudNumericField @bind-Value="_days" Label="الأيام" Min="0" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="1"><MudButton OnClick="CreateAsync" Color="Color.Primary" Variant="Variant.Filled">حفظ</MudButton></MudItem>
+		</MudGrid>
+	</MudPaper>
+	<MudPaper Elevation="0" Class="ubp-card">
+		<MudTable Items="_rows" Dense="true" Hover="true" Striped="true">
+			<HeaderContent><MudTh>الموظف</MudTh><MudTh>النوع</MudTh><MudTh>من</MudTh><MudTh>إلى</MudTh><MudTh>الأيام</MudTh><MudTh>الحالة</MudTh></HeaderContent>
+			<RowTemplate><MudTd>@context.EmployeeId</MudTd><MudTd>@context.LeaveTypeCode</MudTd><MudTd>@context.FromDate</MudTd><MudTd>@context.ToDate</MudTd><MudTd>@context.Days.ToString("N2")</MudTd><MudTd>@context.Status</MudTd></RowTemplate>
+		</MudTable>
+	</MudPaper>
+}
+
+@code {
+	private IReadOnlyList<PayrollLeaveRequest> _rows = Array.Empty<PayrollLeaveRequest>();
+	private string _employeeIdText = "";
+	private string _leaveType = "annual";
+	private string _fromText = DateTime.Today.ToString("yyyy-MM-dd");
+	private string _toText = DateTime.Today.ToString("yyyy-MM-dd");
+	private decimal _days;
+	protected override string ScreenCode => ScreenCodes.PayrollLeaves;
+	protected override async Task OnLoadAsync() => await LoadAsync();
+
+	private async Task LoadAsync()
+	{
+		var date = DateOnly.FromDateTime(DateTime.Today);
+		_rows = await Operations.ListLeavesAsync(date.AddDays(-31), date.AddDays(31));
+	}
+
+	private async Task CreateAsync()
+	{
+		if (!Guid.TryParse(_employeeIdText, out var employeeId) || !DateOnly.TryParse(_fromText, out var from) ||
+			!DateOnly.TryParse(_toText, out var to))
+		{
+			Snackbar.Add("أدخل معرف موظف وتواريخ صحيحة.", Severity.Error);
+			return;
+		}
+		try
+		{
+			await Operations.CreateLeaveAsync(new PayrollLeaveRequest
+			{
+				Id = Guid.NewGuid(), EmployeeId = employeeId, LeaveTypeCode = _leaveType.Trim(),
+				FromDate = from, ToDate = to, Days = _days, Status = "draft"
+			});
+			await LoadAsync();
+			Snackbar.Add("تم تسجيل الإجازة.", Severity.Success);
+		}
+		catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+	}
+}

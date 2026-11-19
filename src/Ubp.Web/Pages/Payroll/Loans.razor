@@ -1,0 +1,34 @@
+@page "/payroll/loans"
+@attribute [Authorize]
+@inherits SecurePageBase
+@inject IPayrollOperationsRepository Operations
+
+<PageTitle>سلف وقروض الموظفين</PageTitle>
+@if (Denied) { <ForbiddenView /> }
+else if (Loading) { <div class="ubp-loading"><MudProgressCircular Indeterminate="true" /></div> }
+else
+{
+	<PageHeader Title="سلف وقروض الموظفين" Subtitle="تسجيل أصل القرض وعدد الأقساط ورصيد السداد" />
+	<MudPaper Elevation="0" Class="ubp-card mb-4"><MudGrid>
+		<MudItem xs="12" md="3"><MudTextField @bind-Value="_employeeText" Label="معرف الموظف" Variant="Variant.Outlined" /></MudItem>
+		<MudItem xs="12" md="3"><MudNumericField @bind-Value="_principal" Label="أصل القرض" Min="0" Variant="Variant.Outlined" /></MudItem>
+		<MudItem xs="12" md="3"><MudNumericField @bind-Value="_installments" Label="عدد الأقساط" Min="1" Variant="Variant.Outlined" /></MudItem>
+		<MudItem xs="12" md="2"><MudButton OnClick="SaveAsync" Color="Color.Primary" Variant="Variant.Filled">حفظ</MudButton></MudItem>
+	</MudGrid></MudPaper>
+	<MudPaper Elevation="0" Class="ubp-card"><MudTable Items="_rows" Dense="true" Hover="true" Striped="true">
+		<HeaderContent><MudTh>الموظف</MudTh><MudTh>الأصل</MudTh><MudTh>الرصيد</MudTh><MudTh>الأقساط</MudTh><MudTh>الحالة</MudTh></HeaderContent>
+		<RowTemplate><MudTd>@context.EmployeeId</MudTd><MudTd>@context.Principal.ToString("N2")</MudTd><MudTd>@context.OutstandingBalance.ToString("N2")</MudTd><MudTd>@context.Installments</MudTd><MudTd>@context.Status</MudTd></RowTemplate>
+	</MudTable></MudPaper>
+}
+@code {
+	private IReadOnlyList<EmployeeLoan> _rows = Array.Empty<EmployeeLoan>();
+	private string _employeeText = ""; private decimal _principal; private int _installments = 1;
+	protected override string ScreenCode => ScreenCodes.PayrollLoans;
+	protected override async Task OnLoadAsync() => _rows = await Operations.ListLoansAsync();
+	private async Task SaveAsync()
+	{
+		if (!Guid.TryParse(_employeeText, out var employeeId) || _principal <= 0 || _installments <= 0) { Snackbar.Add("أدخل بيانات صحيحة للقرض.", Severity.Error); return; }
+		try { await Operations.CreateLoanAsync(new EmployeeLoan { Id = Guid.NewGuid(), EmployeeId = employeeId, Principal = _principal, Installments = _installments, Status = "draft" }); _rows = await Operations.ListLoansAsync(); Snackbar.Add("تم حفظ القرض.", Severity.Success); }
+		catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+	}
+}

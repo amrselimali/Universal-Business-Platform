@@ -1,0 +1,42 @@
+@page "/payroll/net-calculation"
+@attribute [Authorize]
+@inherits SecurePageBase
+@using Ubp.Application.Services
+@inject PayrollCalculationEngines Engines
+
+<PageTitle>حساب صافي المرتب</PageTitle>
+<MudContainer MaxWidth="MaxWidth.Large" Class="pa-4">
+	<MudText Typo="Typo.h5">حساب صافي المرتب والمحاكاة</MudText>
+	<MudText Typo="Typo.body2" Class="mb-4">تشغيل تجريبي لا يحفظ النتائج ولا يستهلك أرصدة أو إعفاءات.</MudText>
+	<MudGrid>
+		<MudItem xs="12" md="4"><MudNumericField @bind-Value="Gross" Label="الإجمالي" Variant="Variant.Outlined" Min="0" /></MudItem>
+		<MudItem xs="12" md="4"><MudNumericField @bind-Value="FixedDeductions" Label="الخصومات الثابتة" Variant="Variant.Outlined" Min="0" /></MudItem>
+		<MudItem xs="12" md="4"><MudNumericField @bind-Value="TaxRate" Label="نسبة الضريبة التجريبية" Variant="Variant.Outlined" Min="0" Max="1" /></MudItem>
+		<MudItem xs="12"><MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Calculate">حساب المحاكاة</MudButton></MudItem>
+	</MudGrid>
+	@if (Result is not null)
+	{
+		<MudAlert Severity="Severity.Info" Class="mt-4">
+			صافي المرتب: <b>@Result.Value.ToString("N2")</b>
+		</MudAlert>
+	}
+</MudContainer>
+
+@code {
+	private decimal Gross = 10000m;
+	private decimal FixedDeductions;
+	private decimal TaxRate = 0.1m;
+	private decimal? Result;
+	protected override string ScreenCode => ScreenCodes.PayrollNetCalculation;
+	protected override Task OnLoadAsync() => Task.CompletedTask;
+
+	private void Calculate()
+	{
+		if (Gross < 0 || FixedDeductions < 0 || TaxRate < 0 || TaxRate > 1)
+		{
+			Snackbar.Add("تحقق من القيم المدخلة.", Severity.Error);
+			return;
+		}
+		Result = Gross - FixedDeductions - Gross * TaxRate;
+	}
+}

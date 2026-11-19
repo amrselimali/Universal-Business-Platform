@@ -149,6 +149,10 @@ public static class ServiceRegistration
         services.AddScoped<IAccountingReportRepository, AccountingReportRepository>();
         services.AddScoped<IStockAccountingRepository, StockAccountingRepository>();
         services.AddScoped<IEmployeeRepository, EmployeeRepository>();
+        services.AddScoped<IPayrollFoundationRepository, PayrollFoundationRepository>();
+        services.AddScoped<IPayrollConfigurationRepository, PayrollConfigurationRepository>();
+        services.AddScoped<IPayrollRunRepository, PayrollRunRepository>();
+        services.AddScoped<IPayrollOperationsRepository, PayrollOperationsRepository>();
         services.AddScoped<ITaxRepository, TaxRepository>();
         services.AddScoped<IPaymentTermRepository, PaymentTermRepository>();
         services.AddScoped<IPriceListRepository, PriceListRepository>();
@@ -178,6 +182,15 @@ public static class ServiceRegistration
 
     private static void AddApplicationServices(IServiceCollection services)
     {
+        services.AddScoped<PayrollFormulaService>();
+        services.AddScoped<PayrollPolicyResolver>();
+        services.AddScoped<PayrollExpressionEvaluator>();
+        services.AddScoped<PayrollCalculationOrchestrator>();
+        services.AddScoped<PayrollConfigurationValidationService>();
+        services.AddScoped<PayrollRunWorkflow>();
+        services.AddScoped<PayrollRunService>();
+        services.AddScoped<PayrollRunCalculationService>();
+        services.AddScoped<PayrollPostingService>();
         services.AddScoped<PermissionService>();
         services.AddScoped<SettingsService>();
         services.AddScoped<ISettingsService>(sp => sp.GetRequiredService<SettingsService>());

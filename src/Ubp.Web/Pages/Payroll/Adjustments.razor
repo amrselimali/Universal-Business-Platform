@@ -1,0 +1,38 @@
+@page "/payroll/adjustments"
+@attribute [Authorize]
+@inherits SecurePageBase
+@inject IPayrollOperationsRepository Operations
+
+<PageTitle>تسويات المرتبات</PageTitle>
+@if (Denied) { <ForbiddenView /> }
+else if (Loading) { <div class="ubp-loading"><MudProgressCircular Indeterminate="true" /></div> }
+else
+{
+	<PageHeader Title="تسويات المرتبات" Subtitle="إضافة بدلات وخصومات ومتغيرات الموظفين" />
+	<MudPaper Elevation="0" Class="ubp-card mb-4"><MudGrid>
+		<MudItem xs="12" md="3"><MudTextField @bind-Value="_employeeText" Label="معرف الموظف" Variant="Variant.Outlined" /></MudItem>
+		<MudItem xs="12" md="2"><MudNumericField @bind-Value="_amount" Label="المبلغ" Variant="Variant.Outlined" /></MudItem>
+		<MudItem xs="12" md="2"><MudTextField @bind-Value="_dateText" Label="تاريخ السريان" Variant="Variant.Outlined" /></MudItem>
+		<MudItem xs="12" md="2"><MudCheckBox @bind-Value="_taxable" Label="خاضع للضريبة" /></MudItem>
+		<MudItem xs="12" md="2"><MudCheckBox @bind-Value="_insurable" Label="خاضع للتأمينات" /></MudItem>
+		<MudItem xs="12" md="1"><MudButton OnClick="SaveAsync" Color="Color.Primary" Variant="Variant.Filled">حفظ</MudButton></MudItem>
+	</MudGrid></MudPaper>
+	<MudPaper Elevation="0" Class="ubp-card"><MudTable Items="_rows" Dense="true" Hover="true" Striped="true">
+		<HeaderContent><MudTh>الموظف</MudTh><MudTh>التاريخ</MudTh><MudTh>المبلغ</MudTh><MudTh>ضريبي</MudTh><MudTh>تأمينات</MudTh><MudTh>الحالة</MudTh></HeaderContent>
+		<RowTemplate><MudTd>@context.EmployeeId</MudTd><MudTd>@context.EffectiveDate</MudTd><MudTd>@context.Amount.ToString("N2")</MudTd><MudTd>@(context.IsTaxable ? "نعم" : "لا")</MudTd><MudTd>@(context.IsInsurable ? "نعم" : "لا")</MudTd><MudTd>@context.Status</MudTd></RowTemplate>
+	</MudTable></MudPaper>
+}
+@code {
+	private IReadOnlyList<PayrollAdjustment> _rows = Array.Empty<PayrollAdjustment>();
+	private string _employeeText = ""; private string _dateText = DateTime.Today.ToString("yyyy-MM-dd");
+	private decimal _amount; private bool _taxable; private bool _insurable;
+	protected override string ScreenCode => ScreenCodes.PayrollAdjustments;
+	protected override async Task OnLoadAsync() => await LoadAsync();
+	private async Task LoadAsync() { var d = DateOnly.FromDateTime(DateTime.Today); _rows = await Operations.ListAdjustmentsAsync(d.AddMonths(-1), d.AddMonths(1)); }
+	private async Task SaveAsync()
+	{
+		if (!Guid.TryParse(_employeeText, out var employeeId) || !DateOnly.TryParse(_dateText, out var date) || _amount == 0) { Snackbar.Add("أدخل البيانات المطلوبة ومبلغاً غير صفري.", Severity.Error); return; }
+		try { await Operations.CreateAdjustmentAsync(new PayrollAdjustment { Id = Guid.NewGuid(), EmployeeId = employeeId, Amount = _amount, EffectiveDate = date, IsTaxable = _taxable, IsInsurable = _insurable }); await LoadAsync(); Snackbar.Add("تم حفظ التسوية.", Severity.Success); }
+		catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+	}
+}
