@@ -14,18 +14,18 @@ else
             @if (Can(ActionCodes.Create))
             {
                 <MudButton Variant="Variant.Filled" Color="Color.Primary"
-                           StartIcon="@Icons.Material.Filled.Add" OnClick="AddAsync">@T.T("common.add")</MudButton>
+                           StartIcon="@Icons.Material.Filled.Add" Disabled="@_busy" OnClick="AddAsync">@T.T("common.add")</MudButton>
                 <MudButton Variant="Variant.Outlined" Color="Color.Warning"
-                           StartIcon="@Icons.Material.Filled.Payments"
+                           StartIcon="@Icons.Material.Filled.Payments" Disabled="@_busy"
                            OnClick="HandoverAsync">@T.T("expenses.cash_handover")</MudButton>
                 <MudButton Variant="Variant.Outlined" Color="Color.Tertiary"
-                           StartIcon="@Icons.Material.Filled.AccountBalanceWallet"
+                           StartIcon="@Icons.Material.Filled.AccountBalanceWallet" Disabled="@_busy"
                            OnClick="AdvanceAsync">صرف سلفة</MudButton>
                 <MudButton Variant="Variant.Outlined" Color="Color.Info"
-                           StartIcon="@Icons.Material.Filled.SwapHoriz"
+                           StartIcon="@Icons.Material.Filled.SwapHoriz" Disabled="@_busy"
                            OnClick="TransferAsync">@T.T("expenses.item_transfer")</MudButton>
                 <MudButton Variant="Variant.Outlined" Color="Color.Secondary"
-                           StartIcon="@Icons.Material.Filled.Undo"
+                           StartIcon="@Icons.Material.Filled.Undo" Disabled="@_busy"
                            OnClick="AddReturnAsync">مرتجعات مشتريات</MudButton>
             }
         </Actions>
@@ -51,7 +51,7 @@ else
                 <MudSelectItem T="string?" Value="@OperatingExpenseStatuses.Draft">@T.T("accounting.status_draft")</MudSelectItem>
                 <MudSelectItem T="string?" Value="@OperatingExpenseStatuses.Posted">@T.T("accounting.status_posted")</MudSelectItem>
             </MudSelect>
-            <MudButton Variant="Variant.Text" OnClick="ReloadAsync">@T.T("common.refresh")</MudButton>
+            <MudButton Variant="Variant.Text" Disabled="@_busy" OnClick="ReloadAsync">@T.T("common.refresh")</MudButton>
         </div>
 
         <MudTable Items="_items" Dense="true" Hover="true" Striped="true" Elevation="0"
@@ -91,6 +91,13 @@ else
                 <MudTd Align="Right">
                     @if (context.IsDraft)
                     {
+                        @if (Can(ActionCodes.Create))
+                        {
+                            <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Info"
+                                       Disabled="@_busy" OnClick="@(() => EditAsync(context.Id))">
+                                تعديل
+                            </MudButton>
+                        }
                         @if (Can(ActionCodes.Post))
                         {
                             <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Success"

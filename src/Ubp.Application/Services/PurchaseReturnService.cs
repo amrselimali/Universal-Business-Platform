@@ -21,8 +21,11 @@ public sealed class PurchaseReturnService
     public PurchaseReturnService(IPurchaseReturnRepository returns, ITreasuryRepository treasury,
         ISettingsService settings, PermissionService permissions, AuditService audit)
     {
-        _returns = returns; _treasury = treasury; _settings = settings;
-        _permissions = permissions; _audit = audit;
+        _returns = returns;
+        _treasury = treasury;
+        _settings = settings;
+        _permissions = permissions;
+        _audit = audit;
     }
 
     public async Task<IReadOnlyList<PurchaseReturn>> ListAsync(ActorContext actor,
@@ -44,6 +47,16 @@ public sealed class PurchaseReturnService
             ct: ct);
         BranchScope.Ensure(actor, branchId);
         return await _returns.ListInvoicesAsync(branchId, supplierId, search, ct);
+    }
+
+    public async Task<IReadOnlyList<OperatingExpenseStockLineOption>>
+        ListOperatingExpenseStockLinesAsync(ActorContext actor, Guid branchId, string? search,
+            CancellationToken ct = default)
+    {
+        await _permissions.RequireAsync(actor, ScreenCodes.OperatingExpenses, ActionCodes.Create,
+            ct: ct);
+        BranchScope.Ensure(actor, branchId);
+        return await _returns.ListOperatingExpenseStockLinesAsync(branchId, search, ct);
     }
 
     public async Task<PurchaseReturn> CreateAsync(ActorContext actor, PurchaseReturnInput input,

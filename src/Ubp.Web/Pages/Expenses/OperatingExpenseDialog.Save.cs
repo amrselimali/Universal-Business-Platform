@@ -38,35 +38,52 @@ public partial class OperatingExpenseDialog
         try
         {
             var actor = await UserContext.RequireAsync();
-            var created = await Expenses.CreateAsync(actor, new OperatingExpenseInput
+            var input = new OperatingExpenseInput
             {
-                BranchId = _branchId, DocDate = _docDate.Value, SupplierId = _supplier.Id,
+                BranchId = _branchId,
+                DocDate = _docDate.Value,
+                SupplierId = _supplier.Id,
                 TreasuryId = _onCredit ? null : _treasuryId,
                 Lines = lines.Select(l => new OperatingExpenseLineInput
                 {
                     ItemId = l.Item?.Id,
                     UnitId = l.Item?.BaseUnitId,
                     WarehouseId = l.Item is null ? null : l.WarehouseId,
-                    CostCenterId = l.CostCenterId, Description = l.Description,
-                    Quantity = l.Quantity, UnitPrice = l.UnitPrice
+                    CostCenterId = l.CostCenterId,
+                    Description = l.Description,
+                    Quantity = l.Quantity,
+                    UnitPrice = l.UnitPrice
                 }).ToList()
-            });
+            };
+
+            var saved = IsEditMode
+                ? await Expenses.UpdateAsync(actor, ExpenseId!.Value, input)
+                : await Expenses.CreateAsync(actor, input);
 
             if (post)
             {
-                try { await Expenses.PostAsync(actor, created.Id); }
+                try
+                {
+                    await Expenses.PostAsync(actor, saved.Id);
+                }
                 catch (AppException ex)
                 {
                     // المستند محفوظ كمسودة؛ نُظهر سبب فشل الترحيل ونغلق الحوار لعرضه في القائمة.
                     Snackbar.Add(T.T(ex.Code), Severity.Error);
-                    MudDialog.Close(DialogResult.Ok(created));
+                    MudDialog.Close(DialogResult.Ok(saved));
                     return;
                 }
             }
 
-            MudDialog.Close(DialogResult.Ok(created));
+            MudDialog.Close(DialogResult.Ok(saved));
         }
-        catch (AppException ex) { Snackbar.Add(T.T(ex.Code), Severity.Error); }
-        finally { _busy = false; }
+        catch (AppException ex)
+        {
+            Snackbar.Add(T.T(ex.Code), Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
     }
 }

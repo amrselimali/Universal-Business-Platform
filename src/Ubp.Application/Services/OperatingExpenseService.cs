@@ -20,7 +20,10 @@ public sealed class OperatingExpenseService
     public OperatingExpenseService(IOperatingExpenseRepository expenses, ISettingsService settings,
         PermissionService permissions, AuditService audit)
     {
-        _expenses = expenses; _settings = settings; _permissions = permissions; _audit = audit;
+        _expenses = expenses;
+        _settings = settings;
+        _permissions = permissions;
+        _audit = audit;
     }
 
     public async Task<IReadOnlyList<OperatingExpense>> ListAsync(ActorContext actor,
@@ -68,6 +71,33 @@ public sealed class OperatingExpenseService
         await _audit.WriteAsync(actor, "operating_expenses", id.ToString(), "INSERT", null,
             expense, ct);
         return expense;
+    }
+
+    public async Task<OperatingExpense> UpdateAsync(ActorContext actor, Guid id,
+        OperatingExpenseInput input, CancellationToken ct = default)
+    {
+        var existing = await _expenses.GetAsync(id, ct) ?? throw new NotFoundAppException();
+        await _permissions.RequireAsync(actor, ScreenCodes.OperatingExpenses, ActionCodes.Create,
+            ct: ct);
+        BranchScope.Ensure(actor, existing.BranchId);
+        BranchScope.Ensure(actor, input.BranchId);
+
+        if (!existing.IsDraft)
+            throw new ValidationAppException("validation.expense_not_draft");
+
+        try
+        {
+            await _expenses.UpdateAsync(id, input, actor.UserId, ct);
+        }
+        catch (PostgresException ex)
+        {
+            throw DbErrorMapper.Map(ex);
+        }
+
+        var updated = await _expenses.GetAsync(id, ct) ?? throw new NotFoundAppException();
+        await _audit.WriteAsync(actor, "operating_expenses", id.ToString(), "UPDATE",
+            existing, updated, ct);
+        return updated;
     }
 
     /// <summary>ترحيل ذري: قيد المصروف على الشجرة + استلام البنود المخزنية + سند السداد إن وُجد.</summary>

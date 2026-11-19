@@ -26,32 +26,32 @@ public abstract class SecurePageBase : ComponentBase
 
     protected override async Task OnInitializedAsync()
     {
-        Actor = await UserContext.GetAsync();
-        if (Actor is null)
-        {
-            Navigation.NavigateTo("/login?expired=1", forceLoad: true);
-            return;
-        }
-
-        _snapshot = await PermissionService.GetSnapshotAsync(Actor.UserId, Actor.IsAdmin);
-        if (!Can(RequiredAction))
-        {
-            Denied = true;
-            Loading = false;
-            return;
-        }
-
         try
         {
+            Actor = await UserContext.GetAsync();
+            if (Actor is null)
+            {
+                Navigation.NavigateTo("/login?expired=1", forceLoad: true);
+                return;
+            }
+
+            _snapshot = await PermissionService.GetSnapshotAsync(Actor.UserId, Actor.IsAdmin);
+            if (!Can(RequiredAction))
+            {
+                Denied = true;
+                return;
+            }
+
             await OnLoadAsync();
         }
         catch (AppException ex)
         {
             ShowError(ex);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            Snackbar.Add(T.T("error.generic"), Severity.Error);
+            var msg = string.IsNullOrWhiteSpace(ex.Message) ? T.T("error.generic") : ex.Message;
+            Snackbar.Add(msg, Severity.Error);
         }
         finally
         {
@@ -84,9 +84,10 @@ public abstract class SecurePageBase : ComponentBase
         {
             ShowError(ex);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            Snackbar.Add(T.T("error.generic"), Severity.Error);
+            var msg = string.IsNullOrWhiteSpace(ex.Message) ? T.T("error.generic") : ex.Message;
+            Snackbar.Add(msg, Severity.Error);
         }
     }
 

@@ -13,6 +13,8 @@ public interface IOperatingExpenseRepository
     Task<OperatingExpense?> GetAsync(Guid id, CancellationToken ct = default);
     Task<Guid> CreateAsync(Guid id, OperatingExpenseInput input, Guid userId,
         CancellationToken ct = default);
+    Task UpdateAsync(Guid id, OperatingExpenseInput input, Guid userId,
+        CancellationToken ct = default);
     Task<bool> DeleteAsync(Guid id, CancellationToken ct = default);
     Task<OperatingExpense> PostAsync(Guid id, Guid userId, bool allowNegative,
         CancellationToken ct = default);
@@ -64,8 +66,14 @@ public sealed partial class OperatingExpenseRepository : IOperatingExpenseReposi
             LIMIT @take
             """, new
         {
-            allBranches = branchIds.Count == 0, branchIds = branchIds.ToArray(), branchId,
-            supplierId, from = from?.Date, to = to?.Date, status, take
+            allBranches = branchIds.Count == 0,
+            branchIds = branchIds.ToArray(),
+            branchId,
+            supplierId,
+            from = from?.Date,
+            to = to?.Date,
+            status,
+            take
         }, cancellationToken: ct));
         return rows.ToList();
     }
@@ -79,6 +87,77 @@ public sealed partial class OperatingExpenseRepository : IOperatingExpenseReposi
         if (expense is null) return null;
         expense.Lines = await LoadLinesAsync(connection, id, ct);
         return expense;
+    }
+
+    public async Task UpdateAsync(Guid id, OperatingExpenseInput input, Guid userId,
+        CancellationToken ct = default)
+    {
+        await using var connection = await _factory.OpenAsync(ct);
+        await using var tx = await connection.BeginTransactionAsync(ct);
+
+        await ResolveDefaultsAsync(connection, tx, input, ct);
+        await ValidateAsync(connection, tx, input, ct);
+
+        var totalAmount = input.Lines.Sum(l => l.Amount);
+
+        var updatedRows = await connection.ExecuteAsync(new CommandDefinition("""
+            UPDATE operating_expenses
+            SET branch_id = @branchId,
+                doc_date = @docDate,
+                supplier_id = @supplierId,
+                treasury_id = @treasuryId,
+                treasury_method_id = @treasuryMethodId,
+                notes = @notes,
+                total_amount = @totalAmount
+            WHERE id = @id
+              AND status = 'DRAFT'
+            """, new
+        {
+            id,
+            branchId = input.BranchId,
+            docDate = input.DocDate.Date,
+            input.SupplierId,
+            input.TreasuryId,
+            input.TreasuryMethodId,
+            notes = Clean(input.Notes),
+            totalAmount
+        }, tx, cancellationToken: ct));
+
+        if (updatedRows == 0)
+            throw new InvalidOperationException("Operating expense not found or not in Draft status.");
+
+        await connection.ExecuteAsync(new CommandDefinition("""
+            DELETE FROM operating_expense_lines
+            WHERE expense_id = @expenseId
+            """, new { expenseId = id }, tx, cancellationToken: ct));
+
+        var lineNo = 0;
+        foreach (var line in input.Lines)
+        {
+            lineNo++;
+            await connection.ExecuteAsync(new CommandDefinition("""
+                INSERT INTO operating_expense_lines
+                    (expense_id, line_no, account_id, item_id, unit_id, warehouse_id,
+                     cost_center_id, description, quantity, unit_price, amount)
+                VALUES (@expenseId, @lineNo, @accountId, @itemId, @unitId, @warehouseId,
+                        @costCenterId, @description, @quantity, @unitPrice, @amount)
+                """, new
+            {
+                expenseId = id,
+                lineNo,
+                accountId = line.AccountId,
+                itemId = line.ItemId,
+                unitId = line.UnitId,
+                warehouseId = line.WarehouseId,
+                costCenterId = line.CostCenterId,
+                description = Clean(line.Description),
+                quantity = line.Quantity,
+                unitPrice = line.UnitPrice,
+                amount = line.Amount
+            }, tx, cancellationToken: ct));
+        }
+
+        await tx.CommitAsync(ct);
     }
 
     private static async Task<IReadOnlyList<OperatingExpenseLine>> LoadLinesAsync(

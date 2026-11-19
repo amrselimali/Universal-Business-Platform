@@ -12,6 +12,7 @@ public partial class OperatingExpenseDialog : ComponentBase
 {
     [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
     [Parameter] public Guid? BranchId { get; set; }
+    [Parameter] public Guid? ExpenseId { get; set; }
 
     [Inject] private OperatingExpenseService Expenses { get; set; } = default!;
     [Inject] private LookupService Lookup { get; set; } = default!;
@@ -44,8 +45,9 @@ public partial class OperatingExpenseDialog : ComponentBase
     private Guid _treasuryId;
     private bool _onCredit;
     private bool _busy;
-    /// <summary>صلاحية «حفظ وترحيل»: بلا ترحيل يظهر زر «حفظ» فقط.</summary>
     private bool _canPost;
+
+    private bool IsEditMode => ExpenseId.HasValue && ExpenseId.Value != Guid.Empty;
 
     private decimal Total => Math.Round(_lines.Sum(l => l.Amount), 2, MidpointRounding.AwayFromZero);
 
@@ -60,26 +62,79 @@ public partial class OperatingExpenseDialog : ComponentBase
         _canPost = await Permissions.HasAsync(actor, ScreenCodes.OperatingExpenses,
             ActionCodes.Post);
         Branches = await BranchApi.OptionsAsync(actor);
-        _branchId = BranchId ?? actor.CurrentBranchId ?? Branches.FirstOrDefault()?.Id ?? Guid.Empty;
         _warehouses = await Lookup.WarehousesAsync(actor);
-        await ReloadBranchAsync();
-        AddLine();
+
+        if (IsEditMode)
+        {
+            var expense = await Expenses.GetAsync(actor, ExpenseId!.Value);
+            if (expense is not null)
+            {
+                _branchId = BranchId ?? expense.BranchId;
+                _docDate = expense.DocDate;
+                _onCredit = !expense.IsPaid;
+
+                await ReloadBranchAsync(preserveTreasury: true);
+                if (expense.TreasuryId.HasValue)
+                    _treasuryId = expense.TreasuryId.Value;
+
+                if (expense.SupplierId != Guid.Empty)
+                {
+                    var suppliers = await Lookup.PartnersAsync(actor, PartnerKind.Supplier, null);
+                    _supplier = suppliers.FirstOrDefault(s => s.Id == expense.SupplierId);
+                }
+
+                var items = await Lookup.ItemsAsync(actor, null, 200, false);
+                foreach (var line in expense.Lines)
+                {
+                    _lines.Add(new LineModel
+                    {
+                        Description = line.Description,
+                        CostCenterId = line.CostCenterId,
+                        Item = line.ItemId.HasValue
+                            ? items.FirstOrDefault(i => i.Id == line.ItemId.Value)
+                            : null,
+                        WarehouseId = line.WarehouseId,
+                        Quantity = line.Quantity == 0 ? 1 : line.Quantity,
+                        UnitPrice = line.UnitPrice
+                    });
+                }
+            }
+        }
+
+        if (_branchId == Guid.Empty)
+            _branchId = BranchId ?? actor.CurrentBranchId ?? Branches.FirstOrDefault()?.Id ?? Guid.Empty;
+
+        if (_costCenters.Count == 0 && _treasuries.Count == 0)
+            await ReloadBranchAsync(preserveTreasury: false);
+
+        if (_lines.Count == 0)
+            AddLine();
     }
 
-    private async Task ReloadBranchAsync()
+    private async Task ReloadBranchAsync(bool preserveTreasury = false)
     {
+        var previousTreasury = _treasuryId;
         var actor = await UserContext.RequireAsync();
         _costCenters = await Lookup.CostCentersAsync(actor,
             _branchId == Guid.Empty ? actor.CurrentBranchId : _branchId);
         _treasuries = await Lookup.TreasuriesAsync(actor, _branchId);
-        _treasuryId = _treasuries.FirstOrDefault()?.Id ?? Guid.Empty;
+
+        if (preserveTreasury && previousTreasury != Guid.Empty &&
+            _treasuries.Any(t => t.Id == previousTreasury))
+        {
+            _treasuryId = previousTreasury;
+        }
+        else
+        {
+            _treasuryId = _treasuries.FirstOrDefault()?.Id ?? Guid.Empty;
+        }
     }
 
     private async Task OnBranchChanged(Guid branchId)
     {
         _branchId = branchId;
         foreach (var line in _lines) line.WarehouseId = null;
-        await ReloadBranchAsync();
+        await ReloadBranchAsync(preserveTreasury: false);
     }
 
     private void OnItemChanged(LineModel line, ItemOption? item)

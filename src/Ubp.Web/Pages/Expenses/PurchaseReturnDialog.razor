@@ -7,17 +7,47 @@
     <DialogContent>
         <MudForm @ref="_form">
             <div class="ubp-form-grid">
+                <MudSelect T="string" Value="_sourceType" ValueChanged="OnSourceTypeChanged"
+                           Label="نوع مصدر الارتجاع" Variant="Variant.Outlined" Required="true"
+                           Class="ubp-span-2">
+                    <MudSelectItem T="string" Value="@PurchaseReturnSourceTypes.OperatingExpense">
+                        مصروفات تشغيلية
+                    </MudSelectItem>
+                    <MudSelectItem T="string" Value="@PurchaseReturnSourceTypes.Invoice">
+                        فاتورة مشتريات
+                    </MudSelectItem>
+                </MudSelect>
+
                 <MudAutocomplete T="Partner" Value="_supplier" ValueChanged="OnSupplierChanged"
                                  SearchFunc="SearchSuppliers" ToStringFunc="SupplierLabel"
                                  Label="المورد" Variant="Variant.Outlined" Required="true"
                                  MinCharacters="0" DebounceInterval="300" OpenOnFocus="true"
                                  ResetValueOnEmptyText="true" CoerceValue="true" />
-                <MudAutocomplete T="PurchaseReturnInvoiceOption" Value="_invoice"
-                                 ValueChanged="OnInvoiceChanged" SearchFunc="SearchInvoices"
-                                 ToStringFunc="InvoiceLabel" Label="الفاتورة الأصلية"
-                                 Variant="Variant.Outlined" Required="true" MinCharacters="0"
-                                 Disabled="_supplier is null" DebounceInterval="300"
-                                 ResetValueOnEmptyText="true" CoerceValue="true" />
+
+                @if (IsExpenseSource)
+                {
+                    <MudSelect T="ExpenseDocOption" Value="_selectedExpense"
+                               ValueChanged="OnExpenseDocChanged" ToStringFunc="ExpenseDocLabel"
+                               Label="مستند المصروف التشغيلي" Variant="Variant.Outlined"
+                               Required="true" Disabled="_supplier is null">
+                        @foreach (var doc in _expenseDocs)
+                        {
+                            <MudSelectItem T="ExpenseDocOption" Value="@doc">
+                                @ExpenseDocLabel(doc)
+                            </MudSelectItem>
+                        }
+                    </MudSelect>
+                }
+                else
+                {
+                    <MudAutocomplete T="PurchaseReturnInvoiceOption" Value="_invoice"
+                                     ValueChanged="OnInvoiceChanged" SearchFunc="SearchInvoices"
+                                     ToStringFunc="InvoiceLabel" Label="الفاتورة الأصلية"
+                                     Variant="Variant.Outlined" Required="true" MinCharacters="0"
+                                     Disabled="_supplier is null" DebounceInterval="300"
+                                     ResetValueOnEmptyText="true" CoerceValue="true" />
+                }
+
                 <MudDatePicker @bind-Date="_date" Label="تاريخ المرتجع"
                                Variant="Variant.Outlined" Required="true" />
                 <MudSelect T="string" @bind-Value="_method" Label="طريقة الارتجاع"
@@ -46,10 +76,17 @@
             </div>
         </MudForm>
 
-        @if (_invoice is null)
+        @if (!HasSourceSelected)
         {
             <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Class="mt-3">
-                اختر المورد ثم الفاتورة الأصلية لعرض الأصناف والكميات القابلة للإرجاع.
+                @if (IsExpenseSource)
+                {
+                    <span>اختر المورد ثم مستند المصروف التشغيلي لعرض الأصناف والكميات القابلة للإرجاع.</span>
+                }
+                else
+                {
+                    <span>اختر المورد ثم الفاتورة الأصلية لعرض الأصناف والكميات القابلة للإرجاع.</span>
+                }
             </MudAlert>
         }
         else

@@ -2,7 +2,7 @@
 
 <MudDialog>
     <TitleContent>
-        <MudText Typo="Typo.h6">@T.T("expenses.new")</MudText>
+        <MudText Typo="Typo.h6">@(IsEditMode ? "تعديل مصروف تشغيلي" : T.T("expenses.new"))</MudText>
     </TitleContent>
     <DialogContent>
         <MudForm @ref="_form">

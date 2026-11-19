@@ -12,6 +12,8 @@ public interface IPurchaseReturnRepository
     Task<PurchaseReturn?> GetAsync(Guid id, CancellationToken ct = default);
     Task<IReadOnlyList<PurchaseReturnInvoiceOption>> ListInvoicesAsync(Guid branchId,
         Guid supplierId, string? search, CancellationToken ct = default);
+    Task<IReadOnlyList<OperatingExpenseStockLineOption>> ListOperatingExpenseStockLinesAsync(
+        Guid branchId, string? search, CancellationToken ct = default);
     Task<Guid> CreateAsync(Guid id, PurchaseReturnInput input, Guid userId,
         CancellationToken ct = default);
     Task<PurchaseReturn> PostAsync(Guid id, Guid userId, bool allowNegative,
@@ -28,19 +30,23 @@ public sealed partial class PurchaseReturnRepository : IPurchaseReturnRepository
     private const string HeaderColumns = """
         r.id AS Id, r.branch_id AS BranchId, b.name_ar AS BranchName, r.doc_no AS DocNo,
         r.doc_date AS DocDate, r.supplier_id AS SupplierId, s.name_ar AS SupplierName,
-        r.original_document_id AS OriginalDocumentId, d.doc_no AS OriginalDocNo,
-        r.return_method AS ReturnMethod, r.treasury_id AS TreasuryId, t.name_ar AS TreasuryName,
-        r.treasury_method_id AS TreasuryMethodId, r.total_amount AS TotalAmount,
-        r.status AS Status, r.notes AS Notes, r.stock_document_id AS StockDocumentId,
-        r.voucher_id AS VoucherId,
-        r.journal_entry_id AS JournalEntryId, r.created_at AS CreatedAt, r.posted_at AS PostedAt
+        r.original_document_id AS OriginalDocumentId,
+        r.operating_expense_id AS OperatingExpenseId,
+        COALESCE(d.doc_no, e.doc_no) AS OriginalDocNo,
+        r.source_type AS SourceType, r.return_method AS ReturnMethod, r.treasury_id AS TreasuryId,
+        t.name_ar AS TreasuryName, r.treasury_method_id AS TreasuryMethodId,
+        r.total_amount AS TotalAmount, r.status AS Status, r.notes AS Notes,
+        r.stock_document_id AS StockDocumentId, r.voucher_id AS VoucherId,
+        r.journal_entry_id AS JournalEntryId, r.created_at AS CreatedAt,
+        r.posted_at AS PostedAt
         """;
 
     private const string HeaderJoins = """
         FROM purchase_returns r
         JOIN branches b ON b.id = r.branch_id
         JOIN suppliers s ON s.id = r.supplier_id
-        JOIN commercial_documents d ON d.id = r.original_document_id
+        LEFT JOIN commercial_documents d ON d.id = r.original_document_id
+        LEFT JOIN operating_expenses e ON e.id = r.operating_expense_id
         LEFT JOIN treasuries t ON t.id = r.treasury_id
         """;
 
@@ -76,6 +82,9 @@ public sealed partial class PurchaseReturnRepository : IPurchaseReturnRepository
         NpgsqlConnection connection, Guid id, CancellationToken ct) =>
         (await connection.QueryAsync<PurchaseReturnLine>(new CommandDefinition("""
             SELECT l.id AS Id, l.line_no AS LineNo, l.original_line_id AS OriginalLineId,
+                   l.operating_expense_line_id AS OperatingExpenseLineId,
+                   CASE WHEN l.operating_expense_line_id IS NOT NULL
+                        THEN 'OPERATING_EXPENSE' ELSE 'INVOICE' END AS SourceType,
                    l.item_id AS ItemId, i.code AS ItemCode, i.name_ar AS ItemName,
                    l.unit_id AS UnitId, l.warehouse_id AS WarehouseId,
                    w.name_ar AS WarehouseName, l.quantity AS Quantity,
@@ -130,10 +139,16 @@ public sealed partial class PurchaseReturnRepository : IPurchaseReturnRepository
             header.Lines = lines.Where(x => x.DocumentId == header.Id)
                 .Select(x => new PurchaseReturnInvoiceLineOption
                 {
-                    OriginalLineId = x.OriginalLineId, ItemId = x.ItemId, ItemCode = x.ItemCode,
-                    ItemName = x.ItemName, UnitId = x.UnitId, WarehouseId = x.WarehouseId,
-                    Quantity = x.Quantity, ReturnedQty = x.ReturnedQty,
-                    ReturnableQty = x.ReturnableQty, UnitPrice = x.UnitPrice
+                    OriginalLineId = x.OriginalLineId,
+                    ItemId = x.ItemId,
+                    ItemCode = x.ItemCode,
+                    ItemName = x.ItemName,
+                    UnitId = x.UnitId,
+                    WarehouseId = x.WarehouseId,
+                    Quantity = x.Quantity,
+                    ReturnedQty = x.ReturnedQty,
+                    ReturnableQty = x.ReturnableQty,
+                    UnitPrice = x.UnitPrice
                 }).ToList();
         return headers;
     }
@@ -151,6 +166,44 @@ public sealed partial class PurchaseReturnRepository : IPurchaseReturnRepository
         public decimal ReturnedQty { get; set; }
         public decimal ReturnableQty { get; set; }
         public decimal UnitPrice { get; set; }
+    }
+
+    public async Task<IReadOnlyList<OperatingExpenseStockLineOption>> ListOperatingExpenseStockLinesAsync(
+        Guid branchId, string? search, CancellationToken ct = default)
+    {
+        await using var connection = await _factory.OpenAsync(ct);
+        var rows = await connection.QueryAsync<OperatingExpenseStockLineOption>(new CommandDefinition("""
+            SELECT l.id AS Id, l.expense_id AS ExpenseId, e.supplier_id AS SupplierId,
+                   e.doc_no AS ExpenseDocNo, e.doc_date AS ExpenseDocDate,
+                   l.item_id AS ItemId, i.code AS ItemCode, i.name_ar AS ItemName,
+                   l.unit_id AS UnitId, l.warehouse_id AS WarehouseId,
+                   w.name_ar AS WarehouseName, l.quantity AS OriginalQty,
+                   COALESCE((
+                       SELECT SUM(prl.quantity)
+                       FROM purchase_return_lines prl
+                       JOIN purchase_returns pr ON pr.id = prl.return_id
+                       WHERE prl.operating_expense_line_id = l.id
+                   ), 0) AS ReturnedQty,
+                   GREATEST(l.quantity - COALESCE((
+                       SELECT SUM(prl.quantity)
+                       FROM purchase_return_lines prl
+                       JOIN purchase_returns pr ON pr.id = prl.return_id
+                       WHERE prl.operating_expense_line_id = l.id
+                   ), 0), 0) AS ReturnableQty,
+                   l.unit_price AS UnitPrice
+            FROM operating_expense_lines l
+            JOIN operating_expenses e ON e.id = l.expense_id
+            JOIN items i ON i.id = l.item_id
+            LEFT JOIN warehouses w ON w.id = l.warehouse_id
+            WHERE l.item_id IS NOT NULL
+              AND e.branch_id = @branchId
+              AND e.status = 'POSTED'
+              AND (@search::varchar IS NULL OR i.code ILIKE '%' || @search || '%'
+                   OR i.name_ar ILIKE '%' || @search || '%')
+            ORDER BY e.doc_date DESC, l.line_no
+            LIMIT 200
+            """, new { branchId, search }, cancellationToken: ct));
+        return rows.ToList();
     }
 
     public async Task<IReadOnlyList<Guid>> ListDraftIdsForShiftAsync(Guid shiftId,

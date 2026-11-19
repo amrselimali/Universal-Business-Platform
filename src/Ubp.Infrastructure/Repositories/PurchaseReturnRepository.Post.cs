@@ -13,7 +13,7 @@ public sealed partial class PurchaseReturnRepository
         public Guid BranchId { get; set; }
         public DateTime DocDate { get; set; }
         public Guid SupplierId { get; set; }
-        public Guid OriginalDocumentId { get; set; }
+        public Guid? OriginalDocumentId { get; set; }
         public string ReturnMethod { get; set; } = PurchaseReturnMethods.Supplier;
         public Guid? TreasuryId { get; set; }
         public Guid? TreasuryMethodId { get; set; }
@@ -101,8 +101,12 @@ public sealed partial class PurchaseReturnRepository
                 VALUES (@id, 'ISSUE', @date, @branchId, @warehouseId, 'DRAFT', @notes, @userId)
                 """, new
             {
-                id = documentId, date = head.DocDate.Date, branchId = head.BranchId,
-                warehouseId = group.Key, notes = $"مرتجع مشتريات {docNo}", userId
+                id = documentId,
+                date = head.DocDate.Date,
+                branchId = head.BranchId,
+                warehouseId = group.Key,
+                notes = $"مرتجع مشتريات {docNo}",
+                userId
             }, tx, cancellationToken: ct));
 
             var lineNo = 0;
@@ -117,9 +121,14 @@ public sealed partial class PurchaseReturnRepository
                             @quantity, @unitCost, @totalCost, @notes)
                     """, new
                 {
-                    documentId, lineNo, itemId = line.ItemId, unitId = line.UnitId,
-                    quantity = line.Quantity, unitCost = line.UnitPrice,
-                    totalCost = line.Amount, notes = $"مرتجع مشتريات {docNo}"
+                    documentId,
+                    lineNo,
+                    itemId = line.ItemId,
+                    unitId = line.UnitId,
+                    quantity = line.Quantity,
+                    unitCost = line.UnitPrice,
+                    totalCost = line.Amount,
+                    notes = $"مرتجع مشتريات {docNo}"
                 }, tx, cancellationToken: ct));
                 await connection.ExecuteAsync(new CommandDefinition("""
                     UPDATE purchase_return_lines SET stock_document_id = @documentId
@@ -138,11 +147,15 @@ public sealed partial class PurchaseReturnRepository
         NpgsqlTransaction tx, PostHeader head, IReadOnlyList<PostLine> lines, string docNo,
         Guid userId, CancellationToken ct)
     {
+        // سطر مرتجع من مصروف تشغيلي: الدائن = حساب سطر المصروف نفسه (الذي دُيِّن عند الشراء)،
+        // وغير ذلك: حساب مخزون فئة الصنف.
         var inventory = (await connection.QueryAsync<(Guid LineId, Guid? AccountId)>(
             new CommandDefinition("""
-            SELECT l.id AS LineId, m.inventory_account_id AS AccountId
+            SELECT l.id AS LineId,
+                   COALESCE(oel.account_id, m.inventory_account_id) AS AccountId
             FROM purchase_return_lines l
             JOIN items i ON i.id = l.item_id
+            LEFT JOIN operating_expense_lines oel ON oel.id = l.operating_expense_line_id
             LEFT JOIN item_category_accounts m ON m.category_id = i.category_id
             WHERE l.return_id = @id
             """, new { id = head.Id }, tx, cancellationToken: ct))).ToList();
@@ -185,9 +198,16 @@ public sealed partial class PurchaseReturnRepository
                     @description, 'draft', 'purchase_return', @sourceId, @debit, @credit, @userId)
             """, new
         {
-            entryId, journalId, branchId = head.BranchId, docDate = head.DocDate.Date, docNo,
-            description = $"مرتجع مشتريات {docNo}", sourceId = head.Id,
-            debit = gl.Sum(x => x.Debit), credit = gl.Sum(x => x.Credit), userId
+            entryId,
+            journalId,
+            branchId = head.BranchId,
+            docDate = head.DocDate.Date,
+            docNo,
+            description = $"مرتجع مشتريات {docNo}",
+            sourceId = head.Id,
+            debit = gl.Sum(x => x.Debit),
+            credit = gl.Sum(x => x.Credit),
+            userId
         }, tx, cancellationToken: ct));
 
         var lineNo = 0;
@@ -201,9 +221,15 @@ public sealed partial class PurchaseReturnRepository
                         @supplierId, @branchId, @docDate)
                 """, new
             {
-                lineId = Guid.CreateVersion7(), entryId, lineNo, accountId = item.AccountId,
-                description = $"مرتجع مشتريات {docNo}", debit = item.Debit, credit = item.Credit,
-                supplierId = item.SupplierId, branchId = head.BranchId,
+                lineId = Guid.CreateVersion7(),
+                entryId,
+                lineNo,
+                accountId = item.AccountId,
+                description = $"مرتجع مشتريات {docNo}",
+                debit = item.Debit,
+                credit = item.Credit,
+                supplierId = item.SupplierId,
+                branchId = head.BranchId,
                 docDate = head.DocDate.Date
             }, tx, cancellationToken: ct));
         }
