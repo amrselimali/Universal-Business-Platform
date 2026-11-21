@@ -1,3 +1,4 @@
+# Build & IDE outputs
 bin/
 obj/
 logs/
@@ -8,25 +9,22 @@ logs/
 TestResults/
 .env
 
-# local toolchain / sandbox artifacts
+# Local toolchain / sandbox artifacts
 .dotnet/
 .dev/
+.nuget/
+.libs/
+
+# Local PostgreSQL artifacts
 .pg/
+.pg16/
 .pg18/
 .pgdata/
 .pgdata2/
 .pglib/
-.pg16/
-.libs/
-
-# ملف الـ workflow لا يُدفع عبر تطبيق بلا صلاحية workflows؛
-# المصدر المتعقَّب هو docs/ci-workflow.yml — انسخه إلى .github/workflows/ci.yml
-# ثم `git add -f` بعد منح الصلاحية.
-.github/workflows/ci.yml
-
-# local sandbox postgres artifacts
 .pgdeb/
-
-.nuget/
 .pgroot/
-.pgdata/
+
+# GitHub workflows are tracked via docs/ci-workflow.yml and copied to
+# .github/workflows/ci.yml when workflow scope is available.
+.github/workflows/ci.yml
