@@ -1,0 +1,169 @@
+@page "/payroll/opening-balances"
+@attribute [Authorize]
+@inherits SecurePageBase
+@inject PayrollOpeningBalanceService Opening
+
+<PageTitle>الأرصدة الافتتاحية للمرتبات</PageTitle>
+@if (Denied) { <ForbiddenView /> }
+else if (Loading) { <div class="ubp-loading"><MudProgressCircular Indeterminate="true" /></div> }
+else
+{
+	<PageHeader Title="الأرصدة الافتتاحية للمرتبات"
+				Subtitle="أساس وضريبة محتجزة ووعاء التأمينات/الصحي في بداية السنة — تُضاف مرة واحدة للأساس التراكمي" />
+
+	@if (_locked)
+	{
+		<MudAlert Severity="Severity.Warning" Class="mb-3" Dense="true">
+			السنة @_taxYear مقفولة: توجد حركات ضريبية محسوبة، ولا يمكن تعديل أو حذف الأرصدة الافتتاحية.
+		</MudAlert>
+	}
+
+	<MudPaper Elevation="0" Class="ubp-card mb-4">
+		<MudGrid>
+			<MudItem xs="12" md="2"><MudTextField @bind-Value="_taxYear" Label="السنة الضريبية" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="3"><MudTextField @bind-Value="_employeeIdText" Label="معرف الموظف" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="2" Class="d-flex align-center">
+				<MudButton OnClick="ReloadAsync" Color="Color.Info" Variant="Variant.Outlined" FullWidth="true">تحميل السنة</MudButton>
+			</MudItem>
+		</MudGrid>
+
+		<MudDivider Class="my-3" />
+
+		<MudText Typo="Typo.subtitle2" Class="mb-2">الضريبة</MudText>
+		<MudGrid>
+			<MudItem xs="12" md="3"><MudNumericField @bind-Value="_taxBase" Label="الأساس الخاضع" Min="0" Format="N2" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="3"><MudNumericField @bind-Value="_taxWithheld" Label="ضريبة محتجزة" Min="0" Format="N2" Variant="Variant.Outlined" /></MudItem>
+		</MudGrid>
+
+		<MudText Typo="Typo.subtitle2" Class="mb-2 mt-3">التأمينات الاجتماعية</MudText>
+		<MudGrid>
+			<MudItem xs="12" md="2"><MudNumericField @bind-Value="_insuranceBase" Label="الوعاء" Min="0" Format="N2" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="2"><MudNumericField @bind-Value="_insuranceEmployee" Label="حصة الموظف" Min="0" Format="N2" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="2"><MudNumericField @bind-Value="_insuranceEmployer" Label="حصة الشركة" Min="0" Format="N2" Variant="Variant.Outlined" /></MudItem>
+		</MudGrid>
+
+		<MudText Typo="Typo.subtitle2" Class="mb-2 mt-3">التأمين الصحي</MudText>
+		<MudGrid>
+			<MudItem xs="12" md="2"><MudNumericField @bind-Value="_healthBase" Label="الوعاء" Min="0" Format="N2" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="2"><MudNumericField @bind-Value="_healthEmployee" Label="حصة الموظف" Min="0" Format="N2" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="2"><MudNumericField @bind-Value="_healthEmployer" Label="حصة الشركة" Min="0" Format="N2" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="4"><MudTextField @bind-Value="_notes" Label="ملاحظات" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="2">
+				<MudButton OnClick="SaveAsync" Color="Color.Primary" Variant="Variant.Filled" FullWidth="true"
+						   Disabled="_locked">حفظ الرصيد</MudButton>
+			</MudItem>
+		</MudGrid>
+	</MudPaper>
+
+	<MudPaper Elevation="0" Class="ubp-card">
+		<MudText Typo="Typo.h6" Class="mb-3">أرصدة السنة @_taxYear</MudText>
+		<MudTable Items="_rows" Dense="true" Hover="true" Striped="true">
+			<HeaderContent>
+				<MudTh>الموظف</MudTh><MudTh>الأساس الضريبي</MudTh><MudTh>ضريبة محتجزة</MudTh>
+				<MudTh>وعاء التأمينات</MudTh><MudTh>حصة الموظف</MudTh><MudTh>حصة الشركة</MudTh>
+				<MudTh>وعاء الصحي</MudTh><MudTh>إجمالي استقطاع الموظف</MudTh><MudTh>ملاحظات</MudTh><MudTh />
+			</HeaderContent>
+			<RowTemplate>
+				<MudTd>@context.EmployeeId</MudTd>
+				<MudTd>@context.TaxBase.ToString("N2")</MudTd>
+				<MudTd>@context.TaxWithheld.ToString("N2")</MudTd>
+				<MudTd>@context.InsuranceBase.ToString("N2")</MudTd>
+				<MudTd>@context.InsuranceEmployee.ToString("N2")</MudTd>
+				<MudTd>@context.InsuranceEmployer.ToString("N2")</MudTd>
+				<MudTd>@context.HealthBase.ToString("N2")</MudTd>
+				<MudTd>@context.TotalEmployeeDeductions.ToString("N2")</MudTd>
+				<MudTd>@context.Notes</MudTd>
+				<MudTd Class="d-flex" Style="gap:6px">
+					<MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="() => Edit(context)" Disabled="_locked" />
+					<MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+								   OnClick="() => DeleteAsync(context)" Disabled="_locked" />
+				</MudTd>
+			</RowTemplate>
+			<NoRecordsContent><MudText Class="pa-4">لا توجد أرصدة افتتاحية مسجلة لهذه السنة.</MudText></NoRecordsContent>
+		</MudTable>
+	</MudPaper>
+}
+
+
+@code {
+	private IReadOnlyList<PayrollOpeningBalance> _rows = Array.Empty<PayrollOpeningBalance>();
+	private string _taxYear = DateTime.Today.Year.ToString("D4");
+	private string _employeeIdText = "";
+	private decimal _taxBase;
+	private decimal _taxWithheld;
+	private decimal _insuranceBase;
+	private decimal _insuranceEmployee;
+	private decimal _insuranceEmployer;
+	private decimal _healthBase;
+	private decimal _healthEmployee;
+	private decimal _healthEmployer;
+	private string _notes = "";
+	private bool _locked;
+
+	protected override string ScreenCode => ScreenCodes.PayrollOpeningBalances;
+
+	protected override async Task OnLoadAsync() => await ReloadAsync();
+
+	private async Task ReloadAsync()
+	{
+		if (Actor is null) return;
+		try
+		{
+			_rows = await Opening.ListAsync(_taxYear, Actor);
+			_locked = await Opening.IsLockedAsync(_taxYear, Actor);
+		}
+		catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+	}
+
+	private void Edit(PayrollOpeningBalance row)
+	{
+		_employeeIdText = row.EmployeeId.ToString();
+		_taxYear = row.TaxYearCode;
+		_taxBase = row.TaxBase;
+		_taxWithheld = row.TaxWithheld;
+		_insuranceBase = row.InsuranceBase;
+		_insuranceEmployee = row.InsuranceEmployee;
+		_insuranceEmployer = row.InsuranceEmployer;
+		_healthBase = row.HealthBase;
+		_healthEmployee = row.HealthEmployee;
+		_healthEmployer = row.HealthEmployer;
+		_notes = row.Notes ?? "";
+	}
+
+	private async Task SaveAsync()
+	{
+		if (Actor is null) return;
+		if (!Guid.TryParse(_employeeIdText, out var employeeId))
+		{ Snackbar.Add("أدخل معرف موظف صحيحاً.", Severity.Warning); return; }
+		if (string.IsNullOrWhiteSpace(_taxYear))
+		{ Snackbar.Add("أدخل السنة الضريبية.", Severity.Warning); return; }
+
+		try
+		{
+			await Opening.SaveAsync(new PayrollOpeningBalance
+			{
+				Id = Guid.Empty, EmployeeId = employeeId, TaxYearCode = _taxYear.Trim(),
+				TaxBase = _taxBase, TaxWithheld = _taxWithheld,
+				InsuranceBase = _insuranceBase, InsuranceEmployee = _insuranceEmployee,
+				InsuranceEmployer = _insuranceEmployer,
+				HealthBase = _healthBase, HealthEmployee = _healthEmployee,
+				HealthEmployer = _healthEmployer, Notes = _notes
+			}, Actor);
+			await ReloadAsync();
+			Snackbar.Add("تم حفظ الرصيد الافتتاحي.", Severity.Success);
+		}
+		catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+	}
+
+	private async Task DeleteAsync(PayrollOpeningBalance row)
+	{
+		if (Actor is null) return;
+		try
+		{
+			await Opening.DeleteAsync(row.EmployeeId, row.TaxYearCode, Actor);
+			await ReloadAsync();
+			Snackbar.Add("تم حذف الرصيد الافتتاحي.", Severity.Success);
+		}
+		catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+	}
+}

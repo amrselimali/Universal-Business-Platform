@@ -1,42 +1,138 @@
 @page "/payroll/net-calculation"
 @attribute [Authorize]
 @inherits SecurePageBase
-@using Ubp.Application.Services
-@inject PayrollCalculationEngines Engines
+@inject PayrollNetCalculationService Simulations
+@inject PayrollRunService PayrollRuns
+@inject IEmployeeRepository Employees
 
-<PageTitle>حساب صافي المرتب</PageTitle>
-<MudContainer MaxWidth="MaxWidth.Large" Class="pa-4">
-	<MudText Typo="Typo.h5">حساب صافي المرتب والمحاكاة</MudText>
-	<MudText Typo="Typo.body2" Class="mb-4">تشغيل تجريبي لا يحفظ النتائج ولا يستهلك أرصدة أو إعفاءات.</MudText>
-	<MudGrid>
-		<MudItem xs="12" md="4"><MudNumericField @bind-Value="Gross" Label="الإجمالي" Variant="Variant.Outlined" Min="0" /></MudItem>
-		<MudItem xs="12" md="4"><MudNumericField @bind-Value="FixedDeductions" Label="الخصومات الثابتة" Variant="Variant.Outlined" Min="0" /></MudItem>
-		<MudItem xs="12" md="4"><MudNumericField @bind-Value="TaxRate" Label="نسبة الضريبة التجريبية" Variant="Variant.Outlined" Min="0" Max="1" /></MudItem>
-		<MudItem xs="12"><MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Calculate">حساب المحاكاة</MudButton></MudItem>
-	</MudGrid>
-	@if (Result is not null)
+<PageTitle>احتساب صافي المرتب</PageTitle>
+@if (Denied) { <ForbiddenView /> }
+else if (Loading) { <div class="ubp-loading"><MudProgressCircular Indeterminate="true" /></div> }
+else
+{
+	<PageHeader Title="احتساب صافي المرتب" Subtitle="محاكاة فقط — لا تُكتب نتيجة ولا تُستهلك أرصدة أو أقساط" />
+	<MudPaper Elevation="0" Class="ubp-card mb-4">
+		<MudGrid>
+			<MudItem xs="12" md="4">
+				<MudSelect T="Guid?" Label="الموظف" @bind-Value="_employeeId" Variant="Variant.Outlined">
+					@foreach (var employee in _employees)
+					{ <MudSelectItem T="Guid?" Value="@employee.Id">@employee.Code — @employee.NameAr</MudSelectItem> }
+				</MudSelect>
+			</MudItem>
+			<MudItem xs="12" md="3">
+				<MudSelect T="string" Label="الوضع" @bind-Value="_mode" Variant="Variant.Outlined">
+					<MudSelectItem T="string" Value="@("current")">حالي/مستقبلي</MudSelectItem>
+					<MudSelectItem T="string" Value="@("historical")">إعادة حساب تاريخي</MudSelectItem>
+					<MudSelectItem T="string" Value="@("temporary")">تعديل مؤقت</MudSelectItem>
+				</MudSelect>
+			</MudItem>
+			<MudItem xs="12" md="3"><MudDatePicker T="DateTime?" Label="تاريخ الحساب" @bind-Date="_asOf" DateFormat="yyyy-MM-dd" /></MudItem>
+			<MudItem xs="12" md="2"><MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="CalculateAsync" Disabled="_busy" FullWidth="true">احسب</MudButton></MudItem>
+			<MudItem xs="12" md="6">
+				<MudSelect T="Guid?" Label="الدورة الأصلية للمقارنة (اختياري)" @bind-Value="_runId" Variant="Variant.Outlined">
+					<MudSelectItem T="Guid?" Value="@((Guid?)null)">بدون مقارنة</MudSelectItem>
+					@foreach (var run in _runs)
+					{ <MudSelectItem T="Guid?" Value="@run.Id">@run.SalaryFrom — @run.SalaryTo (@run.Status)</MudSelectItem> }
+				</MudSelect>
+			</MudItem>
+			<MudItem xs="12" md="3"><MudNumericField T="decimal?" Label="تعديل الراتب (مؤقت)" @bind-Value="_grossOverride" Min="0" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="3"><MudNumericField T="decimal?" Label="خصم إضافي (مؤقت)" @bind-Value="_deductionOverride" Min="0" Variant="Variant.Outlined" /></MudItem>
+		</MudGrid>
+	</MudPaper>
+
+	@if (_result is not null)
 	{
-		<MudAlert Severity="Severity.Info" Class="mt-4">
-			صافي المرتب: <b>@Result.Value.ToString("N2")</b>
-		</MudAlert>
+		<MudPaper Elevation="0" Class="ubp-card mb-4">
+			<MudText Typo="Typo.h6" Class="mb-3">النتيجة (@_result.Mode)</MudText>
+			<MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Secondary"
+					   OnClick="SaveScenarioAsync" Class="mb-3">حفظ السيناريو كمرجع</MudButton>
+			<MudGrid>
+				<MudItem xs="6" md="2"><MudText Typo="Typo.caption">إجمالي</MudText><MudText>@_result.Breakdown.GrossAmount.ToString("N2")</MudText></MudItem>
+				<MudItem xs="6" md="2"><MudText Typo="Typo.caption">تأمينات الموظف</MudText><MudText>@_result.Breakdown.EmployeeInsurance.ToString("N2")</MudText></MudItem>
+				<MudItem xs="6" md="2"><MudText Typo="Typo.caption">تأمين صحي</MudText><MudText>@_result.Breakdown.EmployeeHealthInsurance.ToString("N2")</MudText></MudItem>
+				<MudItem xs="6" md="2"><MudText Typo="Typo.caption">ضريبة</MudText><MudText>@_result.Breakdown.TaxCurrent.ToString("N2")</MudText></MudItem>
+				<MudItem xs="6" md="2"><MudText Typo="Typo.caption">صافي</MudText><MudText Typo="Typo.subtitle1">@_result.Breakdown.NetAmount.ToString("N2")</MudText></MudItem>
+				<MudItem xs="6" md="2"><MudText Typo="Typo.caption">تكلفة صاحب العمل</MudText><MudText>@_result.Breakdown.EmployerCost.ToString("N2")</MudText></MudItem>
+			</MudGrid>
+			@if (_result.Breakdown.Notes.Count > 0)
+			{ <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-3">@string.Join(" • ", _result.Breakdown.Notes)</MudAlert> }
+		</MudPaper>
+
+		<MudPaper Elevation="0" Class="ubp-card mb-4">
+			<MudText Typo="Typo.h6" Class="mb-3">تفصيل البنود (قابل للتفسير)</MudText>
+			<MudTable Items="_result.Breakdown.Lines" Dense="true" Hover="true">
+				<HeaderContent><MudTh>البند</MudTh><MudTh>النوع</MudTh><MudTh>المبلغ</MudTh><MudTh>خاضع للضريبة</MudTh><MudTh>خاضع للتأمين</MudTh><MudTh>شرح</MudTh></HeaderContent>
+				<RowTemplate>
+					<MudTd>@context.Code</MudTd><MudTd>@context.Kind</MudTd>
+					<MudTd>@context.Amount.ToString("N2")</MudTd><MudTd>@context.TaxableAmount.ToString("N2")</MudTd>
+					<MudTd>@context.InsurableAmount.ToString("N2")</MudTd><MudTd>@context.Explanation</MudTd>
+				</RowTemplate>
+			</MudTable>
+		</MudPaper>
+
+		@if (_result.Differences.Count > 0)
+		{
+			<MudPaper Elevation="0" Class="ubp-card">
+				<MudText Typo="Typo.h6" Class="mb-3">الفروق مقابل الدورة الأصلية</MudText>
+				<MudTable Items="_result.Differences" Dense="true" Hover="true">
+					<HeaderContent><MudTh>البند</MudTh><MudTh>الأصل</MudTh><MudTh>المحاكاة</MudTh><MudTh>الفرق</MudTh></HeaderContent>
+					<RowTemplate>
+						<MudTd>@context.Code</MudTd><MudTd>@context.Original.ToString("N2")</MudTd>
+						<MudTd>@context.Simulated.ToString("N2")</MudTd>
+						<MudTd Color="@(context.Difference == 0 ? Color.Default : Color.Warning)">@context.Difference.ToString("N2")</MudTd>
+					</RowTemplate>
+				</MudTable>
+			</MudPaper>
+		}
 	}
-</MudContainer>
+}
 
 @code {
-	private decimal Gross = 10000m;
-	private decimal FixedDeductions;
-	private decimal TaxRate = 0.1m;
-	private decimal? Result;
+	private IReadOnlyList<Employee> _employees = Array.Empty<Employee>();
+	private IReadOnlyList<PayrollRun> _runs = Array.Empty<PayrollRun>();
+	private Guid? _employeeId;
+	private Guid? _runId;
+	private string _mode = "current";
+	private DateTime? _asOf = DateTime.Today;
+	private decimal? _grossOverride;
+	private decimal? _deductionOverride;
+	private bool _busy;
+	private PayrollSimulationResult? _result;
+	private PayrollSimulationRequest? _lastRequest;
 	protected override string ScreenCode => ScreenCodes.PayrollNetCalculation;
-	protected override Task OnLoadAsync() => Task.CompletedTask;
 
-	private void Calculate()
+	protected override async Task OnLoadAsync()
 	{
-		if (Gross < 0 || FixedDeductions < 0 || TaxRate < 0 || TaxRate > 1)
+		_employees = await Employees.ListActiveOptionsAsync(Array.Empty<Guid>(), true);
+		_runs = await PayrollRuns.ListAsync();
+	}
+
+	private async Task CalculateAsync()
+	{
+		if (_employeeId is not { } employeeId) { Snackbar.Add("اختر موظفاً أولاً.", Severity.Warning); return; }
+		_busy = true;
+		try
 		{
-			Snackbar.Add("تحقق من القيم المدخلة.", Severity.Error);
-			return;
+			_lastRequest = new PayrollSimulationRequest
+			{
+				EmployeeId = employeeId, Mode = _mode, RunId = _runId,
+				AsOfDate = _asOf is null ? default : DateOnly.FromDateTime(_asOf.Value),
+				ContractGrossOverride = _grossOverride, DeductionOverride = _deductionOverride
+			};
+			_result = await Simulations.SimulateAsync(_lastRequest);
 		}
-		Result = Gross - FixedDeductions - Gross * TaxRate;
+		catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+		finally { _busy = false; }
+	}
+
+	private async Task SaveScenarioAsync()
+	{
+		if (_result is null || _lastRequest is null || Actor is null) return;
+		try
+		{
+			await Simulations.SaveScenarioAsync(_lastRequest, _result, Actor);
+			Snackbar.Add("تم حفظ السيناريو كمرجع (بلا ترحيل وبلا تأثير على الأصل).", Severity.Success);
+		}
+		catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
 	}
 }

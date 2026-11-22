@@ -1,0 +1,95 @@
+@page "/payroll/formula-rules"
+@attribute [Authorize]
+@inherits SecurePageBase
+@inject IPayrollConfigurationRepository Configuration
+@inject PayrollFormulaService FormulaService
+@inject PayrollExpressionEvaluator Evaluator
+
+<PageTitle>محرر المعادلات والقواعد</PageTitle>
+@if (Denied) { <ForbiddenView /> }
+else if (Loading) { <div class="ubp-loading"><MudProgressCircular Indeterminate="true" /></div> }
+else
+{
+	<PageHeader Title="محرر المعادلات والقواعد" Subtitle="معادلات مرئية بمتغيرات مسماة — لا تنفيذ كود أو SQL" />
+
+	<MudPaper Elevation="0" Class="ubp-card mb-4">
+		<MudGrid>
+			<MudItem xs="12" md="3"><MudTextField @bind-Value="_code" Label="كود المعادلة" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="4"><MudTextField @bind-Value="_nameAr" Label="الاسم العربي" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="5"><MudTextField @bind-Value="_expression" Label="المعادلة (مثال: BASE * 0.1 + OVERTIME_HOURS * 50)" Variant="Variant.Outlined" /></MudItem>
+		</MudGrid>
+		<MudStack Row="true" Class="mt-3">
+			<MudButton OnClick="ValidateAsync" Color="Color.Info" Variant="Variant.Outlined">اختبار المعادلة</MudButton>
+			<MudButton OnClick="SaveAsync" Color="Color.Primary" Variant="Variant.Filled">حفظ</MudButton>
+		</MudStack>
+		@if (_validation is not null)
+		{
+			<MudAlert Severity="@(_validation.IsValid ? Severity.Success : Severity.Error)" Dense="true" Class="mt-3">
+				@(_validation.IsValid ? "المعادلة صالحة." : string.Join(" • ", _validation.Errors))
+			</MudAlert>
+		}
+		@if (_sampleResult is not null)
+		{
+			<MudAlert Severity="Severity.Info" Dense="true" Class="mt-2">نتيجة تجربة القيم: @_sampleResult.Value.ToString("N2")</MudAlert>
+		}
+	</MudPaper>
+
+	<MudPaper Elevation="0" Class="ubp-card">
+		<MudTable Items="_formulas" Dense="true" Hover="true">
+			<HeaderContent><MudTh>الكود</MudTh><MudTh>الاسم</MudTh><MudTh>المعادلة</MudTh><MudTh>إصدار</MudTh></HeaderContent>
+			<RowTemplate>
+				<MudTd><span class="ubp-code">@context.Code</span></MudTd><MudTd>@context.NameAr</MudTd>
+				<MudTd><code>@context.Expression</code></MudTd><MudTd>@context.Version</MudTd>
+			</RowTemplate>
+			<NoRecordsContent><MudText Class="pa-4">لا توجد معادلات معرّفة.</MudText></NoRecordsContent>
+		</MudTable>
+	</MudPaper>
+}
+
+@code {
+	private IReadOnlyList<PayrollFormula> _formulas = Array.Empty<PayrollFormula>();
+	private string _code = "";
+	private string _nameAr = "";
+	private string _expression = "";
+	private PayrollFormulaValidationResult? _validation;
+	private decimal? _sampleResult;
+	protected override string ScreenCode => ScreenCodes.PayrollFormulaRules;
+
+	protected override async Task OnLoadAsync() => _formulas = await Configuration.ListFormulasAsync();
+
+	private static readonly Dictionary<string, decimal> Sample = new(StringComparer.OrdinalIgnoreCase)
+	{
+		["BASE"] = 10000m, ["GROSS"] = 12000m, ["WORKED_HOURS"] = 176m,
+		["OVERTIME_HOURS"] = 10m, ["ABSENCE_HOURS"] = 0m, ["ADJUSTMENTS"] = 0m,
+		["LOAN_DEDUCTION"] = 0m, ["RATE"] = 0.1m
+	};
+
+	private Task ValidateAsync()
+	{
+		var candidate = new PayrollFormula { Code = string.IsNullOrWhiteSpace(_code) ? "TEMP" : _code, Expression = _expression };
+		_validation = FormulaService.Validate(new[] { candidate }, Sample.Keys.ToArray());
+		_sampleResult = null;
+		if (_validation.IsValid)
+		{
+			try { _sampleResult = Evaluator.Evaluate(_expression, Sample); }
+			catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+		}
+		return Task.CompletedTask;
+	}
+
+	private async Task SaveAsync()
+	{
+		await ValidateAsync();
+		if (_validation is not { IsValid: true }) return;
+		try
+		{
+			await Configuration.CreateFormulaAsync(new PayrollFormula
+			{
+				Id = Guid.NewGuid(), Code = _code.Trim(), NameAr = _nameAr.Trim(), Expression = _expression.Trim()
+			});
+			_formulas = await Configuration.ListFormulasAsync();
+			Snackbar.Add("تم حفظ المعادلة.", Severity.Success);
+		}
+		catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+	}
+}

@@ -47,6 +47,36 @@ public sealed class PayrollEmployeeProfileInput
     public int Dependents { get; set; }
 }
 
+/// <summary>صف موظف مرتبات: البيانات الأساسية من جدول employees + حالة ملف المرتب والبيانات الموسعة.</summary>
+public sealed class PayrollEmployeeProfileRow
+{
+    public Guid EmployeeId { get; set; }
+    public string Code { get; set; } = "";
+    public string NameAr { get; set; } = "";
+    public string? Phone { get; set; }
+    public DateTime? HireDate { get; set; }
+    public Guid? BranchId { get; set; }
+    public string? BranchName { get; set; }
+    public bool IsActive { get; set; }
+    public string Status { get; set; } = "";
+    public string? NationalId { get; set; }
+    public string? PassportNumber { get; set; }
+    public string? InsuranceNumber { get; set; }
+    public string? TaxTreatmentCode { get; set; }
+    public string? InsuranceStatusCode { get; set; }
+    public string? NationalityCode { get; set; }
+    public string? WorkPermitStatus { get; set; }
+    public DateOnly? ServiceEndDate { get; set; }
+    public int? WorkingHoursPerMonth { get; set; }
+    public bool TimeManagementEnabled { get; set; }
+    public bool SalarySuspended { get; set; }
+    public int NonWorkingWives { get; set; }
+    public int Dependents { get; set; }
+    public int Version { get; set; }
+    public bool HasProfile { get; set; }
+}
+
+/// <summary>إعداد ظهور/إلزام حقل موظف لكل شركة (يُمنع «مخفي ومطلوب»).</summary>
 public sealed class PayrollEmployeeFieldSetting
 {
     public Guid Id { get; set; }

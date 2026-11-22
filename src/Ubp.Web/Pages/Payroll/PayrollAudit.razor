@@ -1,0 +1,56 @@
+@page "/payroll/audit"
+@attribute [Authorize]
+@inherits SecurePageBase
+@inject PayrollReportingService Reporting
+
+<PageTitle>سجل تدقيق المرتبات</PageTitle>
+@if (Denied) { <ForbiddenView /> }
+else if (Loading) { <div class="ubp-loading"><MudProgressCircular Indeterminate="true" /></div> }
+else
+{
+	<PageHeader Title="سجل تدقيق المرتبات" Subtitle="كل حساب/اعتماد/ترحيل/صرف يُسجَّل بمن قام به ووقته" />
+	<MudPaper Elevation="0" Class="ubp-card mb-4">
+		<MudGrid>
+			<MudItem xs="12" md="4"><MudDatePicker T="DateTime?" Label="من" @bind-Date="_from" DateFormat="yyyy-MM-dd" /></MudItem>
+			<MudItem xs="12" md="4"><MudDatePicker T="DateTime?" Label="إلى" @bind-Date="_to" DateFormat="yyyy-MM-dd" /></MudItem>
+			<MudItem xs="12" md="4"><MudButton OnClick="LoadAsync" Color="Color.Primary" Variant="Variant.Filled" FullWidth="true">تحديث</MudButton></MudItem>
+		</MudGrid>
+	</MudPaper>
+	<MudPaper Elevation="0" Class="ubp-card">
+		<MudTable Items="_rows" Dense="true" Hover="true">
+			<HeaderContent>
+				<MudTh>الوقت</MudTh><MudTh>المستخدم</MudTh><MudTh>الجدول</MudTh>
+				<MudTh>السجل</MudTh><MudTh>الفعل</MudTh><MudTh>الأثر</MudTh>
+			</HeaderContent>
+			<RowTemplate>
+				<MudTd>@context.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</MudTd>
+				<MudTd>@(context.Username ?? "—")</MudTd>
+				<MudTd><span class="ubp-code">@context.TableName</span></MudTd>
+				<MudTd><span class="ubp-code">@context.RecordId</span></MudTd>
+				<MudTd>@(context.AuditAction ?? context.Action)</MudTd>
+				<MudTd Class="ubp-muted">@Truncate(context.NewData, 120)</MudTd>
+			</RowTemplate>
+			<NoRecordsContent><MudText Class="pa-4">لا توجد أحداث مرتبات في الفترة المحددة.</MudText></NoRecordsContent>
+		</MudTable>
+	</MudPaper>
+}
+
+@code {
+	private IReadOnlyList<PayrollAuditRow> _rows = Array.Empty<PayrollAuditRow>();
+	private DateTime? _from = DateTime.Today.AddDays(-30);
+	private DateTime? _to = DateTime.Today;
+	protected override string ScreenCode => ScreenCodes.PayrollAudit;
+
+	protected override Task OnLoadAsync() => LoadAsync();
+
+	private async Task LoadAsync()
+	{
+		var from = (_from ?? DateTime.Today.AddDays(-30)).Date.ToUniversalTime();
+		var to = (_to ?? DateTime.Today).Date.AddDays(1).ToUniversalTime();
+		try { _rows = await Reporting.AuditAsync(from, to); }
+		catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+	}
+
+	private static string Truncate(string? value, int length) =>
+		string.IsNullOrEmpty(value) ? "" : value.Length <= length ? value : value[..length] + "…";
+}

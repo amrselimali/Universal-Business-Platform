@@ -1,0 +1,79 @@
+@page "/payroll/health-insurance"
+@attribute [Authorize]
+@inherits SecurePageBase
+@inject IPayrollStatutoryRepository Statutory
+
+<PageTitle>التأمين الصحي الشامل</PageTitle>
+@if (Denied) { <ForbiddenView /> }
+else if (Loading) { <div class="ubp-loading"><MudProgressCircular Indeterminate="true" /></div> }
+else
+{
+	<PageHeader Title="إعدادات التأمين الصحي الشامل" Subtitle="محرك مستقل عن الضريبة والتأمينات، ووعاؤه معادلة قابلة للإعداد" />
+	<MudPaper Elevation="0" Class="ubp-card mb-4">
+		<MudGrid>
+			<MudItem xs="12" md="2"><MudTextField @bind-Value="_code" Label="كود القاعدة" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="2"><MudDatePicker T="DateTime?" Label="سريان من" @bind-Date="_from" DateFormat="yyyy-MM-dd" /></MudItem>
+			<MudItem xs="12" md="2"><MudDatePicker T="DateTime?" Label="سريان إلى" @bind-Date="_to" DateFormat="yyyy-MM-dd" /></MudItem>
+			<MudItem xs="12" md="3"><MudTextField @bind-Value="_basis" Label="معادلة الوعاء (مثال: GROSS)" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="1"><MudNumericField T="decimal" @bind-Value="_employeeRate" Label="موظف" Min="0" Max="1" Format="N4" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="1"><MudNumericField T="decimal" @bind-Value="_employerRate" Label="شركة" Min="0" Max="1" Format="N4" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="1"><MudCheckBox T="bool" @bind-Value="_approved" Label="معتمد" /></MudItem>
+		</MudGrid>
+		<MudStack Row="true" Class="mt-3">
+			<MudButton OnClick="SaveAsync" Color="Color.Primary" Variant="Variant.Filled">حفظ القاعدة</MudButton>
+			<MudText Typo="Typo.caption">المتغيرات المسموحة: GROSS, BASIC, TAXABLE, INSURABLE, DEPENDENTS, MEMBER_COUNT</MudText>
+		</MudStack>
+	</MudPaper>
+
+	<MudPaper Elevation="0" Class="ubp-card">
+		<MudTable Items="_rules" Dense="true" Hover="true">
+			<HeaderContent>
+				<MudTh>الكود</MudTh><MudTh>من</MudTh><MudTh>إلى</MudTh><MudTh>الوعاء</MudTh>
+				<MudTh>موظف</MudTh><MudTh>شركة</MudTh><MudTh>معتمد</MudTh>
+			</HeaderContent>
+			<RowTemplate>
+				<MudTd>@context.Code</MudTd><MudTd>@context.EffectiveFrom</MudTd><MudTd>@context.EffectiveTo</MudTd>
+				<MudTd>@context.BasisExpression</MudTd><MudTd>@context.EmployeeRate.ToString("P2")</MudTd>
+				<MudTd>@context.EmployerRate.ToString("P2")</MudTd><MudTd>@(context.IsApproved ? "نعم" : "لا")</MudTd>
+			</RowTemplate>
+			<NoRecordsContent><MudText Class="pa-4">لا توجد قواعد تأمين صحي.</MudText></NoRecordsContent>
+		</MudTable>
+	</MudPaper>
+	<MudAlert Severity="Severity.Info" Dense="true" Class="mt-4">
+		الخضوع يُستنتج من الحالة التأمينية للموظف: غير خاضع عند NOT_INSURED / EXEMPT / NONE / NO.
+		أعداد المعالين والزوجات غير العاملات تُقرأ من ملف الموظف وتُتاح كمتغيرات في المعادلة.
+	</MudAlert>
+}
+
+@code {
+	private IReadOnlyList<PayrollHealthInsuranceRule> _rules = Array.Empty<PayrollHealthInsuranceRule>();
+	private string _code = "";
+	private DateTime? _from = DateTime.Today;
+	private DateTime? _to;
+	private string _basis = "GROSS";
+	private decimal _employeeRate;
+	private decimal _employerRate;
+	private bool _approved;
+	protected override string ScreenCode => ScreenCodes.PayrollHealthInsurance;
+
+	protected override async Task OnLoadAsync() => _rules = await Statutory.ListHealthInsuranceRulesAsync();
+
+	private async Task SaveAsync()
+	{
+		if (string.IsNullOrWhiteSpace(_code) || _from is null || string.IsNullOrWhiteSpace(_basis))
+		{ Snackbar.Add("أدخل الكود وتاريخ السريان ومعادلة الوعاء.", Severity.Warning); return; }
+		try
+		{
+			await Statutory.CreateHealthInsuranceRuleAsync(new PayrollHealthInsuranceRule
+			{
+				Id = Guid.NewGuid(), Code = _code.Trim(), EffectiveFrom = DateOnly.FromDateTime(_from.Value),
+				EffectiveTo = _to is null ? null : DateOnly.FromDateTime(_to.Value),
+				BasisExpression = _basis.Trim(), EmployeeRate = _employeeRate,
+				EmployerRate = _employerRate, IsApproved = _approved
+			});
+			_rules = await Statutory.ListHealthInsuranceRulesAsync();
+			Snackbar.Add("تم حفظ قاعدة التأمين الصحي.", Severity.Success);
+		}
+		catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+	}
+}

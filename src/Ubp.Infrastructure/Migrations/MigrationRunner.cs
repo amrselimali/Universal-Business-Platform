@@ -64,7 +64,7 @@ public sealed partial class MigrationRunner
                     Success = result.Successful,
                     ExecutedScripts = result.Scripts.Select(s => s.Name).ToList(),
                     TotalScripts = result.Scripts.Count(),
-                    Error = result.Successful ? null : result.Error?.Message
+                    Error = result.Successful ? null : $"[{result.ErrorScript?.Name ?? "UNKNOWN_SCRIPT"}] {result.Error?.Message}"
                 };
             }
             finally

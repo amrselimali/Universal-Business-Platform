@@ -1,0 +1,88 @@
+@page "/payroll/dashboard"
+@attribute [Authorize]
+@inherits SecurePageBase
+@inject PayrollRunService PayrollRuns
+
+<PageTitle>لوحة معلومات المرتبات</PageTitle>
+@if (Denied) { <ForbiddenView /> }
+else if (Loading) { <div class="ubp-loading"><MudProgressCircular Indeterminate="true" /></div> }
+else
+{
+	<PageHeader Title="لوحة معلومات المرتبات" Subtitle="ملخص الدورات وإجمالي الصافي والأخطاء المانعة" />
+	<MudGrid Class="mb-4">
+		<MudItem xs="12" sm="6" md="3">
+			<MudPaper Elevation="0" Class="ubp-card pa-4">
+				<MudText Typo="Typo.caption">عدد الدورات</MudText><MudText Typo="Typo.h4">@_rows.Count</MudText>
+			</MudPaper>
+		</MudItem>
+		<MudItem xs="12" sm="6" md="3">
+			<MudPaper Elevation="0" Class="ubp-card pa-4">
+				<MudText Typo="Typo.caption">إجمالي الصافي</MudText><MudText Typo="Typo.h4">@_totalNet.ToString("N2")</MudText>
+			</MudPaper>
+		</MudItem>
+		<MudItem xs="12" sm="6" md="3">
+			<MudPaper Elevation="0" Class="ubp-card pa-4">
+				<MudText Typo="Typo.caption">موظفون محسوبون</MudText><MudText Typo="Typo.h4">@_rows.Sum(x => x.Totals.EmployeeCount)</MudText>
+			</MudPaper>
+		</MudItem>
+		<MudItem xs="12" sm="6" md="3">
+			<MudPaper Elevation="0" Class="ubp-card pa-4">
+				<MudText Typo="Typo.caption">ملاحظات مانعة</MudText>
+				<MudText Typo="Typo.h4" Color="@(_blocking > 0 ? Color.Error : Color.Success)">@_blocking</MudText>
+			</MudPaper>
+		</MudItem>
+	</MudGrid>
+
+	<MudPaper Elevation="0" Class="ubp-card">
+		<MudTable Items="_rows" Dense="true" Hover="true" Striped="true">
+			<HeaderContent>
+				<MudTh>الفترة</MudTh><MudTh>الحالة</MudTh><MudTh>موظفون</MudTh>
+				<MudTh>إجمالي</MudTh><MudTh>خصومات</MudTh><MudTh>صافي</MudTh><MudTh>ملاحظات</MudTh>
+			</HeaderContent>
+			<RowTemplate>
+				<MudTd>@context.Run.SalaryFrom — @context.Run.SalaryTo</MudTd>
+				<MudTd><MudChip T="string" Size="Size.Small" Color="@StatusColor(context.Run.Status)">@context.Run.Status</MudChip></MudTd>
+				<MudTd>@context.Totals.EmployeeCount</MudTd>
+				<MudTd>@context.Totals.GrossAmount.ToString("N2")</MudTd>
+				<MudTd>@context.Totals.DeductionsAmount.ToString("N2")</MudTd>
+				<MudTd>@context.Totals.NetAmount.ToString("N2")</MudTd>
+				<MudTd>@context.Totals.BlockingIssueCount / @context.Totals.IssueCount</MudTd>
+			</RowTemplate>
+			<NoRecordsContent><MudText Class="pa-4">لا توجد دورات مرتبات بعد.</MudText></NoRecordsContent>
+		</MudTable>
+	</MudPaper>
+}
+
+@code {
+	private sealed record Row(PayrollRun Run, PayrollRunTotals Totals);
+	private IReadOnlyList<Row> _rows = Array.Empty<Row>();
+	private decimal _totalNet;
+	private int _blocking;
+	protected override string ScreenCode => ScreenCodes.PayrollDashboard;
+
+	protected override async Task OnLoadAsync()
+	{
+		var runs = await PayrollRuns.ListAsync();
+		var rows = new List<Row>();
+		foreach (var run in runs.Take(24))
+		{
+			try { rows.Add(new Row(run, await PayrollRuns.GetTotalsAsync(run.Id))); }
+			catch { rows.Add(new Row(run, new PayrollRunTotals())); }
+		}
+		_rows = rows;
+		_totalNet = rows.Sum(x => x.Totals.NetAmount);
+		_blocking = rows.Sum(x => x.Totals.BlockingIssueCount);
+	}
+
+	private static Color StatusColor(string status) => status switch
+	{
+		PayrollRunStatuses.Calculated => Color.Info,
+		PayrollRunStatuses.UnderReview => Color.Warning,
+		PayrollRunStatuses.Approved => Color.Primary,
+		PayrollRunStatuses.Posted => Color.Secondary,
+		PayrollRunStatuses.Paid => Color.Success,
+		PayrollRunStatuses.NeedsCorrection => Color.Error,
+		PayrollRunStatuses.Closed => Color.Dark,
+		_ => Color.Default
+	};
+}

@@ -2,6 +2,7 @@
 @attribute [Authorize]
 @inherits SecurePageBase
 @inject IPayrollConfigurationRepository PayrollConfiguration
+@inject PayrollActivityTemplateService TemplatesService
 
 <PageTitle>بنود المرتبات</PageTitle>
 @if (Denied)
@@ -31,6 +32,31 @@ else
 			</MudGrid>
 		</MudPaper>
 	}
+	<MudPaper Elevation="0" Class="ubp-card mb-4">
+		<MudText Typo="Typo.h6" Class="mb-2">قوالب الأنشطة (عيادات / تصنيع / تجارة)</MudText>
+		<MudText Typo="Typo.caption" Class="mb-3">
+			تُنشئ البنود الناقصة فقط، كل بند بإصدار غير معتمد للمراجعة، ولا تُعدّل أي بند قائم.
+		</MudText>
+		<MudGrid>
+			<MudItem xs="12" md="3">
+				<MudSelect T="string" Label="القالب" @bind-Value="_templateCode" Variant="Variant.Outlined">
+					@foreach (var template in Templates)
+					{ <MudSelectItem T="string" Value="@template.Code">@template.NameAr (@template.Items.Count بنود)</MudSelectItem> }
+				</MudSelect>
+			</MudItem>
+			<MudItem xs="12" md="3"><MudDatePicker T="DateTime?" Label="سريان البنود" @bind-Date="_templateFrom" DateFormat="yyyy-MM-dd" /></MudItem>
+			<MudItem xs="12" md="3"><MudButton OnClick="PreviewTemplateAsync" Color="Color.Info" Variant="Variant.Outlined" FullWidth="true">معاينة</MudButton></MudItem>
+			<MudItem xs="12" md="3"><MudButton OnClick="ApplyTemplateAsync" Color="Color.Success" Variant="Variant.Filled" FullWidth="true">تطبيق القالب</MudButton></MudItem>
+		</MudGrid>
+		@if (_templateResult is not null)
+		{
+			<MudAlert Severity="Severity.Info" Dense="true" Class="mt-2">
+				سيُنشأ (@_templateResult.CreatedCount): @string.Join("، ", _templateResult.CreatedCodes)
+				— موجود مسبقاً (@_templateResult.SkippedCount): @string.Join("، ", _templateResult.SkippedCodes)
+			</MudAlert>
+		}
+	</MudPaper>
+
 	<MudPaper Elevation="0" Class="ubp-card">
 		<MudTable Items="_items" Dense="true" Hover="true" Striped="true">
 			<HeaderContent>
@@ -56,6 +82,10 @@ else
 	private string _newName = "";
 	private string _newCategory = "earning";
 	private bool _newVariable;
+	private string _templateCode = PayrollActivityTemplates.Clinic;
+	private DateTime? _templateFrom = DateTime.Today;
+	private PayrollTemplateApplyResult? _templateResult;
+	private IReadOnlyList<PayrollActivityTemplate> Templates => TemplatesService.Templates();
 	protected override string ScreenCode => ScreenCodes.PayrollItems;
 
 	protected override async Task OnLoadAsync()
@@ -82,5 +112,25 @@ else
 		{
 			Snackbar.Add(ex.Message, Severity.Error);
 		}
+	}
+
+	private async Task PreviewTemplateAsync()
+	{
+		try { _templateResult = await TemplatesService.PreviewAsync(_templateCode); }
+		catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+	}
+
+	private async Task ApplyTemplateAsync()
+	{
+		if (Actor is null) return;
+		if (_templateFrom is null) { Snackbar.Add("حدد تاريخ سريان البنود.", Severity.Warning); return; }
+		try
+		{
+			_templateResult = await TemplatesService.ApplyAsync(_templateCode,
+				DateOnly.FromDateTime(_templateFrom.Value), Actor);
+			_items = await PayrollConfiguration.ListItemsAsync(false);
+			Snackbar.Add($"تم إنشاء {_templateResult.CreatedCount} بنداً من القالب.", Severity.Success);
+		}
+		catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
 	}
 }

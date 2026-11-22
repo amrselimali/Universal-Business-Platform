@@ -1,0 +1,242 @@
+@page "/payroll/reports"
+@attribute [Authorize]
+@inherits SecurePageBase
+@inject PayrollRunService PayrollRuns
+@inject PayrollReportingService Reporting
+@inject IJSRuntime JS
+
+<PageTitle>تقارير المرتبات</PageTitle>
+@if (Denied) { <ForbiddenView /> }
+else if (Loading) { <div class="ubp-loading"><MudProgressCircular Indeterminate="true" /></div> }
+else
+{
+	<PageHeader Title="تقارير المرتبات" Subtitle="سجل المرتبات، فروق الفترات، تكلفة صاحب العمل، والاستثناءات" />
+	<MudPaper Elevation="0" Class="ubp-card mb-4">
+		<MudGrid>
+			<MudItem xs="12" md="4">
+				<MudSelect T="Guid?" Label="الدورة" @bind-Value="_runId" Variant="Variant.Outlined">
+					@foreach (var run in _runs)
+					{ <MudSelectItem T="Guid?" Value="@run.Id">@run.SalaryFrom — @run.SalaryTo (@run.Status)</MudSelectItem> }
+				</MudSelect>
+			</MudItem>
+			<MudItem xs="12" md="4">
+				<MudSelect T="string" Label="التقرير" @bind-Value="_kind" Variant="Variant.Outlined">
+					<MudSelectItem T="string" Value="@("register")">سجل المرتبات</MudSelectItem>
+					<MudSelectItem T="string" Value="@("variance")">فروق الفترات</MudSelectItem>
+					<MudSelectItem T="string" Value="@("employer")">تكلفة صاحب العمل</MudSelectItem>
+					<MudSelectItem T="string" Value="@("exceptions")">الاستثناءات</MudSelectItem>
+					<MudSelectItem T="string" Value="@("tax")">تراكم الضريبة</MudSelectItem>
+					<MudSelectItem T="string" Value="@("insurance")">التأمينات الاجتماعية والصحية</MudSelectItem>
+					<MudSelectItem T="string" Value="@("exemptions")">الإعفاءات الضريبية</MudSelectItem>
+				</MudSelect>
+			</MudItem>
+			<MudItem xs="12" md="2"><MudButton OnClick="LoadAsync" Color="Color.Primary" Variant="Variant.Filled" FullWidth="true">عرض</MudButton></MudItem>
+			<MudItem xs="12" md="2"><MudButton OnClick="ExportAsync" Color="Color.Secondary" Variant="Variant.Outlined" FullWidth="true">تصدير CSV</MudButton></MudItem>
+			<MudItem xs="12" md="3"><MudButton OnClick="DownloadWorkbookAsync" Color="Color.Success" Variant="Variant.Filled" FullWidth="true" StartIcon="@Icons.Material.Filled.GridOn">Excel متعدد الأوراق</MudButton></MudItem>
+			<MudItem xs="12" md="3" Class="d-flex" Style="gap:8px">
+				<MudButton OnClick="DownloadInsuranceAsync" Color="Color.Info" Variant="Variant.Outlined">CSV التأمين</MudButton>
+				<MudButton OnClick="DownloadExemptionsAsync" Color="Color.Info" Variant="Variant.Outlined">CSV الإعفاءات</MudButton>
+			</MudItem>
+		</MudGrid>
+	</MudPaper>
+
+	@if (_register.Count > 0)
+	{
+		<MudPaper Elevation="0" Class="ubp-card mb-4">
+			<MudTable Items="_register" Dense="true" Hover="true">
+				<HeaderContent><MudTh>الكود</MudTh><MudTh>الموظف</MudTh><MudTh>الفرع</MudTh><MudTh>إجمالي</MudTh><MudTh>خصومات</MudTh><MudTh>صافي</MudTh><MudTh>كشف الراتب</MudTh></HeaderContent>
+				<RowTemplate>
+					<MudTd><span class="ubp-code">@context.Code</span></MudTd><MudTd>@context.NameAr</MudTd>
+					<MudTd>@context.BranchName</MudTd><MudTd>@context.GrossAmount.ToString("N2")</MudTd>
+					<MudTd>@context.DeductionsAmount.ToString("N2")</MudTd><MudTd>@context.NetAmount.ToString("N2")</MudTd>
+					<MudTd>
+						<a class="mud-button-root mud-button mud-button-text" target="_blank"
+						   href="@($"/payroll/payslip/{_runId}/{context.EmployeeId}")">طباعة/PDF</a>
+					</MudTd>
+				</RowTemplate>
+			</MudTable>
+		</MudPaper>
+	}
+	@if (_variance.Count > 0)
+	{
+		<MudPaper Elevation="0" Class="ubp-card mb-4">
+			<MudTable Items="_variance" Dense="true" Hover="true">
+				<HeaderContent><MudTh>الموظف</MudTh><MudTh>الحالي</MudTh><MudTh>السابق</MudTh><MudTh>الفرق</MudTh></HeaderContent>
+				<RowTemplate>
+					<MudTd>@context.Code — @context.NameAr</MudTd><MudTd>@context.CurrentNet.ToString("N2")</MudTd>
+					<MudTd>@context.PreviousNet.ToString("N2")</MudTd>
+					<MudTd Color="@(context.Difference == 0 ? Color.Default : Color.Warning)">@context.Difference.ToString("N2")</MudTd>
+				</RowTemplate>
+			</MudTable>
+		</MudPaper>
+	}
+	@if (_employer.Count > 0)
+	{
+		<MudPaper Elevation="0" Class="ubp-card mb-4">
+			<MudTable Items="_employer" Dense="true" Hover="true">
+				<HeaderContent><MudTh>الموظف</MudTh><MudTh>إجمالي</MudTh><MudTh>تكلفة الشركة</MudTh><MudTh>تأمينات الشركة</MudTh><MudTh>تأمين صحي</MudTh></HeaderContent>
+				<RowTemplate>
+					<MudTd>@context.Code — @context.NameAr</MudTd><MudTd>@context.GrossAmount.ToString("N2")</MudTd>
+					<MudTd>@context.EmployerCost.ToString("N2")</MudTd><MudTd>@context.EmployerInsurance.ToString("N2")</MudTd>
+					<MudTd>@context.EmployerHealth.ToString("N2")</MudTd>
+				</RowTemplate>
+			</MudTable>
+		</MudPaper>
+	}
+	@if (_issues.Count > 0)
+	{
+		<MudPaper Elevation="0" Class="ubp-card mb-4">
+			<MudTable Items="_issues" Dense="true" Hover="true">
+				<HeaderContent><MudTh>الخطورة</MudTh><MudTh>الكود</MudTh><MudTh>الرسالة</MudTh></HeaderContent>
+				<RowTemplate><MudTd>@context.Severity</MudTd><MudTd>@context.Code</MudTd><MudTd>@context.Message</MudTd></RowTemplate>
+			</MudTable>
+		</MudPaper>
+	}
+	@if (_tax.Count > 0)
+	{
+		<MudPaper Elevation="0" Class="ubp-card mb-4">
+			<MudTable Items="_tax" Dense="true" Hover="true">
+				<HeaderContent><MudTh>الموظف</MudTh><MudTh>النطاق</MudTh><MudTh>دخل تراكمي</MudTh><MudTh>ضريبة مستحقة</MudTh><MudTh>مخصوم</MudTh><MudTh>رصيد دائن</MudTh></HeaderContent>
+				<RowTemplate>
+					<MudTd>@context.Code — @context.NameAr</MudTd><MudTd>@context.ScopeType</MudTd>
+					<MudTd>@context.TaxableIncomeYtd.ToString("N2")</MudTd><MudTd>@context.TaxDueYtd.ToString("N2")</MudTd>
+					<MudTd>@context.TaxWithheldYtd.ToString("N2")</MudTd><MudTd>@context.CreditBalance.ToString("N2")</MudTd>
+				</RowTemplate>
+			</MudTable>
+		</MudPaper>
+	}
+	@if (_insurance.Count > 0)
+	{
+		<MudPaper Elevation="0" Class="ubp-card mb-4">
+			<MudTable Items="_insurance" Dense="true" Hover="true">
+				<HeaderContent>
+					<MudTh>الكود</MudTh><MudTh>الموظف</MudTh><MudTh>وعاء التأمينات</MudTh>
+					<MudTh>حصة الموظف</MudTh><MudTh>حصة الشركة</MudTh><MudTh>وعاء الصحي</MudTh>
+					<MudTh>صحي — موظف</MudTh><MudTh>صحي — شركة</MudTh><MudTh>إجمالي استقطاع الموظف</MudTh>
+				</HeaderContent>
+				<RowTemplate>
+					<MudTd>@context.Code</MudTd><MudTd>@context.NameAr</MudTd>
+					<MudTd>@context.InsuranceBasis.ToString("N2")</MudTd>
+					<MudTd>@context.SocialEmployee.ToString("N2")</MudTd>
+					<MudTd>@context.SocialEmployer.ToString("N2")</MudTd>
+					<MudTd>@context.HealthBasis.ToString("N2")</MudTd>
+					<MudTd>@context.HealthEmployee.ToString("N2")</MudTd>
+					<MudTd>@context.HealthEmployer.ToString("N2")</MudTd>
+					<MudTd>@context.TotalEmployee.ToString("N2")</MudTd>
+				</RowTemplate>
+			</MudTable>
+		</MudPaper>
+	}
+	@if (_exemptions.Count > 0)
+	{
+		<MudPaper Elevation="0" Class="ubp-card mb-4">
+			<MudTable Items="_exemptions" Dense="true" Hover="true">
+				<HeaderContent>
+					<MudTh>الكود</MudTh><MudTh>الاسم</MudTh><MudTh>النوع</MudTh>
+					<MudTh>المبلغ</MudTh><MudTh>النسبة</MudTh><MudTh>الشرط</MudTh><MudTh>سريان من</MudTh><MudTh>سريان إلى</MudTh>
+				</HeaderContent>
+				<RowTemplate>
+					<MudTd>@context.Code</MudTd><MudTd>@context.NameAr</MudTd><MudTd>@context.ExemptionType</MudTd>
+					<MudTd>@(context.Amount?.ToString("N2") ?? "—")</MudTd>
+					<MudTd>@(context.Percentage?.ToString("P2") ?? "—")</MudTd>
+					<MudTd>@context.ConditionExpression</MudTd>
+					<MudTd>@context.EffectiveFrom</MudTd><MudTd>@context.EffectiveTo</MudTd>
+				</RowTemplate>
+			</MudTable>
+		</MudPaper>
+	}
+	@if (!string.IsNullOrWhiteSpace(_csv))
+	{
+		<MudPaper Elevation="0" Class="ubp-card">
+			<MudText Typo="Typo.subtitle2" Class="mb-2">ملف CSV (جاهز للنسخ/الحفظ)</MudText>
+			<MudTextField T="string" Value="_csv" Lines="10" ReadOnly="true" Variant="Variant.Outlined" />
+		</MudPaper>
+	}
+}
+
+@code {
+	private IReadOnlyList<PayrollRun> _runs = Array.Empty<PayrollRun>();
+	private IReadOnlyList<PayrollRegisterRow> _register = Array.Empty<PayrollRegisterRow>();
+	private IReadOnlyList<PayrollVarianceRow> _variance = Array.Empty<PayrollVarianceRow>();
+	private IReadOnlyList<PayrollEmployerCostRow> _employer = Array.Empty<PayrollEmployerCostRow>();
+	private IReadOnlyList<PayrollTaxAccumulationRow> _tax = Array.Empty<PayrollTaxAccumulationRow>();
+	private IReadOnlyList<PayrollRunIssue> _issues = Array.Empty<PayrollRunIssue>();
+	private IReadOnlyList<PayrollInsuranceReportRow> _insurance = Array.Empty<PayrollInsuranceReportRow>();
+	private IReadOnlyList<PayrollTaxExemption> _exemptions = Array.Empty<PayrollTaxExemption>();
+	private Guid? _runId;
+	private string _kind = "register";
+	private string _csv = "";
+	protected override string ScreenCode => ScreenCodes.PayrollReports;
+
+	protected override async Task OnLoadAsync() => _runs = await PayrollRuns.ListAsync();
+
+	private async Task LoadAsync()
+	{
+		if (_runId is not { } runId) { Snackbar.Add("اختر الدورة أولاً.", Severity.Warning); return; }
+		_register = Array.Empty<PayrollRegisterRow>();
+		_variance = Array.Empty<PayrollVarianceRow>();
+		_employer = Array.Empty<PayrollEmployerCostRow>();
+		_issues = Array.Empty<PayrollRunIssue>();
+		_tax = Array.Empty<PayrollTaxAccumulationRow>();
+		_insurance = Array.Empty<PayrollInsuranceReportRow>();
+		_exemptions = Array.Empty<PayrollTaxExemption>();
+		try
+		{
+			switch (_kind)
+			{
+				case "variance": _variance = await Reporting.VarianceAsync(runId, null); break;
+				case "employer": _employer = await Reporting.EmployerCostAsync(runId); break;
+				case "exceptions": _issues = await Reporting.ExceptionsAsync(runId); break;
+				case "insurance": _insurance = await Reporting.InsuranceAsync(runId); break;
+				case "exemptions":
+					_exemptions = await Reporting.ExemptionsAsync(DateOnly.FromDateTime(DateTime.Today));
+					break;
+				case "tax":
+					_tax = await Reporting.TaxAccumulationAsync(DateOnly.FromDateTime(DateTime.Today.AddYears(-1)),
+						DateOnly.FromDateTime(DateTime.Today));
+					break;
+				default: _register = await Reporting.RegisterAsync(runId); break;
+			}
+		}
+		catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+	}
+
+	private async Task ExportAsync()
+	{
+		if (_runId is not { } runId) { Snackbar.Add("اختر الدورة أولاً.", Severity.Warning); return; }
+		try { _csv = await Reporting.ExportRegisterCsvAsync(runId); }
+		catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+	}
+
+	private async Task DownloadWorkbookAsync()
+	{
+		if (_runId is not { } runId) { Snackbar.Add("اختر الدورة أولاً.", Severity.Warning); return; }
+		try
+		{
+			await JS.InvokeVoidAsync("ubpExports.download",
+				$"/api/v1/payroll/runs/{runId}/workbook.xls", $"payroll-{runId:N}.xls");
+		}
+		catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+	}
+
+	private async Task DownloadInsuranceAsync()
+	{
+		if (_runId is not { } runId) { Snackbar.Add("اختر الدورة أولاً.", Severity.Warning); return; }
+		try
+		{
+			await JS.InvokeVoidAsync("ubpExports.download",
+				$"/api/v1/payroll/runs/{runId}/insurance.csv", $"payroll-insurance-{runId:N}.csv");
+		}
+		catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+	}
+
+	private async Task DownloadExemptionsAsync()
+	{
+		try
+		{
+			await JS.InvokeVoidAsync("ubpExports.download",
+				$"/api/v1/payroll/tax-exemptions.csv?asOf={DateTime.Today:yyyy-MM-dd}", "payroll-tax-exemptions.csv");
+		}
+		catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+	}
+}

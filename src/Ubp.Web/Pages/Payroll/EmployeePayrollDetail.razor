@@ -1,0 +1,117 @@
+@page "/payroll/employee-detail"
+@attribute [Authorize]
+@inherits SecurePageBase
+@inject PayrollRunService PayrollRuns
+@inject PayrollReportingService Reporting
+@inject PayrollAllocationService Allocations
+
+<PageTitle>كشف مرتب موظف</PageTitle>
+@if (Denied) { <ForbiddenView /> }
+else if (Loading) { <div class="ubp-loading"><MudProgressCircular Indeterminate="true" /></div> }
+else
+{
+	<PageHeader Title="كشف مرتب موظف" Subtitle="تفصيل كل بند مع المصدر/المعادلة — لعرض نتيجة دورة معتمدة" />
+
+	<MudPaper Elevation="0" Class="ubp-card mb-4">
+		<MudGrid>
+			<MudItem xs="12" md="5">
+				<MudSelect T="Guid?" Label="الدورة" @bind-Value="_runId" Variant="Variant.Outlined">
+					@foreach (var run in _runs)
+					{ <MudSelectItem T="Guid?" Value="@run.Id">@run.SalaryFrom — @run.SalaryTo (@run.Status)</MudSelectItem> }
+				</MudSelect>
+			</MudItem>
+			<MudItem xs="12" md="5">
+				<MudSelect T="Guid?" Label="الموظف" @bind-Value="_employeeId" Variant="Variant.Outlined">
+					@foreach (var result in _results)
+					{ <MudSelectItem T="Guid?" Value="@result.EmployeeId">@result.EmployeeId</MudSelectItem> }
+				</MudSelect>
+			</MudItem>
+			<MudItem xs="12" md="2"><MudButton OnClick="LoadPayslipAsync" Color="Color.Primary" Variant="Variant.Filled" FullWidth="true">عرض</MudButton></MudItem>
+		</MudGrid>
+	</MudPaper>
+
+	@if (_result is not null)
+	{
+		<MudPaper Elevation="0" Class="ubp-card mb-4">
+			<MudGrid>
+				<MudItem xs="6" md="3"><MudText Typo="Typo.caption">الإجمالي</MudText><MudText>@_result.GrossAmount.ToString("N2")</MudText></MudItem>
+				<MudItem xs="6" md="3"><MudText Typo="Typo.caption">الخصومات</MudText><MudText>@_result.DeductionsAmount.ToString("N2")</MudText></MudItem>
+				<MudItem xs="6" md="3"><MudText Typo="Typo.caption">الصافي</MudText><MudText Typo="Typo.subtitle1">@_result.NetAmount.ToString("N2")</MudText></MudItem>
+				<MudItem xs="6" md="3"><MudText Typo="Typo.caption">إصدار الحساب</MudText><MudText>@_result.CalculationVersion</MudText></MudItem>
+			</MudGrid>
+		</MudPaper>
+
+		<MudPaper Elevation="0" Class="ubp-card">
+			<MudTable Items="_details" Dense="true" Hover="true">
+				<HeaderContent><MudTh>البند</MudTh><MudTh>المبلغ</MudTh><MudTh>المصدر / المعادلة</MudTh></HeaderContent>
+				<RowTemplate>
+					<MudTd><span class="ubp-code">@context.ItemCode</span></MudTd>
+					<MudTd>@context.Amount.ToString("N2")</MudTd>
+					<MudTd>@context.FormulaReference</MudTd>
+				</RowTemplate>
+				<NoRecordsContent><MudText Class="pa-4">لا توجد بنود لهذا الموظف في الدورة.</MudText></NoRecordsContent>
+			</MudTable>
+		</MudPaper>
+
+		@if (_allocations.Count > 0)
+		{
+			<MudPaper Elevation="0" Class="ubp-card mt-4">
+				<MudText Typo="Typo.h6" Class="mb-3">توزيع التكلفة على الفروع</MudText>
+				<MudTable Items="_allocations" Dense="true" Hover="true">
+					<HeaderContent>
+						<MudTh>الفرع</MudTh><MudTh>أيام العمل</MudTh><MudTh>النسبة</MudTh>
+						<MudTh>إجمالي</MudTh><MudTh>مساهمة صاحب العمل</MudTh><MudTh>إجمالي التكلفة</MudTh>
+					</HeaderContent>
+					<RowTemplate>
+						<MudTd>@context.BranchId</MudTd><MudTd>@context.WorkDays</MudTd>
+						<MudTd>@context.AllocationRatio.ToString("P2")</MudTd>
+						<MudTd>@context.GrossCost.ToString("N2")</MudTd>
+						<MudTd>@context.EmployerContribution.ToString("N2")</MudTd>
+						<MudTd>@context.TotalCost.ToString("N2")</MudTd>
+					</RowTemplate>
+				</MudTable>
+				<MudText Typo="Typo.caption" Class="mt-2">
+					مجموع النسب: @_allocations.Sum(x => x.AllocationRatio).ToString("P2") — مجموع التكلفة: @_allocations.Sum(x => x.TotalCost).ToString("N2")
+				</MudText>
+			</MudPaper>
+		}
+	}
+}
+
+@code {
+	private IReadOnlyList<PayrollRun> _runs = Array.Empty<PayrollRun>();
+	private IReadOnlyList<PayrollResult> _results = Array.Empty<PayrollResult>();
+	private IReadOnlyList<PayrollResultDetail> _details = Array.Empty<PayrollResultDetail>();
+	private IReadOnlyList<PayrollBranchCostAllocation> _allocations = Array.Empty<PayrollBranchCostAllocation>();
+	private Guid? _runId;
+	private Guid? _employeeId;
+	private PayrollResult? _result;
+	protected override string ScreenCode => ScreenCodes.PayrollRuns;
+	protected override string RequiredAction => ActionCodes.ViewDetail;
+
+	protected override async Task OnLoadAsync() => _runs = await PayrollRuns.ListAsync();
+
+	private async Task LoadPayslipAsync()
+	{
+		try
+		{
+			if (_runId is not { } runId) { Snackbar.Add("اختر الدورة أولاً.", Severity.Warning); return; }
+			_results = await PayrollRuns.ListResultsAsync(runId);
+			if (_employeeId is not { } employeeId)
+			{
+				_result = null;
+				_details = Array.Empty<PayrollResultDetail>();
+				Snackbar.Add("تم تحميل نتائج الدورة — اختر الموظف.", Severity.Info);
+				return;
+			}
+			_result = _results.FirstOrDefault(x => x.EmployeeId == employeeId);
+			_allocations = await Allocations.ListAsync(runId, employeeId);
+			var rows = await Reporting.PayslipAsync(runId, employeeId);
+			_details = rows.Select(r => new PayrollResultDetail
+			{
+				ItemCode = r.ItemCode, Amount = r.Amount, FormulaReference = r.FormulaReference
+			}).ToArray();
+		}
+		catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+	}
+}

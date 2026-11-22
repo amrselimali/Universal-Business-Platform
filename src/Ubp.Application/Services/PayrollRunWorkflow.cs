@@ -8,7 +8,8 @@ public sealed class PayrollRunWorkflow
     {
         [PayrollRunStatuses.Draft] = new[] { PayrollRunStatuses.Calculating, PayrollRunStatuses.Cancelled },
         [PayrollRunStatuses.Calculating] = new[] { PayrollRunStatuses.Calculated, PayrollRunStatuses.Draft },
-        [PayrollRunStatuses.Calculated] = new[] { PayrollRunStatuses.UnderReview, PayrollRunStatuses.Calculating },
+        [PayrollRunStatuses.Calculated] = new[] { PayrollRunStatuses.UnderReview, PayrollRunStatuses.Calculating, PayrollRunStatuses.NeedsCorrection },
+        [PayrollRunStatuses.NeedsCorrection] = new[] { PayrollRunStatuses.Calculating, PayrollRunStatuses.Cancelled },
         [PayrollRunStatuses.UnderReview] = new[] { PayrollRunStatuses.Approved, PayrollRunStatuses.Calculating },
         [PayrollRunStatuses.Approved] = new[] { PayrollRunStatuses.Posted },
         [PayrollRunStatuses.Posted] = new[] { PayrollRunStatuses.PartiallyPaid, PayrollRunStatuses.Paid },
@@ -27,11 +28,16 @@ public sealed class PayrollRunWorkflow
         if (!CanTransition(from, to)) throw new InvalidOperationException($"Invalid payroll transition: {from} -> {to}.");
         if (to is PayrollRunStatuses.Approved or PayrollRunStatuses.Posted)
         {
-            var blocking = issues.Where(x => x.Severity.Equals("blocking", StringComparison.OrdinalIgnoreCase)
-                && !x.IsOverridden).ToList();
+            var blocking = issues.Where(x => IsBlocker(x.Severity) && !x.IsOverridden).ToList();
             if (blocking.Count > 0 && (!overrideBlockingIssues || string.IsNullOrWhiteSpace(overrideReason)))
                 throw new InvalidOperationException("Blocking payroll issues require an authorized override and reason.");
         }
         return to;
     }
+
+    /// <summary>الخطورة المانعة تشمل critical وblocking — ولا تُحوَّل تلقائياً إلى تحذير.</summary>
+    public static bool IsBlocker(string? severity) =>
+        severity is not null &&
+        (severity.Equals(PayrollIssueSeverities.Critical, StringComparison.OrdinalIgnoreCase) ||
+         severity.Equals(PayrollIssueSeverities.Blocking, StringComparison.OrdinalIgnoreCase));
 }

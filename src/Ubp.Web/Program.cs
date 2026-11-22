@@ -80,6 +80,7 @@ app.MapSystemEndpoints();
 app.MapDatabaseExportEndpoints();
 app.MapManualScreenshotEndpoints();
 app.MapWhatsAppWebhookEndpoints();
+app.MapPayrollReportEndpoints();
 app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
 
 await DatabaseBootstrapper.InitializeAsync(app);

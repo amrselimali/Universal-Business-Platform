@@ -1,0 +1,88 @@
+@page "/payroll/data-mapping"
+@attribute [Authorize]
+@inherits SecurePageBase
+@inject IPayrollConfigurationRepository Configuration
+
+<PageTitle>ربط مصادر البيانات</PageTitle>
+@if (Denied) { <ForbiddenView /> }
+else if (Loading) { <div class="ubp-loading"><MudProgressCircular Indeterminate="true" /></div> }
+else
+{
+	<PageHeader Title="ربط مصادر البيانات" Subtitle="مصادر مسجلة عبر Providers معتمدة — تُحدد مرة وتُستخدم في المعادلات" />
+	<MudPaper Elevation="0" Class="ubp-card mb-4">
+		<MudGrid>
+			<MudItem xs="12" md="3"><MudTextField @bind-Value="_code" Label="كود المصدر" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="4"><MudTextField @bind-Value="_nameAr" Label="الاسم العربي" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="3">
+				<MudSelect T="string" Label="Provider" @bind-Value="_provider" Variant="Variant.Outlined">
+					<MudSelectItem T="string" Value="@("attendance")">الحضور والانصراف</MudSelectItem>
+					<MudSelectItem T="string" Value="@("sales")">المبيعات/الفواتير</MudSelectItem>
+					<MudSelectItem T="string" Value="@("items")">الأصناف والخدمات</MudSelectItem>
+					<MudSelectItem T="string" Value="@("bookings")">الحجوزات والتنفيذ</MudSelectItem>
+					<MudSelectItem T="string" Value="@("adjustments")">التسويات</MudSelectItem>
+					<MudSelectItem T="string" Value="@("loans")">السلف والقروض</MudSelectItem>
+				</MudSelect>
+			</MudItem>
+			<MudItem xs="12" md="2">
+				<MudSelect T="string" Label="التجميع" @bind-Value="_aggregation" Variant="Variant.Outlined">
+					<MudSelectItem T="string" Value="@("sum")">SUM</MudSelectItem>
+					<MudSelectItem T="string" Value="@("count")">COUNT</MudSelectItem>
+					<MudSelectItem T="string" Value="@("count_distinct")">COUNT DISTINCT</MudSelectItem>
+					<MudSelectItem T="string" Value="@("avg")">AVG</MudSelectItem>
+					<MudSelectItem T="string" Value="@("min")">MIN</MudSelectItem>
+					<MudSelectItem T="string" Value="@("max")">MAX</MudSelectItem>
+				</MudSelect>
+			</MudItem>
+		</MudGrid>
+		<MudStack Row="true" AlignItems="AlignItems.Center" Class="mt-3">
+			<MudButton OnClick="SaveAsync" Color="Color.Primary" Variant="Variant.Filled">حفظ المصدر</MudButton>
+			<MudCheckBox T="bool" @bind-Value="_includeCancelled" Label="تضمين الملغى" />
+		</MudStack>
+	</MudPaper>
+
+	<MudPaper Elevation="0" Class="ubp-card">
+		<MudTable Items="_sources" Dense="true" Hover="true">
+			<HeaderContent><MudTh>الكود</MudTh><MudTh>الاسم</MudTh><MudTh>Provider</MudTh><MudTh>التجميع</MudTh><MudTh>ملغى</MudTh><MudTh>نشط</MudTh></HeaderContent>
+			<RowTemplate>
+				<MudTd><span class="ubp-code">@context.Code</span></MudTd><MudTd>@context.NameAr</MudTd>
+				<MudTd>@context.ProviderCode</MudTd><MudTd>@context.AggregationCode</MudTd>
+				<MudTd>@(context.IncludeCancelled ? "نعم" : "لا")</MudTd>
+				<MudTd><MudChip T="string" Size="Size.Small" Color="@(context.IsActive ? Color.Success : Color.Default)">@(context.IsActive ? "نشط" : "معطل")</MudChip></MudTd>
+			</RowTemplate>
+			<NoRecordsContent><MudText Class="pa-4">لا توجد مصادر بيانات مسجلة.</MudText></NoRecordsContent>
+		</MudTable>
+	</MudPaper>
+	<MudAlert Severity="Severity.Info" Dense="true" Class="mt-4">
+		المصدر المفقود يظهر كملاحظة مانعة في الدورة (PAYROLL_TAX_POLICY_MISSING / SOURCE_MISSING) ولا يُنتج صفراً صامتاً.
+	</MudAlert>
+}
+
+@code {
+	private IReadOnlyList<PayrollDataSource> _sources = Array.Empty<PayrollDataSource>();
+	private string _code = "";
+	private string _nameAr = "";
+	private string _provider = "attendance";
+	private string _aggregation = "sum";
+	private bool _includeCancelled;
+	protected override string ScreenCode => ScreenCodes.PayrollDataSourceMapping;
+
+	protected override async Task OnLoadAsync() => _sources = await Configuration.ListDataSourcesAsync();
+
+	private async Task SaveAsync()
+	{
+		if (string.IsNullOrWhiteSpace(_code) || string.IsNullOrWhiteSpace(_nameAr))
+		{ Snackbar.Add("الكود والاسم مطلوبان.", Severity.Warning); return; }
+		try
+		{
+			await Configuration.CreateDataSourceAsync(new PayrollDataSource
+			{
+				Id = Guid.NewGuid(), Code = _code.Trim(), NameAr = _nameAr.Trim(),
+				ProviderCode = _provider, AggregationCode = _aggregation,
+				IncludeCancelled = _includeCancelled, IsActive = true
+			});
+			_sources = await Configuration.ListDataSourcesAsync();
+			Snackbar.Add("تم حفظ مصدر البيانات.", Severity.Success);
+		}
+		catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+	}
+}

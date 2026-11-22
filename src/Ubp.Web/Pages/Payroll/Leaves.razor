@@ -2,6 +2,7 @@
 @attribute [Authorize]
 @inherits SecurePageBase
 @inject IPayrollOperationsRepository Operations
+@inject PayrollLeaveService LeaveService
 
 <PageTitle>الإجازات</PageTitle>
 @if (Denied)
@@ -27,9 +28,65 @@ else
 	</MudPaper>
 	<MudPaper Elevation="0" Class="ubp-card">
 		<MudTable Items="_rows" Dense="true" Hover="true" Striped="true">
-			<HeaderContent><MudTh>الموظف</MudTh><MudTh>النوع</MudTh><MudTh>من</MudTh><MudTh>إلى</MudTh><MudTh>الأيام</MudTh><MudTh>الحالة</MudTh></HeaderContent>
-			<RowTemplate><MudTd>@context.EmployeeId</MudTd><MudTd>@context.LeaveTypeCode</MudTd><MudTd>@context.FromDate</MudTd><MudTd>@context.ToDate</MudTd><MudTd>@context.Days.ToString("N2")</MudTd><MudTd>@context.Status</MudTd></RowTemplate>
+			<HeaderContent><MudTh>الموظف</MudTh><MudTh>النوع</MudTh><MudTh>من</MudTh><MudTh>إلى</MudTh><MudTh>الأيام</MudTh><MudTh>الحالة</MudTh><MudTh></MudTh></HeaderContent>
+			<RowTemplate><MudTd>@context.EmployeeId</MudTd><MudTd>@context.LeaveTypeCode</MudTd><MudTd>@context.FromDate</MudTd><MudTd>@context.ToDate</MudTd><MudTd>@context.Days.ToString("N2")</MudTd><MudTd>@context.Status</MudTd>
+				<MudTd>
+					@if (context.Status != "approved")
+					{
+						<MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Success"
+								   OnClick="@(() => ApproveAsync(context.Id))">اعتماد</MudButton>
+					}
+				</MudTd>
+			</RowTemplate>
 		</MudTable>
+	</MudPaper>
+
+	<MudPaper Elevation="0" Class="ubp-card mt-4">
+		<MudText Typo="Typo.h6" Class="mb-3">أرصدة الإجازات</MudText>
+		<MudGrid>
+			<MudItem xs="12" md="2"><MudTextField @bind-Value="_balanceEmp" Label="معرف الموظف" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="2"><MudTextField @bind-Value="_balanceType" Label="نوع الإجازة" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="2"><MudDatePicker T="DateTime?" Label="تاريخ الرصيد" @bind-Date="_balanceDate" DateFormat="yyyy-MM-dd" /></MudItem>
+			<MudItem xs="12" md="2"><MudNumericField T="decimal" @bind-Value="_opening" Label="رصيد افتتاحي (يوم)" Min="0" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="2"><MudCheckBox T="bool" @bind-Value="_carryOver" Label="يُسمح بالترحيل" /></MudItem>
+			<MudItem xs="12" md="2"><MudButton OnClick="SaveOpeningAsync" Color="Color.Primary" Variant="Variant.Filled" FullWidth="true">حفظ الرصيد</MudButton></MudItem>
+		</MudGrid>
+		<MudTable Items="_balances" Dense="true" Hover="true" Class="mt-3">
+			<HeaderContent><MudTh>الموظف</MudTh><MudTh>النوع</MudTh><MudTh>التاريخ</MudTh><MudTh>افتتاحي</MudTh><MudTh>مستخدم</MudTh><MudTh>المتبقي</MudTh><MudTh>ترحيل</MudTh></HeaderContent>
+			<RowTemplate>
+				<MudTd>@context.EmployeeId</MudTd><MudTd>@context.LeaveTypeCode</MudTd>
+				<MudTd>@context.BalanceDate</MudTd><MudTd>@context.OpeningBalance.ToString("N2")</MudTd>
+				<MudTd>@context.UsedBalance.ToString("N2")</MudTd><MudTd>@context.RemainingBalance.ToString("N2")</MudTd>
+				<MudTd>@(context.CarryOverAllowed ? (context.CarryOverLimit?.ToString("N2") ?? "بلا حد") : "لا")</MudTd>
+			</RowTemplate>
+			<NoRecordsContent><MudText Class="pa-4">لا توجد أرصدة مسجلة.</MudText></NoRecordsContent>
+		</MudTable>
+	</MudPaper>
+
+	<MudPaper Elevation="0" Class="ubp-card mt-4">
+		<MudText Typo="Typo.h6" Class="mb-2">استحقاق سنة إجازة (مع حد الترحيل)</MudText>
+		<MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
+			الاستحقاق = السنوي × (أشهر الخدمة ÷ 12)، والترحيل = المتبقي بحد أقصى مُعرَّف أو صفر عند المنع.
+			إعادة التطبيق لنفس السنة لا تُضاعف الرصيد (مرجع ACCRUAL‑YYYY).
+		</MudAlert>
+		<MudGrid>
+			<MudItem xs="12" md="2"><MudTextField @bind-Value="_accrualEmp" Label="معرف الموظف" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="2"><MudTextField @bind-Value="_accrualType" Label="نوع الإجازة" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="1"><MudNumericField T="int" @bind-Value="_accrualYear" Label="السنة" Min="2000" Max="2999" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="2"><MudNumericField T="decimal" @bind-Value="_entitlement" Label="الاستحقاق السنوي (يوم)" Min="0" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="1"><MudNumericField T="int" @bind-Value="_months" Label="أشهر" Min="0" Max="12" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="2"><MudCheckBox T="bool" @bind-Value="_accrualCarry" Label="يُسمح بالترحيل" /></MudItem>
+			<MudItem xs="12" md="2"><MudNumericField T="decimal?" @bind-Value="_accrualLimit" Label="حد الترحيل (اختياري)" Min="0" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="3"><MudButton OnClick="AccrueAsync" Color="Color.Primary" Variant="Variant.Filled" FullWidth="true">تطبيق الاستحقاق</MudButton></MudItem>
+		</MudGrid>
+		@if (_accrualPlan is not null)
+		{
+			<MudAlert Severity="Severity.Success" Dense="true" Class="mt-3">
+				استحقاق @_accrualPlan.Accrued.ToString("N2") + ترحيل @_accrualPlan.CarriedForward.ToString("N2")
+				= افتتاحي @_accrualPlan.OpeningBalance.ToString("N2") يوم
+				@(_accrualPlan.CarryLimitApplied ? "(طُبِّق حد الترحيل)" : "")
+			</MudAlert>
+		}
 	</MudPaper>
 }
 
@@ -40,6 +97,20 @@ else
 	private string _fromText = DateTime.Today.ToString("yyyy-MM-dd");
 	private string _toText = DateTime.Today.ToString("yyyy-MM-dd");
 	private decimal _days;
+	private IReadOnlyList<PayrollLeaveBalance> _balances = Array.Empty<PayrollLeaveBalance>();
+	private string _balanceEmp = "";
+	private string _balanceType = "annual";
+	private DateTime? _balanceDate = DateTime.Today;
+	private decimal _opening;
+	private string _accrualEmp = "";
+	private string _accrualType = "annual";
+	private int _accrualYear = DateTime.Today.Year;
+	private decimal _entitlement = 21m;
+	private int _months = 12;
+	private bool _accrualCarry = true;
+	private decimal? _accrualLimit;
+	private PayrollLeaveAccrualPlan? _accrualPlan;
+	private bool _carryOver;
 	protected override string ScreenCode => ScreenCodes.PayrollLeaves;
 	protected override async Task OnLoadAsync() => await LoadAsync();
 
@@ -47,6 +118,23 @@ else
 	{
 		var date = DateOnly.FromDateTime(DateTime.Today);
 		_rows = await Operations.ListLeavesAsync(date.AddDays(-31), date.AddDays(31));
+		_balances = await LeaveService.ListBalancesAsync(null);
+	}
+
+	private async Task SaveOpeningAsync()
+	{
+		if (Actor is null) return;
+		if (!Guid.TryParse(_balanceEmp, out var employeeId))
+		{ Snackbar.Add("أدخل معرف الموظف بشكل صحيح.", Severity.Error); return; }
+		try
+		{
+			await LeaveService.SetOpeningAsync(employeeId, _balanceType.Trim(),
+				_balanceDate is null ? DateOnly.FromDateTime(DateTime.Today) : DateOnly.FromDateTime(_balanceDate.Value),
+				_opening, _carryOver, null, Actor);
+			await LoadAsync();
+			Snackbar.Add("تم حفظ رصيد الإجازة.", Severity.Success);
+		}
+		catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
 	}
 
 	private async Task CreateAsync()
@@ -66,6 +154,36 @@ else
 			});
 			await LoadAsync();
 			Snackbar.Add("تم تسجيل الإجازة.", Severity.Success);
+		}
+		catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+	}
+
+	private async Task ApproveAsync(Guid leaveId)
+	{
+		if (Actor is null) return;
+		try
+		{
+			var approved = await LeaveService.ApproveAsync(leaveId, Actor);
+			await LoadAsync();
+			Snackbar.Add(approved ? "تم اعتماد الإجازة." : "الطلب معتمد بالفعل.", approved ? Severity.Success : Severity.Info);
+		}
+		catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+	}
+
+	private async Task AccrueAsync()
+	{
+		if (Actor is null) return;
+		if (!Guid.TryParse(_accrualEmp, out var employeeId))
+		{ Snackbar.Add("أدخل معرف موظف صحيحاً.", Severity.Warning); return; }
+		if (string.IsNullOrWhiteSpace(_accrualType))
+		{ Snackbar.Add("أدخل نوع الإجازة.", Severity.Warning); return; }
+
+		try
+		{
+			_accrualPlan = await LeaveService.AccrueYearAsync(employeeId, _accrualType, _accrualYear,
+				_entitlement, _months, _accrualCarry, _accrualLimit, Actor);
+			await LoadAsync();
+			Snackbar.Add("تم تطبيق استحقاق الإجازة وحد الترحيل.", Severity.Success);
 		}
 		catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
 	}

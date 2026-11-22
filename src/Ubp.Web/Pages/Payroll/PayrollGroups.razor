@@ -1,0 +1,62 @@
+@page "/payroll/groups"
+@attribute [Authorize]
+@inherits SecurePageBase
+@inject IPayrollConfigurationRepository Configuration
+
+<PageTitle>مجموعات المرتبات</PageTitle>
+@if (Denied) { <ForbiddenView /> }
+else if (Loading) { <div class="ubp-loading"><MudProgressCircular Indeterminate="true" /></div> }
+else
+{
+	<PageHeader Title="مجموعات المرتبات" Subtitle="مجموعات اختيارية لتجميع الموظفين تحت دورة وقواعد وعملة واحدة" />
+	<MudPaper Elevation="0" Class="ubp-card mb-4">
+		<MudGrid>
+			<MudItem xs="12" md="3"><MudTextField @bind-Value="_code" Label="الكود" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="4"><MudTextField @bind-Value="_nameAr" Label="الاسم العربي" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="3"><MudTextField @bind-Value="_nameEn" Label="الاسم الإنجليزي" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="2" Class="d-flex align-center"><MudCheckBox T="bool" @bind-Value="_active" Label="نشطة" /></MudItem>
+		</MudGrid>
+		<MudButton OnClick="SaveAsync" Color="Color.Primary" Variant="Variant.Filled" Class="mt-3">حفظ المجموعة</MudButton>
+	</MudPaper>
+
+	<MudPaper Elevation="0" Class="ubp-card">
+		<MudTable Items="_groups" Dense="true" Hover="true" Striped="true">
+			<HeaderContent><MudTh>الكود</MudTh><MudTh>الاسم</MudTh><MudTh>إنجليزي</MudTh><MudTh>الحالة</MudTh><MudTh>الإصدار</MudTh></HeaderContent>
+			<RowTemplate>
+				<MudTd><span class="ubp-code">@context.Code</span></MudTd>
+				<MudTd>@context.NameAr</MudTd><MudTd>@context.NameEn</MudTd>
+				<MudTd><MudChip T="string" Size="Size.Small" Color="@(context.IsActive ? Color.Success : Color.Default)">@(context.IsActive ? "نشطة" : "معطلة")</MudChip></MudTd>
+				<MudTd>@context.Version</MudTd>
+			</RowTemplate>
+			<NoRecordsContent><MudText Class="pa-4">لا توجد مجموعات — يمكن تشغيل المرتبات بدون مجموعات أيضاً.</MudText></NoRecordsContent>
+		</MudTable>
+	</MudPaper>
+}
+
+@code {
+	private IReadOnlyList<PayrollGroup> _groups = Array.Empty<PayrollGroup>();
+	private string _code = "";
+	private string _nameAr = "";
+	private string _nameEn = "";
+	private bool _active = true;
+	protected override string ScreenCode => ScreenCodes.PayrollGroups;
+
+	protected override async Task OnLoadAsync() => _groups = await Configuration.ListGroupsAsync();
+
+	private async Task SaveAsync()
+	{
+		if (string.IsNullOrWhiteSpace(_code) || string.IsNullOrWhiteSpace(_nameAr))
+		{ Snackbar.Add("الكود والاسم العربي مطلوبان.", Severity.Warning); return; }
+		try
+		{
+			await Configuration.CreateGroupAsync(new PayrollGroup
+			{
+				Id = Guid.NewGuid(), Code = _code.Trim(), NameAr = _nameAr.Trim(),
+				NameEn = string.IsNullOrWhiteSpace(_nameEn) ? null : _nameEn.Trim(), IsActive = _active
+			});
+			_groups = await Configuration.ListGroupsAsync();
+			Snackbar.Add("تم حفظ المجموعة.", Severity.Success);
+		}
+		catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+	}
+}

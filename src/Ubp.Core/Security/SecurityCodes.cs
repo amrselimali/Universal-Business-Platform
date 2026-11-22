@@ -86,6 +86,25 @@ public static class ScreenCodes
     public const string PayrollLeaves = "PAYROLL_LEAVES";
     public const string PayrollAdjustments = "PAYROLL_ADJUSTMENTS";
     public const string PayrollLoans = "PAYROLL_LOANS";
+    public const string PayrollDashboard = "PAYROLL_DASHBOARD";
+    public const string PayrollCalendars = "PAYROLL_CALENDARS";
+    public const string PayrollGroups = "PAYROLL_GROUPS";
+    public const string PayrollEmployees = "PAYROLL_EMPLOYEES";
+    public const string PayrollComponents = "PAYROLL_COMPONENTS";
+    public const string PayrollFormulaRules = "PAYROLL_FORMULA_RULES";
+    public const string PayrollDataSourceMapping = "PAYROLL_DATA_SOURCE_MAPPING";
+    public const string PayrollDistributionRules = "PAYROLL_DISTRIBUTION_RULES";
+    public const string PayrollTaxConfiguration = "PAYROLL_TAX_CONFIGURATION";
+    public const string PayrollInsuranceConfiguration = "PAYROLL_INSURANCE_CONFIGURATION";
+    public const string PayrollHealthInsurance = "PAYROLL_HEALTH_INSURANCE";
+    public const string PayrollGrossUp = "PAYROLL_GROSS_UP";
+    public const string PayrollFinalSettlement = "PAYROLL_FINAL_SETTLEMENT";
+    public const string PayrollReviewApproval = "PAYROLL_REVIEW_APPROVAL";
+    public const string PayrollPosting = "PAYROLL_POSTING";
+    public const string PayrollPayments = "PAYROLL_PAYMENTS";
+    public const string PayrollAudit = "PAYROLL_AUDIT";
+    public const string PayrollReports = "PAYROLL_REPORTS";
+    public const string PayrollOpeningBalances = "PAYROLL_OPENING_BALANCES";
 }
 
 public static class ActionCodes
@@ -188,4 +207,24 @@ public static class ActionCodes
     public const string SettleAccount = "SETTLE_ACCOUNT";
     /// <summary>إدارة تصنيفات العملاء/الموردين من شاشة الأطراف.</summary>
     public const string ManageCategories = "MANAGE_CATEGORIES";
+    /// <summary>حساب دورة مرتبات / حساب تجريبي.</summary>
+    public const string Calculate = "CALCULATE";
+    /// <summary>صرف المرتبات (منفصل عن الاعتماد والترحيل).</summary>
+    public const string Pay = "PAY";
+    /// <summary>تجاوز ملاحظة/رفع خصم — بصلاحية مستقلة وسبب.</summary>
+    public const string Override = "OVERRIDE";
+    /// <summary>عرض تفاصيل مرتب موظف (بيانات حساسة).</summary>
+    public const string ViewDetail = "VIEW_DETAIL";
+    /// <summary>تشغيل محاكاة صافي المرتب.</summary>
+    public const string Simulate = "SIMULATE";
+    /// <summary>عرض أساسي فقط لبيانات الموظف: الاسم والهاتف وتاريخ التعيين.</summary>
+    public const string ViewBasic = "VIEW_BASIC";
+    /// <summary>تسجيل مبدئي لموظف (اسم + هاتف + تاريخ تعيين) بحالة مبدئي.</summary>
+    public const string Register = "REGISTER";
+    /// <summary>استكمال بيانات ملف المرتب (بيانات وظيفية/مالية/تأمينية).</summary>
+    public const string CompleteData = "COMPLETE_DATA";
+    /// <summary>تعديل البيانات الحساسة (رقوم قومي/تأميني/ضريبي/بنكي) — منفصلة عن الاستكمال.</summary>
+    public const string SensitiveEdit = "SENSITIVE_EDIT";
+    /// <summary>إدارة إظهار/إلزام حقول الموظف لكل شركة.</summary>
+    public const string FieldsManage = "FIELDS_MANAGE";
 }

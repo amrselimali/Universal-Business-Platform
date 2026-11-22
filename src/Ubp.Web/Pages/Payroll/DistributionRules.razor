@@ -1,0 +1,47 @@
+@page "/payroll/distribution-rules"
+@attribute [Authorize]
+@inherits SecurePageBase
+@inject IPayrollConfigurationRepository Configuration
+
+<PageTitle>قواعد توزيع الحركات</PageTitle>
+@if (Denied) { <ForbiddenView /> }
+else if (Loading) { <div class="ubp-loading"><MudProgressCircular Indeterminate="true" /></div> }
+else
+{
+	<PageHeader Title="قواعد توزيع الحركات" Subtitle="توزيع الحركة الواحدة على أكثر من موظف: مباشر/نسبة/مبلغ ثابت/بالتساوي/معادلة/تجاهل" />
+	<MudAlert Severity="Severity.Info" Dense="true" Class="mb-4">
+		تُحفظ قيمة الحركة الأصلية وتفاصيل كل جزء موزع وقاعدة التوزيع وإصدارها وتاريخ التنفيذ.
+		مجموع النسب يجب أن يساوي 100%، وكسور التقريب تُسند لقاعدة حتمية حتى يطابق مجموع الأجزاء الإجمالي.
+	</MudAlert>
+
+	<MudPaper Elevation="0" Class="ubp-card">
+		<MudTable Items="_allocations" Dense="true" Hover="true" Striped="true">
+			<HeaderContent>
+				<MudTh>اللقطة (Snapshot)</MudTh><MudTh>الموظف</MudTh><MudTh>الطريقة</MudTh>
+				<MudTh>قيمة المصدر</MudTh><MudTh>النسبة</MudTh><MudTh>المبلغ الموزع</MudTh>
+				<MudTh>إصدار القاعدة</MudTh><MudTh>التاريخ</MudTh>
+			</HeaderContent>
+			<RowTemplate>
+				<MudTd><span class="ubp-code">@context.SourceSnapshotId.ToString("N")[..8]</span></MudTd>
+				<MudTd><span class="ubp-code">@context.EmployeeId.ToString("N")[..8]</span></MudTd>
+				<MudTd>@context.AllocationMethod</MudTd>
+				<MudTd>@context.SourceValue.ToString("N2")</MudTd>
+				<MudTd>@(context.AllocationPercent?.ToString("P2") ?? "—")</MudTd>
+				<MudTd>@context.AllocatedValue.ToString("N2")</MudTd>
+				<MudTd>@context.RuleVersion</MudTd>
+				<MudTd>@context.CreatedAt.ToString("yyyy-MM-dd HH:mm")</MudTd>
+			</RowTemplate>
+			<NoRecordsContent>
+				<MudText Class="pa-4">لا توجد توزيعات مسجلة بعد — تُنشأ تلقائياً عند تنفيذ تشغيل يقرأ حركة مشتركة.</MudText>
+			</NoRecordsContent>
+		</MudTable>
+	</MudPaper>
+}
+
+@code {
+	private IReadOnlyList<PayrollSourceAllocation> _allocations = Array.Empty<PayrollSourceAllocation>();
+	protected override string ScreenCode => ScreenCodes.PayrollDistributionRules;
+
+	protected override async Task OnLoadAsync() =>
+		_allocations = await Configuration.ListSourceAllocationsAsync();
+}

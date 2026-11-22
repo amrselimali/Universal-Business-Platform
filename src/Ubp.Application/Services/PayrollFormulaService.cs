@@ -8,7 +8,7 @@ public sealed class PayrollFormulaService
 {
     private static readonly Regex Identifier = new("[A-Za-z_][A-Za-z0-9_]*", RegexOptions.Compiled);
     private static readonly HashSet<string> Functions = new(StringComparer.OrdinalIgnoreCase)
-        { "IF", "AND", "OR", "NOT", "ROUND", "CEILING", "FLOOR", "ABS", "COALESCE", "NULLIF" };
+        { "IF", "AND", "OR", "NOT", "ROUND", "CEILING", "FLOOR", "ABS", "COALESCE", "NULLIF", "MIN", "MAX" };
 
     public PayrollFormulaValidationResult Validate(IReadOnlyCollection<PayrollFormula> formulas,
         IReadOnlyCollection<string>? externalVariables = null)

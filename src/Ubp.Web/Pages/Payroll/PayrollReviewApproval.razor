@@ -1,0 +1,148 @@
+@page "/payroll/review-approval"
+@attribute [Authorize]
+@inherits SecurePageBase
+@inject PayrollRunService PayrollRuns
+
+<PageTitle>مراجعة واعتماد المرتبات</PageTitle>
+@if (Denied) { <ForbiddenView /> }
+else if (Loading) { <div class="ubp-loading"><MudProgressCircular Indeterminate="true" /></div> }
+else
+{
+	<PageHeader Title="مراجعة واعتماد المرتبات" Subtitle="فصل مهام: منشئ الدورة لا يعتمدها (إلا بسوبر أدمن)" />
+
+	<MudPaper Elevation="0" Class="ubp-card mb-4">
+		<MudTable Items="_rows" Dense="true" Hover="true" Striped="true">
+			<HeaderContent>
+				<MudTh>الفترة</MudTh><MudTh>الحالة</MudTh><MudTh>موظفون</MudTh>
+				<MudTh>صافي</MudTh><MudTh>مانع/إجمالي</MudTh><MudTh></MudTh>
+			</HeaderContent>
+			<RowTemplate>
+				<MudTd>@context.Run.SalaryFrom — @context.Run.SalaryTo</MudTd>
+				<MudTd><MudChip T="string" Size="Size.Small" Color="@ChipColor(context.Run.Status)">@context.Run.Status</MudChip></MudTd>
+				<MudTd>@context.Totals.EmployeeCount</MudTd>
+				<MudTd>@context.Totals.NetAmount.ToString("N2")</MudTd>
+				<MudTd>@context.Totals.BlockingIssueCount / @context.Totals.IssueCount</MudTd>
+				<MudTd><MudButton Size="Size.Small" Variant="Variant.Text" OnClick="@(() => SelectAsync(context.Run))">مراجعة</MudButton></MudTd>
+			</RowTemplate>
+			<NoRecordsContent><MudText Class="pa-4">لا توجد دورات للمراجعة.</MudText></NoRecordsContent>
+		</MudTable>
+	</MudPaper>
+
+	@if (_selected is not null)
+	{
+		<MudPaper Elevation="0" Class="ubp-card">
+			<MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="mb-3">
+				<MudText Typo="Typo.h6">ملاحظات الدورة @_selected.SalaryFrom — @_selected.SalaryTo</MudText>
+				<MudStack Row="true">
+					@if (_selected.Status == PayrollRunStatuses.Calculated)
+					{
+						<MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Info"
+								   OnClick="@(() => TransitionAsync(PayrollRunStatuses.UnderReview))">إرسال للمراجعة</MudButton>
+					}
+					@if (_selected.Status == PayrollRunStatuses.UnderReview)
+					{
+						<MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Success"
+								   OnClick="@(() => TransitionAsync(PayrollRunStatuses.Approved))">اعتماد</MudButton>
+					}
+					@if (_selected.Status == PayrollRunStatuses.NeedsCorrection)
+					{
+						<MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Warning"
+								   OnClick="@(() => TransitionAsync(PayrollRunStatuses.Calculating))">إعادة الحساب</MudButton>
+					}
+				</MudStack>
+			</MudStack>
+
+			<MudTextField @bind-Value="_overrideReason" Label="سبب التجاوز (إلزامي)" Variant="Variant.Outlined"
+						  Class="mb-3" />
+
+			<MudTable Items="_issues" Dense="true" Hover="true">
+				<HeaderContent><MudTh>الخطورة</MudTh><MudTh>الكود</MudTh><MudTh>الرسالة</MudTh><MudTh>تجاوز</MudTh><MudTh></MudTh></HeaderContent>
+				<RowTemplate>
+					<MudTd><MudChip T="string" Size="Size.Small" Color="@SeverityColor(context.Severity)">@context.Severity</MudChip></MudTd>
+					<MudTd><span class="ubp-code">@context.Code</span></MudTd>
+					<MudTd>@context.Message</MudTd>
+					<MudTd>@(context.IsOverridden ? "نعم" : "لا")</MudTd>
+					<MudTd>
+						@if (!context.IsOverridden && PayrollRunWorkflow.IsBlocker(context.Severity))
+						{
+							<MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Warning"
+									   OnClick="@(() => OverrideAsync(context.Id))">تجاوز بسبب</MudButton>
+						}
+					</MudTd>
+				</RowTemplate>
+				<NoRecordsContent><MudText Class="pa-4">لا توجد ملاحظات — الدورة جاهزة للمراجعة.</MudText></NoRecordsContent>
+			</MudTable>
+		</MudPaper>
+	}
+}
+
+@code {
+	private sealed record Row(PayrollRun Run, PayrollRunTotals Totals);
+	private IReadOnlyList<Row> _rows = Array.Empty<Row>();
+	private IReadOnlyList<PayrollRunIssue> _issues = Array.Empty<PayrollRunIssue>();
+	private string _overrideReason = "";
+	private PayrollRun? _selected;
+	protected override string ScreenCode => ScreenCodes.PayrollReviewApproval;
+
+	protected override async Task OnLoadAsync()
+	{
+		var runs = await PayrollRuns.ListAsync();
+		var rows = new List<Row>();
+		foreach (var run in runs.Where(x => x.Status is PayrollRunStatuses.Calculated
+					 or PayrollRunStatuses.UnderReview or PayrollRunStatuses.NeedsCorrection
+					 or PayrollRunStatuses.Approved))
+		{
+			try { rows.Add(new Row(run, await PayrollRuns.GetTotalsAsync(run.Id))); }
+			catch { rows.Add(new Row(run, new PayrollRunTotals())); }
+		}
+		_rows = rows;
+	}
+
+	private async Task SelectAsync(PayrollRun run)
+	{
+		_selected = run;
+		_issues = await PayrollRuns.ListIssuesAsync(run.Id);
+	}
+
+	private async Task TransitionAsync(string target)
+	{
+		if (_selected is null) return;
+		try
+		{
+			_selected = await PayrollRuns.TransitionAsync(_selected.Id, _selected.Version, target,
+				null, Actor, false, null);
+			_issues = await PayrollRuns.ListIssuesAsync(_selected.Id);
+			Snackbar.Add("تم تحديث حالة الدورة.", Severity.Success);
+		}
+		catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+	}
+
+	private async Task OverrideAsync(Guid issueId)
+	{
+		if (_selected is null || Actor is null) return;
+		if (string.IsNullOrWhiteSpace(_overrideReason))
+		{
+			Snackbar.Add("أدخل سبب التجاوز أولاً — التجاوز بلا سبب مرفوض.", Severity.Warning);
+			return;
+		}
+		try
+		{
+			_selected = await PayrollRuns.OverrideIssueAsync(_selected.Id, issueId, _overrideReason, Actor);
+			_issues = await PayrollRuns.ListIssuesAsync(_selected.Id);
+			Snackbar.Add("تم تجاوز الملاحظة بسبب موثق.", Severity.Success);
+		}
+		catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+	}
+
+	private static Color ChipColor(string status) => status switch
+	{
+		PayrollRunStatuses.NeedsCorrection => Color.Error,
+		PayrollRunStatuses.UnderReview => Color.Warning,
+		PayrollRunStatuses.Approved => Color.Success,
+		_ => Color.Info
+	};
+
+	private static Color SeverityColor(string severity) =>
+		PayrollRunWorkflow.IsBlocker(severity) ? Color.Error
+			: severity == PayrollIssueSeverities.Warning ? Color.Warning : Color.Info;
+}

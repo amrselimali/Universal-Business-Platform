@@ -1,0 +1,38 @@
+# Payroll Application Services
+
+This directory contains the application services for the Payroll Module V6.1.
+
+## Services List:
+
+1. **PayrollCalculationService** - Core calculation engine
+2. **PayrollRunService** - Run lifecycle management
+3. **TaxCalculationService** - Tax computation
+4. **InsuranceCalculationService** - Social & health insurance
+5. **GrossUpService** - Company uplift calculations
+6. **DataMappingService** - Source mapping & transformations
+7. **FormulaEngine** - Rule engine execution
+8. **PolicyEngine** - Priority & exception handling
+
+## Usage:
+
+Each service follows the pattern:
+- Interface in `Services/Interfaces/`
+- Implementation in `Services/`
+- Dependency injection registration in `ModulePayroll.cs`
+
+## Example Service Pattern:
+
+```csharp
+public interface IPayrollCalculationService
+{
+    Task<PayrollRunResult> CalculateRunAsync(Guid runId, string correlationId);
+    Task<EmployeePayrollSummary> GetEmployeeSummaryAsync(Guid employeeId, Guid runId);
+    Task<PayrollSummaryDto> GetRunSummaryAsync(Guid runId);
+    Task<List<PayrollRunIssue>> GetRunIssuesAsync(Guid runId);
+}
+
+public class PayrollCalculationService : IPayrollCalculationService
+{
+    // Implementation using Dapper and the migration foundation
+}
+```

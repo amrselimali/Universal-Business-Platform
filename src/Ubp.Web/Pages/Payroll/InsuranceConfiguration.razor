@@ -1,0 +1,81 @@
+@page "/payroll/insurance"
+@attribute [Authorize]
+@inherits SecurePageBase
+@inject IPayrollStatutoryRepository Statutory
+
+<PageTitle>إعدادات التأمينات الاجتماعية</PageTitle>
+@if (Denied) { <ForbiddenView /> }
+else if (Loading) { <div class="ubp-loading"><MudProgressCircular Indeterminate="true" /></div> }
+else
+{
+	<PageHeader Title="إعدادات التأمينات الاجتماعية" Subtitle="لكل فرع سياسة مستقلة: كود السياسة = كود الفرع أو INS-{كود الفرع}" />
+	<MudAlert Severity="Severity.Info" Dense="true" Class="mb-4">
+		عند نقل الموظف بين الفروع تُستخدم سياسة كل فرع على مدة عمله فيه، والوعاء والحدود والنسب تُحفظ لكل موظف.
+	</MudAlert>
+
+	<MudPaper Elevation="0" Class="ubp-card mb-4">
+		<MudGrid>
+			<MudItem xs="12" md="2"><MudTextField @bind-Value="_code" Label="كود السياسة" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="2"><MudDatePicker T="DateTime?" Label="سريان من" @bind-Date="_from" DateFormat="yyyy-MM-dd" /></MudItem>
+			<MudItem xs="12" md="2"><MudDatePicker T="DateTime?" Label="سريان إلى" @bind-Date="_to" DateFormat="yyyy-MM-dd" /></MudItem>
+			<MudItem xs="12" md="2"><MudNumericField T="decimal?" @bind-Value="_min" Label="حد أدنى للوعاء" Min="0" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="2"><MudNumericField T="decimal?" @bind-Value="_max" Label="حد أقصى للوعاء" Min="0" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="2"><MudCheckBox T="bool" @bind-Value="_approved" Label="معتمد" /></MudItem>
+			<MudItem xs="12" md="3"><MudNumericField T="decimal" @bind-Value="_employeeRate" Label="نسبة الموظف (0.11 = 11%)" Min="0" Max="1" Format="N4" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="3"><MudNumericField T="decimal" @bind-Value="_employerRate" Label="نسبة صاحب العمل" Min="0" Max="1" Format="N4" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="2"><MudButton OnClick="SaveAsync" Color="Color.Primary" Variant="Variant.Filled" FullWidth="true">حفظ</MudButton></MudItem>
+		</MudGrid>
+	</MudPaper>
+
+	<MudPaper Elevation="0" Class="ubp-card">
+		<MudTable Items="_policies" Dense="true" Hover="true">
+			<HeaderContent>
+				<MudTh>الكود</MudTh><MudTh>من</MudTh><MudTh>إلى</MudTh>
+				<MudTh>حد أدنى</MudTh><MudTh>حد أقصى</MudTh>
+				<MudTh>موظف</MudTh><MudTh>صاحب عمل</MudTh><MudTh>معتمد</MudTh><MudTh>إصدار</MudTh>
+			</HeaderContent>
+			<RowTemplate>
+				<MudTd>@context.Code</MudTd><MudTd>@context.EffectiveFrom</MudTd><MudTd>@context.EffectiveTo</MudTd>
+				<MudTd>@context.MinimumBasis?.ToString("N2")</MudTd><MudTd>@context.MaximumBasis?.ToString("N2")</MudTd>
+				<MudTd>@context.EmployeeRate.ToString("P2")</MudTd><MudTd>@context.EmployerRate.ToString("P2")</MudTd>
+				<MudTd>@(context.IsApproved ? "نعم" : "لا")</MudTd><MudTd>@context.Version</MudTd>
+			</RowTemplate>
+			<NoRecordsContent><MudText Class="pa-4">لا توجد سياسات تأمينات — أضف سياسة معتمدة قبل التشغيل.</MudText></NoRecordsContent>
+		</MudTable>
+	</MudPaper>
+}
+
+@code {
+	private IReadOnlyList<PayrollInsurancePolicy> _policies = Array.Empty<PayrollInsurancePolicy>();
+	private string _code = "";
+	private DateTime? _from = DateTime.Today;
+	private DateTime? _to;
+	private decimal? _min;
+	private decimal? _max;
+	private decimal _employeeRate;
+	private decimal _employerRate;
+	private bool _approved;
+	protected override string ScreenCode => ScreenCodes.PayrollInsuranceConfiguration;
+
+	protected override async Task OnLoadAsync() => _policies = await Statutory.ListInsurancePoliciesAsync();
+
+	private async Task SaveAsync()
+	{
+		if (string.IsNullOrWhiteSpace(_code) || _from is null)
+		{ Snackbar.Add("أدخل كود السياسة وتاريخ السريان.", Severity.Warning); return; }
+		try
+		{
+			await Statutory.CreateInsurancePolicyAsync(new PayrollInsurancePolicy
+			{
+				Id = Guid.NewGuid(), Code = _code.Trim(),
+				EffectiveFrom = DateOnly.FromDateTime(_from.Value),
+				EffectiveTo = _to is null ? null : DateOnly.FromDateTime(_to.Value),
+				MinimumBasis = _min, MaximumBasis = _max, EmployeeRate = _employeeRate,
+				EmployerRate = _employerRate, IsApproved = _approved
+			});
+			_policies = await Statutory.ListInsurancePoliciesAsync();
+			Snackbar.Add("تم حفظ سياسة التأمينات.", Severity.Success);
+		}
+		catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+	}
+}

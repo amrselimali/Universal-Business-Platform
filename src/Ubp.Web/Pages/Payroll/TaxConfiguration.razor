@@ -1,0 +1,160 @@
+@page "/payroll/tax-config"
+@attribute [Authorize]
+@inherits SecurePageBase
+@inject IPayrollStatutoryRepository Statutory
+@inject PayrollTaxSettingsService TaxSettings
+
+<PageTitle>إعدادات ضريبة الدخل</PageTitle>
+@if (Denied) { <ForbiddenView /> }
+else if (Loading) { <div class="ubp-loading"><MudProgressCircular Indeterminate="true" /></div> }
+else
+{
+	<PageHeader Title="إعدادات ضريبة الدخل" Subtitle="شرائح مؤرخة تُحسب تراكمياً — ولا تُثبت أي نسبة داخل الكود" />
+
+	<MudPaper Elevation="0" Class="ubp-card mb-4">
+		<MudText Typo="Typo.h6" Class="mb-3">نطاق التراكم الضريبي للسنة</MudText>
+		<MudGrid>
+			<MudItem xs="12" md="2"><MudTextField @bind-Value="_taxYear" Label="السنة الضريبية" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="3">
+				<MudSelect T="string" Label="نطاق التراكم" @bind-Value="_scope" Variant="Variant.Outlined">
+					<MudSelectItem T="string" Value="@(PayrollTaxScopes.Company)">مستوى الشركة</MudSelectItem>
+					<MudSelectItem T="string" Value="@(PayrollTaxScopes.Branch)">مستوى الفرع</MudSelectItem>
+				</MudSelect>
+			</MudItem>
+			<MudItem xs="12" md="3">
+				<MudSelect T="string" Label="سياسة نقل الرصيد بين الفروع" @bind-Value="_carry" Variant="Variant.Outlined">
+					<MudSelectItem T="string" Value="@(PayrollTaxBranchCarryPolicies.CarryForward)">ترحيل الرصيد</MudSelectItem>
+					<MudSelectItem T="string" Value="@(PayrollTaxBranchCarryPolicies.Reset)">يبدأ من صفر</MudSelectItem>
+				</MudSelect>
+			</MudItem>
+			<MudItem xs="12" md="2"><MudButton OnClick="SaveSettingsAsync" Color="Color.Primary" Variant="Variant.Filled" FullWidth="true">حفظ النطاق</MudButton></MudItem>
+			<MudItem xs="12" md="2" Class="d-flex align-center">
+				<MudText Typo="Typo.caption">@(_settings is null ? "لا يوجد إعداد" : $"الحالي: {_settings.ScopeType}")</MudText>
+			</MudItem>
+		</MudGrid>
+		<MudAlert Severity="Severity.Info" Dense="true" Class="mt-2">
+			بعد أول حركة ضريبية في السنة لا يمكن تغيير النطاق إلا بإجراء موثق وإعادة تسوية.
+		</MudAlert>
+	</MudPaper>
+
+	<MudPaper Elevation="0" Class="ubp-card mb-4">
+		<MudText Typo="Typo.subtitle1" Class="mb-3">سياسة جديدة / تحديث بنفس الكود وتاريخ السريان</MudText>
+		<MudGrid>
+			<MudItem xs="12" md="2"><MudTextField @bind-Value="_code" Label="كود السياسة" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="2"><MudDatePicker T="DateTime?" Label="سريان من" @bind-Date="_from" DateFormat="yyyy-MM-dd" /></MudItem>
+			<MudItem xs="12" md="2"><MudDatePicker T="DateTime?" Label="سريان إلى" @bind-Date="_to" DateFormat="yyyy-MM-dd" /></MudItem>
+			<MudItem xs="12" md="2"><MudCheckBox T="bool" @bind-Value="_cumulative" Label="تراكمي" /></MudItem>
+			<MudItem xs="12" md="2"><MudCheckBox T="bool" @bind-Value="_approved" Label="معتمد" /></MudItem>
+			<MudItem xs="12" md="2"><MudButton OnClick="SaveAsync" Color="Color.Primary" Variant="Variant.Filled" FullWidth="true">حفظ</MudButton></MudItem>
+			<MudItem xs="12" md="2"><MudNumericField T="decimal" @bind-Value="_limit1" Label="حد 1" Min="0" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="2"><MudNumericField T="decimal" @bind-Value="_rate1" Label="نسبة 1" Min="0" Max="1" Format="N4" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="2"><MudNumericField T="decimal" @bind-Value="_limit2" Label="حد 2" Min="0" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="2"><MudNumericField T="decimal" @bind-Value="_rate2" Label="نسبة 2" Min="0" Max="1" Format="N4" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="2"><MudNumericField T="decimal" @bind-Value="_limit3" Label="حد 3" Min="0" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="2"><MudNumericField T="decimal" @bind-Value="_rate3" Label="نسبة 3" Min="0" Max="1" Format="N4" Variant="Variant.Outlined" /></MudItem>
+		</MudGrid>
+	</MudPaper>
+
+	<MudPaper Elevation="0" Class="ubp-card mb-4">
+		<MudText Typo="Typo.h6" Class="mb-3">السياسات والشرائح</MudText>
+		<MudTable Items="_policies" Dense="true" Hover="true">
+			<HeaderContent><MudTh>الكود</MudTh><MudTh>من</MudTh><MudTh>إلى</MudTh><MudTh>تراكمي</MudTh><MudTh>معتمد</MudTh><MudTh>الشرائح</MudTh></HeaderContent>
+			<RowTemplate>
+				<MudTd>@context.Code</MudTd><MudTd>@context.EffectiveFrom</MudTd><MudTd>@context.EffectiveTo</MudTd>
+				<MudTd>@(context.Cumulative ? "نعم" : "لا")</MudTd><MudTd>@(context.IsApproved ? "نعم" : "لا")</MudTd>
+				<MudTd>@string.Join(" | ", context.Brackets.Select(b => $"{b.UpperLimit:N0}@{b.Rate:P2}"))</MudTd>
+			</RowTemplate>
+			<NoRecordsContent><MudText Class="pa-4">لا توجد سياسات ضريبية.</MudText></NoRecordsContent>
+		</MudTable>
+	</MudPaper>
+
+	<MudPaper Elevation="0" Class="ubp-card">
+		<MudText Typo="Typo.h6" Class="mb-3">الإعفاءات السارية (@_exemptions.Count)</MudText>
+		<MudTable Items="_exemptions" Dense="true" Hover="true">
+			<HeaderContent><MudTh>الكود</MudTh><MudTh>النوع</MudTh><MudTh>قيمة/نسبة</MudTh><MudTh>شرط</MudTh><MudTh>من</MudTh></HeaderContent>
+			<RowTemplate>
+				<MudTd>@context.Code</MudTd><MudTd>@context.ExemptionType</MudTd>
+				<MudTd>@(context.ExemptionType == "percentage" ? context.Percentage?.ToString("P2") : context.Amount?.ToString("N2"))</MudTd>
+				<MudTd>@context.ConditionExpression</MudTd><MudTd>@context.EffectiveFrom</MudTd>
+			</RowTemplate>
+			<NoRecordsContent><MudText Class="pa-4">لا توجد إعفاءات مسجلة.</MudText></NoRecordsContent>
+		</MudTable>
+	</MudPaper>
+}
+
+@code {
+	private IReadOnlyList<PayrollTaxPolicy> _policies = Array.Empty<PayrollTaxPolicy>();
+	private IReadOnlyList<PayrollTaxExemption> _exemptions = Array.Empty<PayrollTaxExemption>();
+	private string _code = "";
+	private DateTime? _from = DateTime.Today;
+	private DateTime? _to;
+	private bool _cumulative = true;
+	private bool _approved;
+	private decimal _limit1 = 30000m, _rate1 = 0m;
+	private decimal _limit2 = 45000m, _rate2 = 0.10m;
+	private decimal _limit3 = 60000m, _rate3 = 0.15m;
+	private Guid _companyId;
+	private string _taxYear = DateTime.Today.Year.ToString("D4");
+	private string _scope = PayrollTaxScopes.Company;
+	private string _carry = PayrollTaxBranchCarryPolicies.CarryForward;
+	private PayrollTaxSettings? _settings;
+	protected override string ScreenCode => ScreenCodes.PayrollTaxConfiguration;
+
+	protected override async Task OnLoadAsync() => await ReloadAsync();
+
+	private async Task ReloadAsync()
+	{
+		_companyId = await Statutory.GetCompanyIdAsync();
+		_policies = await Statutory.ListTaxPoliciesAsync();
+		_exemptions = await Statutory.ListTaxExemptionsAsync(DateOnly.FromDateTime(DateTime.Today));
+		_settings = await TaxSettings.GetAsync(_companyId, _taxYear, DateOnly.FromDateTime(DateTime.Today));
+		if (_settings is not null)
+		{
+			_scope = _settings.ScopeType;
+			_carry = _settings.BranchCarryPolicy;
+		}
+	}
+
+	private async Task SaveSettingsAsync()
+	{
+		if (Actor is null) return;
+		try
+		{
+			await TaxSettings.SaveAsync(new PayrollTaxSettings
+			{
+				Id = Guid.NewGuid(), CompanyId = _companyId, TaxYearCode = _taxYear.Trim(),
+				ScopeType = _scope, BranchCarryPolicy = _carry,
+				EffectiveFrom = DateOnly.FromDateTime(DateTime.Today), Status = "approved",
+				ApprovedBy = Actor.UserId, ApprovedAt = DateTime.UtcNow
+			}, Actor);
+			await ReloadAsync();
+			Snackbar.Add("تم حفظ نطاق التراكم الضريبي.", Severity.Success);
+		}
+		catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+	}
+
+	private async Task SaveAsync()
+	{
+		if (string.IsNullOrWhiteSpace(_code)) { Snackbar.Add("أدخل كود السياسة.", Severity.Warning); return; }
+		if (_from is null) { Snackbar.Add("أدخل تاريخ السريان.", Severity.Warning); return; }
+		try
+		{
+			var brackets = new List<PayrollTaxBracket>
+			{
+				new() { UpperLimit = _limit1, Rate = _rate1, BracketOrder = 1 },
+				new() { UpperLimit = _limit2, Rate = _rate2, BracketOrder = 2 },
+				new() { UpperLimit = _limit3, Rate = _rate3, BracketOrder = 3 }
+			}.Where(x => x.UpperLimit > 0).ToList();
+			await Statutory.CreateTaxPolicyAsync(new PayrollTaxPolicy
+			{
+				Id = Guid.NewGuid(), Code = _code.Trim(),
+				EffectiveFrom = DateOnly.FromDateTime(_from.Value),
+				EffectiveTo = _to is null ? null : DateOnly.FromDateTime(_to.Value),
+				Cumulative = _cumulative, IsApproved = _approved
+			}, brackets);
+			await ReloadAsync();
+			Snackbar.Add("تم حفظ سياسة الضريبة.", Severity.Success);
+		}
+		catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+	}
+}

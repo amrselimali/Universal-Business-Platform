@@ -34,6 +34,44 @@ public sealed class PayrollExpressionEvaluator
 
         public decimal ParseExpression()
         {
+            var value = ParseComparison();
+            while (true)
+            {
+                SkipWhiteSpace();
+                if (TryConsume('&'))
+                {
+                    Require('&');
+                    value = value != 0m && ParseComparison() != 0m ? 1m : 0m;
+                }
+                else if (TryConsume('|'))
+                {
+                    Require('|');
+                    value = value != 0m || ParseComparison() != 0m ? 1m : 0m;
+                }
+                else return value;
+            }
+        }
+
+        private decimal ParseComparison()
+        {
+            var left = ParseAdditive();
+            while (true)
+            {
+                SkipWhiteSpace();
+                if (TryConsume(">=")) left = left >= ParseAdditive() ? 1m : 0m;
+                else if (TryConsume("<=")) left = left <= ParseAdditive() ? 1m : 0m;
+                else if (TryConsume("<>")) left = left != ParseAdditive() ? 1m : 0m;
+                else if (TryConsume("!=")) left = left != ParseAdditive() ? 1m : 0m;
+                else if (TryConsume("==")) left = left == ParseAdditive() ? 1m : 0m;
+                else if (TryConsume('=')) left = left == ParseAdditive() ? 1m : 0m;
+                else if (TryConsume('>')) left = left > ParseAdditive() ? 1m : 0m;
+                else if (TryConsume('<')) left = left < ParseAdditive() ? 1m : 0m;
+                else return left;
+            }
+        }
+
+        private decimal ParseAdditive()
+        {
             var value = ParseTerm();
             while (true)
             {
@@ -77,10 +115,52 @@ public sealed class PayrollExpressionEvaluator
             var name = ParseIdentifier();
             if (name.Length == 0)
                 throw new FormatException($"Expected number or variable at position {_position}.");
+            SkipWhiteSpace();
+            if (!End && _text[_position] == '(')
+                return ParseFunction(name);
             if (!_variables.TryGetValue(name, out var value))
                 throw new KeyNotFoundException($"Payroll formula variable '{name}' was not provided.");
             return value;
         }
+
+        /// <summary>دوال معتمدة فقط (لا تنفيذ كود): IF/ROUND/CEILING/FLOOR/ABS/MIN/MAX/COALESCE/NULLIF/AND/OR/NOT.</summary>
+        private decimal ParseFunction(string name)
+        {
+            Require('(');
+            var args = new List<decimal>();
+            SkipWhiteSpace();
+            if (!TryConsume(')'))
+            {
+                do { args.Add(ParseExpression()); } while (TryConsume(','));
+                Require(')');
+            }
+            return ApplyFunction(name, args);
+        }
+
+        private static decimal ApplyFunction(string name, List<decimal> args) =>
+            name.ToUpperInvariant() switch
+            {
+                "IF" => args.Count < 3
+                    ? throw new FormatException("IF requires three arguments.")
+                    : args[0] != 0m ? args[1] : args[2],
+                "ROUND" => args.Count switch
+                {
+                    0 => 0m,
+                    1 => Math.Round(args[0], 0, MidpointRounding.AwayFromZero),
+                    _ => Math.Round(args[0], (int)Math.Clamp(args[1], 0m, 8m), MidpointRounding.AwayFromZero)
+                },
+                "CEILING" => args.Count == 0 ? 0m : decimal.Ceiling(args[0]),
+                "FLOOR" => args.Count == 0 ? 0m : decimal.Floor(args[0]),
+                "ABS" => args.Count == 0 ? 0m : Math.Abs(args[0]),
+                "MIN" => args.Count == 0 ? 0m : args.Min(),
+                "MAX" => args.Count == 0 ? 0m : args.Max(),
+                "COALESCE" => args.Count == 0 ? 0m : args.FirstOrDefault(x => x != 0m),
+                "NULLIF" => args.Count < 2 || args[0] == args[1] ? 0m : args[0],
+                "AND" => args.Count > 0 && args.All(x => x != 0m) ? 1m : 0m,
+                "OR" => args.Any(x => x != 0m) ? 1m : 0m,
+                "NOT" => args.Count > 0 && args[0] == 0m ? 1m : 0m,
+                _ => throw new FormatException($"Unsupported payroll function '{name}'.")
+            };
 
         private decimal ParseNumber()
         {
@@ -112,6 +192,15 @@ public sealed class PayrollExpressionEvaluator
             SkipWhiteSpace();
             if (!End && _text[_position] == value) { _position++; return true; }
             return false;
+        }
+
+        private bool TryConsume(string value)
+        {
+            SkipWhiteSpace();
+            if (_position + value.Length > _text.Length) return false;
+            if (!_text.AsSpan(_position, value.Length).SequenceEqual(value)) return false;
+            _position += value.Length;
+            return true;
         }
 
         private void Require(char value)

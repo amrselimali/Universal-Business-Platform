@@ -81,6 +81,16 @@ public static class PostingKeys
     public const string ExternalDoctor = "external_doctor";
     public const string PayrollSalaryExpense = "payroll_salary_expense";
     public const string PayrollPayable = "payroll_payable";
+    /// <summary>التزام ضريبة الدخل المستقطعة (بند 15.4).</summary>
+    public const string PayrollTaxPayable = "payroll_tax_payable";
+    /// <summary>التزام التأمينات والتأمين الصحي — حصة الموظف.</summary>
+    public const string PayrollInsurancePayable = "payroll_insurance_payable";
+    /// <summary>التزام الخصومات الأخرى (جزاءات/سلف/تسويات).</summary>
+    public const string PayrollDeductionsPayable = "payroll_deductions_payable";
+    /// <summary>مصروف مساهمات صاحب العمل.</summary>
+    public const string PayrollEmployerExpense = "payroll_employer_expense";
+    /// <summary>التزام مساهمات صاحب العمل المستحقة.</summary>
+    public const string PayrollEmployerPayable = "payroll_employer_payable";
 
     public static readonly string[] All =
     {
@@ -89,7 +99,8 @@ public static class PostingKeys
         SupplierPayable, PurchaseVariance, RoundingDifference, CustomerAdvances,
         SupplierAdvances, EmployeeAdvances, PaymentFees, CashOverShort, InterBranchClearing,
         BookingForfeitIncome, CashClearing, CashHandoverCommission, OperatingExpense,
-        ExternalDoctor, PayrollSalaryExpense, PayrollPayable
+        ExternalDoctor, PayrollSalaryExpense, PayrollPayable, PayrollTaxPayable,
+        PayrollInsurancePayable, PayrollDeductionsPayable, PayrollEmployerExpense, PayrollEmployerPayable
     };
 }
 

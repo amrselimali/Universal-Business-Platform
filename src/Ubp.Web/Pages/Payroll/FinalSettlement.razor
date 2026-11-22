@@ -1,0 +1,102 @@
+@page "/payroll/final-settlement"
+@attribute [Authorize]
+@inherits SecurePageBase
+@inject PayrollSettlementService Settlements
+@inject IEmployeeRepository Employees
+
+<PageTitle>التسوية النهائية</PageTitle>
+@if (Denied) { <ForbiddenView /> }
+else if (Loading) { <div class="ubp-loading"><MudProgressCircular Indeterminate="true" /></div> }
+else
+{
+	<PageHeader Title="التسوية النهائية عند انتهاء الخدمة" Subtitle="المرتب الجزئي + بدل الإجازات + المكافأة − السلف والضرائب والتأمينات" />
+	<MudPaper Elevation="0" Class="ubp-card mb-4">
+		<MudGrid>
+			<MudItem xs="12" md="4">
+				<MudSelect T="Guid?" Label="الموظف" @bind-Value="_employeeId" Variant="Variant.Outlined">
+					@foreach (var employee in _employees)
+					{ <MudSelectItem T="Guid?" Value="@employee.Id">@employee.Code — @employee.NameAr</MudSelectItem> }
+				</MudSelect>
+			</MudItem>
+			<MudItem xs="12" md="3"><MudDatePicker T="DateTime?" Label="تاريخ انتهاء الخدمة" @bind-Date="_asOf" DateFormat="yyyy-MM-dd" /></MudItem>
+			<MudItem xs="12" md="2"><MudNumericField T="decimal" @bind-Value="_leaveDays" Label="رصيد إجازة (يوم)" Min="0" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="2"><MudNumericField T="decimal" @bind-Value="_gratuity" Label="مكافأة نهاية الخدمة" Min="0" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="1"><MudButton OnClick="CalculateAsync" Color="Color.Primary" Variant="Variant.Filled" FullWidth="true">احسب</MudButton></MudItem>
+		</MudGrid>
+	</MudPaper>
+
+	@if (_computation is not null)
+	{
+		<MudPaper Elevation="0" Class="ubp-card mb-4">
+			<MudGrid>
+				<MudItem xs="6" md="2"><MudText Typo="Typo.caption">مرتب جزئي</MudText><MudText>@_computation.NetSalary.ToString("N2")</MudText></MudItem>
+				<MudItem xs="6" md="2"><MudText Typo="Typo.caption">بدل إجازات</MudText><MudText>@_computation.LeavePayment.ToString("N2")</MudText></MudItem>
+				<MudItem xs="6" md="2"><MudText Typo="Typo.caption">إجمالي مستحقات</MudText><MudText>@_computation.TotalEntitlements.ToString("N2")</MudText></MudItem>
+				<MudItem xs="6" md="2"><MudText Typo="Typo.caption">إجمالي خصومات</MudText><MudText>@_computation.TotalDeductions.ToString("N2")</MudText></MudItem>
+				<MudItem xs="6" md="2"><MudText Typo="Typo.caption">صافي التسوية</MudText><MudText Typo="Typo.subtitle1">@_computation.NetSettlement.ToString("N2")</MudText></MudItem>
+				<MudItem xs="6" md="2" Class="d-flex align-center">
+					<MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Secondary" OnClick="SaveAsync">حفظ</MudButton>
+				</MudItem>
+			</MudGrid>
+			<MudTable Items="_computation.Lines" Dense="true" Hover="true" Class="mt-3">
+				<HeaderContent><MudTh>البند</MudTh><MudTh>النوع</MudTh><MudTh>المبلغ</MudTh><MudTh>الأساس</MudTh></HeaderContent>
+				<RowTemplate>
+					<MudTd>@context.Code — @context.NameAr</MudTd><MudTd>@context.Kind</MudTd>
+					<MudTd>@context.Amount.ToString("N2")</MudTd><MudTd>@context.Explanation</MudTd>
+				</RowTemplate>
+			</MudTable>
+		</MudPaper>
+	}
+
+	<MudPaper Elevation="0" Class="ubp-card">
+		<MudText Typo="Typo.h6" Class="mb-3">تسويات مسجلة</MudText>
+		<MudTable Items="_saved" Dense="true" Hover="true">
+			<HeaderContent><MudTh>الموظف</MudTh><MudTh>تاريخ الانتهاء</MudTh><MudTh>الصافي</MudTh><MudTh>الحالة</MudTh></HeaderContent>
+			<RowTemplate>
+				<MudTd>@context.EmployeeId</MudTd><MudTd>@context.TerminationDate</MudTd>
+				<MudTd>@context.NetSettlement.ToString("N2")</MudTd><MudTd>@context.Status</MudTd>
+			</RowTemplate>
+			<NoRecordsContent><MudText Class="pa-4">لا توجد تسويات محفوظة.</MudText></NoRecordsContent>
+		</MudTable>
+	</MudPaper>
+}
+
+@code {
+	private IReadOnlyList<Employee> _employees = Array.Empty<Employee>();
+	private IReadOnlyList<PayrollSettlementSummary> _saved = Array.Empty<PayrollSettlementSummary>();
+	private Guid? _employeeId;
+	private DateTime? _asOf = DateTime.Today;
+	private decimal _leaveDays;
+	private decimal _gratuity;
+	private PayrollSettlementComputation? _computation;
+	protected override string ScreenCode => ScreenCodes.PayrollFinalSettlement;
+
+	protected override async Task OnLoadAsync()
+	{
+		_employees = await Employees.ListActiveOptionsAsync(Array.Empty<Guid>(), true);
+		_saved = await Settlements.ListAsync(null);
+	}
+
+	private async Task CalculateAsync()
+	{
+		if (_employeeId is not { } employeeId) { Snackbar.Add("اختر موظفاً.", Severity.Warning); return; }
+		try
+		{
+			_computation = await Settlements.CalculateAsync(employeeId,
+				_asOf is null ? default : DateOnly.FromDateTime(_asOf.Value), _leaveDays, _gratuity);
+		}
+		catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+	}
+
+	private async Task SaveAsync()
+	{
+		if (_computation is null || Actor is null) return;
+		try
+		{
+			var id = await Settlements.SaveAsync(_computation, Actor, approve: false);
+			_saved = await Settlements.ListAsync(null);
+			Snackbar.Add($"تم حفظ التسوية {id:N}".Substring(0, 24), Severity.Success);
+		}
+		catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+	}
+}

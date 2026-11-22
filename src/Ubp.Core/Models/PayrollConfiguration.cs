@@ -55,3 +55,14 @@ public sealed class PayrollSourceAllocation
     public string? RuleVersion { get; set; }
     public DateTime CreatedAt { get; set; }
 }
+
+/// <summary>مجموعة مرتبات (payroll_groups): تربط الموظفين بدورة وقواعد وعملة.</summary>
+public sealed class PayrollGroup
+{
+    public Guid Id { get; set; }
+    public string Code { get; set; } = "";
+    public string NameAr { get; set; } = "";
+    public string? NameEn { get; set; }
+    public bool IsActive { get; set; } = true;
+    public int Version { get; set; }
+}

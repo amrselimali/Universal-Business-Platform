@@ -194,24 +194,6 @@ public static partial class AppRegistry
         new(ScreenCodes.PayrollItems, "/payroll/items", "RequestQuote", "screen.payroll_items", GroupEmployeeManagement,
             new[] { A(ActionCodes.View), A(ActionCodes.Create), A(ActionCodes.Edit) }, "payroll.items"),
 
-        new(ScreenCodes.PayrollRuns, "/payroll/runs", "Calculate", "screen.payroll_runs", GroupEmployeeManagement,
-            new[] { A(ActionCodes.View), A(ActionCodes.Create), A(ActionCodes.Edit) }, "payroll.runs"),
-
-        new(ScreenCodes.PayrollNetCalculation, "/payroll/net-calculation", "Calculate", "screen.payroll_net_calculation", GroupEmployeeManagement,
-            new[] { A(ActionCodes.View) }, "payroll.net_calculation"),
-
-        new(ScreenCodes.PayrollAttendance, "/payroll/attendance", "AccessTime", "screen.payroll_attendance", GroupEmployeeManagement,
-            new[] { A(ActionCodes.View), A(ActionCodes.Create), A(ActionCodes.Edit) }, "payroll.attendance"),
-
-        new(ScreenCodes.PayrollLeaves, "/payroll/leaves", "EventAvailable", "screen.payroll_leaves", GroupEmployeeManagement,
-            new[] { A(ActionCodes.View), A(ActionCodes.Create), A(ActionCodes.Edit) }, "payroll.leaves"),
-
-        new(ScreenCodes.PayrollAdjustments, "/payroll/adjustments", "Tune", "screen.payroll_adjustments", GroupEmployeeManagement,
-            new[] { A(ActionCodes.View), A(ActionCodes.Create), A(ActionCodes.Edit) }, "payroll.adjustments"),
-
-        new(ScreenCodes.PayrollLoans, "/payroll/loans", "AccountBalance", "screen.payroll_loans", GroupEmployeeManagement,
-            new[] { A(ActionCodes.View), A(ActionCodes.Create), A(ActionCodes.Edit) }, "payroll.loans"),
-
         new(ScreenCodes.PaymentTerms, "/settings/payment-terms", "Schedule", "screen.payment_terms",
             GroupDefinitions,
             new[] { A(ActionCodes.View), A(ActionCodes.Create), A(ActionCodes.Edit),
@@ -301,7 +283,7 @@ public static partial class AppRegistry
 
     public static readonly IReadOnlyList<ScreenDefinition> Screens =
         CoreScreens.Concat(ReportScreens).Concat(SystemScreens).Concat(SalesExtraScreens)
-            .Concat(AssetScreens).ToList();
+            .Concat(AssetScreens).Concat(PayrollScreens).ToList();
 
     public static readonly IReadOnlyDictionary<string, ScreenDefinition> ByCode =
         Screens.ToDictionary(s => s.Code, StringComparer.OrdinalIgnoreCase);

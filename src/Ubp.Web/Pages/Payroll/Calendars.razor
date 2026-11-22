@@ -1,0 +1,40 @@
+@page "/payroll/calendars"
+@attribute [Authorize]
+@inherits SecurePageBase
+@inject PayrollRunService PayrollRuns
+
+<PageTitle>تقويم وفترات المرتبات</PageTitle>
+@if (Denied) { <ForbiddenView /> }
+else if (Loading) { <div class="ubp-loading"><MudProgressCircular Indeterminate="true" /></div> }
+else
+{
+	<PageHeader Title="تقويم وفترات المرتبات" Subtitle="فترة المرتب الأساسي وفترة المتغيرات وتاريخ الصرف المتوقع لكل دورة" />
+	<MudAlert Severity="Severity.Info" Dense="true" Class="mb-4">
+		الفترة الضريبية مستقلة عن فترة المرتب والفترة المحاسبية، والتأمينات تُحسب داخل دورة المرتبات نفسها
+		دون فترة تأمينية منفصلة.
+	</MudAlert>
+
+	<MudPaper Elevation="0" Class="ubp-card">
+		<MudTable Items="_runs" Dense="true" Hover="true" Striped="true">
+			<HeaderContent>
+				<MudTh>فترة المرتب</MudTh><MudTh>فترة المتغيرات</MudTh>
+				<MudTh>تاريخ الصرف المتوقع</MudTh><MudTh>الحالة</MudTh><MudTh>الإصدار</MudTh>
+			</HeaderContent>
+			<RowTemplate>
+				<MudTd>@context.SalaryFrom — @context.SalaryTo</MudTd>
+				<MudTd>@context.VariablesFrom — @context.VariablesTo</MudTd>
+				<MudTd>@(context.ExpectedPaymentDate?.ToString("yyyy-MM-dd") ?? "—")</MudTd>
+				<MudTd><MudChip T="string" Size="Size.Small">@context.Status</MudChip></MudTd>
+				<MudTd>@context.Version</MudTd>
+			</RowTemplate>
+			<NoRecordsContent><MudText Class="pa-4">لا توجد فترات بعد — أنشئ دورة من شاشة دورات المرتبات.</MudText></NoRecordsContent>
+		</MudTable>
+	</MudPaper>
+}
+
+@code {
+	private IReadOnlyList<PayrollRun> _runs = Array.Empty<PayrollRun>();
+	protected override string ScreenCode => ScreenCodes.PayrollCalendars;
+
+	protected override async Task OnLoadAsync() => _runs = await PayrollRuns.ListAsync();
+}

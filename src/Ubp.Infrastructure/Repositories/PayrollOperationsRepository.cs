@@ -10,6 +10,12 @@ public interface IPayrollOperationsRepository
     Task UpsertAttendanceAsync(PayrollAttendanceDaily attendance, CancellationToken ct = default);
     Task<IReadOnlyList<PayrollLeaveRequest>> ListLeavesAsync(DateOnly from, DateOnly to, Guid? employeeId = null, CancellationToken ct = default);
     Task<Guid> CreateLeaveAsync(PayrollLeaveRequest leave, CancellationToken ct = default);
+    Task<PayrollLeaveRequest?> GetLeaveAsync(Guid leaveId, CancellationToken ct = default);
+    /// <summary>اعتماد طلب إجازة (يحوّل الحالة إلى approved) — صاحب صلاحية اعتماد الإجازات.</summary>
+    Task<bool> ApproveLeaveAsync(Guid leaveId, Guid userId, CancellationToken ct = default);
+    /// <summary>اعتماد يوميات الحضور في نطاق تاريخي (لا تُعدَّل بعد الاعتماد بصمت).</summary>
+    Task<int> ApproveAttendanceAsync(DateOnly from, DateOnly to, Guid? employeeId, Guid userId,
+        CancellationToken ct = default);
     Task<IReadOnlyList<PayrollAdjustment>> ListAdjustmentsAsync(DateOnly from, DateOnly to, Guid? employeeId = null, CancellationToken ct = default);
     Task<Guid> CreateAdjustmentAsync(PayrollAdjustment adjustment, CancellationToken ct = default);
     Task<IReadOnlyList<EmployeeLoan>> ListLoansAsync(Guid? employeeId = null, CancellationToken ct = default);
@@ -136,6 +142,39 @@ public sealed class PayrollOperationsRepository : IPayrollOperationsRepository
             VALUES (@Id, @EmployeeId, @Principal, @Principal, @Installments, @Status)
             RETURNING id
             """, loan, cancellationToken: ct));
+    }
+
+    public async Task<PayrollLeaveRequest?> GetLeaveAsync(Guid leaveId, CancellationToken ct = default)
+    {
+        await using var connection = await _factory.OpenAsync(ct);
+        return await connection.QuerySingleOrDefaultAsync<PayrollLeaveRequest>(new CommandDefinition("""
+            SELECT id AS Id, employee_id AS EmployeeId, leave_type_code AS LeaveTypeCode,
+                   from_date AS FromDate, to_date AS ToDate, days AS Days, status AS Status
+            FROM leave_requests WHERE id = @leaveId
+            """, new { leaveId }, cancellationToken: ct));
+    }
+
+    public async Task<bool> ApproveLeaveAsync(Guid leaveId, Guid userId, CancellationToken ct = default)
+    {
+        await using var connection = await _factory.OpenAsync(ct);
+        return await connection.ExecuteAsync(new CommandDefinition("""
+            UPDATE leave_requests SET status = 'approved'
+            WHERE id = @leaveId AND status <> 'approved'
+            """, new { leaveId }, cancellationToken: ct)) == 1;
+    }
+
+    public async Task<int> ApproveAttendanceAsync(DateOnly from, DateOnly to, Guid? employeeId,
+        Guid userId, CancellationToken ct = default)
+    {
+        ValidateRange(from, to);
+        await using var connection = await _factory.OpenAsync(ct);
+        return await connection.ExecuteAsync(new CommandDefinition("""
+            UPDATE attendance_daily
+            SET status = 'approved', version = version + 1
+            WHERE work_date BETWEEN @from AND @to
+              AND status <> 'approved'
+              AND (@employeeId IS NULL OR employee_id = @employeeId)
+            """, new { from, to, employeeId }, cancellationToken: ct));
     }
 
     private static void ValidateRange(DateOnly from, DateOnly to)

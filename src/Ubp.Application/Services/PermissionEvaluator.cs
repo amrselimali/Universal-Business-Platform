@@ -30,11 +30,18 @@ public static class PermissionEvaluator
             return result;
         }
 
-        var grants = roleGrants
+        var exactGrants = roleGrants
             .Where(p => p.ScreenCode.Equals(screenCode, StringComparison.OrdinalIgnoreCase)
                      && p.ActionCode.Equals(actionCode, StringComparison.OrdinalIgnoreCase)
                      && p.IsAllowed)
             .ToList();
+
+        // التسمية الموحّدة (payroll.view …) تُطبَّق فقط إن لم توجد صلاحية شاشة صريحة، فلا تُضعِف تخصيصاً قائماً.
+        var grants = exactGrants.Count > 0
+            ? exactGrants
+            : roleGrants
+                .Where(p => p.IsAllowed && PermissionAliases.Matches(p, screenCode, actionCode))
+                .ToList();
 
         if (grants.Count > 0)
         {
@@ -47,7 +54,8 @@ public static class PermissionEvaluator
 
         var userOverride = overrides.FirstOrDefault(p =>
             p.ScreenCode.Equals(screenCode, StringComparison.OrdinalIgnoreCase) &&
-            p.ActionCode.Equals(actionCode, StringComparison.OrdinalIgnoreCase));
+            p.ActionCode.Equals(actionCode, StringComparison.OrdinalIgnoreCase))
+            ?? overrides.FirstOrDefault(p => PermissionAliases.Matches(p, screenCode, actionCode));
 
         if (userOverride is not null)
         {

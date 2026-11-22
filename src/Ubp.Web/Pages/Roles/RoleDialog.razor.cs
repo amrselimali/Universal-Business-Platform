@@ -34,9 +34,13 @@ public partial class RoleDialog
 
     private bool IsEdit => Model is not null;
 
+    /// <summary>شاشات الصلاحيات = شاشات التطبيق + أقسام صلاحيات الوحدة (payroll.*) لإدارتها هنا.</summary>
+    private static IEnumerable<ScreenDefinition> PermissionScreens =>
+        AppRegistry.Screens.Concat(PermissionAliases.ModuleScreens);
+
     protected override async Task OnInitializedAsync()
     {
-        foreach (var screen in AppRegistry.Screens)
+        foreach (var screen in PermissionScreens)
         {
             foreach (var action in screen.Actions)
                 _rows[$"{screen.Code}/{action.Code}"] = new Row();

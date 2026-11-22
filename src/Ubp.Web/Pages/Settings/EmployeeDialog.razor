@@ -28,7 +28,7 @@
                 <MudTextField @bind-Value="_input.Email" Label="@T.T("settings.email")"
                               Variant="Variant.Outlined" MaxLength="200" />
                 <MudTextField @bind-Value="_input.JobTitle" Label="@T.T("settings.job_title")"
-                              Required="true" Variant="Variant.Outlined" MaxLength="100" />
+                              Variant="Variant.Outlined" MaxLength="100" />
                 <MudSelect T="Guid?" @bind-Value="_input.RoleId" Label="@T.T("settings.admin_role")"
                            Variant="Variant.Outlined" Clearable="true">
                     @foreach (var role in _roles)

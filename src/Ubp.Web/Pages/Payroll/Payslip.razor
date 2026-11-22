@@ -1,0 +1,81 @@
+@page "/payroll/payslip/{RunId:guid}/{EmployeeId:guid}"
+@attribute [Authorize]
+@inherits SecurePageBase
+@inject PayrollReportingService Reporting
+@inject PayrollRunService PayrollRuns
+@inject IJSRuntime JS
+
+<PageTitle>كشف راتب</PageTitle>
+@if (Denied) { <ForbiddenView /> }
+else if (Loading) { <div class="ubp-loading"><MudProgressCircular Indeterminate="true" /></div> }
+else if (_row is null)
+{
+	<MudAlert Severity="Severity.Warning">لا توجد نتيجة مرتبات لهذا الموظف في الدورة المحددة.</MudAlert>
+}
+else
+{
+	<div class="ubp-card pa-6" style="max-width:900px;margin:0 auto">
+		<div class="d-flex justify-space-between align-center mb-4">
+			<div>
+				<MudText Typo="Typo.h5">كشف راتب</MudText>
+				<MudText Typo="Typo.caption">@_run?.SalaryFrom — @_run?.SalaryTo (@_run?.Status)</MudText>
+			</div>
+			<div class="d-print-none">
+				<MudButton OnClick="PrintAsync" Color="Color.Primary" Variant="Variant.Filled"
+						   StartIcon="@Icons.Material.Filled.Print">طباعة / حفظ PDF</MudButton>
+			</div>
+		</div>
+
+		<MudGrid Class="mb-4">
+			<MudItem xs="6" md="3"><MudText Typo="Typo.caption">الموظف</MudText><MudText>@_row.Code — @_row.NameAr</MudText></MudItem>
+			<MudItem xs="6" md="3"><MudText Typo="Typo.caption">الفرع</MudText><MudText>@_row.BranchName</MudText></MudItem>
+			<MudItem xs="6" md="3"><MudText Typo="Typo.caption">العملة</MudText><MudText>@_row.CurrencyCode</MudText></MudItem>
+			<MudItem xs="6" md="3"><MudText Typo="Typo.caption">إصدار الحساب</MudText><MudText>@_row.CalculationVersion</MudText></MudItem>
+		</MudGrid>
+
+		<MudTable Items="_lines" Dense="true" Hover="false" Elevation="0">
+			<HeaderContent><MudTh>البند</MudTh><MudTh>المبلغ</MudTh><MudTh>المرجع</MudTh></HeaderContent>
+			<RowTemplate>
+				<MudTd>@context.ItemCode</MudTd>
+				<MudTd>@context.Amount.ToString("N2")</MudTd>
+				<MudTd>@context.FormulaReference</MudTd>
+			</RowTemplate>
+			<NoRecordsContent><MudText Class="pa-4">لا توجد تفاصيل مسجلة لهذه النتيجة.</MudText></NoRecordsContent>
+		</MudTable>
+
+		<MudDivider Class="my-4" />
+		<MudGrid>
+			<MudItem xs="12" md="4"><MudText Typo="Typo.subtitle2">الإجمالي</MudText><MudText Typo="Typo.h6">@_row.GrossAmount.ToString("N2")</MudText></MudItem>
+			<MudItem xs="12" md="4"><MudText Typo="Typo.subtitle2">الخصومات</MudText><MudText Typo="Typo.h6">@_row.DeductionsAmount.ToString("N2")</MudText></MudItem>
+			<MudItem xs="12" md="4"><MudText Typo="Typo.subtitle2">الصافي</MudText><MudText Typo="Typo.h5">@_row.NetAmount.ToString("N2")</MudText></MudItem>
+		</MudGrid>
+
+		<MudAlert Severity="Severity.Info" Dense="true" Class="mt-4 d-print-none">
+			كشف الراتب مستخرج من نتيجة الدورة (SSOT: payroll_results) — لا يُعاد أي حساب عند الطباعة.
+		</MudAlert>
+	</div>
+}
+
+@code {
+	[Parameter] public Guid RunId { get; set; }
+	[Parameter] public Guid EmployeeId { get; set; }
+
+	private PayrollRun? _run;
+	private PayrollRegisterRow? _row;
+	private IReadOnlyList<PayrollPayslipRow> _lines = Array.Empty<PayrollPayslipRow>();
+
+	protected override string ScreenCode => ScreenCodes.PayrollReports;
+
+	protected override async Task OnLoadAsync()
+	{
+		try
+		{
+			_run = await PayrollRuns.GetAsync(RunId);
+			_row = (await Reporting.RegisterAsync(RunId)).FirstOrDefault(x => x.EmployeeId == EmployeeId);
+			_lines = await Reporting.PayslipAsync(RunId, EmployeeId);
+		}
+		catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+	}
+
+	private async Task PrintAsync() => await JS.InvokeVoidAsync("print");
+}

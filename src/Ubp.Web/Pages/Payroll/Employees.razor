@@ -1,0 +1,358 @@
+@page "/payroll/employees"
+@attribute [Authorize]
+@inherits SecurePageBase
+@inject PayrollEmployeeProfileService Profiles
+@inject PayrollEmployeeCopyService CopyService
+
+<PageTitle>موظفو المرتبات</PageTitle>
+@if (Denied) { <ForbiddenView /> }
+else if (Loading) { <div class="ubp-loading"><MudProgressCircular Indeterminate="true" /></div> }
+else
+{
+	<PageHeader Title="موظفو المرتبات" Subtitle="البيانات الأساسية من ملف الموظفين + استكمال واعتماد ملف المرتب" />
+
+	<MudPaper Elevation="0" Class="ubp-card mb-4">
+		<MudGrid>
+			<MudItem xs="12" md="6">
+				<MudTextField T="string" Label="بحث (كود/اسم/هاتف)" @bind-Value="_search"
+							  Immediate="true" Variant="Variant.Outlined" />
+			</MudItem>
+			<MudItem xs="12" md="4">
+				<MudSelect T="string" Label="الحالة" @bind-Value="_status" Variant="Variant.Outlined">
+					<MudSelectItem T="string" Value="@("")">الكل</MudSelectItem>
+					<MudSelectItem T="string" Value="@(PayrollEmployeeStatuses.Draft)">مبدئي</MudSelectItem>
+					<MudSelectItem T="string" Value="@(PayrollEmployeeStatuses.Incomplete)">تحت استكمال البيانات</MudSelectItem>
+					<MudSelectItem T="string" Value="@(PayrollEmployeeStatuses.Approved)">معتمد وجاهز</MudSelectItem>
+					<MudSelectItem T="string" Value="@(PayrollEmployeeStatuses.Suspended)">موقوف مؤقتاً</MudSelectItem>
+					<MudSelectItem T="string" Value="@(PayrollEmployeeStatuses.Terminated)">منتهي الخدمة</MudSelectItem>
+				</MudSelect>
+			</MudItem>
+			<MudItem xs="12" md="2"><MudButton OnClick="LoadAsync" Color="Color.Primary" Variant="Variant.Filled" FullWidth="true">تحديث</MudButton></MudItem>
+		</MudGrid>
+	</MudPaper>
+
+	<MudPaper Elevation="0" Class="ubp-card">
+		<MudTable Items="_rows" Dense="true" Hover="true" Striped="true">
+			<HeaderContent>
+				<MudTh>الكود</MudTh><MudTh>الاسم</MudTh><MudTh>الهاتف</MudTh><MudTh>تاريخ التعيين</MudTh>
+				<MudTh>الفرع</MudTh><MudTh>الحالة</MudTh><MudTh></MudTh>
+			</HeaderContent>
+			<RowTemplate>
+				<MudTd><span class="ubp-code">@context.Code</span></MudTd>
+				<MudTd>@context.NameAr</MudTd>
+				<MudTd>@context.Phone</MudTd>
+				<MudTd>@(context.HireDate?.ToString("yyyy-MM-dd") ?? "—")</MudTd>
+				<MudTd>@context.BranchName</MudTd>
+				<MudTd><MudChip T="string" Size="Size.Small" Color="@StatusColor(context.Status)">@StatusLabel(context.Status)</MudChip></MudTd>
+				<MudTd><MudButton Size="Size.Small" Variant="Variant.Text" OnClick="@(() => SelectAsync(context))">فتح</MudButton></MudTd>
+			</RowTemplate>
+			<NoRecordsContent><MudText Class="pa-4">لا يوجد موظفون مطابقون.</MudText></NoRecordsContent>
+		</MudTable>
+	</MudPaper>
+
+	@if (_selected is not null)
+	{
+		<MudPaper Elevation="0" Class="ubp-card mt-4">
+			<MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="mb-3">
+				<MudText Typo="Typo.h6">@_selected.NameAr — @StatusLabel(_selected.Status)</MudText>
+				<MudStack Row="true">
+					@if (!_selected.HasProfile && Can(ActionCodes.Register))
+					{ <MudButton Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined" OnClick="RegisterAsync">تسجيل مبدئي</MudButton> }
+					@if (Can(ActionCodes.CompleteData))
+					{ <MudButton Size="Size.Small" Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">حفظ البيانات</MudButton> }
+					@if (Can(ActionCodes.Approve) && _selected.Status != PayrollEmployeeStatuses.Approved)
+					{ <MudButton Size="Size.Small" Color="Color.Success" Variant="Variant.Filled" OnClick="ApproveAsync">اعتماد</MudButton> }
+					@if (Can(ActionCodes.Approve) && _selected.Status != PayrollEmployeeStatuses.Suspended)
+					{ <MudButton Size="Size.Small" Color="Color.Warning" Variant="Variant.Text" OnClick="@(() => SetStatusAsync(PayrollEmployeeStatuses.Suspended))">إيقاف مؤقت</MudButton> }
+					@if (Can(ActionCodes.Approve) && _selected.Status != PayrollEmployeeStatuses.Terminated)
+					{ <MudButton Size="Size.Small" Color="Color.Error" Variant="Variant.Text" OnClick="@(() => SetStatusAsync(PayrollEmployeeStatuses.Terminated))">إنهاء الخدمة</MudButton> }
+					@if (Can(ActionCodes.CompleteData))
+					{ <MudButton Size="Size.Small" Color="Color.Secondary" Variant="Variant.Outlined" OnClick="ToggleCopy">نسخ إعدادات…</MudButton> }
+				</MudStack>
+			</MudStack>
+
+			<MudGrid>
+				<MudItem xs="12" md="3"><MudTextField @bind-Value="_taxTreatment" Label="المعاملة الضريبية" Variant="Variant.Outlined" /></MudItem>
+				<MudItem xs="12" md="3"><MudTextField @bind-Value="_insuranceStatus" Label="الحالة التأمينية" Variant="Variant.Outlined" /></MudItem>
+				<MudItem xs="12" md="3"><MudTextField @bind-Value="_nationality" Label="الجنسية" Variant="Variant.Outlined" /></MudItem>
+				<MudItem xs="12" md="3"><MudNumericField T="int?" @bind-Value="_workingHours" Label="ساعات العمل/شهر" Min="0" Variant="Variant.Outlined" /></MudItem>
+				<MudItem xs="12" md="3"><MudNumericField T="int" @bind-Value="_dependents" Label="عدد المعالين" Min="0" Variant="Variant.Outlined" /></MudItem>
+				<MudItem xs="12" md="3"><MudNumericField T="int" @bind-Value="_wives" Label="زوجات غير عاملات" Min="0" Variant="Variant.Outlined" /></MudItem>
+				<MudItem xs="12" md="3"><MudCheckBox T="bool" @bind-Value="_salarySuspended" Label="إيقاف المرتب" /></MudItem>
+				<MudItem xs="12" md="3"><MudCheckBox T="bool" @bind-Value="_timeManagement" Label="خاضع لإدارة الوقت" /></MudItem>
+
+				@if (Can(ActionCodes.SensitiveEdit))
+				{
+					<MudItem xs="12" md="3"><MudTextField @bind-Value="_nationalId" Label="الرقم القومي" Variant="Variant.Outlined" /></MudItem>
+					<MudItem xs="12" md="3"><MudTextField @bind-Value="_passport" Label="رقم الجواز" Variant="Variant.Outlined" /></MudItem>
+					<MudItem xs="12" md="3"><MudTextField @bind-Value="_insuranceNumber" Label="الرقم التأميني" Variant="Variant.Outlined" /></MudItem>
+				}
+				else
+				{
+					<MudItem xs="12"><MudAlert Severity="Severity.Info" Dense="true">البيانات الحساسة (الرقم القومي/الجواز/التأميني) تحتاج صلاحية «تعديل البيانات الحساسة».</MudAlert></MudItem>
+				}
+			</MudGrid>
+
+			@if (_missing.Count > 0)
+			{
+				<MudAlert Severity="Severity.Warning" Dense="true" Class="mt-3">
+					حقول مطلوبة ناقصة تمنع الاعتماد: @string.Join("، ", _missing)
+				</MudAlert>
+			}
+		</MudPaper>
+	}
+
+	@if (_copyOpen && _selected is not null)
+	{
+		<MudPaper Elevation="0" Class="ubp-card mt-4">
+			<MudText Typo="Typo.h6" Class="mb-2">نسخ إعدادات من موظف آخر إلى @_selected.NameAr</MudText>
+			<MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
+				لا تُنسخ حالة الاعتماد ولا نهاية الخدمة ولا إيقاف الراتب. استخدم «معاينة» أولاً، ثم «تطبيق».
+			</MudAlert>
+
+			<MudGrid>
+				<MudItem xs="12" md="6"><MudTextField @bind-Value="_copySourceId" Label="معرف الموظف المصدر (GUID)" Variant="Variant.Outlined" /></MudItem>
+				<MudItem xs="12" md="6" Class="d-flex align-center" Style="gap:8px">
+					<MudCheckBox T="bool" @bind-Value="_copyClassification" Label="التصنيف الضريبي/التأميني" />
+					<MudCheckBox T="bool" @bind-Value="_copyEmployment" Label="إعدادات العمل" />
+				</MudItem>
+				<MudItem xs="12" md="6" Class="d-flex align-center" Style="gap:8px">
+					<MudCheckBox T="bool" @bind-Value="_copyFamily" Label="بيانات المعالين" />
+					<MudCheckBox T="bool" @bind-Value="_copyIdentifiers" Label="بيانات شخصية حسّاسة" />
+					<MudCheckBox T="bool" @bind-Value="_copyContract" Label="نسخ العقد" />
+				</MudItem>
+				<MudItem xs="12" md="12" Class="d-flex align-center flex-wrap" Style="gap:8px">
+					<MudCheckBox T="bool" @bind-Value="_copyCostCenters" Label="مراكز التكلفة" />
+					<MudCheckBox T="bool" @bind-Value="_copyPaymentSettings" Label="إعدادات الصرف/البنك (حسّاسة)" />
+					<MudCheckBox T="bool" @bind-Value="_copyOpeningBalances" Label="الأرصدة الافتتاحية للسنة" />
+					<MudCheckBox T="bool" @bind-Value="_copyShiftAssignment" Label="إسناد الوردية" />
+				</MudItem>
+				<MudItem xs="12" md="3"><MudNumericField T="decimal?" @bind-Value="_copySalary" Label="راتب العقد الجديد (اختياري)" Min="0" Format="N2" Variant="Variant.Outlined" /></MudItem>
+				<MudItem xs="12" md="3"><MudDatePicker T="DateTime?" Label="سريان العقد" @bind-Date="_copyContractFrom" DateFormat="yyyy-MM-dd" /></MudItem>
+				<MudItem xs="12" md="3"><MudButton OnClick="PreviewCopyAsync" Color="Color.Info" Variant="Variant.Outlined" FullWidth="true">معاينة</MudButton></MudItem>
+				<MudItem xs="12" md="3"><MudButton OnClick="ApplyCopyAsync" Color="Color.Primary" Variant="Variant.Filled" FullWidth="true"
+												  Disabled="_copyPlan is null || !_copyPlan.HasWork">تطبيق النسخ</MudButton></MudItem>
+			</MudGrid>
+
+			@if (_copyPlan is not null)
+			{
+				@if (_copyPlan.Warnings.Count > 0)
+				{
+					<MudAlert Severity="Severity.Warning" Dense="true" Class="mt-3">
+						@string.Join("، ", _copyPlan.Warnings)
+					</MudAlert>
+				}
+
+				<MudTable Items="_copyPlan.Fields" Dense="true" Hover="true" Class="mt-3">
+					<HeaderContent><MudTh>الحقل</MudTh><MudTh>قيمة المصدر</MudTh><MudTh>حسّاس</MudTh><MudTh>سيُنسخ</MudTh></HeaderContent>
+					<RowTemplate>
+						<MudTd>@context.Name</MudTd>
+						<MudTd>@context.SourceValue</MudTd>
+						<MudTd>@(context.IsSensitive ? "نعم" : "لا")</MudTd>
+						<MudTd>@(context.WillCopy ? "نعم" : "لا")</MudTd>
+					</RowTemplate>
+				</MudTable>
+
+				@if (_copyPlan.Contract is { } contract)
+				{
+					<MudAlert Severity="Severity.Success" Dense="true" Class="mt-2">
+						عقد جديد (غير معتمد): @contract.GrossSalary.ToString("N2") @contract.CurrencyCode من @contract.EffectiveFrom
+					</MudAlert>
+				}
+				@if (_copyPlan.RequiresSensitivePermission)
+				{
+					<MudAlert Severity="Severity.Error" Dense="true" Class="mt-2">
+						الخطة تتضمن بيانات شخصية حسّاسة — التطبيق يتطلب صلاحية «تعديل البيانات الحساسة».
+					</MudAlert>
+				}
+			}
+		</MudPaper>
+	}
+}
+
+@code {
+	private IReadOnlyList<PayrollEmployeeProfileRow> _rows = Array.Empty<PayrollEmployeeProfileRow>();
+	private IReadOnlyList<string> _missing = Array.Empty<string>();
+	private PayrollEmployeeProfileRow? _selected;
+	private string _search = "";
+	private string _status = "";
+	private string? _nationalId, _passport, _insuranceNumber, _taxTreatment, _insuranceStatus, _nationality;
+	private int? _workingHours;
+	private int _dependents, _wives;
+	private bool _salarySuspended, _timeManagement;
+	private bool _copyOpen, _copyClassification = true, _copyEmployment = true, _copyFamily, _copyIdentifiers, _copyContract = true;
+	private bool _copyCostCenters, _copyPaymentSettings, _copyOpeningBalances, _copyShiftAssignment;
+	private string _copySourceId = "";
+	private decimal? _copySalary;
+	private DateTime? _copyContractFrom = DateTime.Today;
+	private PayrollEmployeeCopyPlan? _copyPlan;
+	private PayrollEmployeeCopyResult? _copyResult;
+	protected override string ScreenCode => ScreenCodes.PayrollEmployees;
+
+	protected override Task OnLoadAsync() => LoadAsync();
+
+	private async Task LoadAsync()
+	{
+		try
+		{
+			_rows = await Profiles.ListAsync(string.IsNullOrWhiteSpace(_status) ? null : _status,
+				string.IsNullOrWhiteSpace(_search) ? null : _search);
+			if (_selected is not null)
+				_selected = _rows.FirstOrDefault(x => x.EmployeeId == _selected.EmployeeId);
+		}
+		catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+	}
+
+	private Task SelectAsync(PayrollEmployeeProfileRow row)
+	{
+		_selected = row;
+		_nationalId = row.NationalId;
+		_passport = row.PassportNumber;
+		_insuranceNumber = row.InsuranceNumber;
+		_taxTreatment = row.TaxTreatmentCode;
+		_insuranceStatus = row.InsuranceStatusCode;
+		_nationality = row.NationalityCode;
+		_workingHours = row.WorkingHoursPerMonth;
+		_dependents = row.Dependents;
+		_wives = row.NonWorkingWives;
+		_salarySuspended = row.SalarySuspended;
+		_timeManagement = row.TimeManagementEnabled;
+		_missing = PayrollEmployeeProfileService.MissingRequiredFields(row,
+			Array.Empty<PayrollEmployeeFieldSetting>(), DateOnly.FromDateTime(DateTime.Today));
+		return Task.CompletedTask;
+	}
+
+	private async Task RegisterAsync()
+	{
+		if (_selected is null || Actor is null) return;
+		try
+		{
+			await Profiles.RegisterAsync(_selected.EmployeeId, Actor);
+			await LoadAsync();
+			Snackbar.Add("تم التسجيل المبدئي للموظف.", Severity.Success);
+		}
+		catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+	}
+
+	private async Task SaveAsync()
+	{
+		if (_selected is null || Actor is null) return;
+		try
+		{
+			var saved = await Profiles.SaveAsync(_selected.EmployeeId, new PayrollEmployeeProfileInput
+			{
+				Status = PayrollEmployeeStatuses.Incomplete,
+				NationalId = _nationalId, PassportNumber = _passport, InsuranceNumber = _insuranceNumber,
+				TaxTreatmentCode = _taxTreatment, InsuranceStatusCode = _insuranceStatus,
+				NationalityCode = _nationality, WorkingHoursPerMonth = _workingHours,
+				Dependents = Math.Max(0, _dependents), NonWorkingWives = Math.Max(0, _wives),
+				SalarySuspended = _salarySuspended, TimeManagementEnabled = _timeManagement
+			}, Actor);
+			_selected = saved;
+			await LoadAsync();
+			Snackbar.Add("تم حفظ بيانات ملف المرتب.", Severity.Success);
+		}
+		catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+	}
+
+	private async Task ApproveAsync()
+	{
+		if (_selected is null || Actor is null) return;
+		try
+		{
+			_selected = await Profiles.ApproveAsync(_selected.EmployeeId, Actor);
+			_missing = Array.Empty<string>();
+			await LoadAsync();
+			Snackbar.Add("تم اعتماد الموظف وأصبح جاهزاً لدورة المرتبات.", Severity.Success);
+		}
+		catch (AppException ex)
+		{
+			_missing = PayrollEmployeeProfileService.MissingRequiredFields(_selected,
+				Array.Empty<PayrollEmployeeFieldSetting>(), DateOnly.FromDateTime(DateTime.Today));
+			ShowError(ex);
+		}
+		catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+	}
+
+	private async Task SetStatusAsync(string status)
+	{
+		if (_selected is null || Actor is null) return;
+		try
+		{
+			await Profiles.SetStatusAsync(_selected.EmployeeId, status, Actor);
+			await LoadAsync();
+			Snackbar.Add("تم تحديث حالة الموظف.", Severity.Success);
+		}
+		catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+	}
+
+	private static string StatusLabel(string status) => status switch
+	{
+		PayrollEmployeeStatuses.Draft => "مبدئي",
+		PayrollEmployeeStatuses.Incomplete => "تحت استكمال البيانات",
+		PayrollEmployeeStatuses.Approved => "معتمد وجاهز",
+		PayrollEmployeeStatuses.Suspended => "موقوف مؤقتاً",
+		PayrollEmployeeStatuses.Terminated => "منتهي الخدمة",
+		_ => status
+	};
+
+	private static Color StatusColor(string status) => status switch
+	{
+		PayrollEmployeeStatuses.Approved => Color.Success,
+		PayrollEmployeeStatuses.Incomplete => Color.Warning,
+		PayrollEmployeeStatuses.Suspended => Color.Error,
+		PayrollEmployeeStatuses.Terminated => Color.Dark,
+		_ => Color.Default
+	};
+
+	private void ToggleCopy()
+	{
+		_copyOpen = !_copyOpen;
+		_copyPlan = null;
+	}
+
+	private PayrollEmployeeCopyOptions CopyOptions() => new()
+	{
+		CopyClassification = _copyClassification,
+		CopyEmploymentSettings = _copyEmployment,
+		CopyFamilyData = _copyFamily,
+		CopyPersonalIdentifiers = _copyIdentifiers,
+		CopyContract = _copyContract,
+		CopyCostCenters = _copyCostCenters,
+		CopyPaymentSettings = _copyPaymentSettings,
+		CopyOpeningBalances = _copyOpeningBalances,
+		CopyShiftAssignment = _copyShiftAssignment,
+		SalaryOverride = _copySalary,
+		ContractEffectiveFrom = _copyContractFrom is null ? null : DateOnly.FromDateTime(_copyContractFrom.Value)
+	};
+
+	private bool TryCopyIds(out Guid sourceId, out Guid targetId)
+	{
+		(sourceId, targetId) = (Guid.Empty, Guid.Empty);
+		if (_selected is null) return false;
+		if (!Guid.TryParse(_copySourceId, out sourceId))
+		{ Snackbar.Add("أدخل معرف الموظف المصدر صحيحاً.", Severity.Warning); return false; }
+		targetId = _selected.EmployeeId;
+		return true;
+	}
+
+	private async Task PreviewCopyAsync()
+	{
+		if (Actor is null || !TryCopyIds(out var sourceId, out var targetId)) return;
+		try { _copyPlan = await CopyService.PlanAsync(sourceId, targetId, CopyOptions(), Actor); }
+		catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); _copyPlan = null; }
+	}
+
+	private async Task ApplyCopyAsync()
+	{
+		if (Actor is null || !TryCopyIds(out var sourceId, out var targetId)) return;
+		try
+		{
+			_copyResult = await CopyService.ApplyAsync(sourceId, targetId, CopyOptions(), Actor);
+			_copyPlan = _copyResult.Plan;
+			await LoadAsync();
+			Snackbar.Add($"تم النسخ — ملف {_copyResult.CostCenters} مركز تكلفة، {_copyResult.PaymentSettings} إعداد صرف.", Severity.Success);
+		}
+		catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+	}
+}

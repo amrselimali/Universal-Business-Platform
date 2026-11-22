@@ -12,6 +12,13 @@ public interface IPayrollConfigurationRepository
     Task<IReadOnlyList<PayrollFormula>> ListFormulasAsync(CancellationToken ct = default);
     Task<Guid> CreateItemAsync(PayrollItem item, CancellationToken ct = default);
     Task<Guid> AddItemVersionAsync(PayrollItemVersion version, CancellationToken ct = default);
+
+    Task<IReadOnlyList<PayrollGroup>> ListGroupsAsync(CancellationToken ct = default);
+    Task<Guid> CreateGroupAsync(PayrollGroup group, CancellationToken ct = default);
+    Task<Guid> CreateDataSourceAsync(PayrollDataSource source, CancellationToken ct = default);
+    Task<Guid> CreateFormulaAsync(PayrollFormula formula, CancellationToken ct = default);
+    Task<IReadOnlyList<PayrollSourceAllocation>> ListSourceAllocationsAsync(Guid? snapshotId = null,
+        CancellationToken ct = default);
 }
 
 public sealed class PayrollConfigurationRepository : IPayrollConfigurationRepository
@@ -104,5 +111,85 @@ public sealed class PayrollConfigurationRepository : IPayrollConfigurationReposi
                 @MinimumValue, @MaximumValue, @RoundingMode, @IsApproved)
             RETURNING id
             """, version, cancellationToken: ct));
+    }
+
+    public async Task<IReadOnlyList<PayrollGroup>> ListGroupsAsync(CancellationToken ct = default)
+    {
+        await using var connection = await _factory.OpenAsync(ct);
+        var rows = await connection.QueryAsync<PayrollGroup>(new CommandDefinition("""
+            SELECT id AS Id, code AS Code, name_ar AS NameAr, name_en AS NameEn,
+                   is_active AS IsActive, version AS Version
+            FROM payroll_groups ORDER BY code
+            """, cancellationToken: ct));
+        return rows.ToList();
+    }
+
+    public async Task<Guid> CreateGroupAsync(PayrollGroup group, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(group.Code) || string.IsNullOrWhiteSpace(group.NameAr))
+            throw new ArgumentException("Payroll group code and Arabic name are required.", nameof(group));
+        await using var connection = await _factory.OpenAsync(ct);
+        return await connection.ExecuteScalarAsync<Guid>(new CommandDefinition("""
+            INSERT INTO payroll_groups (id, code, name_ar, name_en, is_active)
+            VALUES (@Id, @Code, @NameAr, @NameEn, @IsActive)
+            ON CONFLICT (code) DO UPDATE SET name_ar = EXCLUDED.name_ar, name_en = EXCLUDED.name_en,
+                is_active = EXCLUDED.is_active, version = payroll_groups.version + 1
+            RETURNING id
+            """, new
+        {
+            Id = group.Id == Guid.Empty ? Guid.NewGuid() : group.Id, group.Code, group.NameAr,
+            group.NameEn, group.IsActive
+        }, cancellationToken: ct));
+    }
+
+    public async Task<Guid> CreateDataSourceAsync(PayrollDataSource source, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(source.Code) || string.IsNullOrWhiteSpace(source.NameAr))
+            throw new ArgumentException("Payroll data source code and Arabic name are required.", nameof(source));
+        await using var connection = await _factory.OpenAsync(ct);
+        return await connection.ExecuteScalarAsync<Guid>(new CommandDefinition("""
+            INSERT INTO payroll_data_sources (id, code, name_ar, provider_code, aggregation_code, include_cancelled)
+            VALUES (@Id, @Code, @NameAr, @ProviderCode, @AggregationCode, @IncludeCancelled)
+            RETURNING id
+            """, new
+        {
+            Id = source.Id == Guid.Empty ? Guid.NewGuid() : source.Id, source.Code, source.NameAr,
+            source.ProviderCode, source.AggregationCode, source.IncludeCancelled
+        }, cancellationToken: ct));
+    }
+
+    public async Task<Guid> CreateFormulaAsync(PayrollFormula formula, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(formula.Code) || string.IsNullOrWhiteSpace(formula.Expression))
+            throw new ArgumentException("Formula code and expression are required.", nameof(formula));
+        await using var connection = await _factory.OpenAsync(ct);
+        return await connection.ExecuteScalarAsync<Guid>(new CommandDefinition("""
+            INSERT INTO payroll_formulas (id, code, name_ar, expression)
+            VALUES (@Id, @Code, @NameAr, @Expression)
+            ON CONFLICT (code) DO UPDATE SET name_ar = EXCLUDED.name_ar,
+                expression = EXCLUDED.expression, version = payroll_formulas.version + 1
+            RETURNING id
+            """, new
+        {
+            Id = formula.Id == Guid.Empty ? Guid.NewGuid() : formula.Id,
+            formula.Code, formula.NameAr, formula.Expression
+        }, cancellationToken: ct));
+    }
+
+    public async Task<IReadOnlyList<PayrollSourceAllocation>> ListSourceAllocationsAsync(Guid? snapshotId = null,
+        CancellationToken ct = default)
+    {
+        await using var connection = await _factory.OpenAsync(ct);
+        var rows = await connection.QueryAsync<PayrollSourceAllocation>(new CommandDefinition("""
+            SELECT id AS Id, source_snapshot_id AS SourceSnapshotId, employee_id AS EmployeeId,
+                   allocation_method AS AllocationMethod, source_value AS SourceValue,
+                   allocated_value AS AllocatedValue, allocation_percent AS AllocationPercent,
+                   rule_version AS RuleVersion, created_at AS CreatedAt
+            FROM payroll_source_allocations
+            WHERE (@snapshotId IS NULL OR source_snapshot_id = @snapshotId)
+            ORDER BY created_at DESC
+            LIMIT 500
+            """, new { snapshotId }, cancellationToken: ct));
+        return rows.ToList();
     }
 }

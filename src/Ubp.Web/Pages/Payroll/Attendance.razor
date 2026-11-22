@@ -2,20 +2,17 @@
 @attribute [Authorize]
 @inherits SecurePageBase
 @inject IPayrollOperationsRepository Operations
+@inject PayrollShiftService Shifts
 
-<PageTitle>الحضور والانصراف</PageTitle>
-@if (Denied)
-{
-	<ForbiddenView />
-}
-else if (Loading)
-{
-	<div class="ubp-loading"><MudProgressCircular Indeterminate="true" /></div>
-}
+<PageTitle>الحضور والانصراف والورديات</PageTitle>
+@if (Denied) { <ForbiddenView /> }
+else if (Loading) { <div class="ubp-loading"><MudProgressCircular Indeterminate="true" /></div> }
 else
 {
-	<PageHeader Title="الحضور والانصراف" Subtitle="تسجيل المتغيرات اليومية المستخدمة في المرتبات" />
+	<PageHeader Title="الحضور والانصراف والورديات" Subtitle="تسجيل اليوميات + قواعد الوردية (سماح/غياب/إضافي)" />
+
 	<MudPaper Elevation="0" Class="ubp-card mb-4">
+		<MudText Typo="Typo.subtitle1" Class="mb-3">تسجيل يومية حضور</MudText>
 		<MudGrid>
 			<MudItem xs="12" md="3"><MudTextField @bind-Value="_employeeIdText" Label="معرف الموظف" Variant="Variant.Outlined" /></MudItem>
 			<MudItem xs="12" md="2"><MudTextField @bind-Value="_workDateText" Label="التاريخ" Variant="Variant.Outlined" /></MudItem>
@@ -24,22 +21,84 @@ else
 			<MudItem xs="12" md="2"><MudNumericField @bind-Value="_absenceHours" Label="الغياب" Min="0" Variant="Variant.Outlined" /></MudItem>
 			<MudItem xs="12" md="1"><MudButton OnClick="SaveAsync" Color="Color.Primary" Variant="Variant.Filled">حفظ</MudButton></MudItem>
 		</MudGrid>
+		<MudButton OnClick="ApproveAsync" Color="Color.Success" Variant="Variant.Outlined" Class="mt-3"
+				   StartIcon="@Icons.Material.Filled.DoneAll">اعتماد يوميات آخر 31 يوماً</MudButton>
 	</MudPaper>
+
+	<MudPaper Elevation="0" Class="ubp-card mb-4">
+		<MudText Typo="Typo.h6" Class="mb-3">الورديات وقواعدها</MudText>
+		<MudGrid>
+			<MudItem xs="12" md="2"><MudTextField @bind-Value="_shiftCode" Label="كود الوردية" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="2"><MudTextField @bind-Value="_shiftName" Label="اسم الوردية" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="1"><MudTextField @bind-Value="_shiftStart" Label="من HH:mm" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="1"><MudTextField @bind-Value="_shiftEnd" Label="إلى HH:mm" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="1"><MudNumericField @bind-Value="_shiftBreak" Label="راحة/د" Min="0" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="1"><MudNumericField @bind-Value="_shiftGrace" Label="سماح/د" Min="0" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="1"><MudNumericField @bind-Value="_shiftOt" Label="إضافي بعد/د" Min="0" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="1" Class="d-flex align-center"><MudCheckBox T="bool" @bind-Value="_shiftNight" Label="ليلية" /></MudItem>
+			<MudItem xs="12" md="2"><MudButton OnClick="SaveShiftAsync" Color="Color.Primary" Variant="Variant.Filled" FullWidth="true">حفظ الوردية</MudButton></MudItem>
+		</MudGrid>
+
+		<MudDivider Class="my-3" />
+		<MudGrid>
+			<MudItem xs="12" md="3"><MudTextField @bind-Value="_assignEmp" Label="معرف الموظف" Variant="Variant.Outlined" /></MudItem>
+			<MudItem xs="12" md="4">
+				<MudSelect T="Guid?" Label="الوردية" @bind-Value="_assignShiftId" Variant="Variant.Outlined">
+					@foreach (var shift in _shifts)
+					{ <MudSelectItem T="Guid?" Value="@shift.Id">@shift.Code — @shift.NameAr</MudSelectItem> }
+				</MudSelect>
+			</MudItem>
+			<MudItem xs="12" md="3"><MudDatePicker T="DateTime?" Label="سريان من" @bind-Date="_assignFrom" DateFormat="yyyy-MM-dd" /></MudItem>
+			<MudItem xs="12" md="2"><MudButton OnClick="AssignShiftAsync" Color="Color.Info" Variant="Variant.Outlined" FullWidth="true">إسناد</MudButton></MudItem>
+		</MudGrid>
+
+		<MudButton OnClick="ApplyShiftAsync" Color="Color.Success" Variant="Variant.Filled" Class="mt-3"
+				   StartIcon="@Icons.Material.Filled.PlayArrow">تطبيق قواعد الوردية على آخر 31 يوماً</MudButton>
+
+		<MudTable Items="_shifts" Dense="true" Hover="true" Class="mt-3">
+			<HeaderContent><MudTh>الكود</MudTh><MudTh>الاسم</MudTh><MudTh>من</MudTh><MudTh>إلى</MudTh><MudTh>راحة</MudTh><MudTh>سماح</MudTh><MudTh>إضافي بعد</MudTh><MudTh>ليلية</MudTh><MudTh>دقائق مجدولة</MudTh></HeaderContent>
+			<RowTemplate>
+				<MudTd>@context.Code</MudTd><MudTd>@context.NameAr</MudTd>
+				<MudTd>@context.StartTime</MudTd><MudTd>@context.EndTime</MudTd>
+				<MudTd>@context.BreakMinutes</MudTd><MudTd>@context.GraceMinutes</MudTd>
+				<MudTd>@context.OvertimeAfterMinutes</MudTd><MudTd>@(context.CrossesMidnight ? "نعم" : "لا")</MudTd>
+				<MudTd>@context.ScheduledMinutes</MudTd>
+			</RowTemplate>
+			<NoRecordsContent><MudText Class="pa-4">لا توجد ورديات معرّفة.</MudText></NoRecordsContent>
+		</MudTable>
+	</MudPaper>
+
 	<MudPaper Elevation="0" Class="ubp-card">
 		<MudTable Items="_rows" Dense="true" Hover="true" Striped="true">
 			<HeaderContent><MudTh>الموظف</MudTh><MudTh>التاريخ</MudTh><MudTh>العمل</MudTh><MudTh>الإضافي</MudTh><MudTh>الغياب</MudTh><MudTh>الحالة</MudTh></HeaderContent>
-			<RowTemplate><MudTd>@context.EmployeeId</MudTd><MudTd>@context.WorkDate</MudTd><MudTd>@context.WorkedHours.ToString("N2")</MudTd><MudTd>@context.OvertimeHours.ToString("N2")</MudTd><MudTd>@context.AbsenceHours.ToString("N2")</MudTd><MudTd>@context.Status</MudTd></RowTemplate>
+			<RowTemplate>
+				<MudTd>@context.EmployeeId</MudTd><MudTd>@context.WorkDate</MudTd>
+				<MudTd>@context.WorkedHours.ToString("N2")</MudTd><MudTd>@context.OvertimeHours.ToString("N2")</MudTd>
+				<MudTd>@context.AbsenceHours.ToString("N2")</MudTd><MudTd>@context.Status</MudTd>
+			</RowTemplate>
 		</MudTable>
 	</MudPaper>
 }
 
 @code {
 	private IReadOnlyList<PayrollAttendanceDaily> _rows = Array.Empty<PayrollAttendanceDaily>();
+	private IReadOnlyList<AttendanceShift> _shifts = Array.Empty<AttendanceShift>();
 	private string _employeeIdText = "";
 	private string _workDateText = DateTime.Today.ToString("yyyy-MM-dd");
 	private decimal _workedHours;
 	private decimal _overtimeHours;
 	private decimal _absenceHours;
+	private string _shiftCode = "";
+	private string _shiftName = "";
+	private string _shiftStart = "09:00";
+	private string _shiftEnd = "17:00";
+	private int _shiftBreak;
+	private int _shiftGrace = 10;
+	private int _shiftOt = 15;
+	private bool _shiftNight;
+	private string _assignEmp = "";
+	private Guid? _assignShiftId;
+	private DateTime? _assignFrom = DateTime.Today;
 	protected override string ScreenCode => ScreenCodes.PayrollAttendance;
 	protected override async Task OnLoadAsync() => await LoadAsync();
 
@@ -47,15 +106,13 @@ else
 	{
 		var date = DateOnly.FromDateTime(DateTime.Today);
 		_rows = await Operations.ListAttendanceAsync(date.AddDays(-31), date);
+		_shifts = await Shifts.ListAsync();
 	}
 
 	private async Task SaveAsync()
 	{
 		if (!Guid.TryParse(_employeeIdText, out var employeeId) || !DateOnly.TryParse(_workDateText, out var workDate))
-		{
-			Snackbar.Add("أدخل معرف موظف وتاريخاً صحيحاً.", Severity.Error);
-			return;
-		}
+		{ Snackbar.Add("أدخل معرف موظف وتاريخاً صحيحاً.", Severity.Error); return; }
 		try
 		{
 			await Operations.UpsertAttendanceAsync(new PayrollAttendanceDaily
@@ -66,6 +123,68 @@ else
 			});
 			await LoadAsync();
 			Snackbar.Add("تم حفظ حركة الحضور.", Severity.Success);
+		}
+		catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+	}
+
+	private async Task ApproveAsync()
+	{
+		if (Actor is null) return;
+		try
+		{
+			var date = DateOnly.FromDateTime(DateTime.Today);
+			var count = await Operations.ApproveAttendanceAsync(date.AddDays(-31), date, null, Actor.UserId);
+			await LoadAsync();
+			Snackbar.Add($"تم اعتماد {count} يومية.", Severity.Success);
+		}
+		catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+	}
+
+	private async Task SaveShiftAsync()
+	{
+		if (Actor is null) return;
+		try
+		{
+			await Shifts.UpsertAsync(new AttendanceShift
+			{
+				Id = Guid.NewGuid(), Code = _shiftCode.Trim(), NameAr = _shiftName.Trim(),
+				StartTime = _shiftStart.Trim(), EndTime = _shiftEnd.Trim(),
+				BreakMinutes = _shiftBreak, GraceMinutes = _shiftGrace,
+				OvertimeAfterMinutes = _shiftOt, CrossesMidnight = _shiftNight
+			}, Actor);
+			await LoadAsync();
+			Snackbar.Add("تم حفظ الوردية.", Severity.Success);
+		}
+		catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+	}
+
+	private async Task AssignShiftAsync()
+	{
+		if (Actor is null) return;
+		if (!Guid.TryParse(_assignEmp, out var employeeId) || _assignShiftId is not { } shiftId)
+		{ Snackbar.Add("أدخل معرف الموظف واختر الوردية.", Severity.Warning); return; }
+		try
+		{
+			await Shifts.AssignAsync(new AttendanceShiftAssignment
+			{
+				Id = Guid.NewGuid(), EmployeeId = employeeId, ShiftId = shiftId,
+				EffectiveFrom = _assignFrom is null ? DateOnly.FromDateTime(DateTime.Today) : DateOnly.FromDateTime(_assignFrom.Value)
+			}, Actor);
+			Snackbar.Add("تم إسناد الوردية.", Severity.Success);
+		}
+		catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+	}
+
+	private async Task ApplyShiftAsync()
+	{
+		if (Actor is null || !Guid.TryParse(_employeeIdText, out var employeeId))
+		{ Snackbar.Add("أدخل معرف الموظف أولاً.", Severity.Warning); return; }
+		try
+		{
+			var date = DateOnly.FromDateTime(DateTime.Today);
+			var applied = await Shifts.ApplyAsync(employeeId, date.AddDays(-31), date, Actor);
+			await LoadAsync();
+			Snackbar.Add($"تم تطبيق الوردية على {applied} يوم.", Severity.Success);
 		}
 		catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
 	}
