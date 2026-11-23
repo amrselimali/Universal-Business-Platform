@@ -28,6 +28,11 @@ public sealed class ShiftEditableLine
     public Guid? EmployeeId { get; set; }
     /// <summary>الحقول القابلة للتعديل لهذا السطر مفصولة بفاصلة.</summary>
     public string FieldsCsv { get; set; } = "";
+    /// <summary>عدد البلصات الفعلي = وحدات عدّاد الأصل المرتبط بالتنفيذ (0214).</summary>
+    public decimal MeterUnits { get; set; }
+    /// <summary>الأصل الثابت المرتبط بالعدّاد (يظهر بجوار عدد البلصات) — 0214.</summary>
+    public Guid? MeteredAssetId { get; set; }
+    public string? MeteredAssetName { get; set; }
 
     public IReadOnlyList<string> Fields => FieldsCsv.Split(',',
         StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);

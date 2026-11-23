@@ -24,6 +24,7 @@
                     <MudTh>المستند</MudTh><MudTh>الطرف</MudTh><MudTh>الصنف</MudTh>
                     <MudTh>الموظف</MudTh><MudTh>الخزينة</MudTh><MudTh>الحساب</MudTh>
                     <MudTh Align="Right">الكمية</MudTh><MudTh Align="Right">سعر الوحدة</MudTh>
+                    <MudTh Align="Right">عدد البلصات</MudTh>
                     <MudTh Align="Right">المبلغ</MudTh><MudTh>الشرح</MudTh><MudTh></MudTh>
                 </HeaderContent>
                 <RowTemplate>
@@ -96,6 +97,30 @@
                         else { @(context.L.UnitPrice.ToString("N2")) }
                     </MudTd>
                     <MudTd Align="Right">
+                        @if (context.Editing && context.Can("meter_units"))
+                        {
+                            <MudNumericField T="decimal" @bind-Value="context.MeterUnits" Dense="true"
+                                             Variant="Variant.Outlined" Min="0m" Format="N2" />
+                            @if (!string.IsNullOrWhiteSpace(context.L.MeteredAssetName))
+                            {
+                                <MudText Typo="Typo.caption" Class="ubp-muted">
+                                    @context.L.MeteredAssetName
+                                </MudText>
+                            }
+                        }
+                        else if (context.L.MeteredAssetId is not null)
+                        {
+                            @context.L.MeterUnits.ToString("N2")
+                            @if (!string.IsNullOrWhiteSpace(context.L.MeteredAssetName))
+                            {
+                                <MudText Typo="Typo.caption" Class="ubp-muted">
+                                    @context.L.MeteredAssetName
+                                </MudText>
+                            }
+                        }
+                        else { @("—") }
+                    </MudTd>
+                    <MudTd Align="Right">
                         @if (context.Editing && context.Can("amount"))
                         {
                             <MudNumericField T="decimal" @bind-Value="context.Amount" Dense="true"
@@ -153,6 +178,7 @@
         public Guid? Emp { get; set; }
         public Guid? Tre { get; set; }
         public Guid? Acc { get; set; }
+        public decimal MeterUnits { get; set; }
 
         public Row(ShiftEditableLine l)
         {
@@ -165,6 +191,7 @@
         {
             Qty = L.Quantity; Price = L.UnitPrice; Amount = L.Amount; Desc = L.Description;
             Emp = L.EmployeeId; Tre = L.TreasuryId; Acc = L.AccountId;
+            MeterUnits = L.MeterUnits;
         }
 
         public bool Can(string f) => _fields.Contains(f);
@@ -228,6 +255,8 @@
             changes.Add(("quantity", Num(row.Qty)));
         if (row.Can("unit_price") && row.Price != row.L.UnitPrice)
             changes.Add(("unit_price", Num(row.Price)));
+        if (row.Can("meter_units") && row.MeterUnits != row.L.MeterUnits)
+            changes.Add(("meter_units", Num(row.MeterUnits)));
         if (row.Can("amount") && row.Amount != row.L.Amount)
             changes.Add(("amount", Num(row.Amount)));
         if (row.Can("description") && (row.Desc ?? "") != (row.L.Description ?? ""))

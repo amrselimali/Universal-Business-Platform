@@ -221,6 +221,8 @@ public static class ActionCodes
     public const string ViewBasic = "VIEW_BASIC";
     /// <summary>تسجيل مبدئي لموظف (اسم + هاتف + تاريخ تعيين) بحالة مبدئي.</summary>
     public const string Register = "REGISTER";
+    /// <summary>تسجيل مبدئي لموظف جديد بالبيانات الأساسية فقط (اسم/هاتف/تاريخ تعيين) — صلاحية مستقلة عن CREATE.</summary>
+    public const string RegisterBasic = "REGISTER_BASIC";
     /// <summary>استكمال بيانات ملف المرتب (بيانات وظيفية/مالية/تأمينية).</summary>
     public const string CompleteData = "COMPLETE_DATA";
     /// <summary>تعديل البيانات الحساسة (رقوم قومي/تأميني/ضريبي/بنكي) — منفصلة عن الاستكمال.</summary>

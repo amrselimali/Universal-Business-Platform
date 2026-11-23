@@ -19,14 +19,16 @@ public sealed partial class BranchRepository
     public async Task<Branch> CreateAsync(BranchInput input, CancellationToken ct = default)
     {
         const string sql = """
-            INSERT INTO branches (code, name_ar, name_en, address, phone, is_active, custom_fields)
-            VALUES (@Code, @NameAr, @NameEn, @Address, @Phone, @IsActive, CAST(@CustomFields AS jsonb))
+            INSERT INTO branches (code, name_ar, name_en, address, phone, is_active, require_confirmed_booking_for_execution, custom_fields)
+            VALUES (@Code, @NameAr, @NameEn, @Address, @Phone, @IsActive, @RequireConfirmedBookingForExecution, CAST(@CustomFields AS jsonb))
             RETURNING id
             """;
         await using var connection = await _factory.OpenAsync(ct);
         var id = await connection.ExecuteScalarAsync<Guid>(new CommandDefinition(sql, new
         {
             input.Code, input.NameAr, input.NameEn, input.Address, input.Phone, input.IsActive,
+            input.RequireConfirmedBookingForExecution,
+
             CustomFields = JsonSerializer.Serialize(input.CustomFields)
         }, cancellationToken: ct));
         return (await GetAsync(id, ct))!;
@@ -37,7 +39,9 @@ public sealed partial class BranchRepository
         const string sql = """
             UPDATE branches SET
                 code = @Code, name_ar = @NameAr, name_en = @NameEn, address = @Address,
-                phone = @Phone, is_active = @IsActive, custom_fields = CAST(@CustomFields AS jsonb)
+                phone = @Phone, is_active = @IsActive,
+                require_confirmed_booking_for_execution = @RequireConfirmedBookingForExecution,
+                custom_fields = CAST(@CustomFields AS jsonb)
             WHERE id = @id AND version = @version
             RETURNING id
             """;
@@ -45,7 +49,8 @@ public sealed partial class BranchRepository
         var updated = await connection.ExecuteScalarAsync<Guid?>(new CommandDefinition(sql, new
         {
             id, version, input.Code, input.NameAr, input.NameEn, input.Address, input.Phone,
-            input.IsActive, CustomFields = JsonSerializer.Serialize(input.CustomFields)
+            input.IsActive, input.RequireConfirmedBookingForExecution,
+            CustomFields = JsonSerializer.Serialize(input.CustomFields)
         }, cancellationToken: ct));
         return updated is null ? null : await GetAsync(id, ct);
     }
@@ -81,6 +86,7 @@ public sealed partial class BranchRepository
     {
         Id = row.Id, Code = row.Code, NameAr = row.NameAr, NameEn = row.NameEn,
         Address = row.Address, Phone = row.Phone, IsActive = row.IsActive,
+        RequireConfirmedBookingForExecution = row.RequireConfirmedBookingForExecution,
         CustomFields = string.IsNullOrWhiteSpace(row.CustomFieldsJson)
             ? new() : JsonSerializer.Deserialize<Dictionary<string, object?>>(row.CustomFieldsJson) ?? new(),
         CreatedAt = row.CreatedAt, UpdatedAt = row.UpdatedAt, Version = row.Version
@@ -95,6 +101,7 @@ public sealed partial class BranchRepository
         public string? Address { get; set; }
         public string? Phone { get; set; }
         public bool IsActive { get; set; }
+        public bool RequireConfirmedBookingForExecution { get; set; }
         public string? CustomFieldsJson { get; set; }
         public DateTimeOffset CreatedAt { get; set; }
         public DateTimeOffset UpdatedAt { get; set; }

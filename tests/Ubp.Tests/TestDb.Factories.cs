@@ -84,7 +84,7 @@ public sealed partial class TestDb
         AppointmentRepo, Permissions(), new AuditService(AuditRepo));
 
     public BookingExecutionService Executions() => new(
-        ExecutionRepo, Settings(), Permissions(), new AuditService(AuditRepo));
+        ExecutionRepo, BranchRepo, Settings(), Permissions(), new AuditService(AuditRepo));
 
     public SalesInvoiceService SalesInvoices() => new(
         SalesRepo, CommercialRepo, Permissions(), new AuditService(AuditRepo));

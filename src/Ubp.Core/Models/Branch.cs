@@ -9,6 +9,8 @@ public sealed class Branch
     public string? Address { get; set; }
     public string? Phone { get; set; }
     public bool IsActive { get; set; } = true;
+    /// <summary>يشترط حجزاً مؤكداً للعميل مع الموظف في نفس اليوم قبل تنفيذ الخدمة — 0213.</summary>
+    public bool RequireConfirmedBookingForExecution { get; set; }
     public Dictionary<string, object?> CustomFields { get; set; } = new();
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
@@ -23,5 +25,6 @@ public sealed class BranchInput
     public string? Address { get; set; }
     public string? Phone { get; set; }
     public bool IsActive { get; set; } = true;
+    public bool RequireConfirmedBookingForExecution { get; set; }
     public Dictionary<string, object?> CustomFields { get; set; } = new();
 }

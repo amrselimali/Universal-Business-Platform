@@ -25,10 +25,46 @@ else
                     @T.T("common.add")
                 </MudButton>
             }
+            @if (Can(ActionCodes.RegisterBasic))
+            {
+                <MudButton Variant="Variant.Outlined" Color="Color.Secondary"
+                           StartIcon="@Icons.Material.Filled.PersonAdd" OnClick="ToggleBasic">
+                    تسجيل مبدئي
+                </MudButton>
+            }
         </Actions>
     </PageHeader>
 
     <MudPaper Elevation="0" Class="ubp-card">
+
+        @if (_showBasic)
+        {
+            <div class="pa-4">
+                <MudText Typo="Typo.subtitle1" Class="mb-2">تسجيل مبدئي — بيانات أساسية فقط (بلا أي حقل إلزامي)</MudText>
+                <MudGrid>
+                    <MudItem xs="12" md="3"><MudTextField @bind-Value="_basicName" Label="الاسم العربي" Variant="Variant.Outlined" /></MudItem>
+                    <MudItem xs="12" md="3"><MudTextField @bind-Value="_basicPhone" Label="الهاتف" Variant="Variant.Outlined" /></MudItem>
+                    <MudItem xs="12" md="3"><MudDatePicker T="DateTime?" Label="تاريخ التعيين" @bind-Date="_basicHireDate" DateFormat="yyyy-MM-dd" /></MudItem>
+                    <MudItem xs="12" md="3">
+                        <MudSelect T="Guid?" Label="الفرع" @bind-Value="_basicBranchId" Variant="Variant.Outlined"
+                                   Disabled="@(_branches.Count <= 1)">
+                            @foreach (var branch in _branches)
+                            {
+                                <MudSelectItem T="Guid?" Value="@((Guid?)branch.Id)">@branch.NameAr</MudSelectItem>
+                            }
+                        </MudSelect>
+                    </MudItem>
+                    <MudItem xs="12" md="3" Class="d-flex align-center" Style="gap:8px">
+                        <MudButton OnClick="SaveBasicAsync" Color="Color.Success" Variant="Variant.Filled">تسجيل</MudButton>
+                        <MudButton OnClick="ToggleBasic" Color="Color.Default" Variant="Variant.Text">إلغاء</MudButton>
+                    </MudItem>
+                </MudGrid>
+                <MudAlert Severity="Severity.Info" Dense="true" Class="mt-2">
+                    سيظهر الموظف في شاشة «الموظفون» بحالة «تسجيل مبدئي»، ويُستكمل باقي البيانات لاحقاً بصلاحية استكمال البيانات.
+                </MudAlert>
+            </div>
+            <MudDivider />
+        }
         <div class="ubp-toolbar">
             <MudTextField @bind-Value="_search" Placeholder="@T.T("common.search")" Immediate="true"
                           Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
@@ -50,43 +86,69 @@ else
         <MudTable @ref="_table" ServerData="LoadServerData" Dense="true" Hover="true" Striped="true"
                   Elevation="0" RowsPerPage="25" Class="ubp-table">
             <HeaderContent>
-                <MudTh><MudTableSortLabel T="Employee" SortLabel="code">@T.T("common.code")</MudTableSortLabel></MudTh>
+                @if (!BasicOnly)
+                {
+                    <MudTh><MudTableSortLabel T="Employee" SortLabel="code">@T.T("common.code")</MudTableSortLabel></MudTh>
+                }
                 <MudTh>@T.T("common.name_ar")</MudTh>
-                <MudTh>@T.T("settings.job_title")</MudTh>
-                <MudTh>@T.T("settings.admin_role")</MudTh>
-                <MudTh>الفرع</MudTh>
+                @if (!BasicOnly)
+                {
+                    <MudTh>@T.T("settings.job_title")</MudTh>
+                    <MudTh>@T.T("settings.admin_role")</MudTh>
+                    <MudTh>الفرع</MudTh>
+                }
                 <MudTh>@T.T("common.phone")</MudTh>
-                <MudTh>@T.T("settings.employee_roles")</MudTh>
-                <MudTh>@T.T("common.status")</MudTh>
-                <MudTh Align="Right">@T.T("common.actions")</MudTh>
+                <MudTh>تاريخ التعيين</MudTh>
+                @if (!BasicOnly)
+                {
+                    <MudTh>@T.T("settings.employee_roles")</MudTh>
+                    <MudTh>حالة الملف</MudTh>
+                    <MudTh>مفعّل</MudTh>
+                    <MudTh Align="Right">@T.T("common.actions")</MudTh>
+                }
             </HeaderContent>
             <RowTemplate>
-                <MudTd DataLabel="@T.T("common.code")"><span class="ubp-code">@context.Code</span></MudTd>
+                @if (!BasicOnly)
+                {
+                    <MudTd DataLabel="@T.T("common.code")"><span class="ubp-code">@context.Code</span></MudTd>
+                }
                 <MudTd DataLabel="@T.T("common.name_ar")">@context.DisplayName(IsEnglish)</MudTd>
-                <MudTd DataLabel="@T.T("settings.job_title")">@(context.JobTitle ?? "—")</MudTd>
-                <MudTd DataLabel="@T.T("settings.admin_role")">@(context.RoleName ?? "—")</MudTd>
-                <MudTd DataLabel="الفرع">@(context.BranchName ?? "الشركة")</MudTd>
+                @if (!BasicOnly)
+                {
+                    <MudTd DataLabel="@T.T("settings.job_title")">@(context.JobTitle ?? "—")</MudTd>
+                    <MudTd DataLabel="@T.T("settings.admin_role")">@(context.RoleName ?? "—")</MudTd>
+                    <MudTd DataLabel="الفرع">@(context.BranchName ?? "الشركة")</MudTd>
+                }
                 <MudTd DataLabel="@T.T("common.phone")">@context.Phone</MudTd>
-                <MudTd DataLabel="@T.T("settings.employee_roles")">
-                    @if (context.IsBookingReceiver) { <MudChip T="string" Size="Size.Small">@T.T("settings.role_receiver")</MudChip> }
-                    @if (context.IsSeller) { <MudChip T="string" Size="Size.Small">@T.T("settings.role_seller")</MudChip> }
-                    @if (context.IsServiceExecutor) { <MudChip T="string" Size="Size.Small">@T.T("settings.role_executor")</MudChip> }
-                </MudTd>
-                <MudTd DataLabel="@T.T("common.status")">
-                    <MudSwitch T="bool" Value="@context.IsActive" Color="Color.Success"
-                               Disabled="@(!Can(ActionCodes.ToggleActive))"
-                               ValueChanged="@(v => ToggleAsync(context, v))" />
-                </MudTd>
-                <MudTd Align="Right">
-                    <MudMenu Icon="@Icons.Material.Filled.MoreVert" Dense="true" AnchorOrigin="Origin.BottomRight">
-                        @if (Can(ActionCodes.Edit))
-                        {
-                            <MudMenuItem OnClick="@(() => EditAsync(context))" Icon="@Icons.Material.Filled.Edit">
-                                @T.T("common.edit")
-                            </MudMenuItem>
-                        }
-                    </MudMenu>
-                </MudTd>
+                <MudTd DataLabel="تاريخ التعيين">@(context.HireDate?.ToString("yyyy-MM-dd") ?? "—")</MudTd>
+                @if (!BasicOnly)
+                {
+                    <MudTd DataLabel="@T.T("settings.employee_roles")">
+                        @if (context.IsBookingReceiver) { <MudChip T="string" Size="Size.Small">@T.T("settings.role_receiver")</MudChip> }
+                        @if (context.IsSeller) { <MudChip T="string" Size="Size.Small">@T.T("settings.role_seller")</MudChip> }
+                        @if (context.IsServiceExecutor) { <MudChip T="string" Size="Size.Small">@T.T("settings.role_executor")</MudChip> }
+                    </MudTd>
+                    <MudTd DataLabel="حالة الملف">
+                        <MudChip T="string" Size="Size.Small" Color="@ProfileColor(context.PayrollProfileStatus)">
+                            @ProfileLabel(context.PayrollProfileStatus)
+                        </MudChip>
+                    </MudTd>
+                    <MudTd DataLabel="مفعّل">
+                        <MudSwitch T="bool" Value="@context.IsActive" Color="Color.Success"
+                                   Disabled="@(!Can(ActionCodes.ToggleActive))"
+                                   ValueChanged="@(v => ToggleAsync(context, v))" />
+                    </MudTd>
+                    <MudTd Align="Right">
+                        <MudMenu Icon="@Icons.Material.Filled.MoreVert" Dense="true" AnchorOrigin="Origin.BottomRight">
+                            @if (Can(ActionCodes.Edit))
+                            {
+                                <MudMenuItem OnClick="@(() => EditAsync(context))" Icon="@Icons.Material.Filled.Edit">
+                                    @T.T("common.edit")
+                                </MudMenuItem>
+                            }
+                        </MudMenu>
+                    </MudTd>
+                }
             </RowTemplate>
             <PagerContent>
                 <MudTablePager PageSizeOptions="new[] { 25 }" RowsPerPageString="@T.T("common.rows_per_page")" />
@@ -99,16 +161,70 @@ else
     private MudTable<Employee> _table = default!;
     private string? _search;
     private bool _includeInactive;
+    private bool _showBasic;
+    private string _basicName = "";
+    private string _basicPhone = "";
+    private DateTime? _basicHireDate;
+    private Guid? _basicBranchId;
     private bool IsEnglish => T.Language == "en";
     private IReadOnlyList<Branch> _branches = Array.Empty<Branch>();
     private HashSet<Guid> _branchIds = new();
 
     protected override string ScreenCode => ScreenCodes.Employees;
 
+    /// <summary>صفحة الموظفين تُفتح بصلاحية العرض الكامل أو بعرض البيانات الأساسية فقط.</summary>
+    protected override IReadOnlyList<string> RequiredActions =>
+        new[] { ActionCodes.View, ActionCodes.ViewBasic };
+
+    /// <summary>عرض أساسي فقط: لا صلاحية عرض كامل، لكن لديه VIEW_BASIC → أعمدة الاسم/الهاتف/التعيين فقط.</summary>
+    private bool BasicOnly => !Can(ActionCodes.View) && Can(ActionCodes.ViewBasic);
+
+    private static string ProfileLabel(string? status) => status switch
+    {
+        null or "" => "تسجيل مبدئي",
+        PayrollEmployeeStatuses.Draft => "تسجيل مبدئي",
+        PayrollEmployeeStatuses.Incomplete => "بيانات ناقصة",
+        PayrollEmployeeStatuses.Approved => "معتمد",
+        PayrollEmployeeStatuses.Suspended => "موقوف",
+        PayrollEmployeeStatuses.Terminated => "منتهي الخدمة",
+        _ => status
+    };
+
+    private static Color ProfileColor(string? status) => status switch
+    {
+        PayrollEmployeeStatuses.Approved => Color.Success,
+        PayrollEmployeeStatuses.Incomplete => Color.Warning,
+        PayrollEmployeeStatuses.Suspended or PayrollEmployeeStatuses.Terminated => Color.Error,
+        _ => Color.Info
+    };
+
+    private void ToggleBasic() => _showBasic = !_showBasic;
+
+    private async Task SaveBasicAsync()
+    {
+        if (Actor is null) return;
+        await RunAsync(async () =>
+        {
+            await MasterData.RegisterBasicEmployeeAsync(Actor, new EmployeeBasicInput
+            {
+                NameAr = _basicName,
+                Phone = _basicPhone,
+                HireDate = _basicHireDate,
+                BranchId = _basicBranchId
+            });
+            _showBasic = false;
+            _basicName = ""; _basicPhone = ""; _basicHireDate = null;
+            await ReloadAsync();
+            ShowSuccess("common.saved");
+        });
+    }
+
     protected override async Task OnLoadAsync()
     {
         _branches = await Branches.OptionsAsync(Actor!);
         _branchIds = _branches.Select(b => b.Id).ToHashSet();
+        // فرع واحد فقط: يُختار تلقائياً ولا يُسمح بتغييره.
+        _basicBranchId = _branches.Count == 1 ? _branches[0].Id : Actor?.CurrentBranchId;
     }
 
     private string BranchLabel(Guid id) =>

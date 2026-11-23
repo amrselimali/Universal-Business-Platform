@@ -141,7 +141,9 @@
         try
         {
             _preview = await Executions.GetPreviewAsync(actor, BookingLineId);
-            _employees = await MasterData.EmployeeOptionsAsync(actor);
+            // 0214: منفذ الخدمة يُختار من موظفي فرع التنفيذ فقط (+ موظفي الشركة بلا فرع).
+            _employees = await MasterData.EmployeeOptionsForBranchesAsync(actor,
+                new[] { _preview.BranchId });
         }
         catch (AppException ex)
         {

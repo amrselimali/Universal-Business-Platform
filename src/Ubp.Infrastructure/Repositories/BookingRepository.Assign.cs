@@ -11,6 +11,21 @@ namespace Ubp.Infrastructure.Repositories;
 /// </summary>
 public sealed partial class BookingRepository
 {
+    /// <summary>
+    /// 0214: الموظف المسند يجب أن يكون من فرع الحجز (أو موظفاً على مستوى الشركة بلا فرع)
+    /// حتى لا يُسجَّل تنفيذ حجز فرع بموظف فرع آخر.
+    /// </summary>
+    private static async Task EnsureEmployeeInBookingBranchAsync(NpgsqlConnection connection,
+        NpgsqlTransaction tx, Guid branchId, Guid? employeeId, CancellationToken ct)
+    {
+        if (employeeId is not { } id) return;
+        var employeeBranch = await connection.ExecuteScalarAsync<Guid?>(new CommandDefinition(
+            "SELECT branch_id FROM employees WHERE id = @id", new { id }, tx,
+            cancellationToken: ct));
+        if (!BookingExecutionRules.EmployeeBelongsToBranch(employeeBranch, branchId))
+            throw new ValidationAppException(BookingExecutionRules.BranchMismatchCode);
+    }
+
     public async Task<Booking> AssignEmployeeAsync(Guid id, Guid employeeId, string role,
         Guid userId, CancellationToken ct = default)
     {
@@ -20,12 +35,15 @@ public sealed partial class BookingRepository
         await using var connection = await _factory.OpenAsync(ct);
         await using var tx = await connection.BeginTransactionAsync(ct);
 
-        var status = await connection.ExecuteScalarAsync<string?>(new CommandDefinition(
-            "SELECT status FROM bookings WHERE id = @id FOR UPDATE", new { id }, tx,
-            cancellationToken: ct));
-        if (status is null) throw new NotFoundAppException();
-        if (status is BookingStatuses.Completed or BookingStatuses.Cancelled)
+        var booking = await connection.QuerySingleOrDefaultAsync<(Guid BranchId, string Status)>(
+            new CommandDefinition(
+                "SELECT branch_id AS BranchId, status AS Status FROM bookings WHERE id = @id FOR UPDATE",
+                new { id }, tx, cancellationToken: ct));
+        if (booking.Status is null) throw new NotFoundAppException();
+        if (booking.Status is BookingStatuses.Completed or BookingStatuses.Cancelled)
             throw new ValidationAppException("validation.booking_closed");
+
+        await EnsureEmployeeInBookingBranchAsync(connection, tx, booking.BranchId, employeeId, ct);
 
         await connection.ExecuteAsync(new CommandDefinition("""
             UPDATE booking_assignments SET unassigned_at = now()
@@ -57,14 +75,16 @@ public sealed partial class BookingRepository
         await using var connection = await _factory.OpenAsync(ct);
         await using var tx = await connection.BeginTransactionAsync(ct);
 
-        var status = await connection.ExecuteScalarAsync<string?>(new CommandDefinition(
-            "SELECT status FROM bookings WHERE id = @id FOR UPDATE", new { id }, tx,
-            cancellationToken: ct));
-        if (status is null) throw new NotFoundAppException();
-        if (status is BookingStatuses.Completed or BookingStatuses.Cancelled)
+        var booking = await connection.QuerySingleOrDefaultAsync<(Guid BranchId, string Status)>(
+            new CommandDefinition(
+                "SELECT branch_id AS BranchId, status AS Status FROM bookings WHERE id = @id FOR UPDATE",
+                new { id }, tx, cancellationToken: ct));
+        if (booking.Status is null) throw new NotFoundAppException();
+        if (booking.Status is BookingStatuses.Completed or BookingStatuses.Cancelled)
             throw new ValidationAppException("validation.booking_closed");
 
         await EnsureDraftEmployeeAsync(connection, tx, employeeId, ct);
+        await EnsureEmployeeInBookingBranchAsync(connection, tx, booking.BranchId, employeeId, ct);
 
         await connection.ExecuteAsync(new CommandDefinition("""
             UPDATE booking_assignments SET unassigned_at = now()

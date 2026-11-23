@@ -207,4 +207,36 @@ public sealed class PermissionAliasTests
         Assert.False(PermissionEvaluator.Evaluate(payrollGrants, Array.Empty<PermissionEntry>(), false,
             ScreenCodes.Employees, ActionCodes.Delete).Allowed);
     }
+
+    [Fact]
+    public void EmployeeBasicRegistrationHasItsOwnScreenAction()
+    {
+        var screen = Assert.Single(AppRegistry.Screens.Where(s => s.Code == ScreenCodes.Employees));
+        var codes = screen.Actions.Select(a => a.Code).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        Assert.Contains(ActionCodes.RegisterBasic, codes);
+        Assert.Contains(ActionCodes.ViewBasic, codes);
+        Assert.Contains(ActionCodes.Create, codes);
+        Assert.Contains(ActionCodes.Delete, codes);
+        Assert.Equal("REGISTER_BASIC", ActionCodes.RegisterBasic);
+    }
+
+    [Fact]
+    public void BasicRegisterAndViewPermissionsAreIndependentFromCreateAndView()
+    {
+        var registerOnly = new[] { Grant(ScreenCodes.Employees, ActionCodes.RegisterBasic) };
+        var createOnly = new[] { Grant(ScreenCodes.Employees, ActionCodes.Create) };
+        var viewBasicOnly = new[] { Grant(ScreenCodes.Employees, ActionCodes.ViewBasic) };
+
+        Assert.True(PermissionEvaluator.Evaluate(registerOnly, Array.Empty<PermissionEntry>(), false,
+            ScreenCodes.Employees, ActionCodes.RegisterBasic).Allowed);
+        Assert.False(PermissionEvaluator.Evaluate(registerOnly, Array.Empty<PermissionEntry>(), false,
+            ScreenCodes.Employees, ActionCodes.Create).Allowed);
+        Assert.False(PermissionEvaluator.Evaluate(createOnly, Array.Empty<PermissionEntry>(), false,
+            ScreenCodes.Employees, ActionCodes.RegisterBasic).Allowed);
+        Assert.True(PermissionEvaluator.Evaluate(viewBasicOnly, Array.Empty<PermissionEntry>(), false,
+            ScreenCodes.Employees, ActionCodes.ViewBasic).Allowed);
+        Assert.False(PermissionEvaluator.Evaluate(viewBasicOnly, Array.Empty<PermissionEntry>(), false,
+            ScreenCodes.Employees, ActionCodes.View).Allowed);
+    }
 }

@@ -19,11 +19,11 @@
                                   ReadOnly="true" Variant="Variant.Outlined" MaxLength="30"
                                   HelperText="@T.T("common.auto_generated")" />
                 }
-                <MudTextField @bind-Value="_input.NameAr" Label="@T.T("common.name_ar")" Required="true"
+                <MudTextField @bind-Value="_input.NameAr" Label="@T.T("common.name_ar")"
                               Variant="Variant.Outlined" />
                 <MudTextField @bind-Value="_input.NameEn" Label="@T.T("common.name_en")"
                               Variant="Variant.Outlined" />
-                <MudTextField @bind-Value="_input.Phone" Label="@T.T("common.phone")" Required="true"
+                <MudTextField @bind-Value="_input.Phone" Label="@T.T("common.phone")"
                               Variant="Variant.Outlined" MaxLength="30" />
                 <MudTextField @bind-Value="_input.Email" Label="@T.T("settings.email")"
                               Variant="Variant.Outlined" MaxLength="200" />
@@ -38,10 +38,11 @@
                         </MudSelectItem>
                     }
                 </MudSelect>
-                <MudSelect T="Guid?" Value="_input.BranchId" Label="الفرع (أو الشركة)"
-                           Variant="Variant.Outlined" Clearable="true"
+                <MudSelect T="Guid?" Value="_input.BranchId" Label="الفرع"
+                           Variant="Variant.Outlined" Clearable="@(_branches.Count > 1)"
+                           Disabled="@(_branches.Count <= 1)"
                            ValueChanged="OnBranchChanged"
-                           HelperText="اتركه فارغًا = موظف على مستوى الشركة">
+                           HelperText="@BranchHelper">
                     @foreach (var branch in _branches)
                     {
                         <MudSelectItem T="Guid?" Value="@((Guid?)branch.Id)">@branch.NameAr</MudSelectItem>
@@ -94,6 +95,7 @@
     private IReadOnlyList<Role> _roles = Array.Empty<Role>();
     private IReadOnlyList<Account> _accounts = Array.Empty<Account>();
     private IReadOnlyList<Branch> _branches = Array.Empty<Branch>();
+    private string BranchHelper => _branches.Count <= 1 ? "فرعك المسموح به" : "اختر الفرع";
     private DateTime? _hireDate;
     private bool _busy;
     private string? _nextCode;
@@ -106,9 +108,13 @@
             _roles = await MasterData.EmployeeRoleOptionsAsync(actor);
             _accounts = await Lookup.PostableAccountsAsync(actor);
             _branches = await Branches.OptionsAsync(actor);
-            // الافتراضي = فرع المستخدم الحالي (ولا يظهر غير فروع المستخدم).
-            if (Model is null && actor.CurrentBranchId is { } currentBranch)
-                _input.BranchId = currentBranch;
+            // الافتراضي = فرع المستخدم الحالي؛ ومع فرع واحد فقط يُثبَّت ولا يُعدَّل.
+            if (Model is null)
+            {
+                _input.BranchId = _branches.Count == 1
+                    ? _branches[0].Id
+                    : actor.CurrentBranchId;
+            }
             if (Model is null)
                 _nextCode = await MasterData.NextEmployeeCodeAsync(actor, _input.BranchId);
         }

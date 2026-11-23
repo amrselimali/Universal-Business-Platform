@@ -30,20 +30,22 @@ public sealed partial class ShiftEditRepository
         }, userId, ct);
     }
 
-    /// <summary>تحديث المعدّل المسودة في مكانه (لا آثار محاسبية بعد) مع تعديل كميات الحجز.</summary>
+    /// <summary>تحديث المعدّل المسودة في مكانه (لا آثار محاسبية بعد) مع تعديل كميات الحجز والبلصات.</summary>
     private static async Task<bool> UpdateDraftExecutionAsync(NpgsqlConnection connection,
         NpgsqlTransaction tx, EditExecutionRow e, decimal newQty, decimal newPrice,
-        Guid? newEmployee, decimal net, decimal tax, decimal total, decimal delta, string field,
-        Guid userId, CancellationToken ct)
+        Guid? newEmployee, decimal net, decimal tax, decimal total, decimal delta,
+        decimal newMeter, string field, Guid userId, CancellationToken ct)
     {
         await connection.ExecuteAsync(new CommandDefinition("""
             UPDATE booking_execution_lines
             SET quantity = @qty, unit_price = @price, employee_id = @employee,
+                meter_units = @meter,
                 net_amount = @net, tax_amount = @tax, total_amount = @total, cost_total = 0
             WHERE id = @id
             """, new
         {
-            qty = newQty, price = newPrice, employee = newEmployee, net, tax, total, id = e.LineId
+            qty = newQty, price = newPrice, employee = newEmployee, meter = newMeter,
+            net, tax, total, id = e.LineId
         }, tx, cancellationToken: ct));
 
         await connection.ExecuteAsync(new CommandDefinition("""

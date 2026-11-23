@@ -78,12 +78,21 @@ public sealed partial class ShiftEditRepository
         var newQty = input.Field == "quantity" ? Dec(input.NewValue) : e.Quantity;
         var newPrice = input.Field == "unit_price" ? Dec(input.NewValue) : e.UnitPrice;
         var newEmployee = input.Field == "employee" ? GuidOrNull(input.NewValue) : e.EmployeeId;
+        var newMeter = input.Field == "meter_units" ? Dec(input.NewValue) : e.MeterUnits;
         if (newQty <= 0) throw new ValidationAppException("validation.quantity_invalid");
         if (newPrice < 0) throw new ValidationAppException("validation.amount_invalid");
+        if (input.Field == "meter_units")
+        {
+            // عدد البلصات مربوط بعدّاد أصل ثابت: لا تعديل بلا أصل، ولا قيمة سالبة، ويُعدَّل العداد نفسه.
+            if (e.MeteredAssetId is null)
+                throw new ValidationAppException("validation.item_not_metered");
+            if (newMeter < 0) throw new ValidationAppException("validation.meter_value_invalid");
+        }
         var delta = newQty - e.Quantity;
         if (delta > 0 && newQty > e.BookedQty - e.DeliveredQty + e.Quantity)
             throw new ValidationAppException("validation.booking_quantity_exceeds_remaining");
-        if (delta == 0 && newPrice == e.UnitPrice && newEmployee == e.EmployeeId) return true;
+        if (delta == 0 && newPrice == e.UnitPrice && newEmployee == e.EmployeeId &&
+            newMeter == e.MeterUnits) return true;
 
         var qtyRatio = e.Quantity == 0 ? 1 : newQty / e.Quantity;
         var priceRatio = e.UnitPrice == 0 ? 1 : newPrice / e.UnitPrice;
@@ -95,7 +104,7 @@ public sealed partial class ShiftEditRepository
         // المعدّل ما زال مسودة: تُحدَّث قيمه مباشرة بدل إنشاء سلسلة عكس/تعديل جديدة.
         if (e.Status == ExecutionStatuses.Draft && e.ExecutionType == ExecutionTypes.Adjusted)
             return await UpdateDraftExecutionAsync(connection, tx, e, newQty, newPrice, newEmployee,
-                net, tax, total, delta, input.Field, userId, ct);
+                net, tax, total, delta, newMeter, input.Field, userId, ct);
 
         var targetShiftId = await ResolveExecutionShiftAsync(connection, tx, e, ct);
 
@@ -110,7 +119,7 @@ public sealed partial class ShiftEditRepository
         var adjustedId = await InsertExecutionAsync(connection, tx, e, ExecutionTypes.Adjusted,
             e.Id, targetShiftId, ExecutionStatuses.Draft, userId, ct);
         await InsertExecutionLineAsync(connection, tx, adjustedId, e, newQty, net, tax, total,
-            0, e.MeterUnits, newPrice, newEmployee, ct);
+            0, newMeter, newPrice, newEmployee, ct);
 
         await connection.ExecuteAsync(new CommandDefinition("""
             UPDATE booking_executions

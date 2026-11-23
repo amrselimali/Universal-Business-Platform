@@ -41,6 +41,7 @@ public sealed class EmployeeRepository : IEmployeeRepository
         e.treatment_account_id AS TreatmentAccountId,
         e.branch_id AS BranchId,
         (SELECT b.name_ar FROM branches b WHERE b.id = e.branch_id) AS BranchName,
+        (SELECT p.status FROM payroll_employee_profiles p WHERE p.employee_id = e.id) AS PayrollProfileStatus,
         e.notes AS Notes, e.is_active AS IsActive, e.version AS Version
         """;
 

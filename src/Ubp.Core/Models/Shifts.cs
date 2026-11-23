@@ -234,6 +234,7 @@ public sealed class ShiftReport
     public List<ShiftExpenseRow> Expenses { get; set; } = new();
     public decimal ExpensesTotal =>
         Math.Round(Expenses.Sum(e => e.Amount), 2, MidpointRounding.AwayFromZero);
+
     public string? Notes { get; set; }
 
     public decimal CollectionsTotal =>

@@ -11,6 +11,9 @@ public interface IBookingExecutionRepository
         CancellationToken ct = default);
     Task<BookingExecutionResult> ExecuteAsync(BookingExecutionInput input, Guid userId,
         bool allowNegative, CancellationToken ct = default);
+    /// <summary>هل يوجد حجز مؤكد لنفس العميل (ومع نفس الموظف عند تحديده) في اليوم المحدد؟ — 0213.</summary>
+    Task<bool> HasConfirmedBookingTodayAsync(Guid customerId, Guid? employeeId, DateOnly today,
+        CancellationToken ct = default);
     /// <summary>ترحيل تنفيذات الشفت المسودة (الأصلي/العكسي/المعدّل) مع الشفت.</summary>
     Task<int> PostDraftsForShiftAsync(Guid shiftId, Guid userId, bool allowNegative,
         CancellationToken ct = default);
@@ -21,6 +24,25 @@ public sealed partial class BookingExecutionRepository : IBookingExecutionReposi
     private readonly IDbConnectionFactory _factory;
     public BookingExecutionRepository(IDbConnectionFactory factory) => _factory = factory;
 
+    /// <summary>
+    /// 0213: وجود حجز مؤكد لنفس العميل في يوم التنفيذ — يُشترط مع الموظف المسؤول عن التنفيذ إن وُجد.
+    /// </summary>
+    public async Task<bool> HasConfirmedBookingTodayAsync(Guid customerId, Guid? employeeId,
+        DateOnly today, CancellationToken ct = default)
+    {
+        await using var connection = await _factory.OpenAsync(ct);
+        return await connection.ExecuteScalarAsync<bool>(new CommandDefinition("""
+            SELECT EXISTS (
+                SELECT 1
+                FROM bookings b
+                WHERE b.customer_id = @customerId
+                  AND b.status IN ('confirmed', 'partially_delivered')
+                  AND b.booking_date = @today
+                  AND (CAST(@employeeId AS uuid) IS NULL OR b.assigned_employee_id = @employeeId)
+            )
+            """, new { customerId, employeeId, today }, cancellationToken: ct));
+    }
+
     public async Task<BookingExecutionPreview> GetPreviewAsync(Guid bookingLineId,
         CancellationToken ct = default)
     {
@@ -28,6 +50,8 @@ public sealed partial class BookingExecutionRepository : IBookingExecutionReposi
         var preview = await connection.QuerySingleOrDefaultAsync<BookingExecutionPreview>(
             new CommandDefinition("""
                 SELECT b.id AS BookingId, l.id AS BookingLineId, b.doc_no AS BookingNo,
+                       b.status AS BookingStatus, b.booking_date AS BookingDate,
+                       b.assigned_employee_id AS AssignedEmployeeId,
                        b.branch_id AS BranchId, b.customer_id AS CustomerId,
                        c.name_ar AS CustomerName, l.item_id AS ItemId, i.code AS ItemCode,
                        i.name_ar AS ItemName, i.item_type AS ItemType, l.unit_id AS UnitId,
@@ -39,6 +63,8 @@ public sealed partial class BookingExecutionRepository : IBookingExecutionReposi
                        GREATEST(l.quantity - l.delivered_qty - l.cancelled_qty, 0) AS RemainingQty,
                        l.unit_price AS UnitPrice,
                        COALESCE(resp.name_ar, bk.employee_name, ap.employee_name) AS EmployeeName,
+                       COALESCE(resp.id, bk.employee_id, ap.employee_id) AS EmployeeId,
+                       COALESCE(resp.branch_id, bk.branch_id, ap.branch_id) AS EmployeeBranchId,
                        i.is_metered AS ItemIsMetered
                 FROM booking_lines l
                 JOIN bookings b ON b.id = l.booking_id
@@ -55,24 +81,32 @@ public sealed partial class BookingExecutionRepository : IBookingExecutionReposi
                 -- (2) حجز مؤكد آخر لنفس العميل مع موظف مسؤول (أي خدمة): يكفي وجود حجز
                 --     مؤكد بين الموظف المسؤول والعميل لإتاحة التنفيذ بغض النظر عن الخدمة.
                 LEFT JOIN LATERAL (
-                    SELECT e2.name_ar AS employee_name
+                    SELECT e2.name_ar AS employee_name, e2.id AS employee_id,
+                           e2.branch_id AS branch_id
                     FROM bookings b2
                     JOIN employees e2 ON e2.id = b2.assigned_employee_id
                     WHERE b2.customer_id = b.customer_id
                       AND b2.status IN ('confirmed', 'partially_delivered')
                       AND b2.assigned_employee_id IS NOT NULL
-                    ORDER BY CASE WHEN b2.id = b.id THEN 0 ELSE 1 END, b2.booking_date DESC
+                    ORDER BY CASE WHEN b2.id = b.id THEN 0 ELSE 1 END,
+                             -- نفس فرع التنفيذ أولاً: لا يُربط التنفيذ بموظف فرع آخر (0214).
+                             CASE WHEN e2.branch_id = b.branch_id OR e2.branch_id IS NULL
+                                  THEN 0 ELSE 1 END,
+                             b2.booking_date DESC
                     LIMIT 1
                 ) bk ON true
                 -- (3) توافق خلفي: موعد العميل (المؤكد أولاً) — بلا قيد على الفرع أو الخدمة،
                 --     لأن دوام الموظف قد يُسجَّل على فرع آخر، والمهم ربط العميل بالموظف.
                 LEFT JOIN LATERAL (
-                    SELECT emp.name_ar AS employee_name
+                    SELECT emp.name_ar AS employee_name, emp.id AS employee_id,
+                           emp.branch_id AS branch_id
                     FROM appointments ap
                     JOIN employees emp ON emp.id = ap.employee_id
                     WHERE ap.customer_id = b.customer_id
                       AND ap.status <> 'cancelled'
                     ORDER BY CASE WHEN ap.booking_id = b.id THEN 0 ELSE 1 END,
+                             CASE WHEN emp.branch_id = b.branch_id OR emp.branch_id IS NULL
+                                  THEN 0 ELSE 1 END,
                              CASE WHEN ap.status = 'confirmed' THEN 0 ELSE 1 END,
                              CASE WHEN ap.branch_id = b.branch_id THEN 0 ELSE 1 END,
                              CASE WHEN (ap.starts_at AT TIME ZONE COALESCE(st.time_zone, 'UTC'))::date =

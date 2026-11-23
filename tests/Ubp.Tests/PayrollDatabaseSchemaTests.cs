@@ -91,4 +91,12 @@ public sealed class PayrollDatabaseSchemaTests : IClassFixture<TestDb>
         Assert.True(await TableExistsAsync("purchase_returns"));
         Assert.True(await TableExistsAsync("purchase_return_lines"));
     }
+
+    [Fact]
+    public async Task BranchesCarryConfirmedBookingExecutionSetting()
+    {
+        var columns = await ColumnsAsync("branches");
+
+        Assert.Contains("require_confirmed_booking_for_execution", columns);
+    }
 }

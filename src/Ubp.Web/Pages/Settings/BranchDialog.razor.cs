@@ -33,6 +33,7 @@ public partial class BranchDialog
             {
                 Code = Model.Code, NameAr = Model.NameAr, NameEn = Model.NameEn,
                 Address = Model.Address, Phone = Model.Phone, IsActive = Model.IsActive,
+                RequireConfirmedBookingForExecution = Model.RequireConfirmedBookingForExecution,
                 CustomFields = Model.CustomFields
             };
             foreach (var pair in Model.CustomFields)

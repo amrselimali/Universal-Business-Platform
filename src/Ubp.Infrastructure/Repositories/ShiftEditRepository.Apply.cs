@@ -29,6 +29,7 @@ public sealed partial class ShiftEditRepository
             s.Status != ShiftStatuses.Open && s.ReviewStatus != ShiftReviewStatuses.Pending)
             throw new ValidationAppException("validation.shift_edit_locked");
 
+
         var applied = input.EntityType switch
         {
             "voucher" => await ApplyVoucherAsync(connection, tx, input, userId, ct),

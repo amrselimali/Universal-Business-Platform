@@ -128,9 +128,13 @@ public sealed partial class ShiftEditRepository : IShiftEditRepository
                    i.name_ar AS ItemName, exe.name_ar AS EmployeeName,
                    NULL::text AS TreasuryName, el.quantity AS Quantity,
                    el.unit_price AS UnitPrice, el.total_amount AS Amount,
-                   NULL::text AS Description, 'quantity,unit_price,employee' AS FieldsCsv,
+                   NULL::text AS Description,
+                   CASE WHEN el.metered_asset_id IS NULL THEN 'quantity,unit_price,employee'
+                        ELSE 'quantity,unit_price,employee,meter_units' END AS FieldsCsv,
                    NULL::uuid AS TreasuryId, NULL::uuid AS AccountId, el.employee_id AS EmployeeId,
-                   be.status AS DocStatus, bl.id AS BookingLineId, be.shift_id AS ShiftId
+                   be.status AS DocStatus, bl.id AS BookingLineId, be.shift_id AS ShiftId,
+                   el.meter_units AS MeterUnits, el.metered_asset_id AS MeteredAssetId,
+                   fa.name_ar AS MeteredAssetName
             FROM booking_executions be
             JOIN booking_execution_lines el ON el.execution_id = be.id
             JOIN booking_lines bl ON bl.id = el.booking_line_id
@@ -138,6 +142,7 @@ public sealed partial class ShiftEditRepository : IShiftEditRepository
             JOIN customers c ON c.id = b.customer_id
             JOIN items i ON i.id = el.item_id
             LEFT JOIN employees exe ON exe.id = el.employee_id
+            LEFT JOIN fixed_assets fa ON fa.id = el.metered_asset_id
             WHERE be.branch_id = @branchId AND be.status IN ('draft', 'posted')
               AND NOT be.is_reversed AND be.execution_type <> 'REVERSAL'
               AND (be.shift_id = @shiftId

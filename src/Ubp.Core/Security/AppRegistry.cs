@@ -184,7 +184,8 @@ public static partial class AppRegistry
             new[] { A(ActionCodes.View), A(ActionCodes.Print) }, "accounting.stock_vs_gl"),
 
         new(ScreenCodes.Employees, "/settings/employees", "Badge", "screen.employees", GroupEmployeeManagement,
-            new[] { A(ActionCodes.View), A(ActionCodes.Create), A(ActionCodes.Edit),
+            new[] { A(ActionCodes.View), A(ActionCodes.ViewBasic), A(ActionCodes.Create),
+                    A(ActionCodes.RegisterBasic), A(ActionCodes.Edit),
                     A(ActionCodes.ToggleActive), A(ActionCodes.Delete) }, "settings.employees"),
 
         new(ScreenCodes.Taxes, "/settings/taxes", "Percent", "screen.taxes", GroupDefinitions,

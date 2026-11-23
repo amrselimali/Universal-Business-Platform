@@ -21,6 +21,12 @@ public sealed class BookingExecutionPreview
     public Guid BookingId { get; set; }
     public Guid BookingLineId { get; set; }
     public string? BookingNo { get; set; }
+    /// <summary>حالة الحجز المنفَّذ (confirmed/partially_delivered…) — 0213.</summary>
+    public string? BookingStatus { get; set; }
+    /// <summary>تاريخ حجز الموعد — 0213.</summary>
+    public DateOnly? BookingDate { get; set; }
+    /// <summary>الموظف المسؤول على الحجز — 0213.</summary>
+    public Guid? AssignedEmployeeId { get; set; }
     public Guid BranchId { get; set; }
     public Guid CustomerId { get; set; }
     public string CustomerName { get; set; } = "";
@@ -41,6 +47,10 @@ public sealed class BookingExecutionPreview
     public decimal RemainingQty { get; set; }
     public decimal UnitPrice { get; set; }
     public string? EmployeeName { get; set; }
+    /// <summary>الموظف المسؤول المحلول (حجز/موعد) — يُستخدم في التحقق من فرع التنفيذ.</summary>
+    public Guid? EmployeeId { get; set; }
+    /// <summary>فرع الموظف المسؤول؛ NULL = موظف على مستوى الشركة (0091).</summary>
+    public Guid? EmployeeBranchId { get; set; }
     public bool ItemIsMetered { get; set; }
     public IReadOnlyList<ExecutionMeterAsset> MeterAssets { get; set; } =
         Array.Empty<ExecutionMeterAsset>();

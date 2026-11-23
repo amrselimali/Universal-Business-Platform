@@ -21,6 +21,8 @@ public sealed partial class BookingRepository
         await using var connection = await _factory.OpenAsync(ct);
         await using var tx = await connection.BeginTransactionAsync(ct);
         await EnsureDraftEmployeeAsync(connection, tx, input.AssignedEmployeeId, ct);
+        await EnsureEmployeeInBookingBranchAsync(connection, tx, input.BranchId,
+            input.AssignedEmployeeId, ct);
         if (input.AssignedEmployeeId is { } dupEmpA)
             await EnsureNoDuplicateDailyBookingAsync(connection, tx, input.CustomerId, dupEmpA,
                 input.BookingDate.Date, null, ct);
@@ -101,6 +103,8 @@ public sealed partial class BookingRepository
         await using var connection = await _factory.OpenAsync(ct);
         await using var tx = await connection.BeginTransactionAsync(ct);
         await EnsureDraftEmployeeAsync(connection, tx, input.AssignedEmployeeId, ct);
+        await EnsureEmployeeInBookingBranchAsync(connection, tx, input.BranchId,
+            input.AssignedEmployeeId, ct);
         if (input.AssignedEmployeeId is { } dupEmpC)
             await EnsureNoDuplicateDailyBookingAsync(connection, tx, input.CustomerId, dupEmpC,
                 input.BookingDate.Date, id, ct);

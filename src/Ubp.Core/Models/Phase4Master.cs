@@ -53,10 +53,25 @@ public sealed class Employee
     /// <summary>فرع الموظف؛ null = موظف على مستوى الشركة — 0091.</summary>
     public Guid? BranchId { get; set; }
     public string? BranchName { get; set; }
+    /// <summary>حالة ملف المرتبات (draft = تسجيل مبدئي) — للعرض فقط.</summary>
+    public string? PayrollProfileStatus { get; set; }
+
 
     public string DisplayName(bool english) =>
         english && !string.IsNullOrWhiteSpace(NameEn) ? NameEn! : NameAr;
 }
+/// <summary>
+/// بيانات التسجيل المبدئي لموظف: اسم عربي + هاتف + تاريخ تعيين فقط (كلها اختيارية بلا قيود إلزامية).
+/// </summary>
+public sealed class EmployeeBasicInput
+{
+    public string? NameAr { get; set; }
+    public string? Phone { get; set; }
+    public DateTime? HireDate { get; set; }
+    public Guid? BranchId { get; set; }
+}
+
+
 
 public sealed class EmployeeInput
 {

@@ -35,6 +35,7 @@ public sealed partial class BranchRepository : IBranchRepository
     private const string SelectColumns = """
         b.id AS Id, b.code AS Code, b.name_ar AS NameAr, b.name_en AS NameEn,
         b.address AS Address, b.phone AS Phone, b.is_active AS IsActive,
+        b.require_confirmed_booking_for_execution AS RequireConfirmedBookingForExecution,
         b.custom_fields::text AS CustomFieldsJson,
         b.created_at AS CreatedAt, b.updated_at AS UpdatedAt, b.version AS Version
         """;

@@ -18,7 +18,7 @@ public sealed class AuditService
             BranchId = actor.CurrentBranchId,
             TableName = tableName,
             RecordId = recordId,
-            Action = action,
+            Action = AuditActions.Normalize(action),
             OldData = oldData,
             NewData = newData,
             IpAddress = actor.IpAddress,

@@ -34,6 +34,8 @@ public sealed partial class BookingExecutionRepository
         public decimal UnitPrice { get; set; }
         /// <summary>الموظف المسجّل على بند الحجز وقت تسجيل الخدمة (علاجية) — 0088.</summary>
         public Guid? BookingLineEmployeeId { get; set; }
+        /// <summary>فرع الموظف المسؤول/المنفذ — لمنع التنفيذ بموظف فرع آخر (0214).</summary>
+        public Guid? EmployeeBranchId { get; set; }
     }
 
     public async Task<BookingExecutionResult> ExecuteAsync(BookingExecutionInput input,
@@ -60,6 +62,7 @@ public sealed partial class BookingExecutionRepository
                    l.employee_id AS BookingLineEmployeeId,
                    l.operation_type AS OperationType,
                    COALESCE(b.assigned_employee_id, l.employee_id) AS EmployeeId,
+                   COALESCE(resp.branch_id, le.branch_id) AS EmployeeBranchId,
                    COALESCE(resp.treatment_account_id, le.treatment_account_id,
                             (SELECT pd.account_id FROM posting_defaults pd
                              WHERE pd.setting_key = 'employee_advances')) AS TreatmentAccountId
@@ -74,6 +77,17 @@ public sealed partial class BookingExecutionRepository
             ?? throw new NotFoundAppException();
 
         var direct = ItemExecutionModes.IsDirect(line.ExecutionMode);
+        // 0214: الموظف المسؤول أو المنفّذ المختار يجب أن ينتمي لفرع التنفيذ (موظف الشركة بلا فرع مقبول).
+        if (!BookingExecutionRules.EmployeeBelongsToBranch(line.EmployeeBranchId, line.BranchId))
+            throw new ValidationAppException(BookingExecutionRules.BranchMismatchCode);
+        if (input.EmployeeId is { } executorId)
+        {
+            var executorBranch = await connection.ExecuteScalarAsync<Guid?>(new CommandDefinition(
+                "SELECT branch_id FROM employees WHERE id = @id",
+                new { id = executorId }, tx, cancellationToken: ct));
+            if (!BookingExecutionRules.EmployeeBelongsToBranch(executorBranch, line.BranchId))
+                throw new ValidationAppException(BookingExecutionRules.BranchMismatchCode);
+        }
         // جلسة علاجية: يمكن تنفيذها حتى لو الحجز مسودة (مسجّلة كعلاجية مسبقًا).
         if (!direct && line.OperationType != ServiceOperationTypes.Treatment &&
             line.BookingStatus is not (BookingStatuses.Confirmed or BookingStatuses.PartiallyDelivered))

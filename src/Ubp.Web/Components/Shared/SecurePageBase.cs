@@ -24,6 +24,9 @@ public abstract class SecurePageBase : ComponentBase
     protected abstract string ScreenCode { get; }
     protected virtual string RequiredAction => ActionCodes.View;
 
+    /// <summary>أفعال الدخول المقبولة: الافتراضي فعل واحد، ويمكن لصفحة أن تقبل فعلاً بديلاً (مثل VIEW_BASIC).</summary>
+    protected virtual IReadOnlyList<string> RequiredActions => new[] { RequiredAction };
+
     protected override async Task OnInitializedAsync()
     {
         try
@@ -36,7 +39,7 @@ public abstract class SecurePageBase : ComponentBase
             }
 
             _snapshot = await PermissionService.GetSnapshotAsync(Actor.UserId, Actor.IsAdmin);
-            if (!Can(RequiredAction))
+            if (!RequiredActions.Any(Can))
             {
                 Denied = true;
                 return;

@@ -20,6 +20,15 @@
                 <MudSwitch @bind-Value="_input.IsActive" Label="@T.T("common.active")" Color="Color.Success" />
             </div>
 
+            <MudDivider Class="my-4" />
+            <MudText Typo="Typo.subtitle2" Class="mb-2">@T.T("branches.settings_title")</MudText>
+            <MudSwitch @bind-Value="_input.RequireConfirmedBookingForExecution"
+                       Label="@T.T("branches.require_confirmed_booking")"
+                       Color="Color.Primary" />
+            <MudText Typo="Typo.caption" Class="ubp-muted">
+                @T.T("branches.require_confirmed_booking_hint")
+            </MudText>
+
             @if (_fields.Count > 0)
             {
                 <MudDivider Class="my-4" />
