@@ -17,11 +17,7 @@
             <div id="pos-print-area" class="pos-receipt ubp-print-receipt">
                 <div class="pos-receipt-head">
                     <div><b>@T.T("pos.receipt_no"): @ReceiptNo</b></div>
-                    <div>@CustomerName</div>
-                    @if (Receipt.Executed)
-                    {
-                        <div><b>@T.T("pos.direct_sale_done")</b></div>
-                    }
+                    <div>@T.T("sales.customer"): <b>@(Receipt?.CustomerName ?? CustomerName ?? "—")</b></div>
                 </div>
                 <table>
                     <thead>

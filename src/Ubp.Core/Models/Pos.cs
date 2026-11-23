@@ -90,10 +90,18 @@ public sealed class PosReceipt
 {
     public Guid BookingId { get; set; }
     public string? BookingNo { get; set; }
+    /// <summary>اسم العميل من بطاقته — يُطبع على الإيصال مهما كانت حالة الأصناف.</summary>
+    public string? CustomerName { get; set; }
     public DateTimeOffset? ExpiresAt { get; set; }
 
     /// <summary>true = نُفِّذت السطور مباشرة داخل المعاملة (بيع مباشر)، لا مجرد حجز.</summary>
     public bool Executed { get; set; }
+
+    /// <summary>
+    /// true = يوجد سطر واحد على الأقل حُجز أولًا ويُنفَّذ لاحقًا؛ عندها فقط يظهر
+    /// تاريخ انتهاء الصلاحية على الإيصال (البيع المباشر بالكامل بلا صلاحية).
+    /// </summary>
+    public bool HasReservedLines { get; set; }
 
     public decimal Total { get; set; }
     public decimal TaxTotal { get; set; }

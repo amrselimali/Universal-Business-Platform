@@ -23,6 +23,16 @@ public sealed partial class AppointmentRepository
               AND NOT EXISTS (SELECT 1 FROM booking_lines l
                               WHERE l.booking_id = b.id AND l.delivered_qty > 0)
             """, new { employeeId, startsAt, endsAt }, tx, cancellationToken: ct))).ToList();
+        return await RevertBookingsAsync(connection, tx, ids, userId, ct);
+    }
+
+    /// <summary>
+    /// إرجاع حجوزات محددة إلى مسودة: تُحرَّر الكميات المحجوزة ويُفرَّغ الموظف المسؤول
+    /// حتى يعاد جدولتها — يُستخدم عند إلغاء الدوام وعند تعديل وقته (خارج الوقت الجديد).
+    /// </summary>
+    private static async Task<int> RevertBookingsAsync(NpgsqlConnection connection,
+        NpgsqlTransaction tx, IReadOnlyCollection<Guid> ids, Guid userId, CancellationToken ct)
+    {
         if (ids.Count == 0) return 0;
 
         var idArray = ids.ToArray();

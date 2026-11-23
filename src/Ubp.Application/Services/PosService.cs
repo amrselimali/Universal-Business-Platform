@@ -63,13 +63,13 @@ public sealed class PosService
     }
 
     public async Task<IReadOnlyList<CommercialDocument>> ListReceiptsAsync(ActorContext actor,
-        Guid? branchId, DateTime? from, DateTime? to, int limit = 200,
+        Guid? branchId, DateTime? from, DateTime? to, int limit = 200, string? search = null,
         CancellationToken ct = default)
     {
         await _permissions.RequireAsync(actor, ScreenCodes.PosReceipts, ActionCodes.View, ct: ct);
         // لا يبقى الفلتر فارغًا لغير السوبر أدمن (إلغاء الفلتر لا يعرض كل الفروع) — 0096.
         return await _pos.ListReceiptsAsync(BranchScope.Effective(actor, branchId), from, to,
-            limit, ct);
+            limit, search, ct);
     }
 
     /// <summary>تعديل إيصال POS مسودة داخل الشفت المفتوح (عكسي + معدّل).</summary>

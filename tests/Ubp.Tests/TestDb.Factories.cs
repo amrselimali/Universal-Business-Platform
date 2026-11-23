@@ -81,7 +81,7 @@ public sealed partial class TestDb
         new ReservationRepository(Factory));
 
     public SalesFulfillmentService Fulfillment() => new(
-        AppointmentRepo, Permissions(), new AuditService(AuditRepo));
+        AppointmentRepo, Permissions(), new AuditService(AuditRepo), Settings());
 
     public BookingExecutionService Executions() => new(
         ExecutionRepo, BranchRepo, Settings(), Permissions(), new AuditService(AuditRepo));

@@ -196,3 +196,23 @@ public sealed class AppointmentInput
     /// <summary>إجازة يوم كامل تُسجَّل بلا موعد محدد.</summary>
     public bool IsLeave { get; set; }
 }
+
+/// <summary>
+/// حجز مؤكد يتأثر بتعديل دوام الموظف لأنه يقع خارج الوقت الجديد؛ يُعرض في رسالة التنبيه
+/// قبل التأكيد، ثم يعود مسودة بلا موظف مسؤول وتُحرَّر كمياته المحجوزة.
+/// </summary>
+public sealed class AppointmentImpactBooking
+{
+    public Guid BookingId { get; set; }
+    public string? BookingNo { get; set; }
+    public string? CustomerName { get; set; }
+    public DateTimeOffset StartsAt { get; set; }
+    public DateTimeOffset EndsAt { get; set; }
+}
+
+/// <summary>نتيجة تعديل دوام الموظف: الموعد المحدَّث وعدد الحجوزات المؤكدة التي أُعيدت مسودة.</summary>
+public sealed class AppointmentUpdateResult
+{
+    public Appointment Appointment { get; set; } = default!;
+    public int RevertedBookings { get; set; }
+}

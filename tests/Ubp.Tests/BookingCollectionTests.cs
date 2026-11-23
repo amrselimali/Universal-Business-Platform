@@ -17,7 +17,7 @@ public sealed class BookingCollectionTests : IClassFixture<TestDb>
     public BookingCollectionTests(TestDb db) => _db = db;
 
     private async Task<(Guid Branch, Guid Warehouse, Partner Customer, Booking Booking,
-        Guid TreasuryId, Guid MethodId)> SetupAsync(string suffix)
+        Guid TreasuryId, Guid MethodId, Item Service)> SetupAsync(string suffix)
     {
         var actor = await _db.AdminActorAsync();
         var chart = await _db.SeedAccountingAsync();
@@ -59,7 +59,7 @@ public sealed class BookingCollectionTests : IClassFixture<TestDb>
         await _db.TreasuryRepo.CreateMethodAsync(methodId, new TreasuryMethodInput
         { TreasuryId = treasuryId, Code = "CASH", NameAr = "نقدي" }, actor.UserId);
 
-        return (branch, warehouse, customer, booking, treasuryId, methodId);
+        return (branch, warehouse, customer, booking, treasuryId, methodId, service);
     }
 
     private static BookingCollectionInput CollectInput(Guid branch, Guid customer, Guid treasury,
@@ -293,5 +293,66 @@ public sealed class BookingCollectionTests : IClassFixture<TestDb>
         Assert.Equal(100m, await connection.ExecuteScalarAsync<decimal>(
             "SELECT COALESCE(SUM(amount), 0) FROM booking_payments WHERE booking_id = @id",
             new { id = receipt.BookingId }));
+    }
+
+    /// <summary>
+    /// فلتر اسم العميل في شاشة إيصالات POS: يطابق الاسم بتطبيع الحروف العربية (أ/ا، ة/ه)
+    /// ويستثني إيصالات بقية العملاء، ويُظهر الاسم من بطاقة العميل إن كان غير مسجَّل على الإيصال.
+    /// </summary>
+    [Fact]
+    public async Task Receipts_list_filters_by_customer_name_and_falls_back_to_the_customer_card()
+    {
+        var actor = await _db.AdminActorAsync();
+        var f = await SetupAsync("9");
+        var other = await _db.PartnerRepo.CreateAsync(PartnerKind.Customer, new PartnerInput
+        { Code = "BC-C9B", NameAr = "أحمد بحث إيصالات" });
+        var otherBooking = await _db.BookingService().CreateAsync(actor, new BookingInput
+        {
+            BranchId = f.Branch, BookingDate = DateTime.Today, CustomerId = other.Id,
+            Lines =
+            {
+                new BookingLineInput
+                {
+                    ItemId = f.Service.Id, UnitId = f.Service.BaseUnitId,
+                    WarehouseId = f.Warehouse, Quantity = 1, UnitPrice = 100
+                }
+            }
+        });
+        await _db.BookingRepo.ConfirmAsync(otherBooking.Id, actor.UserId, reserveStock: false);
+
+        var collections = _db.BookingCollections();
+        var firstInput = CollectInput(f.Branch, f.Customer.Id, f.TreasuryId, f.MethodId,
+            f.Booking.Id, 100);
+        firstInput.DraftOnly = true; // مسودة حتى يمكن محاكاة إيصال قديم بلا اسم عميل مسجَّل.
+        var first = await collections.CollectAsync(actor, firstInput);
+        await collections.CollectAsync(actor,
+            CollectInput(f.Branch, other.Id, f.TreasuryId, f.MethodId, otherBooking.Id, 100));
+
+        // البحث بالاسم مع تطبيع الهمزة (أحمد ⇐ احمد).
+        var hit = Assert.Single(await _db.Pos().ListReceiptsAsync(actor, f.Branch, null, null,
+            100, "احمد بحث"));
+        Assert.Equal(other.NameAr, hit.PartyName);
+
+        // بحث باسم العميل الأول يستثني إيصال العميل الآخر.
+        var mine = Assert.Single(await _db.Pos().ListReceiptsAsync(actor, f.Branch, null, null,
+            100, f.Customer.NameAr));
+        Assert.Equal(f.Customer.NameAr, mine.PartyName);
+
+        // بحث بلا مطابقة: لا نتائج.
+        Assert.Empty(await _db.Pos().ListReceiptsAsync(actor, f.Branch, null, null, 100,
+            "عميل غير موجود إطلاقًا"));
+
+        // إيصال بلا اسم عميل مسجَّل: يُقرأ الاسم من بطاقة العميل في القائمة وفي التفاصيل/الطباعة.
+        await using var connection = new NpgsqlConnection(TestDb.AdminConnection);
+        await connection.OpenAsync();
+        await connection.ExecuteAsync(
+            "UPDATE vouchers SET party_name = NULL WHERE id = @id", new { id = first.VoucherId });
+
+        var listed = Assert.Single(await _db.Pos().ListReceiptsAsync(actor, f.Branch, null, null,
+            100, f.Customer.NameAr));
+        Assert.Equal(f.Customer.NameAr, listed.PartyName);
+
+        var detail = await _db.PosRepo.GetReceiptDetailAsync(first.VoucherId);
+        Assert.Equal(f.Customer.NameAr, detail!.PartyName);
     }
 }

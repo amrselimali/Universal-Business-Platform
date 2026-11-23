@@ -23,12 +23,15 @@ public sealed partial class PosRepository
     }
 
     public async Task<IReadOnlyList<CommercialDocument>> ListReceiptsAsync(Guid? branchId,
-        DateTime? from, DateTime? to, int limit, CancellationToken ct = default)
+        DateTime? from, DateTime? to, int limit, string? search = null,
+        CancellationToken ct = default)
     {
         await using var connection = await _factory.OpenAsync(ct);
         return (await connection.QueryAsync<CommercialDocument>(new CommandDefinition("""
             SELECT v.id AS Id, v.voucher_type AS DocType, v.doc_no AS DocNo, v.doc_date AS DocDate,
-                   v.status AS Status, v.branch_id AS BranchId, v.party_name AS PartyName,
+                   v.status AS Status, v.branch_id AS BranchId,
+                   -- اسم العميل من الإيصال، وبطاقته إن كان الاسم غير مسجَّل — شاشة إيصالات POS.
+                   COALESCE(NULLIF(v.party_name, ''), c.name_ar) AS PartyName,
                    v.total_amount AS Total, v.fee_total AS AllocatedTotal,
                    v.receipt_type AS ReceiptType, v.is_reversed AS IsReversed,
                    v.parent_receipt_id AS ParentReceiptId, v.shift_id AS ShiftId,
@@ -85,6 +88,7 @@ public sealed partial class PosRepository
                      v.notes) AS Notes
             FROM vouchers v
             LEFT JOIN treasuries t ON t.id = v.treasury_id
+            LEFT JOIN customers c ON c.id = v.party_id
             WHERE v.voucher_type = 'receipt' AND v.party_type = 'C'
               AND (EXISTS (SELECT 1 FROM bookings b
                            WHERE b.customer_id = v.party_id AND b.source = 'pos'
@@ -94,8 +98,14 @@ public sealed partial class PosRepository
               AND (@branchId::uuid IS NULL OR v.branch_id = @branchId::uuid)
               AND (@from::date IS NULL OR v.doc_date >= @from::date)
               AND (@to::date IS NULL OR v.doc_date <= @to::date)
+              -- بحث باسم العميل (بتطبيع الحروف العربية) أو بكوده — فلتر شاشة إيصالات POS.
+              AND (@search::varchar IS NULL
+                   OR normalize_search(COALESCE(NULLIF(v.party_name, ''), c.name_ar))
+                      LIKE '%' || normalize_search(@search) || '%'
+                   OR COALESCE(c.code, '') ILIKE '%' || @search || '%')
             ORDER BY v.doc_date DESC, v.id DESC LIMIT @limit
-            """, new { branchId, from, to, limit = Math.Clamp(limit, 1, 500) },
+            """, new { branchId, from, to, limit = Math.Clamp(limit, 1, 500),
+                search = string.IsNullOrWhiteSpace(search) ? null : search.Trim() },
             cancellationToken: ct))).ToList();
     }
 
@@ -120,7 +130,9 @@ public sealed partial class PosRepository
         var voucher = await connection.QuerySingleOrDefaultAsync<Voucher>(new CommandDefinition("""
             SELECT v.id AS Id, v.voucher_type AS VoucherType, v.branch_id AS BranchId,
                    v.doc_no AS DocNo, v.doc_date AS DocDate, v.status AS Status,
-                   v.party_type AS PartyType, v.party_name AS PartyName, v.party_id AS PartyId,
+                   v.party_type AS PartyType,
+                   COALESCE(NULLIF(v.party_name, ''), c.name_ar) AS PartyName,
+                   v.party_id AS PartyId,
                    v.treasury_id AS TreasuryId, t.code AS TreasuryCode,
                    t.name_ar AS TreasuryName, v.total_amount AS TotalAmount,
                    v.fee_total AS FeeTotal, v.receipt_type AS ReceiptType,
@@ -131,6 +143,7 @@ public sealed partial class PosRepository
                    v.reversed_at AS ReversedAt, v.notes AS Notes, v.posted_at AS PostedAt,
                    v.version AS Version
             FROM vouchers v JOIN treasuries t ON t.id = v.treasury_id
+            LEFT JOIN customers c ON c.id = v.party_id
             WHERE v.id = @id AND v.voucher_type = 'receipt' AND v.party_type = 'C'
             """, new { id = voucherId }, cancellationToken: ct));
         if (voucher is null) return null;

@@ -12,6 +12,12 @@ public interface IAppointmentRepository
         CancellationToken ct = default);
     Task<Appointment> SetStatusAsync(Guid id, int version, string status, Guid userId,
         CancellationToken ct = default);
+    /// <summary>الحجوزات المؤكدة التي ستُعاد مسودة إن اعتُمد الوقت الجديد للدوام.</summary>
+    Task<IReadOnlyList<AppointmentImpactBooking>> ListConfirmedBookingsOutsideAsync(Guid id,
+        DateTimeOffset newStarts, DateTimeOffset newEnds, CancellationToken ct = default);
+    /// <summary>تعديل وقت/ملاحظات الدوام، مع إرجاع الحجوزات المؤكدة خارجه إلى مسودة عند الطلب.</summary>
+    Task<AppointmentUpdateResult> UpdateAsync(Guid id, int version, AppointmentInput input,
+        bool revertOutsideBookings, Guid userId, CancellationToken ct = default);
     Task<Appointment?> GetAsync(Guid id, CancellationToken ct = default);
     Task<IReadOnlyList<Appointment>> ListDayAsync(Guid? branchId, DateTime date,
         CancellationToken ct = default);

@@ -84,6 +84,9 @@ public sealed class PosDirectSaleTests : IClassFixture<TestDb>
         var receipt = await CheckoutAsync(fixture, 4);
 
         Assert.True(receipt.Executed);
+        // بيع مباشر بالكامل: لا أسطر محجوزة ⇒ لا تاريخ صلاحية في الإيصال.
+        Assert.False(receipt.HasReservedLines);
+        Assert.Equal(fixture.Customer.NameAr, receipt.CustomerName);
         Assert.Equal(400m, receipt.Total);
         Assert.Equal(6m, await _db.OnHandAsync(fixture.Item.Id, fixture.Warehouse));
 
@@ -126,6 +129,10 @@ public sealed class PosDirectSaleTests : IClassFixture<TestDb>
         var receipt = await CheckoutAsync(fixture, 4);
 
         Assert.False(receipt.Executed);
+        // محجوز أولًا ويُنفَّذ لاحقًا: تاريخ الصلاحية يظهر في الإيصال.
+        Assert.True(receipt.HasReservedLines);
+        // اسم العميل يظهر على الإيصال في الحالتين.
+        Assert.Equal(fixture.Customer.NameAr, receipt.CustomerName);
         Assert.Equal(10m, await _db.OnHandAsync(fixture.Item.Id, fixture.Warehouse));
 
         await using var connection = new NpgsqlConnection(TestDb.AdminConnection);
@@ -174,6 +181,8 @@ public sealed class PosDirectSaleTests : IClassFixture<TestDb>
         });
 
         Assert.True(receipt.Executed);
+        // سلة مختلطة: يوجد سطر محجوز واحد على الأقل ⇒ الصلاحية تظهر مع عدم وجود ملاحظة تنفيذ.
+        Assert.True(receipt.HasReservedLines);
         Assert.Equal(3m, await _db.OnHandAsync(direct.Id, fixture.Warehouse));
         Assert.Equal(10m, await _db.OnHandAsync(fixture.Item.Id, fixture.Warehouse));
 

@@ -23,6 +23,11 @@ else
                     <MudSelectItem T="Guid?" Value="@((Guid?)branch.Id)">@branch.NameAr</MudSelectItem>
                 }
             </MudSelect>
+            <MudTextField @bind-Value="_search" Label="@T.T("sales.customer_search")"
+                          Placeholder="@T.T("sales.customer_search_hint")" Immediate="true"
+                          DebounceInterval="400" OnDebounceIntervalElapsed="OnSearchAsync"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true"
+                          Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" />
             <MudDatePicker Date="_from" Label="@T.T("common.from_date")"
                            Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="yyyy-MM-dd"
                            Editable="true" DateChanged="OnFromChanged" />
@@ -89,6 +94,7 @@ else
     private IReadOnlyList<CommercialDocument> _items = Array.Empty<CommercialDocument>();
     private IReadOnlyList<Branch> _branches = Array.Empty<Branch>();
     private Guid? _branchId;
+    private string? _search;
     private DateTime? _from = DateTime.Today;
     private DateTime? _to = DateTime.Today;
     private bool _canEdit;
@@ -105,9 +111,14 @@ else
     }
 
     private async Task ReloadAsync() =>
-        _items = await Pos.ListReceiptsAsync(Actor!, _branchId, _from, _to, 500);
+        _items = await Pos.ListReceiptsAsync(Actor!, _branchId, _from, _to, 500, _search);
 
     private Task OnBranchChanged(Guid? value) { _branchId = value; return RunAsync(ReloadAsync); }
+    private Task OnSearchAsync(string? value)
+    {
+        _search = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+        return RunAsync(ReloadAsync);
+    }
     private Task OnFromChanged(DateTime? value) { _from = value; return RunAsync(ReloadAsync); }
     private Task OnToChanged(DateTime? value) { _to = value; return RunAsync(ReloadAsync); }
     private string BranchLabel(Guid? id) =>

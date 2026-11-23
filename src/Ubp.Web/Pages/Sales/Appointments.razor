@@ -74,6 +74,9 @@ else
                     {
                         <MudMenu Icon="@Icons.Material.Filled.MoreVert" Dense="true"
                                  AnchorOrigin="Origin.BottomRight">
+                            <MudMenuItem OnClick="@(() => EditAsync(context))">
+                                @T.T("common.edit")
+                            </MudMenuItem>
                             <MudMenuItem OnClick="@(() => SetStatusAsync(context, AppointmentStatuses.Confirmed))">
                                 @T.T("sales.appointment_confirm")
                             </MudMenuItem>
@@ -127,6 +130,24 @@ else
         if ((await dialog.Result) is { Canceled: false })
         {
             await RunAsync(ReloadAsync);
+            ShowSuccess("common.saved");
+        }
+    }
+
+    private async Task EditAsync(Appointment appointment)
+    {
+        var dialog = await Dialogs.ShowAsync<AppointmentDialog>(T.T("sales.edit_appointment"),
+            new DialogParameters
+            {
+                ["Branches"] = _branches, ["DefaultBranchId"] = appointment.BranchId,
+                ["Existing"] = appointment
+            });
+        if ((await dialog.Result) is { Canceled: false } result)
+        {
+            await RunAsync(ReloadAsync);
+            if (result.Data is AppointmentUpdateResult { RevertedBookings: > 0 } update)
+                Snackbar.Add(T.T("sales.appointment_bookings_reverted", update.RevertedBookings),
+                    Severity.Warning);
             ShowSuccess("common.saved");
         }
     }

@@ -25,7 +25,7 @@
             <div id="receipt-view-area" class="pos-receipt ubp-print-receipt">
                 <div class="pos-receipt-head">
                     <div><b>@T.T("pos.receipt_no"): @_receipt.DocNo</b></div>
-                    <div>@_receipt.PartyName</div>
+                    <div>@T.T("sales.customer"): <b>@(_receipt.PartyName ?? "—")</b></div>
                     @if (_receipt.IsSettlementReceipt)
                     {
                         <div>@T.T("common.date"): @_receipt.DocDate.ToString("yyyy-MM-dd")</div>

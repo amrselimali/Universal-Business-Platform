@@ -43,7 +43,7 @@ public sealed class WhatsAppReceiptNotifier : IReceiptNotifier
                     ?? PhoneNumberFormatter.ToWhatsApp(customer?.Phone2);
         if (phone is null) return false;
 
-        var body = $"إيصال {docNo}\nالإجمالي: {total:N2}\nالمدفوع: {paid:N2}"
+        var body = $"إيصال {docNo}\nالعميل: {customer?.NameAr}\nالإجمالي: {total:N2}\nالمدفوع: {paid:N2}"
                    + (remaining is > 0 ? $"\nالمتبقي: {remaining.Value:N2}" : "");
         try
         {

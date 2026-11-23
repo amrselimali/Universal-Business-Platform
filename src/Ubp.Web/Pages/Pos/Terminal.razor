@@ -272,7 +272,7 @@ else
                         <div class="pos-receipt-head">
                             <div><b>@T.T("pos.receipt")</b> — @T.T("pos.preview")</div>
                             <div>@DateTime.Now.ToString("yyyy-MM-dd HH:mm")</div>
-                            <div>@(_customerName ?? "—")</div>
+                            <div>@T.T("sales.customer"): <b>@(_customerName ?? "—")</b></div>
                         </div>
                         <table>
                             <tbody>
@@ -301,6 +301,6 @@ else
 
     <PosFinalReceipt Receipt="_receipt" Lines="_lastLines.Select(l => new PosReceiptLine(l.Name, l.Qty2, l.Total)).ToList()" CustomerName="_customerName"
                      ReceiptNo="ReceiptNo" Net="_lastNet" WhatsAppUrl="WhatsAppUrl"
-                     ShowExpiryDate="@_lastLines.Any(l => !l.IsDirect)"
+                     ShowExpiryDate="@(_receipt?.HasReservedLines == true)"
                      OnPrint="PrintAsync" />
 }

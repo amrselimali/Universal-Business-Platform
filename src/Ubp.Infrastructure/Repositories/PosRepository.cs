@@ -11,8 +11,9 @@ public interface IPosRepository
     Task<PosReceipt> CheckoutAsync(PosCheckoutInput input, Guid userId, bool reserveStock,
         bool allowNegative, CancellationToken ct = default);
     /// <summary>إيصالات التحصيل للفرع مع فلتر تاريخ (يوم إلى يوم) — شاشة إيصالات POS.</summary>
+    /// <summary>إيصالات التحصيل للفرع مع فلتر التاريخ/اليوم وبحث باسم العميل أو كوده.</summary>
     Task<IReadOnlyList<CommercialDocument>> ListReceiptsAsync(Guid? branchId, DateTime? from,
-        DateTime? to, int limit, CancellationToken ct = default);
+        DateTime? to, int limit, string? search = null, CancellationToken ct = default);
     /// <summary>رأس إيصال قبض (عميل/رقم/إجمالي/فرع) لإعادة إرسال الإشعار.</summary>
     Task<(Guid? CustomerId, string? DocNo, decimal Total, Guid BranchId)> GetReceiptHeaderAsync(
         Guid voucherId, CancellationToken ct = default);
@@ -153,7 +154,11 @@ public sealed partial class PosRepository : IPosRepository
         var receipt = new PosReceipt
         {
             BookingId = bookingId, BookingNo = bookingNo, ExpiresAt = expiresAt,
-            Total = total, Executed = lines.Any(l => l.Direct)
+            CustomerName = await connection.ExecuteScalarAsync<string?>(new CommandDefinition(
+                "SELECT name_ar FROM customers WHERE id = @CustomerId",
+                new { input.CustomerId }, tx, cancellationToken: ct)),
+            Total = total, Executed = lines.Any(l => l.Direct),
+            HasReservedLines = lines.Any(l => !l.Direct)
         };
         foreach (var group in payments.GroupBy(p => p.TreasuryId))
         {

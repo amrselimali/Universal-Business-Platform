@@ -1,19 +1,20 @@
 @inherits ComponentBase
 
 <MudDialog>
-    <TitleContent><MudText Typo="Typo.h6">@T.T("sales.new_appointment")</MudText></TitleContent>
+    <TitleContent><MudText Typo="Typo.h6">@T.T(IsEdit ? "sales.edit_appointment" : "sales.new_appointment")</MudText></TitleContent>
     <DialogContent>
         <MudForm @ref="_form">
             <div class="ubp-form-grid">
                 <MudSelect T="Guid" Value="_branchId" Label="@T.T("common.branch")"
-                           Variant="Variant.Outlined" ValueChanged="OnBranchChanged">
+                           Variant="Variant.Outlined" ValueChanged="OnBranchChanged"
+                           Disabled="IsEdit">
                     @foreach (var branch in Branches)
                     {
                         <MudSelectItem T="Guid" Value="@branch.Id">@branch.NameAr</MudSelectItem>
                     }
                 </MudSelect>
                 <MudSelect T="Guid" @bind-Value="_employeeId" Label="@T.T("sales.employee")"
-                           Variant="Variant.Outlined" Required="true">
+                           Variant="Variant.Outlined" Required="true" Disabled="IsEdit">
                     @foreach (var employee in _employees)
                     {
                         <MudSelectItem T="Guid" Value="@employee.Id">
@@ -33,11 +34,35 @@
                               Variant="Variant.Outlined" MaxLength="500" />
             </div>
         </MudForm>
+
+        @if (_pendingImpact.Count > 0)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-3">
+                <MudText Typo="Typo.body2">@T.T("sales.appointment_edit_warning", _pendingImpact.Count)</MudText>
+                <ul class="mb-0">
+                    @foreach (var booking in _pendingImpact)
+                    {
+                        <li>
+                            @booking.BookingNo — @booking.CustomerName —
+                            @Fmt.Time(booking.StartsAt) → @Fmt.Time(booking.EndsAt)
+                        </li>
+                    }
+                </ul>
+            </MudAlert>
+        }
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="Cancel">@T.T("common.cancel")</MudButton>
-        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync"
-                   Disabled="_busy">@T.T("common.save")</MudButton>
+        @if (_pendingImpact.Count > 0)
+        {
+            <MudButton Color="Color.Warning" Variant="Variant.Filled" OnClick="ConfirmConvertAsync"
+                       Disabled="_busy">@T.T("sales.appointment_edit_confirm")</MudButton>
+        }
+        else
+        {
+            <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync"
+                       Disabled="_busy">@T.T("common.save")</MudButton>
+        }
     </DialogActions>
 </MudDialog>
 
@@ -46,12 +71,15 @@
     [Parameter] public IReadOnlyList<Branch> Branches { get; set; } = Array.Empty<Branch>();
     [Parameter] public Guid? DefaultBranchId { get; set; }
     [Parameter] public DateTime DefaultDate { get; set; } = DateTime.Today;
+    /// <summary>الدوام المُراد تعديله؛ NULL = إضافة دوام جديد.</summary>
+    [Parameter] public Appointment? Existing { get; set; }
 
     [Inject] private SalesFulfillmentService Fulfillment { get; set; } = default!;
     [Inject] private MasterDataService MasterData { get; set; } = default!;
     [Inject] private UserContext UserContext { get; set; } = default!;
     [Inject] private UiCulture T { get; set; } = default!;
     [Inject] private ISnackbar Snackbar { get; set; } = default!;
+    [Inject] private IDisplayFormatter Fmt { get; set; } = default!;
 
     private MudForm _form = default!;
     private Guid _branchId;
@@ -64,20 +92,47 @@
     private IReadOnlyList<Employee> _employees = Array.Empty<Employee>();
     private bool _busy;
 
+    /// <summary>وقت الدوام الأصلي بالتوقيت المحلي للشاشة — لكشف تغيير الوقت فعليًا.</summary>
+    private DateTimeOffset _originalStartLocal;
+    private DateTimeOffset _originalEndLocal;
+    /// <summary>الطلب المعلَّق بعد ظهور التنبيه، والحجوزات المؤكدة التي ستُعاد مسودة.</summary>
+    private AppointmentInput? _pendingInput;
+    private IReadOnlyList<AppointmentImpactBooking> _pendingImpact =
+        Array.Empty<AppointmentImpactBooking>();
+
+    private bool IsEdit => Existing is not null;
+
     protected override async Task OnInitializedAsync()
     {
+        if (Existing is { } existing)
+        {
+            _branchId = existing.BranchId;
+            _employeeId = existing.EmployeeId;
+            _isLeave = existing.IsLeave;
+            _notes = existing.Notes;
+            var startLocal = Fmt.ToUserTime(existing.StartsAt);
+            var endLocal = Fmt.ToUserTime(existing.EndsAt);
+            _date = startLocal.Date;
+            _start = startLocal.TimeOfDay;
+            _end = endLocal.TimeOfDay;
+            _originalStartLocal = startLocal;
+            _originalEndLocal = endLocal;
+            await LoadEmployeesAsync(keepSelection: true);
+            return;
+        }
+
         _branchId = DefaultBranchId ?? Branches.FirstOrDefault()?.Id ?? Guid.Empty;
         _date = DefaultDate;
         await LoadEmployeesAsync();
     }
 
     /// <summary>كل الموظفين النشطين في الفرع لتسجيل المواعيد لهم — 0093.</summary>
-    private async Task LoadEmployeesAsync()
+    private async Task LoadEmployeesAsync(bool keepSelection = false)
     {
         var actor = await UserContext.GetAsync();
         if (actor is null) return;
         _employees = await MasterData.EmployeeBranchOptionsAsync(actor, _branchId);
-        _employeeId = _employees.FirstOrDefault()?.Id ?? Guid.Empty;
+        if (!keepSelection) _employeeId = _employees.FirstOrDefault()?.Id ?? Guid.Empty;
     }
 
     private async Task OnBranchChanged(Guid value)
@@ -98,28 +153,90 @@
             return;
         }
 
+        // تاريخ الدوام الجديد لا يسبق تاريخ اليوم (نفس القاعدة مفروضة على الخادم).
+        if (!AppointmentEditRules.IsDateAllowed(DateOnly.FromDateTime(_date.Value.Date),
+                DateOnly.FromDateTime(DateTime.Today)))
+        {
+            Snackbar.Add(T.T(AppointmentEditRules.DateInPastCode), Severity.Warning);
+            return;
+        }
+
         _busy = true;
         try
         {
             var actor = await UserContext.RequireAsync();
-            // الإجازة تُسجَّل ليوم كامل بلا موعد محدد، ويُكتب في الملاحظات «إجازة + الملاحظة».
-            var starts = _isLeave
-                ? new DateTimeOffset(_date.Value.Date)
-                : new DateTimeOffset(_date.Value.Date + _start!.Value);
-            var ends = _isLeave
-                ? starts.AddDays(1).AddTicks(-1)
-                : new DateTimeOffset(_date.Value.Date + _end!.Value);
-            var notes = _isLeave
-                ? $"{T.T("sales.leave")}{(string.IsNullOrWhiteSpace(_notes) ? "" : " + " + _notes.Trim())}"
-                : _notes;
-            var appointment = await Fulfillment.CreateAppointmentAsync(actor, new AppointmentInput
+            var input = BuildInput();
+            if (Existing is null)
             {
-                BranchId = _branchId, EmployeeId = _employeeId,
-                StartsAt = starts, EndsAt = ends, Notes = notes, IsLeave = _isLeave
-            });
-            MudDialog.Close(DialogResult.Ok(appointment));
+                var created = await Fulfillment.CreateAppointmentAsync(actor, input);
+                MudDialog.Close(DialogResult.Ok(created));
+                return;
+            }
+
+            // تغيير الوقت قد يُخرج حجوزات مؤكدة عن الدوام: تُعرض رسالة تنبيه أولاً،
+            // وعند التأكيد فقط تُعاد تلك الحجوزات إلى مسودات.
+            var moved = input.IsLeave != Existing.IsLeave ||
+                        input.StartsAt.UtcDateTime != _originalStartLocal.UtcDateTime ||
+                        input.EndsAt.UtcDateTime != _originalEndLocal.UtcDateTime;
+            if (moved)
+            {
+                var impact = await Fulfillment.GetAppointmentEditImpactAsync(actor, Existing.Id,
+                    input.StartsAt, input.EndsAt);
+                if (impact.Count > 0)
+                {
+                    _pendingInput = input;
+                    _pendingImpact = impact;
+                    StateHasChanged();
+                    return;
+                }
+            }
+
+            await ApplyUpdateAsync(actor, input, revertOutsideBookings: false);
         }
         catch (AppException ex) { Snackbar.Add(T.T(ex.Code), Severity.Error); }
         finally { _busy = false; }
+    }
+
+    /// <summary>تأكيد التنبيه: تعديل الدوام وإرجاع الحجوزات المؤكدة خارجه إلى مسودات.</summary>
+    private async Task ConfirmConvertAsync()
+    {
+        if (Existing is null || _pendingInput is null) return;
+        _busy = true;
+        try
+        {
+            var actor = await UserContext.RequireAsync();
+            await ApplyUpdateAsync(actor, _pendingInput, revertOutsideBookings: true);
+        }
+        catch (AppException ex) { Snackbar.Add(T.T(ex.Code), Severity.Error); }
+        finally { _busy = false; }
+    }
+
+    private async Task ApplyUpdateAsync(ActorContext actor, AppointmentInput input,
+        bool revertOutsideBookings)
+    {
+        var result = await Fulfillment.UpdateAppointmentAsync(actor, Existing!.Id,
+            Existing.Version, input, revertOutsideBookings);
+        MudDialog.Close(DialogResult.Ok(result));
+    }
+
+    private AppointmentInput BuildInput()
+    {
+        var day = _date!.Value.Date;
+        // الإجازة تُسجَّل ليوم كامل بلا موعد محدد، ويُكتب في الملاحظات «إجازة + الملاحظة».
+        var starts = _isLeave
+            ? new DateTimeOffset(day)
+            : new DateTimeOffset(day + _start!.Value);
+        var ends = _isLeave
+            ? starts.AddDays(1).AddTicks(-1)
+            : new DateTimeOffset(day + _end!.Value);
+        var notes = _isLeave
+            ? $"{T.T("sales.leave")}{(string.IsNullOrWhiteSpace(_notes) ? "" : " + " + _notes.Trim())}"
+            : _notes;
+        return new AppointmentInput
+        {
+            BranchId = Existing?.BranchId ?? _branchId,
+            EmployeeId = Existing?.EmployeeId ?? _employeeId,
+            StartsAt = starts, EndsAt = ends, Notes = notes, IsLeave = _isLeave
+        };
     }
 }
