@@ -58,18 +58,18 @@ public sealed class CollectionFeeBehaviorTests : IClassFixture<TestDb>
             """, new { id = receipt.Vouchers.Single().VoucherId });
         Assert.Equal(105m, voucher.Total);
         Assert.Equal(5m, voucher.Fee);
-        Assert.Equal(2m, voucher.ProviderFee);
+        // عمولة المزود تُحسب على إجمالي المدفوع (105 × 2% = 2.1) كما هو سلوك نقطة البيع.
+        Assert.Equal(2.1m, voucher.ProviderFee);
 
         var report = await treasury.GetShiftReportAsync(actor, shift.Id);
-        Assert.Contains(report.Expenses, e => e.Description.Contains("على العميل") &&
-                                             e.Amount == -5m);
-        Assert.Contains(report.Expenses, e => e.Description.Contains("مزود الخدمة") &&
-                                             e.Amount == 2m);
-        Assert.Equal(-3m, report.ExpensesTotal);
+        // سطر واحد لكل خزينة يجمع عمولة العميل (تُضاف) وعمولة المزود (تُخصم): 2.1 − 5 = −2.9.
+        var feeLine = Assert.Single(report.Expenses, e => e.Description.Contains("عمولة التحصيل"));
+        Assert.Equal(-2.9m, feeLine.Amount);
+        Assert.Equal(-2.9m, report.ExpensesTotal);
 
         var closed = await treasury.CloseShiftAsync(actor, shift.Id,
             new List<ShiftCashCountInput>());
-        Assert.Equal(103m, closed.ExpectedCash); // 100 + 5 − 2
+        Assert.Equal(102.9m, closed.ExpectedCash); // 105 − 2.1
 
         await treasury.ReviewShiftAsync(actor, shift.Id);
         var customerFee = await connection.ExecuteScalarAsync<decimal>("""
@@ -85,7 +85,7 @@ public sealed class CollectionFeeBehaviorTests : IClassFixture<TestDb>
             WHERE account_id = @id
             """, new { id = chart["1101"].Id });
         Assert.Equal(5m, customerFee);
-        Assert.Equal(2m, providerFee);
-        Assert.Equal(103m, cash);
+        Assert.Equal(2.1m, providerFee);
+        Assert.Equal(102.9m, cash);
     }
 }

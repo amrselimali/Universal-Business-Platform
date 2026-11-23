@@ -45,6 +45,7 @@ public sealed partial class TreasuryRepository
                           WHERE bp.voucher_id = v.id)) AS ItemName,
                        0::numeric AS UnitPrice,
                        CASE WHEN v.is_shift_settlement THEN 'تسوية دكتور خارجى'::varchar
+                            WHEN v.receipt_type = 'ADVANCE' THEN 'دفعة مقدمة'::varchar
                             WHEN EXISTS (SELECT 1 FROM customer_account_settlements bs
                                          WHERE bs.voucher_id = v.id)
                             THEN 'تسوية حساب عميل'::varchar
@@ -233,22 +234,35 @@ public sealed partial class TreasuryRepository
             cancellationToken: ct));
 
         report.CashCounts = (await QueryCashCountsAsync(connection, shiftId, null, ct)).ToList();
-        if (shift.IsOpen)
+        decimal expectedTotal = 0;
+        foreach (var count in report.CashCounts)
         {
-            decimal expected = 0;
-            foreach (var count in report.CashCounts)
-            {
-                var movement = await TreasuryMovementAsync(connection, null, count.TreasuryId,
-                    shift.OpenedAt, ct);
-                // النقد المتوقع = أول المدة + (المحصل − المنصرف) − عمولة التحصيل — 0081.
-                var fee = await CollectionFeeAsync(connection, null, count.TreasuryId,
-                    shift.OpenedAt, shift.ClosedAt, ct);
-                count.ExpectedCash = Math.Round(count.OpeningCash + movement - fee, 2,
-                    MidpointRounding.AwayFromZero);
-                expected += count.ExpectedCash;
-            }
-            shift.ExpectedCash = Math.Round(expected, 2, MidpointRounding.AwayFromZero);
+            // «حركة اليوم» = تحصيلات العملاء (شاملة عمولة العميل) − عمولة مزود الخدمة فقط،
+            // بلا مصروفات/تحويلات/تسليم نقدية، وتُحسب ديناميكيًا حتى للشفت المغلق.
+            count.Movement = Math.Round(await CollectionsMovementAsync(connection, null,
+                count.TreasuryId, shift.BranchId, shift.OpenedAt, shift.ClosedAt, ct), 2,
+                MidpointRounding.AwayFromZero);
+            if (!shift.IsOpen) continue;
+
+            // النقد المتوقع = أول المدة + صافي الحركة النقدية (تحصيلات − مصروفات/تحويلات/تسليم).
+            var movement = await TreasuryMovementAsync(connection, null, count.TreasuryId,
+                shift.BranchId, shift.OpenedAt, ct);
+            count.ExpectedCash = Math.Round(count.OpeningCash + movement, 2,
+                MidpointRounding.AwayFromZero);
+            count.Variance = count.CountedCash is { } counted
+                ? Math.Round(counted - count.ExpectedCash, 2, MidpointRounding.AwayFromZero)
+                : null;
+            expectedTotal += count.ExpectedCash;
+
+            // تُحفظ القيم المحسوبة حتى يُبنى أي عدّ/فرق لاحق على المتوقع الحالي بعد أي تعديل.
+            await connection.ExecuteAsync(new CommandDefinition("""
+                UPDATE shift_cash_counts SET expected_cash = @expected, variance = @variance
+                WHERE id = @id
+                """, new { expected = count.ExpectedCash, variance = count.Variance,
+                    id = count.Id }, cancellationToken: ct));
         }
+        if (shift.IsOpen)
+            shift.ExpectedCash = Math.Round(expectedTotal, 2, MidpointRounding.AwayFromZero);
 
         report.Meters = (await connection.QueryAsync<ShiftMeterMovementRow>(new CommandDefinition("""
             SELECT fa.id AS AssetId, fa.code AS Code, fa.name_ar AS NameAr,
@@ -323,12 +337,13 @@ public sealed partial class TreasuryRepository
             ORDER BY h.created_at
             """, args, cancellationToken: ct)));
 
-        // عمولة التحصيل المحمَّلة على العميل: مصروف سالب (إيراد) ويُضاف لرصيد الخزينة.
+        // عمولتا التحصيل لخزينة واحدة في سطر واحد: المحمَّلة على العميل (تُضاف) مع المحمَّلة
+        // من مزود الخدمة (تُخصم) — صافي الأثر يُحسب ديناميكيًا من السندات، ولا يظهر سطر عند صفر.
         report.Expenses.AddRange(await connection.QueryAsync<ShiftExpenseRow>(new CommandDefinition("""
             SELECT t.treasury_type AS TreasuryType, t.name_ar AS TreasuryName,
-                   (-ROUND(SUM(v.fee_total), 2)) AS Amount,
+                   ROUND(SUM(v.provider_fee_total) - SUM(v.fee_total), 2) AS Amount,
                    NULL::text AS ItemName, 0::numeric AS Quantity, 0::numeric AS UnitPrice,
-                   'عمولة تحصيل محملة على العميل' AS Description,
+                   'عمولة التحصيل (عمولة العميل + عمولة مزود الخدمة)' AS Description,
                    'POSTED'::varchar AS Status
             FROM vouchers v
             JOIN treasuries t ON t.id = v.treasury_id
@@ -338,26 +353,9 @@ public sealed partial class TreasuryRepository
               AND NOT EXISTS (SELECT 1 FROM customer_account_settlements bs WHERE bs.voucher_id = v.id)
               AND v.created_at >= @openedAt
               AND (@until::timestamptz IS NULL OR v.created_at <= @until::timestamptz)
-            GROUP BY t.treasury_type, t.name_ar
-            HAVING SUM(v.fee_total) > 0
-            """, args, cancellationToken: ct)));
-
-        // عمولة مزود الخدمة: مصروف موجب يُخصم من رصيد الخزينة ولا يظهر في إيصال العميل.
-        report.Expenses.AddRange(await connection.QueryAsync<ShiftExpenseRow>(new CommandDefinition("""
-            SELECT t.treasury_type AS TreasuryType, t.name_ar AS TreasuryName,
-                   ROUND(SUM(v.provider_fee_total), 2) AS Amount,
-                   NULL::text AS ItemName, 0::numeric AS Quantity, 0::numeric AS UnitPrice,
-                   'عمولة مزود الخدمة' AS Description,
-                   'POSTED'::varchar AS Status
-            FROM vouchers v
-            JOIN treasuries t ON t.id = v.treasury_id
-            WHERE v.branch_id = @branchId AND v.voucher_type = 'receipt'
-              AND v.status <> 'cancelled'
-              AND NOT v.is_shift_settlement
-              AND v.created_at >= @openedAt
-              AND (@until::timestamptz IS NULL OR v.created_at <= @until::timestamptz)
-            GROUP BY t.treasury_type, t.name_ar
-            HAVING SUM(v.provider_fee_total) > 0
+            GROUP BY t.id, t.treasury_type, t.name_ar
+            HAVING ROUND(SUM(v.provider_fee_total) - SUM(v.fee_total), 2) <> 0
+            ORDER BY t.name_ar
             """, args, cancellationToken: ct)));
 
         // عمولة تسليم النقدية (0082): مصروف إضافي في الشفت.

@@ -66,17 +66,21 @@ public sealed partial class TreasuryRepository
         Guid? treasuryId = input?.TreasuryId;
         if (treasuryId is null)
             treasuryId = await connection.ExecuteScalarAsync<Guid?>(new CommandDefinition("""
+                -- خزينة التسوية الافتراضية: خزينة الفرع أولًا ثم خزينة الشركة (is_company_wide) — 0215.
                 SELECT id FROM treasuries
-                WHERE branch_id = @branchId AND is_active ORDER BY code LIMIT 1
+                WHERE (is_company_wide OR branch_id = @branchId) AND is_active
+                ORDER BY is_company_wide, code LIMIT 1
                 """, new { branchId = shift.BranchId }, tx, cancellationToken: ct));
         if (treasuryId is null)
             throw new ValidationAppException("validation.treasury_required");
         var treasury = await connection.QuerySingleAsync<(Guid AccountId, Guid BranchId,
-            bool Active)>(new CommandDefinition("""
-            SELECT account_id AS AccountId, branch_id AS BranchId, is_active AS Active
+            bool Active, bool IsCompanyWide)>(new CommandDefinition("""
+            SELECT account_id AS AccountId, branch_id AS BranchId, is_active AS Active,
+                   is_company_wide AS IsCompanyWide
             FROM treasuries WHERE id = @id
             """, new { id = treasuryId }, tx, cancellationToken: ct));
-        if (!treasury.Active || treasury.BranchId != shift.BranchId)
+        // خزينة الشركة مسموحة لأي فرع؛ خزينة الفرع يجب أن تتبع نفس فرع الشفت.
+        if (!treasury.Active || (!treasury.IsCompanyWide && treasury.BranchId != shift.BranchId))
             throw new ValidationAppException("validation.treasury_not_found");
 
         var doctorAccount = await NeedPostingAccountAsync(connection, tx,

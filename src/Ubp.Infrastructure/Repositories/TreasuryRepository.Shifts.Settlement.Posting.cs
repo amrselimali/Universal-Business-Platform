@@ -97,7 +97,9 @@ public sealed partial class TreasuryRepository
             """, new { branchId = shift.BranchId, customerId, openedAt = shift.OpenedAt,
                 until = shift.ClosedAt }, tx, cancellationToken: ct));
         var collections = await connection.ExecuteScalarAsync<decimal>(new CommandDefinition("""
-            SELECT COALESCE(SUM(v.total_amount), 0) FROM vouchers v
+            -- الصافي المسدد فعلاً للعميل: إجمالي السند ناقص عمولة التحصيل المحمَّلة عليه
+            -- (العمولة لا تُقيَّد على حساب العميل، بل تُضاف لرصيد الخزينة عند مراجعة الشفت).
+            SELECT COALESCE(SUM(v.total_amount - v.fee_total), 0) FROM vouchers v
             WHERE v.branch_id = @branchId AND v.voucher_type = 'receipt'
               AND v.party_type = 'C' AND v.party_id = @customerId
               AND v.status <> 'cancelled' AND NOT v.is_shift_settlement

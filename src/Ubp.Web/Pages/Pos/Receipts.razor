@@ -67,6 +67,7 @@ else
                                    OnClick="@(() => SendWhatsAppAsync(context))" />
                     @if (_canEdit && !context.IsReversed &&
                          context.ReceiptType != VoucherReceiptTypes.Reversal &&
+                         context.ReceiptType != VoucherReceiptTypes.Advance &&
                          !context.IsSettlementReceipt && context.Status != "cancelled")
                     {
                         <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"

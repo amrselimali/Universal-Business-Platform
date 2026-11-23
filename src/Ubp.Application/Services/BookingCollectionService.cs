@@ -58,9 +58,13 @@ public sealed class BookingCollectionService
                shift.ExternalDoctorCustomerId == customerId;
     }
 
-    /// <summary>إنشاء سند قبض دفعة مقدمة (Customer advances) داخل شفت الدكتور الخارجي.</summary>
-    public async Task<Guid> CollectAdvanceAsync(ActorContext actor, AdvancePaymentInput input,
-        CancellationToken ct = default)
+    /// <summary>
+    /// إنشاء سند قبض دفعة مقدمة (Customer advances) داخل شفت الدكتور الخارجي.
+    /// الخزينة هي طريقة الدفع (تُستنتج طريقة الخزينة الافتراضية)، وعمولة التحصيل تُحسب
+    /// تلقائيًا من نسبة الخزينة على إجمالي المدفوع وتُسجَّل على السند كما في الإيصال العادي.
+    /// </summary>
+    public async Task<AdvancePaymentResult> CollectAdvanceAsync(ActorContext actor,
+        AdvancePaymentInput input, CancellationToken ct = default)
     {
         await _permissions.RequireAsync(actor, ScreenCodes.PosTerminal, ActionCodes.Collect,
             ct: ct);
@@ -70,17 +74,38 @@ public sealed class BookingCollectionService
         if (shift is not { IsExternalDoctor: true } ||
             shift.ExternalDoctorCustomerId != input.CustomerId)
             throw new ValidationAppException("validation.external_doctor_advance_not_allowed");
-        if (input.TreasuryId == Guid.Empty || input.TreasuryMethodId == Guid.Empty)
+        if (input.TreasuryId == Guid.Empty)
             throw new ValidationAppException("validation.required_fields");
         var customer = (await _partners.GetAsync(PartnerKind.Customer, input.CustomerId, ct))
                        ?? throw new ValidationAppException("validation.customer_not_found");
+
+        // الخزينة = طريقة الدفع: لا تُطلب طريقة من الشاشة، وتُستنتج الافتراضية إن لم تُحدَّد.
+        var treasury = (await _treasury.ListTreasuriesAsync(input.BranchId, ct))
+            .FirstOrDefault(t => t.Id == input.TreasuryId)
+            ?? throw new ValidationAppException("validation.treasury_not_found");
+        if (!treasury.IsCompanyWide && treasury.BranchId != input.BranchId)
+            throw new ValidationAppException("validation.treasury_branch_mismatch");
+
+        var methods = await _treasury.ListMethodsAsync(input.TreasuryId, ct);
+        var method = (input.TreasuryMethodId == Guid.Empty
+                ? null
+                : methods.FirstOrDefault(m => m.Id == input.TreasuryMethodId))
+            ?? methods.FirstOrDefault(m => m.Code == "DEFAULT")
+            ?? methods.FirstOrDefault()
+            ?? throw new ValidationAppException("validation.treasury_method_not_found");
+
+        // عمولة العميل المحمَّلة على السند = نسبة الخزينة من إجمالي المدفوع (مثل إيصال POS).
+        var fee = TreasuryFeeRules.CollectionFee(input.Amount, treasury.CollectionFeePercent);
+        if (fee < 0 || fee >= input.Amount)
+            throw new ValidationAppException("validation.invalid_fee");
 
         var voucherId = Guid.CreateVersion7();
         try
         {
             await _treasury.CreateVoucherAsync(voucherId, new VoucherInput
             {
-                VoucherType = VoucherTypes.Receipt, BranchId = input.BranchId,
+                VoucherType = VoucherTypes.Receipt, ReceiptType = VoucherReceiptTypes.Advance,
+                BranchId = input.BranchId,
                 DocDate = DateTime.Today, PartyType = "C", PartyId = input.CustomerId,
                 PartyName = customer.NameAr, TreasuryId = input.TreasuryId,
                 Notes = string.IsNullOrWhiteSpace(input.Notes)
@@ -88,15 +113,21 @@ public sealed class BookingCollectionService
                 Lines =
                 {
                     new VoucherLineInput
-                    { TreasuryMethodId = input.TreasuryMethodId, Amount = input.Amount }
+                    {
+                        TreasuryMethodId = method.Id, Amount = input.Amount, FeeAmount = fee
+                    }
                 }
             }, actor.UserId, ct);
             await _treasury.SetVoucherShiftAsync(voucherId, shift.Id, ct);
         }
         catch (PostgresException ex) { throw DbErrorMapper.Map(ex); }
         await _audit.WriteAsync(actor, "vouchers", voucherId.ToString(), "INSERT", null,
-            new { input.CustomerId, input.Amount, ShiftId = shift.Id }, ct);
-        return voucherId;
+            new { input.CustomerId, input.Amount, Fee = fee, ShiftId = shift.Id,
+                  TreasuryId = input.TreasuryId, TreasuryMethodId = method.Id }, ct);
+        return new AdvancePaymentResult
+        {
+            VoucherId = voucherId, Amount = input.Amount, Fee = fee
+        };
     }
 
     public async Task<IReadOnlyList<BookingCollectionRow>> ListOutstandingAsync(

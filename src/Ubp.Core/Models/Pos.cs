@@ -68,9 +68,19 @@ public sealed class AdvancePaymentInput
     public Guid BranchId { get; set; }
     public Guid CustomerId { get; set; }
     public Guid TreasuryId { get; set; }
+    /// <summary>اختياري: عند تركه فارغًا تُستخدم طريقة الخزينة الافتراضية (DEFAULT) — كإيصال عادي.</summary>
     public Guid TreasuryMethodId { get; set; }
     public decimal Amount { get; set; }
     public string? Notes { get; set; }
+}
+
+/// <summary>نتيجة سداد الدفعة المقدمة: إجمالي المدفوع، عمولة الخزينة المحمَّلة على العميل، والصافي.</summary>
+public sealed class AdvancePaymentResult
+{
+    public Guid VoucherId { get; set; }
+    public decimal Amount { get; set; }
+    public decimal Fee { get; set; }
+    public decimal Net => TreasuryFeeRules.Net(Amount, Fee);
 }
 
 /// <summary>نتيجة تعديل الإيصال: الإيصال المعدّل والعكسي وحاجة المستند للترحيل الفوري.</summary>

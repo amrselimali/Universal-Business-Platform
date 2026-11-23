@@ -7,7 +7,9 @@
 <MudDialog>
     <TitleContent>
         <MudText Typo="Typo.h6">
-            @(_receipt?.IsSettlementReceipt == true ? T.T("settlement.receipt_title") : T.T("pos.receipt"))
+            @(_receipt?.IsSettlementReceipt == true ? T.T("settlement.receipt_title")
+              : _receipt?.IsAdvanceReceipt == true ? T.T("pos.advance_receipt")
+              : T.T("pos.receipt"))
             — @(_receipt?.DocNo ?? "…")
         </MudText>
     </TitleContent>

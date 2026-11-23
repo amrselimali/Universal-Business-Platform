@@ -38,11 +38,9 @@ public sealed partial class TreasuryRepository
         foreach (var row in rows)
         {
             var movement = await TreasuryMovementAsync(connection, tx, row.TreasuryId,
-                shift.OpenedAt, ct);
-            // النقد المتوقع = أول المدة + (المحصل − المنصرف) للخزينة خلال الشفت (0079).
-            var fee = await CollectionFeeAsync(connection, tx, row.TreasuryId, shift.OpenedAt,
-                shift.ClosedAt, ct);
-            var expected = Math.Round(row.OpeningCash + movement - fee, 2,
+                shift.BranchId, shift.OpenedAt, ct);
+            // النقد المتوقع = أول المدة + حركة اليوم (محصَّل شامل عمولة العميل − عمولة المزود) (0079).
+            var expected = Math.Round(row.OpeningCash + movement, 2,
                 MidpointRounding.AwayFromZero);
             var counted = counts?.FirstOrDefault(c => c.TreasuryId == row.TreasuryId)?.CountedCash
                           ?? expected;
@@ -94,9 +92,13 @@ public sealed partial class TreasuryRepository
         return (await GetShiftAsync(shiftId, ct))!;
     }
 
-    /// <summary>صافي حركة خزينة واحدة منذ فتح الشفت (المرحّل + المسودات، أياً كانت طريقة الدفع).</summary>
+    /// <summary>
+    /// صافي حركة خزينة واحدة منذ فتح الشفت (المرحّل + المسودات، أياً كانت طريقة الدفع):
+    /// الإيصالات تُحسب بالإجمالي المحصَّل شاملاً عمولة العميل ومخصومًا منها عمولة مزود الخدمة.
+    /// </summary>
     private static async Task<decimal> TreasuryMovementAsync(NpgsqlConnection connection,
-        NpgsqlTransaction? tx, Guid treasuryId, DateTimeOffset openedAt, CancellationToken ct) =>
+        NpgsqlTransaction? tx, Guid treasuryId, Guid branchId, DateTimeOffset openedAt,
+        CancellationToken ct) =>
         await connection.ExecuteScalarAsync<decimal>(new CommandDefinition("""
             SELECT COALESCE(SUM(CASE
                        WHEN v.treasury_id = @treasuryId AND v.is_shift_settlement
@@ -110,7 +112,7 @@ public sealed partial class TreasuryRepository
                                         WHERE bs.voucher_id = v.id)
                            THEN -v.total_amount
                        WHEN v.treasury_id = @treasuryId AND v.voucher_type = 'receipt'
-                           THEN v.total_amount - v.fee_total
+                           THEN v.total_amount - v.provider_fee_total
                        WHEN v.treasury_id = @treasuryId AND v.voucher_type = 'payment'
                            THEN -v.total_amount
                        WHEN v.treasury_id = @treasuryId AND v.voucher_type = 'transfer'
@@ -120,12 +122,43 @@ public sealed partial class TreasuryRepository
                        ELSE 0 END), 0)
                    -- تسليم النقدية للحساب الوسيط يخفض نقدية الخزينة في الشفت (0080)
                    - COALESCE((SELECT SUM(h.amount + h.commission_amount) FROM cash_handovers h
-                               WHERE h.treasury_id = @treasuryId
+                               WHERE h.treasury_id = @treasuryId AND h.branch_id = @branchId
                                  AND h.created_at >= @openedAt), 0)
             FROM vouchers v
-            WHERE v.status <> 'cancelled' AND v.created_at >= @openedAt
+            -- الخزينة قد تكون خزينة شركة مشتركة: تُحسب حركة فرع الشفت فقط — 0216.
+            WHERE v.branch_id = @branchId AND v.status <> 'cancelled'
+              AND v.created_at >= @openedAt
               AND (v.treasury_id = @treasuryId OR v.to_treasury_id = @treasuryId)
-            """, new { treasuryId, openedAt }, tx, cancellationToken: ct));
+            """, new { treasuryId, branchId, openedAt }, tx, cancellationToken: ct));
+
+    /// <summary>
+    /// «حركة اليوم» في عدّ النقدية: إجمالي القيم المسددة من العملاء (شاملة عمولة التحصيل المحمَّلة
+    /// على العميل) − عمولة مزود الخدمة − سندات الصرف على نفس الخزينة.
+    /// التحويلات بين الخزائن وتسليم النقدية لا تدخل فيها (ليست تحصيلًا ولا سند صرف)،
+    /// ومرتجع تسوية حساب العميل يُخصم، وتسوية الشفت لا تدخل.
+    /// </summary>
+    private static async Task<decimal> CollectionsMovementAsync(NpgsqlConnection connection,
+        NpgsqlTransaction? tx, Guid treasuryId, Guid branchId, DateTimeOffset openedAt,
+        DateTimeOffset? until, CancellationToken ct) =>
+        await connection.ExecuteScalarAsync<decimal>(new CommandDefinition("""
+            SELECT COALESCE(SUM(CASE
+                       WHEN v.voucher_type = 'receipt' AND EXISTS (
+                                SELECT 1 FROM customer_account_settlements bs
+                                WHERE bs.voucher_id = v.id)
+                         THEN -v.total_amount
+                       WHEN v.voucher_type = 'receipt'
+                         THEN v.total_amount - v.provider_fee_total
+                       WHEN v.voucher_type = 'payment'
+                         THEN -v.total_amount
+                       ELSE 0 END), 0)
+            FROM vouchers v
+            -- الخزينة قد تكون خزينة شركة مشتركة: تُحسب حركة فرع الشفت فقط — 0216.
+            WHERE v.branch_id = @branchId AND v.treasury_id = @treasuryId
+              AND v.voucher_type IN ('receipt', 'payment')
+              AND v.status <> 'cancelled' AND NOT v.is_shift_settlement
+              AND v.created_at >= @openedAt
+              AND (@until::timestamptz IS NULL OR v.created_at <= @until::timestamptz)
+            """, new { treasuryId, branchId, openedAt, until }, tx, cancellationToken: ct));
 
     /// <summary>عدّ النقدية لكل خزينة في الشفت.</summary>
     private static async Task<IReadOnlyList<ShiftCashCount>> QueryCashCountsAsync(
@@ -182,16 +215,42 @@ public sealed partial class TreasuryRepository
     {
         if (countedCash < 0) throw new ValidationAppException("validation.shift_counted_cash");
         await using var connection = await _factory.OpenAsync(ct);
-        var updated = await connection.ExecuteAsync(new CommandDefinition("""
-            UPDATE shift_cash_counts c
-            SET counted_cash = @counted,
-                variance = ROUND(@counted - c.expected_cash, 2)
-            WHERE c.shift_id = @shiftId AND c.treasury_id = @treasuryId
-              AND EXISTS (SELECT 1 FROM cashier_shifts s
-                          WHERE s.id = c.shift_id AND s.status = 'open')
-            """, new { shiftId, treasuryId, counted = Math.Round(countedCash, 2,
-                MidpointRounding.AwayFromZero) }, cancellationToken: ct));
-        return updated > 0;
+        await using var tx = await connection.BeginTransactionAsync(ct);
+
+        // الشفت المفتوح فقط يقبل العدّ (مسودة قبل الإغلاق).
+        var shift = await connection.QuerySingleOrDefaultAsync<(DateTimeOffset OpenedAt,
+            DateTimeOffset? ClosedAt, Guid BranchId)>(new CommandDefinition("""
+            SELECT opened_at AS OpenedAt, closed_at AS ClosedAt, branch_id AS BranchId
+            FROM cashier_shifts WHERE id = @shiftId AND status = 'open'
+            FOR UPDATE
+            """, new { shiftId }, tx, cancellationToken: ct));
+        if (shift.OpenedAt == default) { await tx.RollbackAsync(ct); return false; }
+
+        var row = await connection.QuerySingleOrDefaultAsync<(Guid Id, decimal OpeningCash)>(
+            new CommandDefinition("""
+            SELECT id AS Id, opening_cash AS OpeningCash FROM shift_cash_counts
+            WHERE shift_id = @shiftId AND treasury_id = @treasuryId
+            FOR UPDATE
+            """, new { shiftId, treasuryId }, tx, cancellationToken: ct));
+        if (row.Id == Guid.Empty) { await tx.RollbackAsync(ct); return false; }
+
+        // القيم تُحسب ديناميكيًا عند كل حفظ: أي إيصال/عمولة/تسليم جديد ينعكس فورًا
+        // على حركة اليوم والنقد المتوقع والفرق بدون انتظار إغلاق الشفت.
+        var movement = await TreasuryMovementAsync(connection, tx, treasuryId, shift.BranchId,
+            shift.OpenedAt, ct);
+        var expected = Math.Round(row.OpeningCash + movement, 2,
+            MidpointRounding.AwayFromZero);
+        var counted = Math.Round(countedCash, 2, MidpointRounding.AwayFromZero);
+        var variance = Math.Round(counted - expected, 2, MidpointRounding.AwayFromZero);
+
+        await connection.ExecuteAsync(new CommandDefinition("""
+            UPDATE shift_cash_counts
+            SET expected_cash = @expected, counted_cash = @counted, variance = @variance
+            WHERE id = @id
+            """, new { expected, counted, variance, id = row.Id }, tx, cancellationToken: ct));
+
+        await tx.CommitAsync(ct);
+        return true;
     }
 
     public async Task<IReadOnlyList<ShiftCashCount>> ListCashCountsAsync(Guid shiftId,
@@ -200,18 +259,4 @@ public sealed partial class TreasuryRepository
         await using var connection = await _factory.OpenAsync(ct);
         return await QueryCashCountsAsync(connection, shiftId, null, ct);
     }
-
-    /// <summary>صافي أثر العمولات على نقدية الخزينة = عمولة المزود − عمولة العميل.</summary>
-    private static async Task<decimal> CollectionFeeAsync(NpgsqlConnection connection,
-        NpgsqlTransaction? tx, Guid treasuryId, DateTimeOffset openedAt, DateTimeOffset? until,
-        CancellationToken ct) =>
-        await connection.ExecuteScalarAsync<decimal>(new CommandDefinition("""
-            SELECT COALESCE(SUM(v.provider_fee_total - v.fee_total), 0)
-            FROM vouchers v
-            WHERE v.treasury_id = @treasuryId AND v.voucher_type = 'receipt'
-              AND v.status <> 'cancelled' AND NOT v.is_shift_settlement
-              AND NOT EXISTS (SELECT 1 FROM customer_account_settlements bs WHERE bs.voucher_id = v.id)
-              AND v.created_at >= @openedAt
-              AND (@until::timestamptz IS NULL OR v.created_at <= @until::timestamptz)
-            """, new { treasuryId, openedAt, until }, tx, cancellationToken: ct));
 }

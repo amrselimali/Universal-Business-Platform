@@ -1,7 +1,6 @@
 @using TreasuryModel = Ubp.Core.Models.Treasury
 @using Ubp.Core.Results
 @inject BookingCollectionService Collections
-@inject LookupService Lookup
 @inject UserContext UserContext
 @inject UiCulture T
 @inject ISnackbar Snackbar
@@ -11,34 +10,54 @@
     <DialogContent>
         <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
             دفعة مقدمة بلا خدمة محجوزة داخل شفت الدكتور الخارجى (تُرَحَّل ضمن دفعات العملاء المقدمة).
+            الخزينة هي طريقة الدفع، وعمولة التحصيل تُحسب تلقائيًا من إعدادات الخزينة مثل الإيصال العادي.
         </MudAlert>
         <div class="ubp-form-grid">
-            <MudNumericField T="decimal" @bind-Value="_amount" Label="مبلغ الدفعة"
-                             Min="0.01m" Format="N2" Variant="Variant.Outlined" />
+            <MudNumericField T="decimal" Value="_amount" ValueChanged="OnAmountChanged"
+                             Label="مبلغ الدفعة" Min="0.01m" Format="N2"
+                             Variant="Variant.Outlined" />
             <MudSelect T="Guid?" Value="_treasuryId" Label="الخزينة"
                        Variant="Variant.Outlined" ValueChanged="OnTreasuryChanged">
                 @foreach (var treasury in Treasuries)
                 {
                     <MudSelectItem T="Guid?" Value="@((Guid?)treasury.Id)">
                         @treasury.Code — @treasury.NameAr
+                        (@treasury.CollectionFeePercent.ToString("N2")%)
                     </MudSelectItem>
                 }
             </MudSelect>
-            <MudSelect T="Guid" @bind-Value="_methodId" Label="طريقة الدفع"
-                       Variant="Variant.Outlined">
-                @foreach (var method in _methods)
-                {
-                    <MudSelectItem T="Guid" Value="@method.Id">@method.Code — @method.NameAr</MudSelectItem>
-                }
-            </MudSelect>
+            <MudNumericField T="decimal" Value="_fee" Label="@T.T("pos.treasury_fee")"
+                             Format="N2" Variant="Variant.Outlined" ReadOnly="true" />
+            <MudNumericField T="decimal" Value="_net" Label="@T.T("pos.net_paid")"
+                             Format="N2" Variant="Variant.Outlined" ReadOnly="true" />
             <MudTextField @bind-Value="_notes" Label="ملاحظات" Variant="Variant.Outlined"
                           MaxLength="500" Class="ubp-span-2" />
         </div>
+
+        @if (_amount > 0 && SelectedTreasury is { } preview)
+        {
+            <MudDivider Class="my-3" />
+            <MudText Typo="Typo.subtitle2" Class="mb-2">@T.T("pos.receipt_preview")</MudText>
+            <div class="pos-receipt">
+                <div class="pos-receipt-head">
+                    <div><b>@T.T("pos.receipt_no"): —</b></div>
+                    <div>@T.T("sales.customer"): <b>@CustomerName</b></div>
+                    <div>@T.T("treasury.treasury"): @preview.Code — @preview.NameAr</div>
+                </div>
+                <div class="pos-receipt-totals">
+                    <div><span>مبلغ الدفعة</span><span>@(_amount - _fee).ToString("N2")</span></div>
+                    <div><span>@T.T("pos.treasury_fee")</span><span>@_fee.ToString("N2")</span></div>
+                    <div><b>@T.T("pos.grand_due")</b><b>@_amount.ToString("N2")</b></div>
+                    <div><span>@T.T("pos.paid_amount")</span><span>@_amount.ToString("N2")</span></div>
+                    <div><span>@T.T("pos.remaining")</span><span>@(0m.ToString("N2"))</span></div>
+                </div>
+            </div>
+        }
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="Cancel" Disabled="_busy">@T.T("common.cancel")</MudButton>
         <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync"
-                   Disabled="@(_busy || _amount <= 0 || _treasuryId is null || _methodId == Guid.Empty)">
+                   Disabled="@(_busy || _amount <= 0 || _treasuryId is null || _net <= 0)">
             @T.T("common.save")
         </MudButton>
     </DialogActions>
@@ -53,53 +72,58 @@
         Array.Empty<TreasuryModel>();
 
     private decimal _amount;
+    private decimal _fee;
+    private decimal _net;
     private Guid? _treasuryId;
-    private Guid _methodId;
     private string? _notes;
-    private IReadOnlyList<TreasuryMethod> _methods = Array.Empty<TreasuryMethod>();
     private bool _busy;
 
-    protected override async Task OnInitializedAsync()
+    protected override void OnInitialized()
     {
         _treasuryId = Treasuries.FirstOrDefault()?.Id;
-        await LoadMethodsAsync();
+        Recalculate();
     }
 
-    private async Task OnTreasuryChanged(Guid? treasuryId)
+    private TreasuryModel? SelectedTreasury =>
+        Treasuries.FirstOrDefault(t => t.Id == _treasuryId);
+
+    private void OnTreasuryChanged(Guid? treasuryId)
     {
         _treasuryId = treasuryId;
-        await LoadMethodsAsync();
+        Recalculate();
     }
 
-    private async Task LoadMethodsAsync()
+    private void OnAmountChanged(decimal amount)
     {
-        var actor = await UserContext.GetAsync();
-        if (actor is null || _treasuryId is null)
-        {
-            _methods = Array.Empty<TreasuryMethod>();
-            _methodId = Guid.Empty;
-            return;
-        }
-        _methods = (await Lookup.TreasuryMethodsAsync(actor, BranchId))
-            .Where(m => m.TreasuryId == _treasuryId).ToList();
-        _methodId = _methods.FirstOrDefault()?.Id ?? Guid.Empty;
+        _amount = amount;
+        Recalculate();
+    }
+
+    /// <summary>
+    /// عمولة الخزينة وصافي المسدد بنفس معادلة الإيصال العادي (نسبة الخزينة من إجمالي المدفوع).
+    /// </summary>
+    private void Recalculate()
+    {
+        _fee = TreasuryFeeRules.CollectionFee(_amount,
+            SelectedTreasury?.CollectionFeePercent ?? 0);
+        _net = TreasuryFeeRules.Net(_amount, _fee);
     }
 
     private void Cancel() => MudDialog.Cancel();
 
     private async Task SaveAsync()
     {
-        if (_treasuryId is null || _methodId == Guid.Empty || _amount <= 0) return;
+        if (_treasuryId is null || _amount <= 0 || _net <= 0) return;
         _busy = true;
         try
         {
             var actor = await UserContext.RequireAsync();
-            var voucherId = await Collections.CollectAdvanceAsync(actor, new AdvancePaymentInput
+            var result = await Collections.CollectAdvanceAsync(actor, new AdvancePaymentInput
             {
                 BranchId = BranchId, CustomerId = CustomerId, TreasuryId = _treasuryId.Value,
-                TreasuryMethodId = _methodId, Amount = _amount, Notes = _notes
+                Amount = _amount, Notes = _notes
             });
-            MudDialog.Close(DialogResult.Ok(voucherId));
+            MudDialog.Close(DialogResult.Ok(result));
         }
         catch (AppException ex) { Snackbar.Add(T.T(ex.Code), Severity.Error); }
         finally { _busy = false; }

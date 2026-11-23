@@ -41,8 +41,10 @@ public sealed partial class PosRepository
                            WHERE s.id = v.shift_id AND s.status = 'open') AS ShiftOpen,
                    v.journal_entry_id AS JournalEntryId,
                    t.name_ar AS TreasuryName,
-                   -- مضمون جدول الإيصال في خلية واحدة: تسوية/خدمات البيع/حجوزات السداد — 0096.
+                   -- مضمون جدول الإيصال في خلية واحدة: دفعة مقدمة/تسوية/خدمات البيع/حجوزات السداد — 0096.
                    COALESCE(
+                     CASE WHEN v.receipt_type = 'ADVANCE'
+                          THEN 'دفعة مقدمة — ' || COALESCE(t.name_ar, '') END,
                      (SELECT string_agg(i.name_ar || ' × ' ||
                               trim(to_char(bsl.settled_qty, 'FM999999990.##')) || ' — ' ||
                               trim(to_char(bsl.refund_amount, 'FM999999990.00')), ' • ')
@@ -94,7 +96,9 @@ public sealed partial class PosRepository
                            WHERE b.customer_id = v.party_id AND b.source = 'pos'
                              AND b.branch_id = v.branch_id AND b.booking_date = v.doc_date)
                    OR EXISTS (SELECT 1 FROM booking_payments bp WHERE bp.voucher_id = v.id)
-                   OR EXISTS (SELECT 1 FROM customer_account_settlements bs WHERE bs.voucher_id = v.id))
+                   OR EXISTS (SELECT 1 FROM customer_account_settlements bs WHERE bs.voucher_id = v.id)
+                   -- إيصال دفعة مقدمة (شفت دكتور خارجي) يُعامل كإيصال التحصيل العادي — 0215.
+                   OR v.receipt_type = 'ADVANCE')
               AND (@branchId::uuid IS NULL OR v.branch_id = @branchId::uuid)
               AND (@from::date IS NULL OR v.doc_date >= @from::date)
               AND (@to::date IS NULL OR v.doc_date <= @to::date)
@@ -156,6 +160,28 @@ public sealed partial class PosRepository
             JOIN treasury_methods m ON m.id = l.treasury_method_id
             WHERE l.voucher_id = @id ORDER BY l.line_no
             """, new { id = voucherId }, cancellationToken: ct))).ToList();
+
+        // إيصال دفعة مقدمة (شفت دكتور خارجي): يُعرض بجدول إيصال التحصيل العادي — 0215.
+        if (voucher.ReceiptType == VoucherReceiptTypes.Advance)
+        {
+            var net = Math.Round(voucher.TotalAmount - voucher.FeeTotal, 2,
+                MidpointRounding.AwayFromZero);
+            voucher.IsAdvanceReceipt = true;
+            voucher.IsCollectionReceipt = true;
+            voucher.DisplayLines = new List<ReceiptLineDisplay>
+            {
+                new()
+                {
+                    Description = "دفعة مقدمة — " + (voucher.TreasuryName ?? ""),
+                    ServiceName = "دفعة مقدمة", Quantity = 1, UnitPrice = net, Value = net
+                }
+            };
+            voucher.DueTotal = net;
+            voucher.TaxTotal = 0;
+            voucher.PaidBefore = 0;
+            voucher.RemainingDue = 0;
+            return voucher;
+        }
 
         var settlement = await connection.QuerySingleOrDefaultAsync<(Guid Id, decimal Total,
             string? UserName)>(new CommandDefinition("""

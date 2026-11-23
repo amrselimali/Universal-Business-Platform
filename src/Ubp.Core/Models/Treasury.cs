@@ -39,6 +39,8 @@ public static class VoucherReceiptTypes
     public const string Original = "ORIGINAL";
     public const string Reversal = "REVERSAL";
     public const string Adjusted = "ADJUSTED";
+    /// <summary>إيصال دفعة مقدمة (شفت دكتور خارجي) — يُعامَل كإيصال قبض عادي في شاشات POS.</summary>
+    public const string Advance = "ADVANCE";
 }
 
 public static class VoucherStatuses
@@ -197,6 +199,8 @@ public sealed class Voucher
     public bool IsCollectionReceipt { get; set; }
     /// <summary>true = إيصال تسوية حساب عميل (خدمات مستهلكة/متبقية وقيمة مستردة) — 0096.</summary>
     public bool IsSettlementReceipt { get; set; }
+    /// <summary>true = إيصال دفعة مقدمة (شفت دكتور خارجي) يُعرض كإيصال تحصيل عادي.</summary>
+    public bool IsAdvanceReceipt { get; set; }
     public List<BookingSettlementReceiptLine> SettlementLines { get; set; } = new();
     /// <summary>اسم منشئ الإيصال لعرضه في إيصال تسوية الحساب.</summary>
     public string? CreatedByName { get; set; }
@@ -270,6 +274,8 @@ public sealed class VoucherLineInput
 public sealed class VoucherInput
 {
     public string VoucherType { get; set; } = VoucherTypes.Receipt;
+    /// <summary>نوع الإيصال (ORIGINAL/ADVANCE…)؛ null = ORIGINAL.</summary>
+    public string? ReceiptType { get; set; }
     public Guid BranchId { get; set; }
     public DateTime DocDate { get; set; } = DateTime.Today;
     public string? PartyType { get; set; }

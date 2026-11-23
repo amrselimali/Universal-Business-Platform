@@ -331,9 +331,13 @@ public partial class Terminal : SecurePageBase
                 ["BranchId"] = _branchId, ["CustomerId"] = _customerId,
                 ["CustomerName"] = _customerName, ["Treasuries"] = _treasuries
             });
-        if ((await dialog.Result) is { Canceled: false })
+        if ((await dialog.Result) is { Canceled: false, Data: AdvancePaymentResult advance })
         {
             ShowSuccess("common.saved");
+            // الإيصال يظهر على الشاشة فور التسجيل (عرض/طباعة) مثل الإيصال العادي.
+            await Dialogs.ShowAsync<ViewReceiptDialog>(T.T("pos.advance_receipt"),
+                new DialogParameters { ["VoucherId"] = advance.VoucherId },
+                new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
             StateHasChanged();
         }
     }

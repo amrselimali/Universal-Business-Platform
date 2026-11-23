@@ -179,6 +179,11 @@ public sealed class ShiftCashCount
     public string TreasuryName { get; set; } = "";
     public string TreasuryType { get; set; } = TreasuryTypes.Cash;
     public decimal OpeningCash { get; set; }
+    /// <summary>
+    /// حركة اليوم المعروضة في عدّ النقدية: إجمالي القيم المسددة من العملاء (شاملة عمولة التحصيل
+    /// المحمَّلة على العميل) − عمولة مزود الخدمة − سندات الصرف على الخزينة.
+    /// </summary>
+    public decimal Movement { get; set; }
     public decimal ExpectedCash { get; set; }
     public decimal? CountedCash { get; set; }
     public decimal? Variance { get; set; }

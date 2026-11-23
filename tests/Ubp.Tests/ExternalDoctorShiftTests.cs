@@ -138,4 +138,117 @@ public sealed class ExternalDoctorShiftTests : IClassFixture<TestDb>
             """, new { account = s.DoctorAccountId, voucherId = closed.Shift.SettlementVoucherId });
         Assert.Equal(150m, doctorDebit);
     }
+
+    [Fact]
+    public async Task Advance_payment_uses_the_treasury_fee_and_records_it_in_the_shift_report()
+    {
+        var actor = await _db.AdminActorAsync();
+        var s = await SetupAsync("3");
+        // عمولة تحصيل الخزينة 10% من إجمالي المدفوع (مثل إيصال POS).
+        await _db.TreasuryService().SetCollectionFeeAsync(actor, s.TreasuryId, 10m, null);
+        var shift = await _db.TreasuryService().OpenShiftAsync(actor, new ShiftInput
+        {
+            BranchId = s.Branch, NormalShift = false, ExternalDoctorShift = true,
+            ExternalDoctorCustomerId = s.Doctor.Id
+        });
+
+        // 110 إجمالي المدفوع بنسبة 10% ⇒ عمولة 10 وصافي مسدد 100.
+        var result = await _db.BookingCollections().CollectAdvanceAsync(actor,
+            new AdvancePaymentInput
+            {
+                BranchId = s.Branch, CustomerId = s.Doctor.Id, TreasuryId = s.TreasuryId,
+                Amount = 110, Notes = "دفعة مقدمة عمولة"
+            });
+        Assert.Equal(110m, result.Amount);
+        Assert.Equal(10m, result.Fee);
+        Assert.Equal(100m, result.Net);
+
+        await using var connection = new NpgsqlConnection(TestDb.AdminConnection);
+        await connection.OpenAsync();
+        var voucher = await connection.QuerySingleAsync<(decimal Total, decimal Fee, string Status)>(
+            "SELECT total_amount, fee_total, status FROM vouchers WHERE id = @id",
+            new { id = result.VoucherId });
+        Assert.Equal(110m, voucher.Total);
+        Assert.Equal(10m, voucher.Fee);
+        Assert.Equal(10m, await connection.ExecuteScalarAsync<decimal>(
+            "SELECT fee_amount FROM voucher_lines WHERE voucher_id = @id",
+            new { id = result.VoucherId }));
+
+        // الإيصال يُسجَّل في شاشة إيصالات تحصيل POS ويُفتح كإيصال تحصيل عادي (معاينة/طباعة) — 0215.
+        var list = await _db.Pos().ListReceiptsAsync(actor, s.Branch, null, null, 100);
+        var listed = Assert.Single(list, r => r.Id == result.VoucherId);
+        Assert.Equal(s.Doctor.NameAr, listed.PartyName);
+        Assert.Contains("دفعة مقدمة", listed.Description);
+
+        var detail = await _db.PosRepo.GetReceiptDetailAsync(result.VoucherId);
+        Assert.NotNull(detail);
+        Assert.True(detail!.IsAdvanceReceipt);
+        Assert.Equal(110m, detail.GrandDue);
+        Assert.Equal(110m, detail.PaidAmount);
+        Assert.Equal(0m, detail.RemainingDue);
+        Assert.Equal(100m, Assert.Single(detail.DisplayLines).Value);
+
+        // تقرير الشفت: سطر تحصيل بالإجمالي + سطر مصروف عمولة التحصيل بالسالب (كالإيصال العادي).
+        var report = await _db.TreasuryService().GetShiftReportAsync(actor, shift.Id);
+        var receipt = Assert.Single(report.Lines, l => l.Source == "دفعة مقدمة");
+        Assert.Equal(110m, receipt.Collected);
+        var feeLine = Assert.Single(report.Expenses,
+            e => e.Description.Contains("عمولة التحصيل"));
+        Assert.Equal(-10m, feeLine.Amount);
+    }
+
+    [Fact]
+    public async Task Closing_a_doctor_shift_uses_a_company_wide_treasury_when_the_branch_has_none()
+    {
+        var actor = await _db.AdminActorAsync();
+        var s = await SetupAsync("4");
+        // تُعطَّل خزينة الفرع وتبقى خزينة عامة للشركة فقط — الإغلاق يجب ألا يرفض.
+        await _db.TreasuryRepo.SetTreasuryActiveAsync(s.TreasuryId, false, actor.UserId);
+        var companyTreasuryId = Guid.CreateVersion7();
+        await _db.TreasuryRepo.CreateTreasuryAsync(companyTreasuryId, new TreasuryInput
+        {
+            BranchId = s.Branch, IsCompanyWide = true, Code = "ED-CW-4",
+            NameAr = "خزينة الشركة", TreasuryType = TreasuryTypes.Cash,
+            AccountId = s.Chart["1101"].Id
+        }, actor.UserId);
+
+        var shift = await _db.TreasuryService().OpenShiftAsync(actor, new ShiftInput
+        {
+            BranchId = s.Branch, NormalShift = false, ExternalDoctorShift = true,
+            ExternalDoctorCustomerId = s.Doctor.Id
+        });
+        var warehouse = await _db.CreateWarehouseAsync("ED-CW-W4", "مخزن شركة", s.Branch);
+        var item = await _db.CreateItemAsync("ED-CW-IT4", "خدمة شركة");
+        await using (var c = new NpgsqlConnection(TestDb.AdminConnection))
+        {
+            await c.OpenAsync();
+            await c.ExecuteAsync(
+                "UPDATE items SET item_type='SERVICE', execution_mode='direct' WHERE id=@id",
+                new { id = item.Id });
+        }
+        var booking = await _db.BookingService().CreateAsync(actor, new BookingInput
+        {
+            BranchId = s.Branch, BookingDate = DateTime.Today, CustomerId = s.Doctor.Id,
+            Lines = { new BookingLineInput { ItemId = item.Id, UnitId = item.BaseUnitId,
+                WarehouseId = warehouse, Quantity = 2, UnitPrice = 100 } }
+        });
+        await _db.BookingService().ConfirmAsync(actor, booking.Id);
+        var line = (await _db.BookingService().GetAsync(actor, booking.Id)).Lines.Single();
+        await _db.Executions().ExecuteAsync(actor, new BookingExecutionInput
+        { BookingLineId = line.Id, Quantity = 2 });
+
+        // تسوية على حساب الدكتور بلا اختيار خزينة: تُستخدم خزينة الشركة بدل رسالة «لا توجد خزينة».
+        var closed = await _db.TreasuryService().CloseShiftAsync(actor, shift.Id,
+            new List<ShiftCashCountInput>(),
+            new ShiftSettlementInput { Mode = ShiftSettlementModes.Doctor });
+        Assert.Equal(ShiftStatuses.Closed, closed.Status);
+        Assert.Equal(200m, closed.SettlementAmount);
+        Assert.NotNull(closed.SettlementVoucherId);
+
+        await using var connection = new NpgsqlConnection(TestDb.AdminConnection);
+        await connection.OpenAsync();
+        Assert.Equal(companyTreasuryId, await connection.ExecuteScalarAsync<Guid>(
+            "SELECT treasury_id FROM vouchers WHERE id = @id",
+            new { id = closed.SettlementVoucherId }));
+    }
 }
