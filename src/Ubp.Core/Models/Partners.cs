@@ -34,6 +34,22 @@ public sealed class Partner
     public int Version { get; set; } = 1;
 }
 
+/// <summary>
+/// اختيار حقل «الكود الورقي» من تعريفات الحقول المخصصة للعميل (المفتاح أو التسمية
+/// تحتوي paper/ورق) لعرضه في قائمة العملاء في عمود بجوار الكود.
+/// </summary>
+public static class PartnerCustomFieldRules
+{
+    public static CustomFieldDefinition? FindPaperCode(IEnumerable<CustomFieldDefinition> definitions) =>
+        definitions.FirstOrDefault(IsPaperCode);
+
+    public static bool IsPaperCode(CustomFieldDefinition definition) =>
+        definition.FieldKey.Contains("paper", StringComparison.OrdinalIgnoreCase) ||
+        definition.FieldKey.Contains("waraq", StringComparison.OrdinalIgnoreCase) ||
+        definition.LabelAr.Contains("ورق", StringComparison.Ordinal) ||
+        (definition.LabelEn?.Contains("paper", StringComparison.OrdinalIgnoreCase) ?? false);
+}
+
 public sealed class PartnerInput
 {
     public string Code { get; set; } = "";

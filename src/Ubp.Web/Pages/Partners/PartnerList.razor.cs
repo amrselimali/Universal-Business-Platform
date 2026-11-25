@@ -11,6 +11,7 @@ public partial class PartnerList
 {
     [Parameter] public PartnerKind Kind { get; set; } = PartnerKind.Customer;
     [Inject] private PartnerService Partners { get; set; } = default!;
+    [Inject] private CustomFieldService CustomFields { get; set; } = default!;
     [Inject] private IDialogService DialogService { get; set; } = default!;
 
     private MudTable<Partner> _table = default!;
@@ -18,6 +19,8 @@ public partial class PartnerList
     private Guid? _categoryId;
     private bool _includeInactive;
     private IReadOnlyList<PartnerCategory> _categories = Array.Empty<PartnerCategory>();
+    /// <summary>حقل «الكود الورقي» المخصص للعميل — يُعرض عمودًا بجوار الكود عند تعريفه.</summary>
+    private CustomFieldDefinition? _paperCodeField;
 
     protected override string ScreenCode => Kind == PartnerKind.Customer ? ScreenCodes.Customers : ScreenCodes.Suppliers;
     private string ScreenTitleKey => Kind == PartnerKind.Customer ? "screen.customers" : "screen.suppliers";
@@ -25,6 +28,35 @@ public partial class PartnerList
     protected override async Task OnLoadAsync()
     {
         _categories = await Partners.ListCategoriesAsync(Actor!, Kind, false);
+        _paperCodeField = Kind == PartnerKind.Customer
+            ? PartnerCustomFieldRules.FindPaperCode(await CustomFields.ListActiveAsync("customers"))
+            : null;
+    }
+
+    /// <summary>قيمة الكود الورقي المحفوظة في الحقول المخصصة للطرف.</summary>
+    private string? PaperCode(Partner partner)
+    {
+        if (_paperCodeField is null) return null;
+        var pair = partner.CustomFields.FirstOrDefault(field =>
+            string.Equals(field.Key, _paperCodeField.FieldKey, StringComparison.OrdinalIgnoreCase));
+        return CustomFieldText(pair.Value);
+    }
+
+    /// <summary>القيمة المخصصة تصل من JSON كـ JsonElement؛ تُحوَّل لنص للعرض فقط.</summary>
+    private static string? CustomFieldText(object? value)
+    {
+        var text = value switch
+        {
+            null => null,
+            System.Text.Json.JsonElement element => element.ValueKind switch
+            {
+                System.Text.Json.JsonValueKind.String => element.GetString(),
+                System.Text.Json.JsonValueKind.Null or System.Text.Json.JsonValueKind.Undefined => null,
+                _ => element.ToString()
+            },
+            _ => value.ToString()
+        };
+        return string.IsNullOrWhiteSpace(text) ? null : text.Trim();
     }
 
     private string Name(Partner partner) =>
