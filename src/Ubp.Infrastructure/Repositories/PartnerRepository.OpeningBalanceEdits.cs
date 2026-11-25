@@ -300,7 +300,7 @@ public sealed partial class PartnerRepository
                     INSERT INTO bookings (id, branch_id, doc_no, booking_date, status, customer_id,
                         source, total_amount, deposit_amount, notes, is_opening_balance, created_by)
                     VALUES (@bookingId, @branchId, @docNo, @docDate, 'confirmed', @customerId,
-                            'manual', @total, @paid, @notes, true, @userId)
+                            'opening', @total, @paid, @notes, true, @userId)
                     """, new { bookingId, branchId, docNo, docDate, customerId, total,
                         paid = line.PaidAmount, notes = OpeningBalanceNote, userId },
                     tx, cancellationToken: ct));

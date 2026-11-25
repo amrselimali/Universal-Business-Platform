@@ -17,6 +17,12 @@ public static class BookingSources
 {
     public const string Manual = "manual";
     public const string Pos = "pos";
+
+    /// <summary>
+    /// رصيد افتتاحي لخدمات العميل: التزام/حجز خدمة وليس موعدًا. يُنشأ من شاشة
+    /// تكويد العميل أو تعديل أرصدته، ويُستبعد من شاشات المواعيد وطبعها — 0104.
+    /// </summary>
+    public const string OpeningBalance = "opening";
 }
 
 public static class AppointmentStatuses
@@ -132,6 +138,12 @@ public sealed class BookingFilter
 
     /// <summary>مصدر الحجز: manual للحجوزات/المواعيد، pos لمبيعات نقطة البيع.</summary>
     public string? Source { get; set; }
+
+    /// <summary>
+    /// استبعاد حجوزات الأرصدة الافتتاحية: هي حجوزات خدمات (تُدار من شاشة العملاء
+    /// والخدمات المحجوزة) وليست مواعيد عملاء، فلا تظهر في شاشة «حجز موعد» — 0104.
+    /// </summary>
+    public bool ExcludeOpeningBalances { get; set; }
 }
 
 public sealed class BookingInput

@@ -411,4 +411,48 @@ public sealed class CustomerOpeningBalanceEditTests : IClassFixture<TestDb>
             "SELECT deposit_amount FROM bookings WHERE id = @id", new { id = line.BookingId });
         Assert.Equal(100m, deposit);
     }
+
+    /// <summary>
+    /// الأرصدة الافتتاحية حجوزات خدمات وليست مواعيد عملاء: مصدرها `opening`
+    /// فتُستبعد تلقائيًا من شاشة «حجز موعد» وطبعها، وتبقى في شاشة بنود الأرصدة
+    /// والخدمات المحجوزة — 0104/0217.
+    /// </summary>
+    [Fact]
+    public async Task Opening_balance_is_not_listed_as_an_appointment_booking()
+    {
+        var suffix = Unique();
+        var actor = await _db.AdminActorAsync();
+        var (branch, category, service, _) = await SetupAsync(suffix);
+        var input = CustomerInput("عميل فصل المواعيد " + suffix, category, branch, Phone("031"));
+        input.OpeningBalances.Add(new ServiceOpeningBalanceInput
+        { ServiceId = service.Id, Quantity = 1, UnitPrice = 120, PaidAmount = 20 });
+        var customer = await _db.Partners().CreateAsync(actor, PartnerKind.Customer, input);
+
+        var repo = new BookingRepository(_db.Factory);
+        var unfiltered = await repo.ListAsync(new BookingFilter
+        {
+            BranchIds = new[] { branch }
+        }, new PageRequest { PageSize = 50 });
+        var opening = Assert.Single(unfiltered.Items, b => b.CustomerId == customer.Id);
+        Assert.Equal(BookingSources.OpeningBalance, opening.Source);
+
+        // شاشة «حجز موعد» تصفّي مصدر manual فقط — لا تعرض أرصدة التكويد.
+        var appointments = await repo.ListAsync(new BookingFilter
+        {
+            BranchIds = new[] { branch }, Source = BookingSources.Manual
+        }, new PageRequest { PageSize = 50 });
+        Assert.DoesNotContain(appointments.Items, b => b.CustomerId == customer.Id);
+
+        // حماية إضافية لأي قائمة مواعيد لا تصفّي المصدر صراحةً.
+        var excluded = await repo.ListAsync(new BookingFilter
+        {
+            BranchIds = new[] { branch }, ExcludeOpeningBalances = true
+        }, new PageRequest { PageSize = 50 });
+        Assert.DoesNotContain(excluded.Items, b => b.CustomerId == customer.Id);
+
+        // يبقى بندًا افتتاحيًا ظاهرًا في شاشته الخاصة (حجز خدمة لا موعد).
+        var line = Assert.Single(await _db.Partners().ListOpeningBalancesAsync(actor,
+            PartnerKind.Customer, customer.Id));
+        Assert.Equal(120m, line.TotalAmount);
+    }
 }

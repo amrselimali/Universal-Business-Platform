@@ -140,6 +140,7 @@ public sealed partial class BookingRepository : IBookingRepository
         if (filter.From.HasValue) where.Add("b.booking_date >= @from");
         if (filter.To.HasValue) where.Add("b.booking_date <= @to");
         if (!string.IsNullOrWhiteSpace(filter.Source)) where.Add("b.source = @source");
+        if (filter.ExcludeOpeningBalances) where.Add("NOT b.is_opening_balance");
         if (!string.IsNullOrWhiteSpace(filter.Search))
             where.Add("(b.doc_no ILIKE '%' || @search || '%' OR " +
                       "c.search_text LIKE '%' || normalize_search(@search) || '%')");

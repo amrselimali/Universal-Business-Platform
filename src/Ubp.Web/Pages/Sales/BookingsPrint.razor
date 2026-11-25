@@ -118,6 +118,8 @@ else
         var result = await BookingApi.ListAsync(Actor!, new BookingFilter
         {
             BranchIds = ids, Statuses = _statuses, Source = BookingSources.Manual,
+            // طبع «حجز موعد» يستبعد أرصدة التكويد (حجوزات خدمات) مثل الشاشة نفسها.
+            ExcludeOpeningBalances = true,
             Search = Search, From = _from, To = _to
         }, new PageRequest { Page = 1, PageSize = 500 });
         _items = result.Items;
