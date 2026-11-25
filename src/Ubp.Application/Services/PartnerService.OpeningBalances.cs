@@ -57,6 +57,81 @@ public sealed partial class PartnerService
                     Remaining = Math.Max(b.TotalAmount - b.PaidAmount, 0)
                 }).ToArray()
             }, ct);
+
         return result.Partner;
+    }
+
+    /// <summary>
+    /// بنود الأرصدة الافتتاحية للعميل مع سبب منع التعديل (تنفيذ/تحصيل/تحويل/تسوية).
+    /// تحتاج صلاحية مستقلة «تعديل الأرصدة الافتتاحية» ولا تمس بيانات العميل.
+    /// </summary>
+    public async Task<IReadOnlyList<PartnerOpeningBalanceLine>> ListOpeningBalancesAsync(
+        ActorContext actor, PartnerKind kind, Guid customerId, CancellationToken ct = default)
+    {
+        await _permissions.RequireAsync(actor, Screen(kind), ActionCodes.EditOpeningBalances,
+            ct: ct);
+        var partner = await _repository.GetAsync(kind, customerId, ct)
+            ?? throw new NotFoundAppException();
+        EnsureAccess(actor, partner);
+        return await _repository.ListOpeningBalancesAsync(customerId, ct);
+    }
+
+    /// <summary>
+    /// تعديل مباشر للأرصدة الافتتاحية (تحديث/إضافة/حذف بنود) بنفس قواعد التكويد:
+    /// بلا أي أثر محاسبي، ومع إعادة حساب reserved_qty وإجمالي الحجز والمسدد حتى
+    /// تنعكس القيم في الخدمات المحجوزة والتحصيلات والتسوية فورًا.
+    /// </summary>
+    public async Task<PartnerOpeningBalanceEditResult> UpdateOpeningBalancesAsync(
+        ActorContext actor, PartnerKind kind, Guid customerId,
+        IReadOnlyList<PartnerOpeningBalanceEditLine> lines, CancellationToken ct = default)
+    {
+        await _permissions.RequireAsync(actor, Screen(kind), ActionCodes.EditOpeningBalances,
+            ct: ct);
+        var partner = await _repository.GetAsync(kind, customerId, ct)
+            ?? throw new NotFoundAppException();
+        EnsureAccess(actor, partner);
+
+        foreach (var line in lines)
+        {
+            var error = PartnerOpeningBalanceRules.ValidateLine(line.Quantity, line.UnitPrice,
+                line.PaidAmount);
+            if (error is not null) throw new ValidationAppException(error);
+            if (line.BookingLineId is null && line.ServiceId is null)
+                throw new ValidationAppException("validation.required_fields");
+        }
+
+        // فرع البنود الجديدة: فرع العميل، ثم فرع أرصدته الحالية، ثم الفرع الحالي للمستخدم.
+        var currentLines = await _repository.ListOpeningBalancesAsync(customerId, ct);
+        var branchId = partner.BranchId ?? currentLines.FirstOrDefault()?.BranchId
+            ?? actor.CurrentBranchId ?? (Guid?)actor.AllowedBranchIds.FirstOrDefault();
+        if (branchId is null || branchId.Value == Guid.Empty)
+            throw new ValidationAppException("validation.branch_required");
+        BranchScope.Ensure(actor, branchId.Value);
+
+        PartnerOpeningBalanceEditResult result;
+        try
+        {
+            result = await _repository.UpdateOpeningBalancesAsync(customerId, branchId.Value,
+                lines, actor.UserId, ct);
+        }
+        catch (PostgresException ex) { throw DbErrorMapper.Map(ex); }
+
+        // سجل المراجعة: سطر لكل بند (إضافة/تعديل/حذف) يحمل الفروق النقدية والقيمية.
+        if (result.Changes.Count == 0) return result;
+        foreach (var change in result.Changes)
+            await _audit.WriteAsync(actor, "bookings", change.BookingId.ToString(),
+                change.Action, change.OldValues, change.NewValues, ct);
+
+        // ملخص العملية على العميل: فروق القيمة والمسدد (نقد/تسوية) بلا أي قيد محاسبي.
+        await _audit.WriteAsync(actor, "customers", customerId.ToString(), "UPDATE",
+            new { OpeningBalances = true, Total = result.OldTotal, Paid = result.OldPaid },
+            new
+            {
+                OpeningBalances = true, Total = result.NewTotal, Paid = result.NewPaid,
+                result.Added, result.Updated, result.Removed,
+                result.ValueDifference, result.CashDifference
+            }, ct);
+
+        return result;
     }
 }

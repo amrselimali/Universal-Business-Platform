@@ -81,11 +81,12 @@
             @if (Kind == PartnerKind.Customer && !IsEdit && _canAddOpeningBalances)
             {
                 <MudDivider Class="my-4" />
+                <div @ref="_balancesSection" tabindex="-1" class="ubp-opening-balances">
                 <div class="d-flex align-center justify-space-between mb-2">
                     <MudText Typo="Typo.subtitle2">@T.T("partners.opening_balances")</MudText>
                     <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary"
                                StartIcon="@Icons.Material.Filled.Add" OnClick="AddBalanceAsync"
-                               Disabled="_noOpeningBalance">
+                               Ripple="false" Disabled="_noOpeningBalance">
                         @T.T("partners.add_opening_balance")
                     </MudButton>
                 </div>
@@ -138,11 +139,12 @@
                             <MudTd Align="Right">@context.Remaining.ToString("N2")</MudTd>
                             <MudTd>
                                 <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small"
-                                               OnClick="@(() => RemoveBalance(context))" />
+                                               Ripple="false" OnClick="@(() => RemoveBalance(context))" />
                             </MudTd>
                         </RowTemplate>
                     </MudTable>
                 }
+                </div>
             }
 
             @if (_fields.Count > 0)

@@ -1,4 +1,5 @@
 using Ubp.Core.Models;
+using Ubp.Core.Paging;
 using Ubp.Core.Results;
 using Xunit;
 
@@ -84,5 +85,40 @@ public sealed class CustomerUniquenessTests : IClassFixture<TestDb>
         Assert.Equal("01030303030", updated.WhatsAppPhone);
         Assert.Equal(second.NameAr, (await _db.PartnerRepo.GetAsync(PartnerKind.Customer,
             second.Id))!.NameAr);
+    }
+
+    [Fact]
+    public async Task Branch_filter_limits_results_to_selected_branches_and_keeps_company_scope()
+    {
+        var actor = await _db.AdminActorAsync();
+        var s = await SetupAsync("3");
+        await _db.Partners().CreateAsync(actor, PartnerKind.Customer,
+            Input(s.BranchA, s.Category, "عميل فرع أ فلتر", "02011111111", "02022222222", "F-1"));
+        await _db.Partners().CreateAsync(actor, PartnerKind.Customer,
+            Input(s.BranchB, s.Category, "عميل فرع ب فلتر", "02033333333", "02044444444", "F-2"));
+        var company = await _db.Partners().CreateAsync(actor, PartnerKind.Customer, new PartnerInput
+        {
+            NameAr = "عميل نطاق الشركة فلتر", CategoryId = s.Category.Id, ScopeType = "COMPANY",
+            Phone = "02055555555", WhatsAppPhone = "02066666666"
+        });
+
+        var onlyA = await _db.Partners().ListAsync(actor, PartnerKind.Customer,
+            new PageRequest { PageSize = 25 }, null, new[] { s.BranchA });
+        Assert.Contains(onlyA.Items, p => p.BranchId == s.BranchA);
+        Assert.Contains(onlyA.Items, p => p.Id == company.Id);
+        Assert.DoesNotContain(onlyA.Items, p => p.BranchId == s.BranchB);
+
+        var both = await _db.Partners().ListAsync(actor, PartnerKind.Customer,
+            new PageRequest { PageSize = 25 }, null, new[] { s.BranchA, s.BranchB });
+        Assert.Contains(both.Items, p => p.BranchId == s.BranchA);
+        Assert.Contains(both.Items, p => p.BranchId == s.BranchB);
+        Assert.Contains(both.Items, p => p.Id == company.Id);
+
+        // بلا فلتر: كل الفروع (سلوك مدير النظام الافتراضي القديم محفوظ).
+        var unfiltered = await _db.Partners().ListAsync(actor, PartnerKind.Customer,
+            new PageRequest { PageSize = 25 }, null);
+        Assert.Contains(unfiltered.Items, p => p.BranchId == s.BranchA);
+        Assert.Contains(unfiltered.Items, p => p.BranchId == s.BranchB);
+        Assert.Contains(unfiltered.Items, p => p.Id == company.Id);
     }
 }

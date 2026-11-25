@@ -99,6 +99,19 @@ public static class PartnerOpeningBalanceRules
             return "validation.opening_balance_required";
         return null;
     }
+
+    /// <summary>
+    /// نفس قواعد بند الرصيد عند التكويد تُطبَّق على التعديل المباشر:
+    /// كمية موجبة، سعر غير سالب، ومسدد بين صفر والإجمالي.
+    /// </summary>
+    public static string? ValidateLine(decimal quantity, decimal unitPrice, decimal paidAmount)
+    {
+        if (quantity <= 0) return "validation.quantity_invalid";
+        if (unitPrice < 0) return "validation.price_invalid";
+        var total = Math.Round(quantity * unitPrice, 2, MidpointRounding.AwayFromZero);
+        if (paidAmount < 0 || paidAmount > total) return "validation.paid_exceeds_total";
+        return null;
+    }
 }
 
 public sealed class ServiceOpeningBalanceInput
@@ -149,4 +162,90 @@ public sealed class PartnerCategoryInput
     public string NameAr { get; set; } = "";
     public string? NameEn { get; set; }
     public bool IsActive { get; set; } = true;
+}
+
+/// <summary>
+/// بند رصيد افتتاحي لعميل: حجز خدمة مؤكد يُنشأ مع تكويد العميل ويُعرض في شاشات
+/// الخدمات المحجوزة وتحصيلات الخدمات المحجوزة وتسوية الحساب. قابل للتعديل المباشر
+/// قبل أي تنفيذ/تحصيل/تحويل/تسوية، وبلا أي أثر محاسبي.
+/// </summary>
+public sealed class PartnerOpeningBalanceLine
+{
+    public Guid BookingId { get; set; }
+    public Guid BookingLineId { get; set; }
+    public Guid BranchId { get; set; }
+    public string? DocNo { get; set; }
+    public DateTime BookingDate { get; set; }
+    public string Status { get; set; } = "";
+    public Guid ServiceId { get; set; }
+    public string ServiceCode { get; set; } = "";
+    public string ServiceName { get; set; } = "";
+    public decimal Quantity { get; set; }
+    public decimal UnitPrice { get; set; }
+    public decimal PaidAmount { get; set; }
+    public decimal DeliveredQty { get; set; }
+    public decimal InvoicedQty { get; set; }
+    public decimal TransferredQty { get; set; }
+    public decimal SettledQty { get; set; }
+    public int PaymentCount { get; set; }
+    public int SettlementCount { get; set; }
+    public int RelatedCount { get; set; }
+    public int LineCount { get; set; }
+    /// <summary>إجمالي الإيصالات المسجلة على الحجز (لا يُعدَّل منها شيء من هنا).</summary>
+    public decimal ReceiptsAmount { get; set; }
+
+    public decimal TotalAmount => Math.Round(Quantity * UnitPrice, 2, MidpointRounding.AwayFromZero);
+    public decimal RemainingAmount => Math.Max(TotalAmount - PaidAmount, 0);
+
+    /// <summary>أقصى مسدد مسموح = قيمة الخدمة ناقص الإيصالات المسجلة.</summary>
+    public decimal MaxPaidAmount => Math.Max(
+        Math.Round(TotalAmount - ReceiptsAmount, 2, MidpointRounding.AwayFromZero), 0);
+
+    /// <summary>مفتاح ترجمة سبب منع التعديل، أو null إذا كان البند قابلًا للتعديل.</summary>
+    public string? LockReasonKey { get; set; }
+    public bool IsEditable => LockReasonKey is null;
+
+    /// <summary>
+    /// المسدد قابل للتعديل حتى بعد التنفيذ أو التحصيل (بحد أقصى قيمة الخدمة ناقص
+    /// الإيصالات)، ويُمنع فقط بعد التحويل أو التسوية لأنهما يغيّران اقتصاديات البند.
+    /// </summary>
+    public bool CanEditPaid { get; set; }
+}
+
+/// <summary>سطر تعديل مباشر لبند رصيد افتتاحي: BookingLineId فارغ = بند جديد.</summary>
+public sealed class PartnerOpeningBalanceEditLine
+{
+    public Guid? BookingLineId { get; set; }
+    public Guid? ServiceId { get; set; }
+    public decimal Quantity { get; set; }
+    public decimal UnitPrice { get; set; }
+    public decimal PaidAmount { get; set; }
+}
+
+/// <summary>تغيّر مسجَّل في المراجعة لكل بند رصيد افتتاحي بعد الحفظ.</summary>
+public sealed class PartnerOpeningBalanceChange
+{
+    public Guid BookingId { get; set; }
+    public string Action { get; set; } = "";
+    public object? OldValues { get; set; }
+    public object? NewValues { get; set; }
+}
+
+/// <summary>
+/// نتيجة تعديل الأرصدة الافتتاحية: العدادات والفروق (فرق القيمة وفرق المسدد/النقد)
+/// تُعرض للمستخدم وتُسجَّل في المراجعة، ولا تُنشئ أي قيد أو سند محاسبي.
+/// </summary>
+public sealed class PartnerOpeningBalanceEditResult
+{
+    public int Added { get; set; }
+    public int Updated { get; set; }
+    public int Removed { get; set; }
+    public decimal OldTotal { get; set; }
+    public decimal NewTotal { get; set; }
+    public decimal OldPaid { get; set; }
+    public decimal NewPaid { get; set; }
+    public decimal ValueDifference => NewTotal - OldTotal;
+    public decimal CashDifference => NewPaid - OldPaid;
+    public IReadOnlyList<PartnerOpeningBalanceChange> Changes { get; set; } =
+        Array.Empty<PartnerOpeningBalanceChange>();
 }

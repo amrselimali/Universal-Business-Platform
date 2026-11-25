@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Components;
+using Microsoft.JSInterop;
 using MudBlazor;
 using Ubp.Application.Services;
 using Ubp.Core.Models;
@@ -23,6 +24,7 @@ public partial class PartnerDialog
     [Inject] private ISnackbar Snackbar { get; set; } = default!;
 
     private MudForm _form = default!;
+    private ElementReference _balancesSection;
     private PartnerInput _input = new();
     private IReadOnlyList<PartnerCategory> _categories = Array.Empty<PartnerCategory>();
     private IReadOnlyList<Branch> _branches = Array.Empty<Branch>();
@@ -141,18 +143,38 @@ public partial class PartnerDialog
         StateHasChanged();
     }
 
-    private Task AddBalanceAsync()
+    /// <summary>
+    /// يُضيف صف رصيد افتتاحي ويُبقي قسم الأرصدة في مجال الرؤية. تأثير Ripple معطَّل على
+    /// الزر لأن إدراج عنصر الموجة أثناء pointerdown كان يُغيّر تخطيط الحوار ويُعيد
+    /// تمرير المحتوى لأعلى قبل إفلات الزر، فلا يصل حدث click — 0104.
+    /// </summary>
+    private async Task AddBalanceAsync()
     {
         if (_noOpeningBalance)
         {
             Snackbar.Add(T.T("validation.opening_balance_exclusive"), Severity.Warning);
-            return Task.CompletedTask;
+            return;
         }
         _balances.Add(new BalanceRow());
-        return Task.CompletedTask;
+        StateHasChanged();
+        await Task.Yield();
+        await FocusBalancesAsync();
     }
 
-    private void RemoveBalance(BalanceRow row) => _balances.Remove(row);
+    private async Task RemoveBalance(BalanceRow row)
+    {
+        _balances.Remove(row);
+        StateHasChanged();
+        await Task.Yield();
+        await FocusBalancesAsync();
+    }
+
+    /// <summary>يُمرِّر قسم الأرصدة إلى الرؤية بعد إضافة/حذف صف دون كسر حالة النموذج.</summary>
+    private async Task FocusBalancesAsync()
+    {
+        try { await _balancesSection.FocusAsync(); }
+        catch (JSException) { /* العنصر غير متاح أثناء إعادة الرسم — لا شيء يُفعل */ }
+    }
 
     private async Task<IEnumerable<ItemOption>> SearchServices(string? search, CancellationToken ct)
     {

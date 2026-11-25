@@ -1,0 +1,414 @@
+using Dapper;
+using Ubp.Application.Services;
+using Ubp.Core.Models;
+using Ubp.Core.Paging;
+using Ubp.Core.Results;
+using Ubp.Core.Security;
+using Ubp.Infrastructure.Repositories;
+using Xunit;
+
+namespace Ubp.Tests;
+
+/// <summary>
+/// التعديل المباشر للأرصدة الافتتاحية: قبل أي تنفيذ/تحصيل فقط، بصلاحية مستقلة،
+/// وبلا أي قيد محاسبي، مع إعادة حساب الكميات والمسدد وظهورها في كل الشاشات.
+/// </summary>
+public sealed class CustomerOpeningBalanceEditTests : IClassFixture<TestDb>
+{
+    private readonly TestDb _db;
+    public CustomerOpeningBalanceEditTests(TestDb db) => _db = db;
+
+    private static string Unique() => Guid.NewGuid().ToString("N")[..6].ToUpperInvariant();
+    private static string Phone(string prefix) =>
+        prefix + Guid.NewGuid().ToString("N")[..8];
+
+    private async Task<(Guid Branch, PartnerCategory Category, Item Service, Item ServiceB)>
+        SetupAsync(string suffix)
+    {
+        var branch = await _db.CreateBranchAsync("OBE-B-" + suffix, "فرع تعديل الأرصدة " + suffix);
+        await _db.CreateWarehouseAsync("OBE-W-" + suffix, "مخزن تعديل الأرصدة " + suffix, branch);
+        var unit = await _db.UnitRepo.CreateAsync(new UnitInput
+        { Code = "OBEU" + suffix, NameAr = "وحدة " + suffix });
+        var category = await _db.PartnerRepo.CreateCategoryAsync(PartnerKind.Customer,
+            new PartnerCategoryInput { Code = "OBE-C-" + suffix, NameAr = "تصنيف " + suffix });
+        var service = await _db.ItemRepo.CreateAsync(new ItemInput
+        {
+            Code = "OBES1" + suffix, NameAr = "خدمة أولى " + suffix, ItemType = "SERVICE",
+            BaseUnitId = unit.Id,
+            Units = new List<ItemUnitInput> { new() { UnitId = unit.Id, ConversionFactor = 1 } }
+        });
+        var serviceB = await _db.ItemRepo.CreateAsync(new ItemInput
+        {
+            Code = "OBES2" + suffix, NameAr = "خدمة ثانية " + suffix, ItemType = "SERVICE",
+            BaseUnitId = unit.Id,
+            Units = new List<ItemUnitInput> { new() { UnitId = unit.Id, ConversionFactor = 1 } }
+        });
+        return (branch, category, service, serviceB);
+    }
+
+    private static PartnerInput CustomerInput(string name, PartnerCategory category, Guid branch,
+        string phone) => new()
+    {
+        NameAr = name, CategoryId = category.Id, ScopeType = "BRANCH", BranchId = branch,
+        Phone = phone, WhatsAppPhone = phone
+    };
+
+    private static ActorContext LimitedActor(Guid userId, string username, Guid branch) => new()
+    {
+        UserId = userId, Username = username, IsAdmin = false, IsSuperAdmin = false,
+        Language = "ar", AllowedBranchIds = new[] { branch }, CurrentBranchId = branch,
+        TraceId = "opening-balance-edit-test"
+    };
+
+    private async Task SetPermissionsAsync(Guid userId, params string[] actions)
+    {
+        await _db.PermissionRepo.ReplaceUserPermissionsAsync(userId, actions.Select(action =>
+            new PermissionEntry
+            {
+                ScreenCode = ScreenCodes.Customers, ActionCode = action, IsAllowed = true,
+                Scope = PermissionScope.All
+            }));
+        PermissionService.InvalidateAll();
+    }
+
+    [Fact]
+    public async Task Edit_updates_quantities_paid_and_all_screens_without_journal()
+    {
+        var suffix = Unique();
+        var actor = await _db.AdminActorAsync();
+        var (branch, category, service, _) = await SetupAsync(suffix);
+        var input = CustomerInput("عميل تعديل " + suffix, category, branch, Phone("021"));
+        input.OpeningBalances.Add(new ServiceOpeningBalanceInput
+        { ServiceId = service.Id, Quantity = 2, UnitPrice = 100, PaidAmount = 50 });
+        var customer = await _db.Partners().CreateAsync(actor, PartnerKind.Customer, input);
+
+        var line = Assert.Single(await _db.Partners().ListOpeningBalancesAsync(actor,
+            PartnerKind.Customer, customer.Id));
+        Assert.True(line.IsEditable);
+        Assert.Equal(200m, line.TotalAmount);
+
+        await using var connection = await _db.Factory.OpenAsync();
+        var journalsBefore = await connection.ExecuteScalarAsync<int>(
+            "SELECT count(*)::int FROM journal_entries WHERE branch_id = @branch",
+            new { branch });
+
+        var result = await _db.Partners().UpdateOpeningBalancesAsync(actor, PartnerKind.Customer,
+            customer.Id, new[]
+            {
+                new PartnerOpeningBalanceEditLine
+                {
+                    BookingLineId = line.BookingLineId, ServiceId = line.ServiceId,
+                    Quantity = 3, UnitPrice = 120, PaidAmount = 60
+                }
+            });
+
+        Assert.Equal(1, result.Updated);
+        Assert.Equal(0, result.Added);
+        Assert.Equal(0, result.Removed);
+        Assert.Equal(360m, result.NewTotal);
+        Assert.Equal(60m, result.NewPaid);
+        Assert.Equal(160m, result.ValueDifference);
+        Assert.Equal(10m, result.CashDifference);
+
+        var bookingLine = await connection.QuerySingleAsync<(decimal Qty, decimal Price, decimal Reserved)>(
+            "SELECT quantity, unit_price, reserved_qty FROM booking_lines WHERE id = @id",
+            new { id = line.BookingLineId });
+        Assert.Equal(3m, bookingLine.Qty);
+        Assert.Equal(120m, bookingLine.Price);
+        Assert.Equal(3m, bookingLine.Reserved);
+
+        var booking = await connection.QuerySingleAsync<(decimal Total, decimal Deposit)>(
+            "SELECT total_amount, deposit_amount FROM bookings WHERE id = @id",
+            new { id = line.BookingId });
+        Assert.Equal(360m, booking.Total);
+        Assert.Equal(60m, booking.Deposit);
+
+        var reservation = Assert.Single((await new ReservationRepository(_db.Factory).ListAsync(
+            new PageRequest { PageSize = 50 }, Array.Empty<Guid>(), customer.Id, true)).Items);
+        Assert.Equal(3m, reservation.RemainingQty);
+        Assert.Equal(360m, reservation.RemainingValue);
+
+        var outstanding = Assert.Single(await _db.BookingCollections()
+            .ListOutstandingAsync(actor, branch, customer.Id));
+        Assert.Equal(60m, outstanding.PaidAmount);
+        Assert.Equal(300m, outstanding.RemainingAmount);
+
+        var journalsAfter = await connection.ExecuteScalarAsync<int>(
+            "SELECT count(*)::int FROM journal_entries WHERE branch_id = @branch",
+            new { branch });
+        Assert.Equal(journalsBefore, journalsAfter);
+
+        var audit = await connection.ExecuteScalarAsync<int>("""
+            SELECT count(*)::int FROM audit_log
+            WHERE table_name = 'bookings' AND record_id = @id AND action = 'UPDATE'
+            """, new { id = line.BookingId.ToString() });
+        Assert.Equal(1, audit);
+    }
+
+    [Fact]
+    public async Task Edit_is_locked_after_collection()
+    {
+        var suffix = Unique();
+        var actor = await _db.AdminActorAsync();
+        var chart = await _db.SeedAccountingAsync();
+        var (branch, category, service, _) = await SetupAsync(suffix);
+        var input = CustomerInput("عميل قفل التحصيل " + suffix, category, branch, Phone("023"));
+        input.OpeningBalances.Add(new ServiceOpeningBalanceInput
+        { ServiceId = service.Id, Quantity = 1, UnitPrice = 100, PaidAmount = 0 });
+        var customer = await _db.Partners().CreateAsync(actor, PartnerKind.Customer, input);
+
+        var treasuryId = Guid.CreateVersion7();
+        await _db.TreasuryRepo.CreateTreasuryAsync(treasuryId, new TreasuryInput
+        {
+            BranchId = branch, Code = "OBET" + suffix, NameAr = "خزينة " + suffix,
+            TreasuryType = TreasuryTypes.Cash, AccountId = chart["1101"].Id
+        }, actor.UserId);
+        var methodId = Guid.CreateVersion7();
+        await _db.TreasuryRepo.CreateMethodAsync(methodId, new TreasuryMethodInput
+        { TreasuryId = treasuryId, Code = "CASH", NameAr = "نقدي" }, actor.UserId);
+
+        var before = Assert.Single(await _db.BookingCollections()
+            .ListOutstandingAsync(actor, branch, customer.Id));
+        await _db.BookingCollections().CollectAsync(actor, new BookingCollectionInput
+        {
+            BranchId = branch, CustomerId = customer.Id, DocDate = DateTime.Today,
+            Lines = { new BookingCollectionLineInput { BookingId = before.BookingId, Amount = 100 } },
+            Payments =
+            {
+                new PosPaymentInput { TreasuryId = treasuryId, TreasuryMethodId = methodId, Amount = 100 }
+            }
+        });
+
+        var line = Assert.Single(await _db.Partners().ListOpeningBalancesAsync(actor,
+            PartnerKind.Customer, customer.Id));
+        Assert.False(line.IsEditable);
+        Assert.Equal("opening_balances.lock_collected", line.LockReasonKey);
+
+        var error = await Assert.ThrowsAsync<ValidationAppException>(() =>
+            _db.Partners().UpdateOpeningBalancesAsync(actor, PartnerKind.Customer, customer.Id,
+                new[]
+                {
+                    new PartnerOpeningBalanceEditLine
+                    {
+                        BookingLineId = line.BookingLineId, ServiceId = line.ServiceId,
+                        Quantity = 2, UnitPrice = 100, PaidAmount = 0
+                    }
+                }));
+        Assert.Equal("validation.opening_balance_locked", error.Code);
+    }
+
+    [Fact]
+    public async Task Edit_requires_its_own_permission_and_supports_add_and_remove()
+    {
+        var suffix = Unique();
+        var (branch, category, service, serviceB) = await SetupAsync(suffix);
+        var username = "obe-" + suffix;
+        var userId = await _db.CreateUserAsync(username, "Passw0rd!2026", new[] { branch });
+        await SetPermissionsAsync(userId, ActionCodes.View, ActionCodes.Add,
+            ActionCodes.AddOpeningBalances);
+        var actor = LimitedActor(userId, username, branch);
+
+        var input = CustomerInput("عميل صلاحية التعديل " + suffix, category, branch, Phone("025"));
+        input.OpeningBalances.Add(new ServiceOpeningBalanceInput
+        { ServiceId = service.Id, Quantity = 1, UnitPrice = 100, PaidAmount = 0 });
+        var customer = await _db.Partners().CreateAsync(actor, PartnerKind.Customer, input);
+
+        // بدون صلاحية «تعديل الأرصدة الافتتاحية»: القراءة والتعديل ممنوعان.
+        await Assert.ThrowsAsync<ForbiddenException>(() => _db.Partners()
+            .ListOpeningBalancesAsync(actor, PartnerKind.Customer, customer.Id));
+        await Assert.ThrowsAsync<ForbiddenException>(() => _db.Partners()
+            .UpdateOpeningBalancesAsync(actor, PartnerKind.Customer, customer.Id,
+                Array.Empty<PartnerOpeningBalanceEditLine>()));
+
+        // بصلاحية التعديل: إضافة خدمة ثانية وحذف الأولى في حفظ واحد.
+        await SetPermissionsAsync(userId, ActionCodes.View, ActionCodes.EditOpeningBalances);
+        var line = Assert.Single(await _db.Partners().ListOpeningBalancesAsync(actor,
+            PartnerKind.Customer, customer.Id));
+        var result = await _db.Partners().UpdateOpeningBalancesAsync(actor, PartnerKind.Customer,
+            customer.Id, new[]
+            {
+                new PartnerOpeningBalanceEditLine
+                { ServiceId = serviceB.Id, Quantity = 4, UnitPrice = 25, PaidAmount = 20 }
+            });
+
+        Assert.Equal(1, result.Added);
+        Assert.Equal(0, result.Updated);
+        Assert.Equal(1, result.Removed);
+        Assert.Equal(100m, result.NewTotal);
+        Assert.Equal(20m, result.NewPaid);
+
+        await using var connection = await _db.Factory.OpenAsync();
+        var deleted = await connection.ExecuteScalarAsync<int>(
+            "SELECT count(*)::int FROM bookings WHERE id = @id", new { id = line.BookingId });
+        Assert.Equal(0, deleted);
+
+        var added = await connection.QuerySingleAsync<(Guid Id, bool IsOpening, decimal Total)>(
+            "SELECT id, is_opening_balance, total_amount FROM bookings " +
+            "WHERE customer_id = @customerId AND is_opening_balance",
+            new { customerId = customer.Id });
+        Assert.True(added.IsOpening);
+        Assert.Equal(100m, added.Total);
+        var serviceId = await connection.ExecuteScalarAsync<Guid>(
+            "SELECT item_id FROM booking_lines WHERE booking_id = @id", new { id = added.Id });
+        Assert.Equal(serviceB.Id, serviceId);
+    }
+
+    [Fact]
+    public async Task Paid_only_edit_stays_allowed_after_execution()
+    {
+        var suffix = Unique();
+        var actor = await _db.AdminActorAsync();
+        var (branch, category, service, _) = await SetupAsync(suffix);
+        var input = CustomerInput("عميل مسدد منفذ " + suffix, category, branch, Phone("027"));
+        input.OpeningBalances.Add(new ServiceOpeningBalanceInput
+        { ServiceId = service.Id, Quantity = 1, UnitPrice = 100, PaidAmount = 20 });
+        var customer = await _db.Partners().CreateAsync(actor, PartnerKind.Customer, input);
+        var line = Assert.Single(await _db.Partners().ListOpeningBalancesAsync(actor,
+            PartnerKind.Customer, customer.Id));
+
+        // محاكاة تنفيذ كامل: الكمية صُرفت والحجز أصبح completed.
+        await using (var connection = await _db.Factory.OpenAsync())
+        {
+            await connection.ExecuteAsync(
+                "UPDATE booking_lines SET delivered_qty = 1, reserved_qty = 0 WHERE id = @id",
+                new { id = line.BookingLineId });
+            await connection.ExecuteAsync(
+                "UPDATE bookings SET status = 'completed' WHERE id = @id", new { id = line.BookingId });
+        }
+
+        var locked = Assert.Single(await _db.Partners().ListOpeningBalancesAsync(actor,
+            PartnerKind.Customer, customer.Id));
+        Assert.False(locked.IsEditable);
+        Assert.Equal("opening_balances.lock_executed", locked.LockReasonKey);
+        Assert.True(locked.CanEditPaid);
+        Assert.Equal(100m, locked.MaxPaidAmount);
+
+        // تعديل الكمية ممنوع بعد التنفيذ.
+        var blocked = await Assert.ThrowsAsync<ValidationAppException>(() =>
+            _db.Partners().UpdateOpeningBalancesAsync(actor, PartnerKind.Customer, customer.Id,
+                new[]
+                {
+                    new PartnerOpeningBalanceEditLine
+                    {
+                        BookingLineId = line.BookingLineId, ServiceId = line.ServiceId,
+                        Quantity = 2, UnitPrice = 100, PaidAmount = 20
+                    }
+                }));
+        Assert.Equal("validation.opening_balance_locked", blocked.Code);
+
+        // تعديل المسدد فقط مسموح وينعكس في التحصيلات.
+        var result = await _db.Partners().UpdateOpeningBalancesAsync(actor, PartnerKind.Customer,
+            customer.Id, new[]
+            {
+                new PartnerOpeningBalanceEditLine
+                {
+                    BookingLineId = line.BookingLineId, ServiceId = line.ServiceId,
+                    Quantity = 1, UnitPrice = 100, PaidAmount = 80
+                }
+            });
+        Assert.Equal(1, result.Updated);
+        Assert.Equal(80m, result.NewPaid);
+        Assert.Equal(60m, result.CashDifference);
+
+        var outstanding = Assert.Single(await _db.BookingCollections()
+            .ListOutstandingAsync(actor, branch, customer.Id));
+        Assert.Equal(80m, outstanding.PaidAmount);
+        Assert.Equal(20m, outstanding.RemainingAmount);
+
+        await using var check = await _db.Factory.OpenAsync();
+        var deposit = await check.ExecuteScalarAsync<decimal>(
+            "SELECT deposit_amount FROM bookings WHERE id = @id", new { id = line.BookingId });
+        Assert.Equal(80m, deposit);
+        var quantity = await check.ExecuteScalarAsync<decimal>(
+            "SELECT quantity FROM booking_lines WHERE id = @id", new { id = line.BookingLineId });
+        Assert.Equal(1m, quantity);
+    }
+
+    [Fact]
+    public async Task Paid_edit_after_collection_is_capped_by_service_value_less_receipts()
+    {
+        var suffix = Unique();
+        var actor = await _db.AdminActorAsync();
+        var chart = await _db.SeedAccountingAsync();
+        var (branch, category, service, _) = await SetupAsync(suffix);
+        var input = CustomerInput("عميل سقف المسدد " + suffix, category, branch, Phone("029"));
+        input.OpeningBalances.Add(new ServiceOpeningBalanceInput
+        { ServiceId = service.Id, Quantity = 2, UnitPrice = 100, PaidAmount = 50 });
+        var customer = await _db.Partners().CreateAsync(actor, PartnerKind.Customer, input);
+
+        var treasuryId = Guid.CreateVersion7();
+        await _db.TreasuryRepo.CreateTreasuryAsync(treasuryId, new TreasuryInput
+        {
+            BranchId = branch, Code = "OBEC" + suffix, NameAr = "خزينة السقف " + suffix,
+            TreasuryType = TreasuryTypes.Cash, AccountId = chart["1101"].Id
+        }, actor.UserId);
+        var methodId = Guid.CreateVersion7();
+        await _db.TreasuryRepo.CreateMethodAsync(methodId, new TreasuryMethodInput
+        { TreasuryId = treasuryId, Code = "CASH", NameAr = "نقدي" }, actor.UserId);
+
+        var before = Assert.Single(await _db.BookingCollections()
+            .ListOutstandingAsync(actor, branch, customer.Id));
+        await _db.BookingCollections().CollectAsync(actor, new BookingCollectionInput
+        {
+            BranchId = branch, CustomerId = customer.Id, DocDate = DateTime.Today,
+            Lines = { new BookingCollectionLineInput { BookingId = before.BookingId, Amount = 100 } },
+            Payments =
+            {
+                new PosPaymentInput { TreasuryId = treasuryId, TreasuryMethodId = methodId, Amount = 100 }
+            }
+        });
+
+        var line = Assert.Single(await _db.Partners().ListOpeningBalancesAsync(actor,
+            PartnerKind.Customer, customer.Id));
+        Assert.False(line.IsEditable);
+        Assert.Equal("opening_balances.lock_collected", line.LockReasonKey);
+        Assert.True(line.CanEditPaid);
+        Assert.Equal(100m, line.MaxPaidAmount);   // 200 قيمة − 100 إيصال
+
+        // تجاوز السقف مرفوض.
+        var over = await Assert.ThrowsAsync<ValidationAppException>(() =>
+            _db.Partners().UpdateOpeningBalancesAsync(actor, PartnerKind.Customer, customer.Id,
+                new[]
+                {
+                    new PartnerOpeningBalanceEditLine
+                    {
+                        BookingLineId = line.BookingLineId, ServiceId = line.ServiceId,
+                        Quantity = 2, UnitPrice = 100, PaidAmount = 150
+                    }
+                }));
+        Assert.Equal("validation.paid_exceeds_total", over.Code);
+
+        // تعديل الكمية بعد التحصيل ممنوع.
+        var structural = await Assert.ThrowsAsync<ValidationAppException>(() =>
+            _db.Partners().UpdateOpeningBalancesAsync(actor, PartnerKind.Customer, customer.Id,
+                new[]
+                {
+                    new PartnerOpeningBalanceEditLine
+                    {
+                        BookingLineId = line.BookingLineId, ServiceId = line.ServiceId,
+                        Quantity = 3, UnitPrice = 100, PaidAmount = 50
+                    }
+                }));
+        Assert.Equal("validation.opening_balance_locked", structural.Code);
+
+        // حتى السقف مسموح: المسدد الكلي = قيمة الخدمة، ولا يبقى مستحق.
+        var result = await _db.Partners().UpdateOpeningBalancesAsync(actor, PartnerKind.Customer,
+            customer.Id, new[]
+            {
+                new PartnerOpeningBalanceEditLine
+                {
+                    BookingLineId = line.BookingLineId, ServiceId = line.ServiceId,
+                    Quantity = 2, UnitPrice = 100, PaidAmount = 100
+                }
+            });
+        Assert.Equal(1, result.Updated);
+        Assert.Equal(50m, result.CashDifference);
+
+        Assert.Empty(await _db.BookingCollections()
+            .ListOutstandingAsync(actor, branch, customer.Id));
+        await using var check = await _db.Factory.OpenAsync();
+        var deposit = await check.ExecuteScalarAsync<decimal>(
+            "SELECT deposit_amount FROM bookings WHERE id = @id", new { id = line.BookingId });
+        Assert.Equal(100m, deposit);
+    }
+}

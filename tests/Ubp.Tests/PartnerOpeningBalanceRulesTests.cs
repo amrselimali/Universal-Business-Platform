@@ -30,4 +30,19 @@ public sealed class PartnerOpeningBalanceRulesTests
         Assert.Null(PartnerOpeningBalanceRules.Validate(null, 0));
         Assert.Null(PartnerOpeningBalanceRules.Validate(null, 2));
     }
+
+    [Fact]
+    public void Direct_edit_lines_follow_the_same_creation_rules()
+    {
+        Assert.Null(PartnerOpeningBalanceRules.ValidateLine(1, 100, 0));
+        Assert.Null(PartnerOpeningBalanceRules.ValidateLine(2.5m, 40, 100));
+        Assert.Equal("validation.quantity_invalid",
+            PartnerOpeningBalanceRules.ValidateLine(0, 100, 0));
+        Assert.Equal("validation.price_invalid",
+            PartnerOpeningBalanceRules.ValidateLine(1, -1, 0));
+        Assert.Equal("validation.paid_exceeds_total",
+            PartnerOpeningBalanceRules.ValidateLine(1, 100, 100.01m));
+        Assert.Equal("validation.paid_exceeds_total",
+            PartnerOpeningBalanceRules.ValidateLine(1, 100, -0.01m));
+    }
 }

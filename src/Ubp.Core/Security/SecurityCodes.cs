@@ -116,6 +116,8 @@ public static class ActionCodes
     public const string Create = "CREATE";
     /// <summary>صلاحية مستقلة: إضافة الأرصدة الافتتاحية للعملاء — 0104.</summary>
     public const string AddOpeningBalances = "ADD_OPENING_BALANCES";
+    /// <summary>صلاحية مستقلة: تعديل الأرصدة الافتتاحية القائمة قبل أي تنفيذ أو تحصيل.</summary>
+    public const string EditOpeningBalances = "EDIT_OPENING_BALANCES";
     /// <summary>تعديل جزئي لبيانات اتصال العميل (الهاتف/واتساب) دون صلاحية التعديل الكاملة.</summary>
     public const string EditContact = "EDIT_CONTACT";
     public const string Edit = "EDIT";

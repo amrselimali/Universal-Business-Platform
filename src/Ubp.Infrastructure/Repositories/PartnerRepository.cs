@@ -7,8 +7,12 @@ namespace Ubp.Infrastructure.Repositories;
 
 public interface IPartnerRepository
 {
+    /// <summary>
+    /// قائمة الأطراف. branchIds = null تعني بلا فلتر فرع (المدير العام)، وغير null
+    /// تعني: أطراف نطاق الشركة + الأطراف المقيّدة بأي فرع من الفروع المختارة.
+    /// </summary>
     Task<PagedResult<Partner>> ListAsync(PartnerKind kind, PageRequest request, Guid? categoryId,
-        bool isAdmin, IReadOnlyCollection<Guid> branchIds, CancellationToken ct = default);
+        IReadOnlyCollection<Guid>? branchIds, CancellationToken ct = default);
     Task<Partner?> GetAsync(PartnerKind kind, Guid id, CancellationToken ct = default);
     Task<Partner?> GetByCodeAsync(PartnerKind kind, string code, CancellationToken ct = default);
     Task<Partner> CreateAsync(PartnerKind kind, PartnerInput input, CancellationToken ct = default);
@@ -18,6 +22,19 @@ public interface IPartnerRepository
     /// </summary>
     Task<PartnerOpeningBalancesResult> CreateWithOpeningBalancesAsync(PartnerInput input,
         IReadOnlyList<ServiceOpeningBalanceInput> balances, Guid branchId, Guid userId,
+        CancellationToken ct = default);
+    /// <summary>
+    /// بنود الأرصدة الافتتاحية للعميل (حجز خدمة لكل بند) مع سبب منع التعديل إن وجد:
+    /// تُمنع بعد أي تنفيذ/تحصيل/تحويل/تسوية، وتُعدَّل بلا أي أثر محاسبي.
+    /// </summary>
+    Task<IReadOnlyList<PartnerOpeningBalanceLine>> ListOpeningBalancesAsync(Guid customerId,
+        CancellationToken ct = default);
+    /// <summary>
+    /// تعديل مباشر للأرصدة الافتتاحية: تحديث بنود، إضافة بنود، وحذف بنود غير مستخدمة
+    /// في معاملة واحدة مع إعادة حساب reserved_qty وإجمالي الحجز والمسدد — بلا قيود.
+    /// </summary>
+    Task<PartnerOpeningBalanceEditResult> UpdateOpeningBalancesAsync(Guid customerId,
+        Guid branchId, IReadOnlyList<PartnerOpeningBalanceEditLine> lines, Guid userId,
         CancellationToken ct = default);
     /// <summary>الكود التسلسلي التالي للطرف داخل نطاق/فرع، بدءًا من 1 — 0094.</summary>
     Task<string> NextCodeAsync(PartnerKind kind, string scopeType, Guid? branchId,
@@ -91,12 +108,14 @@ public sealed partial class PartnerRepository : IPartnerRepository
     }
 
     public async Task<PagedResult<Partner>> ListAsync(PartnerKind kind, PageRequest request,
-        Guid? categoryId, bool isAdmin, IReadOnlyCollection<Guid> branchIds, CancellationToken ct = default)
+        Guid? categoryId, IReadOnlyCollection<Guid>? branchIds, CancellationToken ct = default)
     {
         var where = new List<string>();
         if (!request.IncludeInactive) where.Add("p.is_active");
         if (categoryId.HasValue) where.Add("p.category_id = @categoryId");
-        if (!isAdmin) where.Add("(p.scope_type = 'COMPANY' OR p.branch_id = ANY(@branchIds))");
+        // أطراف نطاق الشركة تظهر في كل الفروع، والمقيّدة بالفرع حسب الفلتر المختار.
+        if (branchIds is not null)
+            where.Add("(p.scope_type = 'COMPANY' OR p.branch_id = ANY(@branchIds))");
         if (!string.IsNullOrWhiteSpace(request.Search))
         {
             // يشمل البحث حقول العميل المخصصة (مثل «الكود الورقي») بجميع قيمها النصية.
@@ -116,7 +135,8 @@ public sealed partial class PartnerRepository : IPartnerRepository
         await using var connection = await _factory.OpenAsync(ct);
         using var multi = await connection.QueryMultipleAsync(new CommandDefinition(sql, new
         {
-            search = request.Search, categoryId, branchIds = branchIds.ToArray(),
+            search = request.Search, categoryId,
+            branchIds = branchIds?.ToArray() ?? Array.Empty<Guid>(),
             take = request.SafePageSize, offset = request.Offset
         }, cancellationToken: ct));
         var items = (await multi.ReadAsync<PartnerRow>()).Select(Map).ToList();

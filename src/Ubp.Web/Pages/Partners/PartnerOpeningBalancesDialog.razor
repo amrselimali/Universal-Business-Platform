@@ -1,0 +1,124 @@
+@inherits ComponentBase
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">@T.T("opening_balances.title") — @Customer.NameAr</MudText>
+    </TitleContent>
+    <DialogContent>
+        @if (_loading)
+        {
+            <MudProgressLinear Indeterminate="true" />
+        }
+        else
+        {
+            <MudAlert Severity="Severity.Info" Dense="true" Class="mb-2">
+                @T.T("opening_balances.hint")
+            </MudAlert>
+
+            <div style="overflow-x:auto">
+                <table class="ubp-table" style="width:100%">
+                    <thead>
+                        <tr>
+                            <th>@T.T("opening_balances.doc_no")</th>
+                            <th>@T.T("partners.service")</th>
+                            <th>@T.T("common.quantity")</th>
+                            <th>@T.T("inventory.unit_price")</th>
+                            <th>@T.T("accounting.total")</th>
+                            <th>@T.T("partners.paid")</th>
+                            <th>@T.T("partners.remaining")</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var row in _rows)
+                        {
+                            <tr>
+                                <td>@(row.DocNo ?? "—")</td>
+                                <td style="min-width:260px">
+                                    @if (row.IsLocked)
+                                    {
+                                        <span class="ubp-code">@row.ServiceCode</span>@(" — " + row.ServiceName)
+                                    }
+                                    else
+                                    {
+                                        <MudAutocomplete T="ItemOption" Value="row.Service"
+                                                         SearchFunc="SearchServices"
+                                                         ToStringFunc="@ServiceLabel"
+                                                         ValueChanged="@(v => OnServiceChanged(row, v))"
+                                                         Variant="Variant.Outlined" Margin="Margin.Dense"
+                                                         ResetValueOnEmptyText="true" CoerceValue="true"
+                                                         Placeholder="@T.T("partners.service")" />
+                                    }
+                                </td>
+                                <td style="max-width:120px">
+                                    <MudNumericField T="decimal" Value="row.Quantity"
+                                                     ValueChanged="@(v => row.Quantity = v)"
+                                                     Min="0.0001m" Format="N2" Variant="Variant.Outlined"
+                                                     Margin="Margin.Dense" Disabled="row.IsLocked" />
+                                </td>
+                                <td style="max-width:140px">
+                                    <MudNumericField T="decimal" Value="row.UnitPrice"
+                                                     ValueChanged="@(v => row.UnitPrice = v)"
+                                                     Min="0m" Format="N2" Variant="Variant.Outlined"
+                                                     Margin="Margin.Dense" Disabled="row.IsLocked" />
+                                </td>
+                                <td style="max-width:140px">@row.Total.ToString("N2")</td>
+                                <td style="max-width:140px">
+                                    <MudNumericField T="decimal" Value="row.PaidAmount"
+                                                     ValueChanged="@(v => row.PaidAmount = v)"
+                                                     Min="0m" Max="@row.MaxPaid" Format="N2"
+                                                     Variant="Variant.Outlined" Margin="Margin.Dense"
+                                                     Disabled="@(!row.CanEditPaid)" />
+                                </td>
+                                <td style="max-width:140px"><b>@row.Remaining.ToString("N2")</b></td>
+                                <td>
+                                    @if (row.IsLocked)
+                                    {
+                                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">
+                                            @T.T(row.LockReasonKey ?? "opening_balances.lock_status")
+                                        </MudChip>
+                                        @if (row.CanEditPaid)
+                                        {
+                                            <MudText Typo="Typo.caption" Class="ubp-muted d-block">
+                                                @T.T("opening_balances.paid_only_hint", row.MaxPaid)
+                                            </MudText>
+                                        }
+                                    }
+                                    else
+                                    {
+                                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small"
+                                                       Color="Color.Error" OnClick="@(() => RemoveRow(row))" />
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.Add" OnClick="AddRow" Class="mt-2">
+                @T.T("opening_balances.add_row")
+            </MudButton>
+
+            <MudDivider Class="my-3" />
+            <div class="ubp-inline ubp-gap">
+                <MudText Typo="Typo.body2">@T.T("opening_balances.old_total"): <b>@_oldTotal.ToString("N2")</b></MudText>
+                <MudText Typo="Typo.body2">@T.T("opening_balances.new_total"): <b>@CurrentTotal.ToString("N2")</b></MudText>
+                <MudText Typo="Typo.body2">@T.T("opening_balances.value_difference"): <b>@ValueDifference.ToString("N2")</b></MudText>
+                <MudText Typo="Typo.body2">@T.T("opening_balances.cash_difference"): <b>@CashDifference.ToString("N2")</b></MudText>
+            </div>
+            <MudText Typo="Typo.caption" Class="ubp-muted d-block mt-2">
+                @T.T("opening_balances.no_accounting_hint")
+            </MudText>
+            <MudText Typo="Typo.caption" Class="ubp-muted d-block">
+                @T.T("opening_balances.delete_hint")
+            </MudText>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel" Disabled="_busy">@T.T("common.cancel")</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync"
+                   Disabled="@(_busy || _loading)">@T.T("common.save")</MudButton>
+    </DialogActions>
+</MudDialog>

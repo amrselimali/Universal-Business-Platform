@@ -34,6 +34,19 @@ else
                     <MudSelectItem T="Guid?" Value="@((Guid?)category.Id)">@CategoryName(category)</MudSelectItem>
                 }
             </MudSelect>
+            @if (Kind == PartnerKind.Customer && _branches.Count > 1)
+            {
+                <MudSelect T="Guid" SelectedValues="_branchIds" MultiSelection="true"
+                           Label="@T.T("partners.branch_filter")" Variant="Variant.Outlined"
+                           Margin="Margin.Dense" SelectAll="true"
+                           SelectAllText="@T.T("common.select_all")"
+                           ToStringFunc="@BranchLabel" SelectedValuesChanged="OnBranchFilterChanged">
+                    @foreach (var branch in _branches)
+                    {
+                        <MudSelectItem T="Guid" Value="@branch.Id">@branch.NameAr</MudSelectItem>
+                    }
+                </MudSelect>
+            }
             <MudSwitch T="bool" Value="_includeInactive" Label="@T.T("common.include_inactive")" Color="Color.Primary"
                        ValueChanged="OnFilterChanged" />
         </div>
@@ -103,6 +116,13 @@ else
                         {
                             <MudMenuItem OnClick="@(() => EditContactAsync(context))" Icon="@Icons.Material.Filled.Phone">
                                 تعديل بيانات الاتصال
+                            </MudMenuItem>
+                        }
+                        @if (Kind == PartnerKind.Customer && Can(ActionCodes.EditOpeningBalances))
+                        {
+                            <MudMenuItem OnClick="@(() => EditOpeningBalancesAsync(context))"
+                                         Icon="@Icons.Material.Filled.Tune">
+                                @T.T("opening_balances.menu")
                             </MudMenuItem>
                         }
                         @if (Can(ActionCodes.Delete))

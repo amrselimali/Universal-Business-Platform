@@ -38,7 +38,7 @@ public sealed class LookupService
         var page = await _partners.ListAsync(kind, new PageRequest
         {
             Page = 1, PageSize = PageRequest.MaxPageSize, Search = search
-        }, null, actor.IsSuperAdmin, actor.AllowedBranchIds, ct);
+        }, null, actor.IsSuperAdmin ? null : actor.AllowedBranchIds, ct);
         if (branchId is not { } selectedBranch) return page.Items;
         return page.Items
             .Where(p => string.Equals(p.ScopeType, "COMPANY", StringComparison.OrdinalIgnoreCase)

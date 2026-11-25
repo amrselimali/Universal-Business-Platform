@@ -12,6 +12,7 @@ public partial class PartnerList
     [Parameter] public PartnerKind Kind { get; set; } = PartnerKind.Customer;
     [Inject] private PartnerService Partners { get; set; } = default!;
     [Inject] private CustomFieldService CustomFields { get; set; } = default!;
+    [Inject] private BranchService Branches { get; set; } = default!;
     [Inject] private IDialogService DialogService { get; set; } = default!;
 
     private MudTable<Partner> _table = default!;
@@ -19,6 +20,9 @@ public partial class PartnerList
     private Guid? _categoryId;
     private bool _includeInactive;
     private IReadOnlyList<PartnerCategory> _categories = Array.Empty<PartnerCategory>();
+    private IReadOnlyList<Branch> _branches = Array.Empty<Branch>();
+    /// <summary>فروع فلتر شاشة العملاء — الافتراضي الفروع المصرح بها (المربوطة) للمستخدم.</summary>
+    private HashSet<Guid> _branchIds = new();
     /// <summary>حقل «الكود الورقي» المخصص للعميل — يُعرض عمودًا بجوار الكود عند تعريفه.</summary>
     private CustomFieldDefinition? _paperCodeField;
 
@@ -28,6 +32,13 @@ public partial class PartnerList
     protected override async Task OnLoadAsync()
     {
         _categories = await Partners.ListCategoriesAsync(Actor!, Kind, false);
+        _branches = await Branches.OptionsAsync(Actor!);
+        // الافتراضي: الفروع المصرح بها/المربوطة للمستخدم؛ لو لا توجد قيود يبدأ بالمتاح كله.
+        var allowed = Actor!.AllowedBranchIds;
+        _branchIds = _branches
+            .Where(b => Actor.IsSuperAdmin || allowed.Contains(b.Id))
+            .Select(b => b.Id).ToHashSet();
+        if (_branchIds.Count == 0) _branchIds = _branches.Select(b => b.Id).ToHashSet();
         _paperCodeField = Kind == PartnerKind.Customer
             ? PartnerCustomFieldRules.FindPaperCode(await CustomFields.ListActiveAsync("customers"))
             : null;
@@ -70,8 +81,19 @@ public partial class PartnerList
         {
             Page = state.Page + 1, PageSize = 25, Search = _search, IncludeInactive = _includeInactive,
             SortBy = state.SortLabel ?? "code", Descending = state.SortDirection == SortDirection.Descending
-        }, _categoryId, ct);
+        }, _categoryId, Kind == PartnerKind.Customer ? _branchIds.ToArray() : null, ct);
         return new TableData<Partner> { Items = result.Items, TotalItems = result.Total };
+    }
+
+    private string BranchLabel(Guid id) =>
+        _branches.FirstOrDefault(b => b.Id == id)?.NameAr ?? "—";
+
+    private Task OnBranchFilterChanged(IEnumerable<Guid> values)
+    {
+        _branchIds = values.ToHashSet();
+        // حد أدنى فرع واحد: عند إلغاء الكل نعود للفروع المتاحة للمستخدم.
+        if (_branchIds.Count == 0) _branchIds = _branches.Select(b => b.Id).ToHashSet();
+        return ReloadAsync();
     }
 
     private async Task ReloadAsync() => await _table.ReloadServerData();
@@ -96,6 +118,19 @@ public partial class PartnerList
         var dialog = await DialogService.ShowAsync<PartnerContactDialog>("تعديل بيانات الاتصال",
             new DialogParameters { ["Model"] = partner });
         if ((await dialog.Result) is { Canceled: false }) { await ReloadAsync(); ShowSuccess("common.saved"); }
+    }
+
+    /// <summary>
+    /// تعديل مباشر لأرصدة العميل الافتتاحية بصلاحية مستقلة: بلا أي أثر محاسبي،
+    /// وبمنع البنود التي نُفّذت أو حُصّلت أو حُوّلت أو سُوّيت.
+    /// </summary>
+    private async Task EditOpeningBalancesAsync(Partner partner)
+    {
+        var dialog = await DialogService.ShowAsync<PartnerOpeningBalancesDialog>(
+            T.T("opening_balances.menu"),
+            new DialogParameters { ["Customer"] = partner },
+            new DialogOptions { MaxWidth = MaxWidth.ExtraLarge, FullWidth = true });
+        await dialog.Result;
     }
 
     private async Task ManageCategoriesAsync()

@@ -239,7 +239,7 @@ public sealed partial class TreasuryService
         await RequireAnyTreasuryViewAsync(actor, ct);
         var kind = partyType == "S" ? PartnerKind.Supplier : PartnerKind.Customer;
         var page = await _partners.ListAsync(kind, new PageRequest { Page = 1, PageSize = 200 },
-            null, actor.IsAdmin, actor.AllowedBranchIds, ct);
+            null, actor.IsAdmin ? null : actor.AllowedBranchIds, ct);
         return page.Items;
     }
 

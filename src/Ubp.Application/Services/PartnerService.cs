@@ -26,12 +26,35 @@ public sealed partial class PartnerService
 
     private static string Table(PartnerKind kind) => kind == PartnerKind.Customer ? "customers" : "suppliers";
 
+    /// <summary>
+    /// قائمة الأطراف مع فلتر فروع اختياري: الافتراضي فروع المستخدم المصرح بها،
+    /// ومدير النظام بلا اختيار يرى كل الفروع. أطراف نطاق الشركة تظل ظاهرة دائمًا.
+    /// </summary>
     public async Task<PagedResult<Partner>> ListAsync(ActorContext actor, PartnerKind kind,
-        PageRequest request, Guid? categoryId, CancellationToken ct = default)
+        PageRequest request, Guid? categoryId, IReadOnlyCollection<Guid>? branchIds = null,
+        CancellationToken ct = default)
     {
         await _permissions.RequireAsync(actor, Screen(kind), ActionCodes.View, ct: ct);
-        return await _repository.ListAsync(kind, request, categoryId, actor.IsSuperAdmin,
-            actor.AllowedBranchIds, ct);
+
+        IReadOnlyCollection<Guid>? filter;
+        if (branchIds is { Count: > 0 })
+        {
+            var requested = branchIds.Distinct().ToArray();
+            if (actor.IsSuperAdmin) filter = requested;
+            else
+            {
+                var allowed = requested.Where(actor.CanAccessBranch).ToArray();
+                if (allowed.Length == 0) throw new ForbiddenException("error.branch_not_allowed");
+                filter = allowed;
+            }
+        }
+        else
+        {
+            // الافتراضي: الفروع المصرح بها للمستخدم (فروع الجلسة/المربوطة).
+            filter = actor.IsSuperAdmin ? null : actor.AllowedBranchIds.ToArray();
+        }
+
+        return await _repository.ListAsync(kind, request, categoryId, filter, ct);
     }
 
     public async Task<IReadOnlyList<PartnerCategory>> ListCategoriesAsync(ActorContext actor,
