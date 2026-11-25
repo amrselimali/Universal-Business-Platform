@@ -19,12 +19,36 @@ public sealed class FollowUpService
         _followUps = followUps; _permissions = permissions; _audit = audit;
     }
 
+    /// <summary>
+    /// متابعات العملاء مع فلتر فروع اختياري: الافتراضي فروع المستخدم المصرح بها،
+    /// ومدير النظام بلا اختيار يرى كل الفروع. عملاء نطاق الشركة يظلون ظاهرين دائمًا.
+    /// </summary>
     public async Task<IReadOnlyList<FollowUp>> ListAsync(ActorContext actor, string? status,
         DateTime? from = null, DateTime? to = null, string? customerSearch = null,
-        int limit = 200, CancellationToken ct = default)
+        int limit = 200, IReadOnlyCollection<Guid>? branchIds = null,
+        CancellationToken ct = default)
     {
         await _permissions.RequireAsync(actor, ScreenCodes.FollowUps, ActionCodes.View, ct: ct);
-        try { return await _followUps.ListAsync(status, from, to, customerSearch, limit, ct); }
+
+        IReadOnlyCollection<Guid>? filter;
+        if (branchIds is { Count: > 0 })
+        {
+            var requested = branchIds.Distinct().ToArray();
+            if (actor.IsSuperAdmin) filter = requested;
+            else
+            {
+                var allowed = requested.Where(actor.CanAccessBranch).ToArray();
+                if (allowed.Length == 0) throw new ForbiddenException("error.branch_not_allowed");
+                filter = allowed;
+            }
+        }
+        else
+        {
+            // الافتراضي: الفروع المصرح بها/المربوطة للمستخدم.
+            filter = actor.IsSuperAdmin ? null : actor.AllowedBranchIds.ToArray();
+        }
+
+        try { return await _followUps.ListAsync(status, from, to, customerSearch, limit, filter, ct); }
         catch (PostgresException ex) { throw DbErrorMapper.Map(ex); }
     }
 

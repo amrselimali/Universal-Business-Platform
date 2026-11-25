@@ -48,6 +48,16 @@ else
 
     <MudPaper Elevation="0" Class="ubp-card">
         <div class="ubp-toolbar">
+            <MudSelect T="Guid" SelectedValues="_branchIds" MultiSelection="true"
+                       Label="@T.T("common.branch")" Variant="Variant.Outlined"
+                       Margin="Margin.Dense" SelectAll="true"
+                       SelectAllText="@T.T("common.select_all")"
+                       ToStringFunc="@BranchLabel" SelectedValuesChanged="OnBranchesChanged">
+                @foreach (var branch in _branches)
+                {
+                    <MudSelectItem T="Guid" Value="@branch.Id">@branch.NameAr</MudSelectItem>
+                }
+            </MudSelect>
             <MudTextField @bind-Value="_customerSearch" Label="@T.T("sales.followup_customer_filter")"
                           Placeholder="@T.T("sales.customer_search_hint")" Immediate="true"
                           DebounceInterval="350" OnDebounceIntervalElapsed="ReloadAsync"

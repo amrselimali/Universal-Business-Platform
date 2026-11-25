@@ -288,4 +288,36 @@ public sealed class BookingTests : IClassFixture<TestDb>
         Assert.Equal(2, updated.Assignments.Count);
         Assert.Single(updated.Assignments, a => a.UnassignedAt is null);
     }
+
+    /// <summary>
+    /// سعر الوحدة يُحفظ بدقة تصل إلى 9 منازل (نقطة البيع تعرضه بمنزلتين وتقبل 9)،
+    /// بينما تقريبات الإجماليات تبقى بمنزلتين — 0218.
+    /// </summary>
+    [Fact]
+    public async Task Unit_price_is_stored_with_nine_decimal_places()
+    {
+        var actor = await _db.AdminActorAsync();
+        var suffix = Guid.NewGuid().ToString("N")[..6].ToUpperInvariant();
+        var (branch, warehouse, item, customer, _) = await SetupAsync(suffix);
+        var booking = await _db.BookingService().CreateAsync(actor, new BookingInput
+        {
+            BranchId = branch, BookingDate = DateTime.Today, CustomerId = customer.Id,
+            Lines =
+            {
+                new BookingLineInput
+                {
+                    ItemId = item.Id, UnitId = item.BaseUnitId, WarehouseId = warehouse,
+                    Quantity = 1, UnitPrice = 12.123456789m
+                }
+            }
+        });
+
+        await using var connection = await _db.Factory.OpenAsync();
+        var price = await connection.ExecuteScalarAsync<decimal>(
+            "SELECT unit_price FROM booking_lines WHERE booking_id = @id", new { id = booking.Id });
+        Assert.Equal(12.123456789m, price);
+        var total = await connection.ExecuteScalarAsync<decimal>(
+            "SELECT total_amount FROM bookings WHERE id = @id", new { id = booking.Id });
+        Assert.Equal(12.12m, total);
+    }
 }

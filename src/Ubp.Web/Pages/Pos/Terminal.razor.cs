@@ -23,9 +23,9 @@ public partial class Terminal : SecurePageBase
         public bool IsDirect => ItemExecutionModes.IsDirect(ExecutionMode);
         public decimal Quantity { get; set; } = 1;
         public decimal UnitPrice { get; set; }
-        /// <summary>الكمية والسعر مقرّبان لرقمين عشريين في كل الحسابات والعرض.</summary>
+        /// <summary>الكمية مقرّبة لمنزلتين، وسعر الوحدة يُستخدم بدقة تصل إلى 9 منازل.</summary>
         public decimal Qty2 => Math.Round(Quantity, 2, MidpointRounding.AwayFromZero);
-        public decimal Price2 => Math.Round(UnitPrice, 2, MidpointRounding.AwayFromZero);
+        public decimal Price9 => Math.Round(UnitPrice, 9, MidpointRounding.AwayFromZero);
         public decimal TaxRate { get; set; }
         public bool PriceIncludesTax { get; set; }
         /// <summary>normal / gift / treatment — 0084.</summary>
@@ -33,7 +33,8 @@ public partial class Terminal : SecurePageBase
         public Guid? EmployeeId { get; set; }
         public bool IsTreatment => OperationType == ServiceOperationTypes.Treatment;
 
-        public decimal Gross => Math.Round(Qty2 * Price2, 2,
+        // العرض والتقريب النهائي بمنزلتين، لكن الضرب يستخدم سعر الوحدة الكامل (حتى 9 منازل).
+        public decimal Gross => Math.Round(Qty2 * Price9, 2,
             MidpointRounding.AwayFromZero);
         public decimal Net => PriceIncludesTax && TaxRate > 0
             ? Math.Round(Gross / (1 + TaxRate / 100m), 2, MidpointRounding.AwayFromZero)
@@ -414,7 +415,7 @@ public partial class Terminal : SecurePageBase
                 Lines = _cart.Select(l => new PosLineInput
                 {
                     ItemId = l.ItemId, UnitId = l.UnitId, Quantity = l.Qty2,
-                    UnitPrice = l.Price2, OperationType = l.OperationType,
+                    UnitPrice = l.Price9, OperationType = l.OperationType,
                     EmployeeId = l.EmployeeId
                 }).ToList(),
                 Payments = _payments.Where(p => p.Total > 0).Select(p => new PosPaymentInput

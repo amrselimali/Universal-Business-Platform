@@ -25,6 +25,8 @@ public partial class FollowUps
     private DateTime? _to = DateTime.Today;
     private string? _status = FollowUpStatuses.Pending;
     private string? _customerSearch;
+    /// <summary>فروع فلتر شاشة المتابعات — الافتراضي الفروع المصرح بها (المربوطة) للمستخدم.</summary>
+    private HashSet<Guid> _branchIds = new();
     private bool _busy;
 
     protected override string ScreenCode => ScreenCodes.FollowUps;
@@ -36,12 +38,28 @@ public partial class FollowUps
         // نموذج الإضافة يبدأ فارغًا بالكامل (العميل والتاريخ والملاحظة).
         _input.CustomerId = Guid.Empty;
         _branches = await BranchApi.OptionsAsync(Actor!);
+        // الافتراضي: الفروع المصرح بها/المربوطة للمستخدم (لكل الفروع في حالة المدير العام).
+        _branchIds = _branches.Select(b => b.Id).ToHashSet();
         await ReloadAsync();
     }
 
-    private async Task ReloadAsync() =>
-        await RunAsync(async () =>
-            _items = await FollowUpApi.ListAsync(Actor!, _status, _from, _to, _customerSearch));
+    private async Task ReloadAsync() => await RunAsync(async () =>
+    {
+        // لا يمكن ترك الفلتر بلا فرع: نعود تلقائيًا إلى فروع المستخدم المتاحة.
+        if (_branchIds.Count == 0) _branchIds = _branches.Select(b => b.Id).ToHashSet();
+        _items = await FollowUpApi.ListAsync(Actor!, _status, _from, _to, _customerSearch,
+            branchIds: _branchIds.ToArray());
+    });
+
+    private string BranchLabel(Guid id) =>
+        _branches.FirstOrDefault(b => b.Id == id)?.NameAr ?? "—";
+
+    private async Task OnBranchesChanged(IEnumerable<Guid> values)
+    {
+        _branchIds = values.ToHashSet();
+        if (_branchIds.Count == 0) _branchIds = _branches.Select(b => b.Id).ToHashSet();
+        await ReloadAsync();
+    }
 
     private async Task OnStatusChanged(string? status)
     {

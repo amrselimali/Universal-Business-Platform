@@ -1,6 +1,8 @@
 using Dapper;
 using Npgsql;
 using Ubp.Core.Models;
+using Ubp.Core.Results;
+using Ubp.Core.Security;
 using Xunit;
 
 namespace Ubp.Tests;
@@ -236,5 +238,62 @@ public sealed class FollowUpTests : IClassFixture<TestDb>
         Assert.Contains(rows, f => f.Id == today.Id);
         Assert.DoesNotContain(rows, f => f.Id == later.Id);
         Assert.Contains(rows, f => f.Id == today.Id && f.Note == "today");
+    }
+
+    [Fact]
+    public async Task Followup_list_filters_by_branch_and_defaults_to_the_users_branches()
+    {
+        var admin = await _db.AdminActorAsync();
+        var suffix = Guid.NewGuid().ToString("N")[..6].ToUpperInvariant();
+        var branchA = await _db.CreateBranchAsync("FUB-A-" + suffix, "فرع متابعة أ " + suffix);
+        var branchB = await _db.CreateBranchAsync("FUB-B-" + suffix, "فرع متابعة ب " + suffix);
+        var category = await _db.PartnerRepo.CreateCategoryAsync(PartnerKind.Customer,
+            new PartnerCategoryInput { Code = "FUC-" + suffix, NameAr = "تصنيف " + suffix });
+
+        var customerA = await _db.Partners().CreateAsync(admin, PartnerKind.Customer, new PartnerInput
+        {
+            NameAr = "عميل متابعة أ " + suffix, CategoryId = category.Id, ScopeType = "BRANCH",
+            BranchId = branchA, Phone = "021" + suffix + "1", WhatsAppPhone = "021" + suffix + "2"
+        });
+        var customerB = await _db.Partners().CreateAsync(admin, PartnerKind.Customer, new PartnerInput
+        {
+            NameAr = "عميل متابعة ب " + suffix, CategoryId = category.Id, ScopeType = "BRANCH",
+            BranchId = branchB, Phone = "022" + suffix + "1", WhatsAppPhone = "022" + suffix + "2"
+        });
+        var company = await _db.Partners().CreateAsync(admin, PartnerKind.Customer, new PartnerInput
+        {
+            NameAr = "عميل متابعة شركة " + suffix, CategoryId = category.Id, ScopeType = "COMPANY",
+            Phone = "023" + suffix + "1", WhatsAppPhone = "023" + suffix + "2"
+        });
+
+        FollowUpInput FollowIn(Guid customerId, string note) => new()
+        {
+            CustomerId = customerId, Channel = FollowUpChannels.Call,
+            DueAt = DateTimeOffset.Now.AddHours(1), Note = note
+        };
+        var followA = await _db.FollowUps().CreateAsync(admin, FollowIn(customerA.Id, "A"));
+        var followB = await _db.FollowUps().CreateAsync(admin, FollowIn(customerB.Id, "B"));
+        var followCompany = await _db.FollowUps().CreateAsync(admin, FollowIn(company.Id, "C"));
+
+        var onlyA = await _db.FollowUps().ListAsync(admin, null, branchIds: new[] { branchA });
+        Assert.Contains(onlyA, f => f.Id == followA.Id);
+        Assert.Contains(onlyA, f => f.Id == followCompany.Id);
+        Assert.DoesNotContain(onlyA, f => f.Id == followB.Id);
+
+        // مستخدم مقيّد بفرع A: الافتراضي فروعه المصرح بها، وطلب فرع آخر يُرفض.
+        var restricted = new ActorContext
+        {
+            UserId = admin.UserId, Username = "followup-limited", IsAdmin = false,
+            IsSuperAdmin = false, Language = "ar",
+            AllowedBranchIds = new[] { branchA }, CurrentBranchId = branchA,
+            TraceId = "followup-branch-test"
+        };
+        var defaults = await _db.FollowUps().ListAsync(restricted, null);
+        Assert.Contains(defaults, f => f.Id == followA.Id);
+        Assert.Contains(defaults, f => f.Id == followCompany.Id);
+        Assert.DoesNotContain(defaults, f => f.Id == followB.Id);
+
+        await Assert.ThrowsAsync<ForbiddenException>(() => _db.FollowUps()
+            .ListAsync(restricted, null, branchIds: new[] { branchB }));
     }
 }

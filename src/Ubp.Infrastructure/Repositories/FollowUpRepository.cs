@@ -12,7 +12,8 @@ public interface IFollowUpRepository
         CancellationToken ct = default);
     Task<FollowUp?> GetAsync(Guid id, CancellationToken ct = default);
     Task<IReadOnlyList<FollowUp>> ListAsync(string? status, DateTime? from, DateTime? to,
-        string? customerSearch, int limit, CancellationToken ct = default);
+        string? customerSearch, int limit, IReadOnlyCollection<Guid>? branchIds = null,
+        CancellationToken ct = default);
     Task<IReadOnlyList<CustomerGapRow>> FindIdleCustomersAsync(string? codeFrom, string? codeTo,
         Guid? branchId, IReadOnlyCollection<Guid> branchIds, int limit,
         CancellationToken ct = default);
@@ -77,7 +78,8 @@ public sealed class FollowUpRepository : IFollowUpRepository
     }
 
     public async Task<IReadOnlyList<FollowUp>> ListAsync(string? status, DateTime? from,
-        DateTime? to, string? customerSearch, int limit, CancellationToken ct = default)
+        DateTime? to, string? customerSearch, int limit,
+        IReadOnlyCollection<Guid>? branchIds = null, CancellationToken ct = default)
     {
         await using var connection = await _factory.OpenAsync(ct);
         return (await connection.QueryAsync<FollowUp>(new CommandDefinition(Select + """
@@ -86,11 +88,16 @@ public sealed class FollowUpRepository : IFollowUpRepository
                AND (@to::date IS NULL OR f.due_at::date <= @to::date)
                AND (@customerSearch::text IS NULL OR @customerSearch = ''
                     OR c.search_text LIKE '%' || normalize_search(@customerSearch) || '%')
+               AND (@allBranches
+                    OR c.scope_type = 'COMPANY'
+                    OR c.branch_id = ANY(@branchIds))
              ORDER BY f.status = 'pending' DESC, f.due_at
              LIMIT @limit
             """, new
         {
             status, from = from?.Date, to = to?.Date, customerSearch,
+            allBranches = branchIds is null,
+            branchIds = (branchIds ?? Array.Empty<Guid>()).ToArray(),
             limit = Math.Clamp(limit, 1, 500)
         }, cancellationToken: ct))).ToList();
     }
