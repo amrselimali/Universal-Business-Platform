@@ -34,14 +34,14 @@ public sealed class ShiftReportSummaryTests : IClassFixture<TestDb>
         {
             await connection.OpenAsync();
             await connection.ExecuteAsync("""
-                INSERT INTO bookings (id, branch_id, doc_no, booking_date, status, customer_id,
+                INSERT INTO bookings (id, branch_id, doc_no, booking_date, starts_at, status, customer_id,
                     source, total_amount)
-                VALUES (@confirmedId, @branch, 'SRS-BK-1', current_date + 1, 'confirmed',
-                        @customerId, 'manual', 100),
-                       (@cancelledId, @branch, 'SRS-BK-2', current_date + 1, 'cancelled',
-                        @customerId, 'manual', 50),
-                       (@draftId, @branch, 'SRS-BK-3', current_date + 1, 'draft',
-                        @customerId, 'manual', 75)
+                VALUES (@confirmedId, @branch, 'SRS-BK-1', current_date, now() + interval '1 day',
+                        'confirmed', @customerId, 'manual', 100),
+                       (@cancelledId, @branch, 'SRS-BK-2', current_date, now() + interval '1 day',
+                        'cancelled', @customerId, 'manual', 50),
+                       (@draftId, @branch, 'SRS-BK-3', current_date, now() + interval '1 day',
+                        'draft', @customerId, 'manual', 75)
                 """, new
             {
                 confirmedId = Guid.CreateVersion7(), cancelledId = Guid.CreateVersion7(),
@@ -84,10 +84,10 @@ public sealed class ShiftReportSummaryTests : IClassFixture<TestDb>
         {
             await connection.OpenAsync();
             await connection.ExecuteAsync("""
-                INSERT INTO bookings (id, branch_id, doc_no, booking_date, status, customer_id,
-                    source, total_amount)
-                VALUES (@id, @branch, 'SRS-D-BK', current_date + 1, 'confirmed', @customerId,
-                        'manual', 100)
+                INSERT INTO bookings (id, branch_id, doc_no, booking_date, starts_at, status,
+                    customer_id, source, total_amount)
+                VALUES (@id, @branch, 'SRS-D-BK', current_date, now() + interval '1 day',
+                        'confirmed', @customerId, 'manual', 100)
                 """, new { id = Guid.CreateVersion7(), branch, customerId = customer.Id });
         }
 
@@ -107,6 +107,44 @@ public sealed class ShiftReportSummaryTests : IClassFixture<TestDb>
         var backdated = await shifts.GetShiftReportAsync(actor, shift.Id);
         Assert.Equal(0, backdated.TomorrowBookingsCount);
         Assert.Equal(0, backdated.TomorrowAppointments.Count);
+    }
+
+    /// <summary>
+    /// «حجوزات اليوم التالي» تُحسب بتاريخ **الموعد** (starts_at) لا تاريخ إنشاء الحجز:
+    /// حجز مسجَّل اليوم بموعد غدًا يُحتسب، وحجز بلا موعد يُحتسب بتاريخه.
+    /// </summary>
+    [Fact]
+    public async Task Tomorrow_bookings_use_the_appointment_date_not_the_document_date()
+    {
+        var actor = await _db.AdminActorAsync();
+        await _db.SeedAccountingAsync();
+        var branch = await _db.CreateBranchAsync("SRS-E", "فرع موعد الغد");
+        var customer = await _db.PartnerRepo.CreateAsync(PartnerKind.Customer, new PartnerInput
+        { Code = "SRS-E-C", NameAr = "عميل موعد الغد", ScopeType = "BRANCH", BranchId = branch });
+
+        await using (var connection = new NpgsqlConnection(TestDb.AdminConnection))
+        {
+            await connection.OpenAsync();
+            await connection.ExecuteAsync("""
+                INSERT INTO bookings (id, branch_id, doc_no, booking_date, starts_at, status,
+                    customer_id, source, total_amount)
+                VALUES (@withStart, @branch, 'SRS-E-BK1', current_date,
+                        now() + interval '1 day', 'confirmed', @customerId, 'manual', 100),
+                       (@noStart, @branch, 'SRS-E-BK2', current_date, NULL, 'confirmed',
+                        @customerId, 'manual', 50)
+                """, new
+            {
+                withStart = Guid.CreateVersion7(), noStart = Guid.CreateVersion7(), branch,
+                customerId = customer.Id
+            });
+        }
+
+        var shifts = _db.TreasuryService();
+        var shift = await shifts.OpenShiftAsync(actor,
+            new ShiftInput { NormalShift = true, BranchId = branch });
+
+        // حجز واحد فقط موعده غدًا؛ الحجز بلا موعد تاريخه اليوم فلا يُحتسب.
+        Assert.Equal(1, (await shifts.GetShiftReportAsync(actor, shift.Id)).TomorrowBookingsCount);
     }
 
     [Fact]

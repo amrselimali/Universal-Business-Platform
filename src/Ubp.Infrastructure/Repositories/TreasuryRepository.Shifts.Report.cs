@@ -433,20 +433,25 @@ public sealed partial class TreasuryRepository
                     AND f.due_at::date > @shiftDate::date)
             """, args, cancellationToken: ct));
 
-        // حجوزات اليوم التالي للشفت: الحالات المؤكدة فقط، ويُعرض العدد فقط — 0094.
+        // حجوزات اليوم التالي للشفت = **حجوزات المواعيد** فقط (التي لها موعد starts_at)،
+        // وليس حجوزات الخدمة التي بلا موعد — والتاريخ بتاريخ الموعد لا تاريخ المستند — 0094.
         report.TomorrowBookingsCount = await connection.ExecuteScalarAsync<int>(new CommandDefinition("""
             SELECT count(*)::int
             FROM bookings b
-            WHERE b.branch_id = @branchId AND b.booking_date = @shiftDate::date + 1
+            WHERE b.branch_id = @branchId
+              AND b.starts_at IS NOT NULL
+              AND b.starts_at::date = @shiftDate::date + 1
               AND b.status = 'confirmed'
             """, args, cancellationToken: ct));
 
-        // حجوزات اليوم التالي غير المؤكدة (باستثناء الملغى والمنتهي) — 0095.
+        // حجوزات المواعيد غير المؤكدة في اليوم التالي (باستثناء الملغى والمنتهي) — 0095.
         report.TomorrowBookingsUnconfirmedCount = await connection.ExecuteScalarAsync<int>(
             new CommandDefinition("""
             SELECT count(*)::int
             FROM bookings b
-            WHERE b.branch_id = @branchId AND b.booking_date = @shiftDate::date + 1
+            WHERE b.branch_id = @branchId
+              AND b.starts_at IS NOT NULL
+              AND b.starts_at::date = @shiftDate::date + 1
               AND b.status NOT IN ('confirmed', 'cancelled', 'expired')
             """, args, cancellationToken: ct));
 
