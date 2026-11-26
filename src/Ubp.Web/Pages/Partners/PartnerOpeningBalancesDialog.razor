@@ -70,7 +70,7 @@
                                                      Variant="Variant.Outlined" Margin="Margin.Dense"
                                                      Disabled="@(!row.CanEditPaid)" />
                                 </td>
-                                <td style="max-width:140px"><b>@row.Remaining.ToString("N2")</b></td>
+                                <td style="max-width:140px"><b>@Money(row.Remaining)</b></td>
                                 <td>
                                     @if (row.IsLocked)
                                     {
@@ -103,10 +103,10 @@
 
             <MudDivider Class="my-3" />
             <div class="ubp-inline ubp-gap">
-                <MudText Typo="Typo.body2">@T.T("opening_balances.old_total"): <b>@_oldTotal.ToString("N2")</b></MudText>
-                <MudText Typo="Typo.body2">@T.T("opening_balances.new_total"): <b>@CurrentTotal.ToString("N2")</b></MudText>
-                <MudText Typo="Typo.body2">@T.T("opening_balances.value_difference"): <b>@ValueDifference.ToString("N2")</b></MudText>
-                <MudText Typo="Typo.body2">@T.T("opening_balances.cash_difference"): <b>@CashDifference.ToString("N2")</b></MudText>
+                <MudText Typo="Typo.body2">@T.T("opening_balances.old_total"): <b>@Money(_oldTotal)</b></MudText>
+                <MudText Typo="Typo.body2">@T.T("opening_balances.new_total"): <b>@Money(CurrentTotal)</b></MudText>
+                <MudText Typo="Typo.body2">@T.T("opening_balances.value_difference"): <b>@Money(ValueDifference)</b></MudText>
+                <MudText Typo="Typo.body2">@T.T("opening_balances.cash_difference"): <b>@Money(CashDifference)</b></MudText>
             </div>
             <MudText Typo="Typo.caption" Class="ubp-muted d-block mt-2">
                 @T.T("opening_balances.no_accounting_hint")

@@ -222,7 +222,7 @@ public sealed partial class PartnerRepository
             {
                 var sameStructure = serviceId == current.ServiceId
                     && line.Quantity == current.Quantity && line.UnitPrice == current.UnitPrice;
-                var paidChanged = paid != RoundAmount(current.PaidAmount);
+                var paidChanged = paid != current.PaidAmount;
                 var structuralLock = OpeningBalanceLockReason(current);
 
                 // الكمية/السعر/الخدمة مقفولة بعد الاستخدام، أما المسدد فيبقى قابلًا للتعديل
