@@ -342,4 +342,63 @@ public sealed class OperatingExpenseTests : IClassFixture<TestDb>
 
         Assert.Equal(5000m, ok.TotalAmount);
     }
+
+    /// <summary>
+    /// المصروف المسودة (بلا سند بعد) يجب أن يظهر في «حركة اليوم» ويخفض «النقد المتوقع»
+    /// في تقرير الشفت — كان يُحسب في المتاح فقط ولا يظهر في تقرير الشفت.
+    /// </summary>
+    [Fact]
+    public async Task Draft_expense_appears_in_shift_movement_and_expected_cash()
+    {
+        var actor = await _db.AdminActorAsync();
+        var chart = await _db.SeedAccountingAsync();
+        var branch = await _db.CreateBranchAsync("EXP-B-22", "فرع حركة 22");
+        var supplier = await _db.PartnerRepo.CreateAsync(PartnerKind.Supplier, new PartnerInput
+        { Code = "EXP-S-22", NameAr = "مورد حركة 22" });
+        var customer = await _db.PartnerRepo.CreateAsync(PartnerKind.Customer, new PartnerInput
+        { Code = "EXP-C-22", NameAr = "عميل حركة 22" });
+
+        var treasuryId = Guid.CreateVersion7();
+        await _db.TreasuryRepo.CreateTreasuryAsync(treasuryId, new TreasuryInput
+        {
+            BranchId = branch, Code = "EXP-T-22", NameAr = "خزينة حركة 22",
+            TreasuryType = TreasuryTypes.Cash, AccountId = chart["1101"].Id,
+            FollowInShift = true
+        }, actor.UserId);
+        var cash = Guid.CreateVersion7();
+        await _db.TreasuryRepo.CreateMethodAsync(cash, new TreasuryMethodInput
+        { TreasuryId = treasuryId, Code = "CASH", NameAr = "نقدي" }, actor.UserId);
+
+        var shifts = _db.TreasuryService();
+        var shift = await shifts.OpenShiftAsync(actor,
+            new ShiftInput { NormalShift = true, BranchId = branch });
+
+        // تحصيل نقدي 150 داخل الشفت (قيده مسودة).
+        var receipt = await shifts.CreateVoucherAsync(actor, new VoucherInput
+        {
+            VoucherType = VoucherTypes.Receipt, BranchId = branch, DocDate = DateTime.Today,
+            PartyType = "C", PartyId = customer.Id, PartyName = customer.NameAr,
+            TreasuryId = treasuryId,
+            Lines = { new VoucherLineInput { TreasuryMethodId = cash, Amount = 150 } }
+        });
+        await shifts.PostVoucherAsync(actor, receipt.Id);
+
+        var before = (await shifts.GetShiftReportAsync(actor, shift.Id)).CashCounts
+            .Single(c => c.TreasuryId == treasuryId);
+        Assert.Equal(150m, before.Movement);
+        Assert.Equal(150m, before.ExpectedCash);
+
+        // مصروف مسودة 100 من نفس الخزينة (بلا سند/قيد بعد).
+        await _db.OperatingExpenses().CreateAsync(actor, new OperatingExpenseInput
+        {
+            BranchId = branch, DocDate = DateTime.Today, SupplierId = supplier.Id,
+            TreasuryId = treasuryId, TreasuryMethodId = cash,
+            Lines = { ExpenseLine(chart["5300"], 1, 100) }
+        });
+
+        var after = (await shifts.GetShiftReportAsync(actor, shift.Id)).CashCounts
+            .Single(c => c.TreasuryId == treasuryId);
+        Assert.Equal(50m, after.Movement);
+        Assert.Equal(50m, after.ExpectedCash);
+    }
 }
