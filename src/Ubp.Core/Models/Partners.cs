@@ -89,6 +89,18 @@ public sealed class PartnerInput
 /// </summary>
 public static class PartnerOpeningBalanceRules
 {
+    /// <summary>
+    /// هامش تسامح للكسور الدقيقة: أي اختلاف في حدود 3 علامات عشرية أو أقل
+    /// (ناتج عن تقريب سعر الوحدة في الشاشة) لا يمنع قبول المسدد.
+    /// </summary>
+    public const decimal Tolerance = 0.001m;
+
+    /// <summary>
+    /// تسامح مقارنة **سعر الوحدة**: أي فرق ≤ نصف قرش (0.005) يُعدّ مجرد تقريب للعرض،
+    /// فيُعتمد السعر الأصلي بكامل علاماته ولا يُستبدل بالمقرَّب.
+    /// </summary>
+    public const decimal PriceTolerance = 0.005m;
+
     public static string? Validate(bool? noOpeningBalance, int openingBalancesCount)
     {
         if (noOpeningBalance is null) return null;
@@ -108,10 +120,10 @@ public static class PartnerOpeningBalanceRules
     {
         if (quantity <= 0) return "validation.quantity_invalid";
         if (unitPrice < 0) return "validation.price_invalid";
-        var total = Math.Round(quantity * unitPrice, 2, MidpointRounding.AwayFromZero);
-        // المسدد يُقارن بدقة قرشين: كسور سعر الوحدة (15 رقمًا) لا تمنع إدخال قيمة الإجمالي الظاهرة.
-        var paid = Math.Round(paidAmount, 2, MidpointRounding.AwayFromZero);
-        if (paid < 0 || paid > total) return "validation.paid_exceeds_total";
+        // الحد يُحسب من سعر الوحدة بكامل علاماته العشرية، ويُتسامح مع فروق ≤ 0.001.
+        var total = quantity * unitPrice;
+        if (paidAmount < 0 || paidAmount - total > Tolerance)
+            return "validation.paid_exceeds_total";
         return null;
     }
 }
@@ -203,9 +215,12 @@ public sealed class PartnerOpeningBalanceLine
     public decimal BookingTotal { get; set; }
 
     /// <summary>أقصى مسدد مسموح = إجمالي الحجز ناقص الإيصالات المسجلة.</summary>
-    public decimal MaxPaidAmount => Math.Max(Math.Round(
-        (BookingTotal > 0 ? BookingTotal : TotalAmount) - ReceiptsAmount, 2,
-        MidpointRounding.AwayFromZero), 0);
+    /// <summary>
+    /// أقصى مسدد = (إجمالي الحجز أو إجمالي البند بسعر الوحدة الأصلي بكل علاماته) − الإيصالات،
+    /// بدون تقريب؛ ويُقبل المسدد مع تسامح 3 علامات عشرية (0.001).
+    /// </summary>
+    public decimal MaxPaidAmount => Math.Max(
+        (BookingTotal > 0 ? BookingTotal : Quantity * UnitPrice) - ReceiptsAmount, 0);
 
     /// <summary>مفتاح ترجمة سبب منع التعديل، أو null إذا كان البند قابلًا للتعديل.</summary>
     public string? LockReasonKey { get; set; }

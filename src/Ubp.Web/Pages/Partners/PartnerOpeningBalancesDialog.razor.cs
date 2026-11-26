@@ -28,9 +28,6 @@ public partial class PartnerOpeningBalancesDialog
     private decimal ValueDifference => CurrentTotal - _oldTotal;
     private decimal CashDifference => CurrentPaid - _oldPaid;
 
-    private static decimal Round2(decimal value) =>
-        Math.Round(value, 2, MidpointRounding.AwayFromZero);
-
     /// <summary>
     /// عرض المبلغ/الفرق بكامل علاماته العشرية **دون أي تقريب** (خلية الفرق)،
     /// حتى يظهر الفرق الحقيقي مهما كان عدد الكسور في سعر الوحدة أو المسدد.
@@ -146,9 +143,10 @@ public partial class PartnerOpeningBalancesDialog
             }
             if (row.IsLocked)
             {
-                // بند مستخدم: يُرسل المسدد فقط، وبحد أقصى قيمة الخدمة ناقص الإيصالات.
-                // المقارنة بدقة قرشين حتى لا تمنع كسور سعر الوحدة إدخال قيمة الإجمالي الظاهرة.
-                if (row.PaidAmount < 0 || Round2(row.PaidAmount) > Round2(row.MaxPaid))
+                // بند مستخدم: يُرسل المسدد فقط، وبحد أقصى القيمة الأصلية ناقص الإيصالات،
+                // مع التسامح مع فروق الكسور ≤ 0.001 (3 علامات عشرية) — 0220.
+                if (row.PaidAmount < 0 ||
+                    row.PaidAmount - row.MaxPaid > PartnerOpeningBalanceRules.Tolerance)
                 {
                     Snackbar.Add($"{prefix}: {T.T("validation.paid_exceeds_total")}",
                         Severity.Warning);

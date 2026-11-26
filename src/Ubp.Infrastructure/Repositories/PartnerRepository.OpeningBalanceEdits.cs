@@ -100,13 +100,12 @@ public sealed partial class PartnerRepository
         row.Status is not ("cancelled" or "reversed" or "expired");
 
     /// <summary>
-    /// أقصى مسدد = إجمالي الحجز ناقص الإيصالات المسجلة (يشمل كل بنود الحجز)،
-    /// محسوبًا بدقة قرشين حتى لا تمنع بقايا كسور سعر الوحدة (15 رقمًا) إدخال المسدد.
-    /// لو إجمالي الحجز غير مسجّل يُستخدم إجمالي البند.
+    /// أقصى مسدد = إجمالي الحجز ناقص الإيصالات المسجلة، محسوبًا من **القيم الأصلية
+    /// بكامل علاماتها العشرية** (بدون تقريب) — ويُقبل المسدد مع تسامح 3 علامات عشرية.
     /// </summary>
-    private static decimal OpeningBalanceMaxPaid(OpeningBalanceRow row) => Math.Max(
-        RoundAmount((row.BookingTotal > 0 ? row.BookingTotal : row.Quantity * row.UnitPrice)
-                    - row.ReceiptsAmount), 0);
+    private static decimal OpeningBalanceMaxPaid(OpeningBalanceRow row) =>
+        (row.BookingTotal > 0 ? row.BookingTotal : row.Quantity * row.UnitPrice)
+        - row.ReceiptsAmount;
 
     private static PartnerOpeningBalanceLine MapOpeningBalance(OpeningBalanceRow row) => new()
     {
@@ -215,23 +214,33 @@ public sealed partial class PartnerRepository
             if (service.BranchId is { } itemBranch && itemBranch != bookingBranch)
                 throw new ValidationAppException("validation.item_not_found");
 
-            var total = RoundAmount(line.Quantity * line.UnitPrice);
+            // السعر المستخدم في الحساب: لو الفرق عن السعر الأصلي مجرد تقريب (≤ 0.001)
+            // يُعتمد **السعر الأصلي بكامل علاماته العشرية** ولا تُفقد دقته — 0220.
+            var unitPrice = line.UnitPrice;
+            if (current is not null && line.Quantity == current.Quantity &&
+                Math.Abs(line.UnitPrice - current.UnitPrice)
+                    <= PartnerOpeningBalanceRules.PriceTolerance)
+                unitPrice = current.UnitPrice;
+
+            var total = RoundAmount(line.Quantity * unitPrice);
             // المسدد يُحسب بدقة قرشين: كسور سعر الوحدة لا تمنع إدخال قيمة الإجمالي الظاهرة.
             var paid = RoundAmount(line.PaidAmount);
             if (current is not null)
             {
                 var sameStructure = serviceId == current.ServiceId
-                    && line.Quantity == current.Quantity && line.UnitPrice == current.UnitPrice;
+                    && line.Quantity == current.Quantity && unitPrice == current.UnitPrice;
                 var paidChanged = paid != current.PaidAmount;
                 var structuralLock = OpeningBalanceLockReason(current);
 
                 // الكمية/السعر/الخدمة مقفولة بعد الاستخدام، أما المسدد فيبقى قابلًا للتعديل
-                // بعد التنفيذ/التحصيل بحد أقصى قيمة الخدمة ناقص الإيصالات المسجلة.
+                // بعد التنفيذ/التحصيل بحد أقصى قيمة الخدمة ناقص الإيصالات المسجلة،
+                // مع التسامح مع فروق الكسور ≤ 0.001 (3 علامات عشرية).
                 if ((structuralLock is not null && !sameStructure) ||
                     (paidChanged && !OpeningBalancePaidEditable(current)))
                     throw new ValidationAppException("validation.opening_balance_locked",
                         new Dictionary<string, string> { ["item"] = current.ServiceName });
-                if (paid < 0 || paid > OpeningBalanceMaxPaid(current))
+                if (paid < 0 ||
+                    paid - OpeningBalanceMaxPaid(current) > PartnerOpeningBalanceRules.Tolerance)
                     throw new ValidationAppException("validation.paid_exceeds_total");
 
                 if (!sameStructure || paidChanged)
@@ -248,7 +257,7 @@ public sealed partial class PartnerRepository
                         {
                             lineId = current.BookingLineId, itemId = serviceId,
                             unitId = service.BaseUnitId, quantity = line.Quantity,
-                            unitPrice = line.UnitPrice, total
+                            unitPrice, total
                         }, tx, cancellationToken: ct));
 
                         await connection.ExecuteAsync(new CommandDefinition("""
@@ -280,7 +289,7 @@ public sealed partial class PartnerRepository
                         NewValues = new
                         {
                             current.DocNo, ServiceId = serviceId, line.Quantity,
-                            line.UnitPrice, PaidAmount = paid, Total = total
+                            unitPrice, PaidAmount = paid, Total = total
                         }
                     });
                     result.Updated++;
