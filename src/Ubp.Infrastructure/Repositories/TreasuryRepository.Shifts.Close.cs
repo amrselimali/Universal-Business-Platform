@@ -99,7 +99,7 @@ public sealed partial class TreasuryRepository
     /// وتُضاف تسويات الحسابات الوسيطة (بطاقة/محفظة/شيك) إلى الخزينة (0219).
     /// هذه هي نفس الحركة المستخدمة في «النقد المتوقع» = أول المدة + حركة اليوم.
     /// </summary>
-    private static async Task<decimal> TreasuryMovementAsync(NpgsqlConnection connection,
+    internal static async Task<decimal> TreasuryMovementAsync(NpgsqlConnection connection,
         NpgsqlTransaction? tx, Guid treasuryId, Guid branchId, Guid shiftId,
         DateTimeOffset openedAt, DateTimeOffset? until, CancellationToken ct) =>
         await connection.ExecuteScalarAsync<decimal>(new CommandDefinition("""

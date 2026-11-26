@@ -239,4 +239,100 @@ public sealed class BookingExecutionEmployeeTests : IClassFixture<TestDb>
         var preview = await _db.Executions().GetPreviewAsync(actor, line.Id);
         Assert.Equal("موظف تغيّر الدور", preview.EmployeeName);
     }
+
+    /// <summary>
+    /// حجز خدمة محجوزة **بلا موظف مسؤول** وبلا موعد للعميل: اختيار المنفّذ في حوار التنفيذ
+    /// يكفي لتنفيذ الجلسة (لا تُرفض برسالة «بدون موظف مسجل للحجز أو الموعد»).
+    /// </summary>
+    [Fact]
+    public async Task Execution_accepts_the_selected_executor_when_booking_has_no_employee()
+    {
+        var actor = await _db.AdminActorAsync();
+        await _db.SeedAccountingAsync();
+        var branch = await _db.CreateBranchAsync("EX-B-10", "فرع منفّذ مختار");
+        var warehouse = await _db.CreateWarehouseAsync("EX-W-10", "مخزن منفّذ مختار", branch);
+        var unit = await _db.UnitRepo.CreateAsync(new UnitInput
+        { Code = "EX-U-10", NameAr = "وحدة منفّذ مختار" });
+        var service = await _db.ItemRepo.CreateAsync(new ItemInput
+        {
+            Code = "EX-SV-10", NameAr = "خدمة منفّذ مختار", ItemType = "SERVICE",
+            BaseUnitId = unit.Id,
+            Units = new List<ItemUnitInput> { new() { UnitId = unit.Id, ConversionFactor = 1 } }
+        });
+        var customer = await _db.PartnerRepo.CreateAsync(PartnerKind.Customer, new PartnerInput
+        { Code = "EX-C-10", NameAr = "عميل منفّذ مختار" });
+
+        var executor = Guid.CreateVersion7();
+        await _db.EmployeeRepo.CreateAsync(executor, new EmployeeInput
+        {
+            Code = "EX-E-10", NameAr = "منفّذ مختار", BranchId = branch, IsServiceExecutor = true
+        }, actor.UserId);
+
+        // شفت مفتوح (0220): التنفيذ يبقى مسودة ولا يحتاج ترحيلاً فوريًا.
+        await _db.TreasuryService().OpenShiftAsync(actor,
+            new ShiftInput { NormalShift = true, BranchId = branch });
+
+        var booking = await _db.BookingService().CreateAsync(actor, new BookingInput
+        {
+            BranchId = branch, BookingDate = DateTime.Today, CustomerId = customer.Id,
+            Lines =
+            {
+                new BookingLineInput
+                {
+                    ItemId = service.Id, UnitId = service.BaseUnitId, WarehouseId = warehouse,
+                    Quantity = 2, UnitPrice = 150
+                }
+            }
+        });
+        await _db.BookingRepo.ConfirmAsync(booking.Id, actor.UserId, reserveStock: false);
+        var line = (await _db.BookingService().GetAsync(actor, booking.Id)).Lines.Single();
+
+        var preview = await _db.Executions().GetPreviewAsync(actor, line.Id);
+        Assert.True(string.IsNullOrWhiteSpace(preview.EmployeeName)); // لا موظف على الحجز
+
+        var result = await _db.Executions().ExecuteAsync(actor, new BookingExecutionInput
+        { BookingLineId = line.Id, Quantity = 1, EmployeeId = executor });
+
+        Assert.Equal(1m, result.Quantity);
+    }
+
+    /// <summary>بلا اختيار منفّذ وبلا موظف على الحجز: تبقى الرسالة واضحة.</summary>
+    [Fact]
+    public async Task Execution_still_requires_an_employee_when_none_is_selected()
+    {
+        var actor = await _db.AdminActorAsync();
+        await _db.SeedAccountingAsync();
+        var branch = await _db.CreateBranchAsync("EX-B-11", "فرع بلا منفّذ");
+        var warehouse = await _db.CreateWarehouseAsync("EX-W-11", "مخزن بلا منفّذ", branch);
+        var unit = await _db.UnitRepo.CreateAsync(new UnitInput
+        { Code = "EX-U-11", NameAr = "وحدة بلا منفّذ" });
+        var service = await _db.ItemRepo.CreateAsync(new ItemInput
+        {
+            Code = "EX-SV-11", NameAr = "خدمة بلا منفّذ", ItemType = "SERVICE",
+            BaseUnitId = unit.Id,
+            Units = new List<ItemUnitInput> { new() { UnitId = unit.Id, ConversionFactor = 1 } }
+        });
+        var customer = await _db.PartnerRepo.CreateAsync(PartnerKind.Customer, new PartnerInput
+        { Code = "EX-C-11", NameAr = "عميل بلا منفّذ" });
+
+        var booking = await _db.BookingService().CreateAsync(actor, new BookingInput
+        {
+            BranchId = branch, BookingDate = DateTime.Today, CustomerId = customer.Id,
+            Lines =
+            {
+                new BookingLineInput
+                {
+                    ItemId = service.Id, UnitId = service.BaseUnitId, WarehouseId = warehouse,
+                    Quantity = 1, UnitPrice = 100
+                }
+            }
+        });
+        await _db.BookingRepo.ConfirmAsync(booking.Id, actor.UserId, reserveStock: false);
+        var line = (await _db.BookingService().GetAsync(actor, booking.Id)).Lines.Single();
+
+        var error = await Assert.ThrowsAsync<ValidationAppException>(() =>
+            _db.Executions().ExecuteAsync(actor,
+                new BookingExecutionInput { BookingLineId = line.Id, Quantity = 1 }));
+        Assert.Equal("validation.execution_employee_required", error.Code);
+    }
 }

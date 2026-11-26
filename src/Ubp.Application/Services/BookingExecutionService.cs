@@ -41,8 +41,11 @@ public sealed class BookingExecutionService
         var preview = await _executions.GetPreviewAsync(input.BookingLineId, ct);
         BranchScope.Ensure(actor, preview.BranchId);
         var direct = ItemExecutionModes.IsDirect(preview.ExecutionMode);
-        if (!direct && preview.ItemType == "SERVICE" &&
-            string.IsNullOrWhiteSpace(preview.EmployeeName))
+        // الموظف المطلوب للتنفيذ: مَن سجّله الحجز/الموعد (preview) **أو المنفّذ المختار في الحوار**
+        // (input.EmployeeId). اختيار منفّذ صالح في شاشة التنفيذ يكفي ولا يُرفض الطلب.
+        var hasEmployee = !string.IsNullOrWhiteSpace(preview.EmployeeName) ||
+                          input.EmployeeId is not null;
+        if (!direct && preview.ItemType == "SERVICE" && !hasEmployee)
             throw new ValidationAppException("validation.execution_employee_required");
         // 0214: لا يُنفَّذ حجز فرع بموظف مسؤول مسجّل على فرع آخر (موظف الشركة بلا فرع مقبول).
         if (!BookingExecutionRules.EmployeeBelongsToBranch(preview.EmployeeBranchId,
