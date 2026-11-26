@@ -235,7 +235,7 @@ public sealed partial class TreasuryRepository
         NpgsqlTransaction tx, Guid entryId, string treasuryType, Guid branchId, DateTime docDate,
         string docNo, string description, IReadOnlyList<JournalLine> gl, Guid userId,
         Guid? sourceId, CancellationToken ct, string sourceType = "voucher",
-        string? journalTypeOverride = null)
+        string? journalTypeOverride = null, Guid? deferToShift = null)
     {
         var debit = gl.Sum(x => x.Debit);
         var credit = gl.Sum(x => x.Credit);
@@ -275,6 +275,15 @@ public sealed partial class TreasuryRepository
                 description, debit = line.Debit, credit = line.Credit,
                 customerId = line.CustomerId, supplierId = line.SupplierId, branchId, docDate
             }, tx, cancellationToken: ct));
+        }
+
+        // شفت محدد صراحةً (مغلق تحت المراجعة) ⇒ القيد مسودة مرتبط به حتى اعتماد مراجعته — 0220.
+        if (deferToShift is { } forcedShift)
+        {
+            await connection.ExecuteAsync(new CommandDefinition(
+                "UPDATE journal_entries SET shift_id = @forcedShift WHERE id = @entryId",
+                new { forcedShift, entryId }, tx, cancellationToken: ct));
+            return;
         }
 
         // أثناء شفت مفتوح: يبقى القيد مسودة مرتبطة بالشفت ويُعتمد عند اعتماد المراجعة — 0220.

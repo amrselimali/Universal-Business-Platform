@@ -53,7 +53,7 @@ public sealed partial class TreasuryRepository
     /// </summary>
     public async Task<Guid> SettleClearingAsync(Guid treasuryId, Guid clearingAccountId,
         decimal amount, DateTime docDate, string? reference, Guid userId,
-        Guid? branchId = null, CancellationToken ct = default)
+        Guid? branchId = null, Guid? shiftId = null, CancellationToken ct = default)
     {
         amount = Math.Round(amount, 2, MidpointRounding.AwayFromZero);
         if (amount == 0)
@@ -95,18 +95,15 @@ public sealed partial class TreasuryRepository
 
         var description = $"تسوية حساب وسيط {account.Code}" +
                           (string.IsNullOrWhiteSpace(reference) ? "" : $" — {reference.Trim()}");
+        // الشفت المستهدف: المحدَّد من النافذة (مفتوح أو مغلق تحت المراجعة)، وإلا الشفت المفتوح.
+        var resolvedShiftId = await ResolveSettlementShiftAsync(connection, tx, targetBranch,
+            shiftId, ct);
+
         var entryId = Guid.CreateVersion7();
         var settlementId = Guid.CreateVersion7();
         await CreateVoucherEntryAsync(connection, tx, entryId, treasury.TreasuryType,
             targetBranch, docDate, reference?.Trim() ?? account.Code, description, gl, userId,
-            settlementId, ct, "clearing_settlement");
-
-        // ربط التسوية بالشفت المفتوح للفرع وقت التنفيذ (لتظهر في تقرير الشفت وحركة النقد).
-        var shiftId = await connection.ExecuteScalarAsync<Guid?>(new CommandDefinition("""
-            SELECT id FROM cashier_shifts
-            WHERE branch_id = @branchId AND status = 'open'
-            ORDER BY opened_at DESC LIMIT 1
-            """, new { branchId = targetBranch }, tx, cancellationToken: ct));
+            settlementId, ct, "clearing_settlement", deferToShift: resolvedShiftId);
 
         await connection.ExecuteAsync(new CommandDefinition("""
             INSERT INTO treasury_clearing_settlements (id, branch_id, treasury_id,
@@ -117,11 +114,42 @@ public sealed partial class TreasuryRepository
             """, new
         {
             settlementId, branchId = targetBranch, treasuryId, clearingAccountId,
-            amount, docDate, reference = reference?.Trim(), entryId, shiftId, userId
+            amount, docDate, reference = reference?.Trim(), entryId, shiftId = resolvedShiftId,
+            userId
         }, tx, cancellationToken: ct));
 
         await tx.CommitAsync(ct);
         return entryId;
+    }
+
+    /// <summary>
+    /// يحدد شفت التسوية: المحدَّد صراحةً (مفتوح، أو مغلق ما زال تحت المراجعة) — وإلا الشفت المفتوح.
+    /// يرفض شفتًا نهائيًا أو شفتًا من فرع آخر.
+    /// </summary>
+    private static async Task<Guid?> ResolveSettlementShiftAsync(NpgsqlConnection connection,
+        NpgsqlTransaction tx, Guid branchId, Guid? shiftId, CancellationToken ct)
+    {
+        if (shiftId is { } id)
+        {
+            var row = await connection.QuerySingleOrDefaultAsync<(Guid Id, Guid BranchId,
+                string Status, string ReviewStatus)>(new CommandDefinition("""
+                SELECT id AS Id, branch_id AS BranchId, status AS Status,
+                       review_status AS ReviewStatus
+                FROM cashier_shifts WHERE id = @id
+                """, new { id }, tx, cancellationToken: ct));
+            if (row.Id == Guid.Empty) throw new NotFoundAppException();
+            if (row.BranchId != branchId)
+                throw new ValidationAppException("validation.treasury_branch_mismatch");
+            if (row.Status != "open" && row.ReviewStatus != "pending")
+                throw new ValidationAppException("validation.shift_not_open");
+            return row.Id;
+        }
+
+        return await connection.ExecuteScalarAsync<Guid?>(new CommandDefinition("""
+            SELECT id FROM cashier_shifts
+            WHERE branch_id = @branchId AND status = 'open'
+            ORDER BY opened_at DESC LIMIT 1
+            """, new { branchId }, tx, cancellationToken: ct));
     }
 
     /// <summary>مستندات الطرف المرحّلة التي لها رصيد غير مخصص (لشاشة التخصيص).</summary>

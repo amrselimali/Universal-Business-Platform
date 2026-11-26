@@ -24,7 +24,7 @@ public sealed partial class TreasuryService
     /// </summary>
     public async Task<Guid> SettleClearingAsync(ActorContext actor, Guid treasuryId,
         Guid clearingAccountId, decimal amount, DateTime docDate, string? reference,
-        Guid? branchId = null, CancellationToken ct = default)
+        Guid? branchId = null, Guid? shiftId = null, CancellationToken ct = default)
     {
         await _permissions.RequireAsync(actor, ScreenCodes.TreasuryReconciliation,
             ActionCodes.Post, ct: ct);
@@ -37,12 +37,13 @@ public sealed partial class TreasuryService
         try
         {
             entryId = await _treasury.SettleClearingAsync(treasuryId, clearingAccountId, amount,
-                docDate, reference, actor.UserId, branchId, ct);
+                docDate, reference, actor.UserId, branchId, shiftId, ct);
         }
         catch (PostgresException ex) { throw DbErrorMapper.Map(ex); }
 
         await _audit.WriteAsync(actor, "journal_entries", entryId.ToString(), "INSERT", null,
-            new { treasuryId, clearingAccountId, amount, docDate, reference, branchId }, ct);
+            new { treasuryId, clearingAccountId, amount, docDate, reference, branchId, shiftId },
+            ct);
         return entryId;
     }
 }

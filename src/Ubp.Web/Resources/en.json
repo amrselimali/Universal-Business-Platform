@@ -1420,6 +1420,8 @@
   "treasury.set_main": "Set as main",
   "treasury.settle": "Settle",
   "treasury.settlement_amount": "Settlement amount",
+  "treasury.settlement_shift": "Shift (open or under review)",
+  "treasury.no_shift": "No shift (post immediately)",
   "treasury.settlement_date": "Settlement date",
   "treasury.shift_closed": "Closed",
   "treasury.shift_code": "Shift no.",

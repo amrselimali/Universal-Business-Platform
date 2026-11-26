@@ -1420,6 +1420,8 @@
   "treasury.set_main": "تعيين رئيسية",
   "treasury.settle": "تسوية",
   "treasury.settlement_amount": "مبلغ التسوية",
+  "treasury.settlement_shift": "الشفت (مفتوح أو تحت المراجعة)",
+  "treasury.no_shift": "بدون شفت (ترحيل فوري)",
   "treasury.settlement_date": "تاريخ التسوية",
   "treasury.shift_closed": "مغلقة",
   "treasury.shift_code": "رقم الشفت",

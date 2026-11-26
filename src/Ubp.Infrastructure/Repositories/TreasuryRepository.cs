@@ -123,7 +123,7 @@ public partial interface ITreasuryRepository : IShiftGate
         bool includeAllAccounts = false, CancellationToken ct = default);
     Task<Guid> SettleClearingAsync(Guid treasuryId, Guid clearingAccountId, decimal amount,
         DateTime docDate, string? reference, Guid userId, Guid? branchId = null,
-        CancellationToken ct = default);
+        Guid? shiftId = null, CancellationToken ct = default);
 }
 
 public sealed partial class TreasuryRepository : ITreasuryRepository

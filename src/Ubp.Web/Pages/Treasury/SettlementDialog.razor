@@ -23,6 +23,17 @@
                         </MudSelectItem>
                     }
                 </MudSelect>
+                <MudSelect T="Guid?" Value="_shiftId" Label="@T.T("treasury.settlement_shift")"
+                           Variant="Variant.Outlined" Clearable="true"
+                           ValueChanged="OnShiftChanged">
+                    <MudSelectItem T="Guid?" Value="@((Guid?)null)">@T.T("treasury.no_shift")</MudSelectItem>
+                    @foreach (var item in _shifts)
+                    {
+                        <MudSelectItem T="Guid?" Value="@((Guid?)item.Id)">
+                            @ShiftLabel(item)
+                        </MudSelectItem>
+                    }
+                </MudSelect>
                 <MudNumericField @bind-Value="_amount" Label="@T.T("treasury.settlement_amount")"
                                  Variant="Variant.Outlined" Format="N2" />
                 <MudDatePicker @bind-Date="_date" Label="@T.T("treasury.settlement_date")"
@@ -55,8 +66,10 @@
 
     private MudForm _form = default!;
     private IReadOnlyList<Treasury> _treasuries = Array.Empty<Treasury>();
+    private IReadOnlyList<Shift> _shifts = Array.Empty<Shift>();
     private Guid _branchId;
     private Guid _treasuryId;
+    private Guid? _shiftId;
     private decimal _amount;
     private DateTime? _date = DateTime.Today;
     private string? _reference;
@@ -77,7 +90,29 @@
     {
         _treasuries = await Treasury.ListTreasuriesAsync(actor, _branchId);
         _treasuryId = _treasuries.FirstOrDefault()?.Id ?? Guid.Empty;
+        await ReloadShiftsAsync(actor);
     }
+
+    /// <summary>
+    /// الشفتات القابلة للتسوية: المفتوح، أو المغلق الذي ما زال «تحت المراجعة»
+    /// (يُرحَّل القيد عند اعتماد مراجعته) — 0220.
+    /// </summary>
+    private async Task ReloadShiftsAsync(ActorContext actor)
+    {
+        var shifts = await Treasury.ListShiftsAsync(actor, _branchId, null, null, 100);
+        _shifts = shifts
+            .Where(s => s.IsOpen || s.IsPendingReview)
+            .OrderByDescending(s => s.OpenedAt)
+            .ToList();
+        if (_shiftId is { } current && _shifts.All(s => s.Id != current)) _shiftId = null;
+        _shiftId ??= _shifts.FirstOrDefault(s => s.IsOpen)?.Id ?? _shifts.FirstOrDefault()?.Id;
+    }
+
+    private string ShiftLabel(Shift shift) =>
+        $"{shift.Code} — {shift.OpenedAt.ToLocalTime():yyyy-MM-dd HH:mm} — " +
+        (shift.IsOpen ? "مفتوح" : "تحت المراجعة");
+
+    private void OnShiftChanged(Guid? value) => _shiftId = value;
 
     private async Task OnBranchChanged(Guid value)
     {
@@ -103,7 +138,7 @@
         {
             var actor = await UserContext.RequireAsync();
             var entryId = await Treasury.SettleClearingAsync(actor, _treasuryId, Balance.AccountId,
-                _amount, _date ?? DateTime.Today, _reference, _branchId);
+                _amount, _date ?? DateTime.Today, _reference, _branchId, _shiftId);
             MudDialog.Close(DialogResult.Ok(entryId));
         }
         catch (AppException ex) { Snackbar.Add(T.T(ex.Code), Severity.Error); }
