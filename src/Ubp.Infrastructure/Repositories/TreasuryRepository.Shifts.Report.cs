@@ -185,24 +185,6 @@ public sealed partial class TreasuryRepository
                   AND v.is_shift_settlement AND v.status <> 'cancelled'
                   AND v.created_at >= @openedAt
                   AND (@until::timestamptz IS NULL OR v.created_at <= @until::timestamptz)
-            ), clearing_settlements AS (
-                -- تسوية حساب وسيط (بطاقة/محفظة/شيك) إلى الخزينة: موجب دخول نقد، سالب خروج (0219).
-                SELECT NULL::text AS CustomerName, t.treasury_type AS TreasuryType,
-                       t.code AS TreasuryCode, t.name_ar AS TreasuryName,
-                       cs.amount AS Collected, 0::numeric AS Revenue,
-                       0::numeric AS Quantity, 0::numeric AS MeterUnits,
-                       NULL::text AS EmployeeName,
-                       a.name_ar || COALESCE(' — ' || cs.reference, '') AS ItemName,
-                       0::numeric AS UnitPrice, 'تسوية حساب وسيط'::varchar AS Source,
-                       NULL::text AS ComplaintEmployeeName
-                FROM treasury_clearing_settlements cs
-                JOIN accounts a ON a.id = cs.clearing_account_id
-                JOIN treasuries t ON t.id = cs.treasury_id
-                WHERE cs.branch_id = @branchId
-                  AND (cs.shift_id = @shiftId
-                       OR (cs.shift_id IS NULL AND cs.created_at >= @openedAt
-                           AND (@until::timestamptz IS NULL
-                                OR cs.created_at <= @until::timestamptz)))
             )
             SELECT * FROM receipts
             UNION ALL SELECT * FROM revenues
@@ -210,7 +192,6 @@ public sealed partial class TreasuryRepository
             UNION ALL SELECT * FROM transfers
             UNION ALL SELECT * FROM settlements
             UNION ALL SELECT * FROM doctor_refunds
-            UNION ALL SELECT * FROM clearing_settlements
             ORDER BY CustomerName
             """, args, cancellationToken: ct))).ToList();
 
@@ -475,6 +456,27 @@ public sealed partial class TreasuryRepository
               AND a.status <> 'cancelled'
             ORDER BY a.starts_at
             """, args, cancellationToken: ct))).ToList();
+
+        // تسوية حساب وسيط (بطاقة/محفظة/شيك): تظهر في جدول المصروفات بإشارة نقد الخزينة —
+        // موجب = دخول نقد للخزينة (يُخصم من المصروفات)، سالب = خروج نقد (يضاف للمصروفات) — 0219.
+        report.Expenses.AddRange(await connection.QueryAsync<ShiftExpenseRow>(new CommandDefinition("""
+            SELECT t.treasury_type AS TreasuryType, t.code AS TreasuryCode, t.name_ar AS TreasuryName,
+                   (-cs.amount) AS Amount, NULL::text AS ItemName, 0::numeric AS Quantity,
+                   0::numeric AS UnitPrice,
+                   ('تسوية حساب وسيط — ' || a.name_ar ||
+                    COALESCE(' (' || cs.reference || ')', '')) AS Description,
+                   CASE WHEN e.status = 'posted' THEN 'POSTED' ELSE 'DRAFT' END AS Status
+            FROM treasury_clearing_settlements cs
+            JOIN treasuries t ON t.id = cs.treasury_id
+            JOIN accounts a ON a.id = cs.clearing_account_id
+            LEFT JOIN journal_entries e ON e.id = cs.journal_entry_id
+            WHERE cs.branch_id = @branchId
+              AND (cs.shift_id = @shiftId
+                   OR (cs.shift_id IS NULL AND cs.created_at >= @openedAt
+                       AND (@until::timestamptz IS NULL
+                            OR cs.created_at <= @until::timestamptz)))
+            ORDER BY cs.created_at
+            """, args, cancellationToken: ct)));
 
         return report;
     }

@@ -247,13 +247,19 @@ public sealed partial class ShiftEditRepository : IShiftEditRepository
                    0::numeric AS Quantity, 0::numeric AS UnitPrice, cs.amount AS Amount,
                    cs.reference AS Description, 'amount,description' AS FieldsCsv,
                    cs.treasury_id AS TreasuryId, cs.clearing_account_id AS AccountId,
-                   NULL::uuid AS EmployeeId, 'posted'::varchar AS DocStatus, true AS CanDelete
+                   NULL::uuid AS EmployeeId,
+                   CASE WHEN e.status = 'posted' THEN 'posted' ELSE 'draft' END AS DocStatus,
+                   true AS CanDelete
             FROM treasury_clearing_settlements cs
             JOIN treasuries t ON t.id = cs.treasury_id
             JOIN accounts a ON a.id = cs.clearing_account_id
+            LEFT JOIN journal_entries e ON e.id = cs.journal_entry_id
             WHERE cs.branch_id = @branchId
-              AND (@until::timestamptz IS NULL OR cs.created_at <= @until::timestamptz)
-              AND (cs.created_at >= @openedAt OR cs.shift_id = @shiftId)
+              -- التسوية المربوطة بهذا الشفت تظهر دائمًا حتى لو أُنشئت بعد إغلاقه (تسوية شفت أمس).
+              AND (cs.shift_id = @shiftId
+                   OR (cs.shift_id IS NULL
+                       AND cs.created_at >= @openedAt
+                       AND (@until::timestamptz IS NULL OR cs.created_at <= @until::timestamptz)))
             """, new { args.shiftId, args.branchId, args.openedAt, args.until },
             cancellationToken: ct)));
 

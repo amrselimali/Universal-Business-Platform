@@ -42,11 +42,12 @@ public sealed class ClearingSettlementShiftTests : IClassFixture<TestDb>
         return new Fixture(branch, treasuryId, chart["1130"].Id, chart, shift.Id);
     }
 
-    private async Task<Guid> SettleAsync(Fixture f, decimal amount, string reference)
+    private async Task<Guid> SettleAsync(Fixture f, decimal amount, string reference,
+        Guid? shiftId = null)
     {
         var actor = await _db.AdminActorAsync();
         return await _db.TreasuryService().SettleClearingAsync(actor, f.TreasuryId,
-            f.ClearingAccountId, amount, DateTime.Today, reference, f.Branch);
+            f.ClearingAccountId, amount, DateTime.Today, reference, f.Branch, shiftId);
     }
 
     /// <summary>رصيد حساب في الأستاذ العام (القيود المرحّلة فقط) لفرع محدد.</summary>
@@ -83,9 +84,10 @@ public sealed class ClearingSettlementShiftTests : IClassFixture<TestDb>
         Assert.Equal(count.OpeningCash + count.Movement, count.ExpectedCash);
         Assert.Equal(250m, count.ExpectedCash);
 
-        var line = Assert.Single(report.Lines.Where(l => l.Source == "تسوية حساب وسيط"));
-        Assert.Equal(250m, line.Collected);
-        Assert.Equal(0m, line.Revenue);
+        var line = Assert.Single(report.Expenses.Where(e =>
+            e.Description!.Contains("تسوية حساب وسيط")));
+        // دخول نقد للخزينة ⇒ يظهر في جدول المصروفات بقيمة سالبة (يخفض المصروفات).
+        Assert.Equal(-250m, line.Amount);
 
         // تظهر أيضًا في «تعديل بيانات الشفت» قابلة للتعديل والحذف.
         var editable = Assert.Single((await _db.ShiftEdit().ListAsync(actor, f.ShiftId))
@@ -133,9 +135,48 @@ public sealed class ClearingSettlementShiftTests : IClassFixture<TestDb>
         });
         var report = await _db.TreasuryService().GetShiftReportAsync(actor, f.ShiftId);
         Assert.Equal(0m, Assert.Single(report.CashCounts).Movement);
-        Assert.DoesNotContain(report.Lines, l => l.Source == "تسوية حساب وسيط");
+        Assert.DoesNotContain(report.Expenses, e =>
+            e.Description != null && e.Description.Contains("تسوية حساب وسيط"));
         Assert.Equal(0m, await GlBalanceAsync(f.Chart["1101"].Id, f.Branch));
         Assert.Equal(0m, await GlBalanceAsync(f.ClearingAccountId, f.Branch));
+        Assert.Equal(0, await CountSettlementsAsync(f));
+        Assert.Empty(await _db.TreasuryService().ListDraftPostingsAsync(actor, f.ShiftId));
+    }
+
+    /// <summary>
+    /// تسوية أُنشئت **بعد** إغلاق الشفت ومربوطة به (شفت أمس تحت المراجعة): تظهر في
+    /// «تعديل بيانات الشفت» قابلة للتعديل والحذف رغم أن وقت إنشائها خارج نافذة الشفت.
+    /// </summary>
+    [Fact]
+    public async Task Settlement_of_a_closed_shift_can_be_edited_and_deleted_from_shift_edit()
+    {
+        var actor = await _db.AdminActorAsync();
+        var f = await SetupAsync("3");
+        await _db.TreasuryService().CloseShiftAsync(actor, f.ShiftId,
+            new List<ShiftCashCountInput> { new() { TreasuryId = f.TreasuryId, CountedCash = 0 } });
+
+        await SettleAsync(f, 300m, "SETTLE-3", f.ShiftId);
+
+        var editable = Assert.Single((await _db.ShiftEdit().ListAsync(actor, f.ShiftId))
+            .Where(l => l.EntityType == "clearing_settlement"));
+        Assert.Equal(300m, editable.Amount);
+        Assert.True(editable.CanDelete);
+
+        // تعديل القيمة من شاشة تعديل الشفت (قيد فرق مسودة).
+        await _db.ShiftEdit().ApplyAsync(actor, new ShiftLineEditInput
+        {
+            ShiftId = f.ShiftId, EntityType = "clearing_settlement", DocId = editable.DocId,
+            Field = "amount", NewValue = "350"
+        });
+        var edited = Assert.Single((await _db.ShiftEdit().ListAsync(actor, f.ShiftId))
+            .Where(l => l.EntityType == "clearing_settlement"));
+        Assert.Equal(350m, edited.Amount);
+
+        // الحذف من نفس الشاشة.
+        await _db.ShiftEdit().DeleteAsync(actor, new ShiftLineDeleteInput
+        { ShiftId = f.ShiftId, EntityType = "clearing_settlement", DocId = editable.DocId });
+        Assert.DoesNotContain(await _db.ShiftEdit().ListAsync(actor, f.ShiftId),
+            l => l.EntityType == "clearing_settlement");
         Assert.Equal(0, await CountSettlementsAsync(f));
         Assert.Empty(await _db.TreasuryService().ListDraftPostingsAsync(actor, f.ShiftId));
     }
