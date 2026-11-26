@@ -242,7 +242,7 @@
                 .Select(e => new Opt(e.Id, e.NameAr)).ToList();
             await ReloadAsync(actor);
         }
-        catch (AppException ex) { Snackbar.Add(T.T(ex.Code), Severity.Error); }
+        catch (AppException ex) { Snackbar.Add(ErrorText(ex), Severity.Error); }
     }
 
     private async Task ReloadAsync(ActorContext actor)
@@ -294,7 +294,7 @@
             await ReloadAsync(actor);
             Snackbar.Add(T.T("common.saved"), Severity.Success);
         }
-        catch (AppException ex) { Snackbar.Add(T.T(ex.Code), Severity.Error); }
+        catch (AppException ex) { Snackbar.Add(ErrorText(ex), Severity.Error); }
         finally { _busy = false; }
     }
 
@@ -335,9 +335,18 @@
                 ? "shift_edit.deleted_with_document"
                 : "shift_edit.deleted"), Severity.Success);
         }
-        catch (AppException ex) { Snackbar.Add(T.T(ex.Code), Severity.Error); }
+        catch (AppException ex) { Snackbar.Add(ErrorText(ex), Severity.Error); }
         catch (Exception) { Snackbar.Add(T.T("error.generic"), Severity.Error); }
         finally { _busy = false; }
+    }
+
+    /// <summary>نص رسالة الخطأ مع استبدال وسائطها ({links} …) بتفصيل الارتباطات.</summary>
+    private string ErrorText(AppException ex)
+    {
+        var text = T.T(ex.Code);
+        foreach (var arg in ex.Args)
+            text = text.Replace("{" + arg.Key + "}", arg.Value);
+        return text;
     }
 }
 

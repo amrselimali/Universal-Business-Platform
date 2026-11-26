@@ -135,6 +135,9 @@ public sealed class ShiftEditDeleteTests : IClassFixture<TestDb>
         var error = await Assert.ThrowsAsync<ValidationAppException>(() => _db.ShiftEdit()
             .DeleteAsync(actor, DeleteInput(f, "booking", f.BookingId, f.FirstLineId)));
         Assert.Equal("validation.shift_delete_line_in_use", error.Code);
+        // الرسالة تعرض التفصيل: الكمية المنفذة + مستند التنفيذ المرتبط.
+        Assert.Contains("منفَّذ", error.Args["links"]);
+        Assert.Contains("تنفيذ: 1", error.Args["links"]);
         Assert.Equal(1, await ScalarAsync<int>(
             "SELECT count(*)::int FROM booking_lines WHERE id = @id", new { id = f.FirstLineId }));
     }
@@ -179,6 +182,9 @@ public sealed class ShiftEditDeleteTests : IClassFixture<TestDb>
         var error = await Assert.ThrowsAsync<ValidationAppException>(() => _db.ShiftEdit()
             .DeleteAsync(actor, DeleteInput(f, "booking", f.BookingId, f.FirstLineId)));
         Assert.Equal("validation.shift_delete_document_in_use", error.Code);
+        // التفصيل يوضح مصدر المنع: مدفوعات الحجز وعددها والمبلغ.
+        Assert.Contains("مدفوعات: 1", error.Args["links"]);
+        Assert.Contains("100.00", error.Args["links"]);
         Assert.Equal(1, await ScalarAsync<int>(
             "SELECT count(*)::int FROM booking_lines WHERE id = @id", new { id = f.FirstLineId }));
     }

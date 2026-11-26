@@ -40,24 +40,46 @@ public sealed partial class ShiftEditRepository
         return result;
     }
 
+    /// <summary>رسالة رفض الحذف مع تفصيل الارتباطات المانعة (نوع + عدد/مبلغ).</summary>
+    private static ValidationAppException DeleteBlocked(string code,
+        IReadOnlyList<string> links) => new(code,
+        new Dictionary<string, string> { ["links"] = string.Join(" • ", links) });
+
     /// <summary>قيد الحذف على بند الحجز: لا تنفيذ ولا حركة كمية ولا مستند يشير للسطر.</summary>
     private static async Task EnsureBookingLineHasNoUsageAsync(NpgsqlConnection connection,
         NpgsqlTransaction tx, Guid lineId, decimal delivered, decimal invoiced,
         decimal transferred, decimal settled, CancellationToken ct)
     {
-        if (delivered > 0 || invoiced > 0 || transferred > 0 || settled > 0)
-            throw new ValidationAppException("validation.shift_delete_line_in_use");
-        var used = await connection.ExecuteScalarAsync<int>(new CommandDefinition("""
-            SELECT (SELECT count(*) FROM booking_execution_lines WHERE booking_line_id = @id)
-                 + (SELECT count(*) FROM commercial_document_lines WHERE booking_line_id = @id)
-                 + (SELECT count(*) FROM customer_account_settlement_lines WHERE booking_line_id = @id)
-                 + (SELECT count(*) FROM delivery_note_lines WHERE booking_line_id = @id)
-                 + (SELECT count(*) FROM service_consumptions WHERE booking_line_id = @id)
-                 + (SELECT count(*) FROM service_transfer_lines WHERE from_booking_line_id = @id)
-            """, new { id = lineId }, tx, cancellationToken: ct));
-        if (used > 0)
-            throw new ValidationAppException("validation.shift_delete_line_in_use");
+        var links = new List<string>();
+        if (delivered > 0) links.Add($"منفَّذ: {delivered:N2}");
+        if (invoiced > 0) links.Add($"مفوتر: {invoiced:N2}");
+        if (transferred > 0) links.Add($"محوَّل: {transferred:N2}");
+        if (settled > 0) links.Add($"مسوّى: {settled:N2}");
+        links.AddRange(await LinkedDocumentsAsync(connection, tx, lineId, ct));
+        if (links.Count > 0)
+            throw DeleteBlocked("validation.shift_delete_line_in_use", links);
     }
+
+    /// <summary>تفصيل المستندات المرتبطة ببند الحجز (نوع + عدد).</summary>
+    private static async Task<IReadOnlyList<string>> LinkedDocumentsAsync(
+        NpgsqlConnection connection, NpgsqlTransaction tx, Guid lineId, CancellationToken ct) =>
+        (await connection.QueryAsync<DeleteLinkRow>(new CommandDefinition("""
+            SELECT 'تنفيذ' AS Label, count(*)::int AS Count, 0::numeric AS Amount
+            FROM booking_execution_lines WHERE booking_line_id = @id
+            UNION ALL SELECT 'فاتورة/مستند', count(*)::int, 0::numeric
+            FROM commercial_document_lines WHERE booking_line_id = @id
+            UNION ALL SELECT 'تسوية حساب', count(*)::int, 0::numeric
+            FROM customer_account_settlement_lines WHERE booking_line_id = @id
+            UNION ALL SELECT 'إذن تسليم', count(*)::int, 0::numeric
+            FROM delivery_note_lines WHERE booking_line_id = @id
+            UNION ALL SELECT 'استهلاك خدمة', count(*)::int, 0::numeric
+            FROM service_consumptions WHERE booking_line_id = @id
+            UNION ALL SELECT 'تحويل خدمات', count(*)::int, 0::numeric
+            FROM service_transfer_lines WHERE from_booking_line_id = @id
+            """, new { id = lineId }, tx, cancellationToken: ct)))
+        .Where(r => r.Count > 0)
+        .Select(DeleteLinkRow.ToText)
+        .ToList();
 
     /// <summary>تحرير كمية الحجز من أرصدة المخزون ثم حذف السطر (لا أثر محاسبي على البند).</summary>
     private static async Task DeleteBookingLineCoreAsync(NpgsqlConnection connection,
@@ -131,19 +153,30 @@ public sealed partial class ShiftEditRepository
     private static async Task EnsureBookingIsEmptyDeletableAsync(NpgsqlConnection connection,
         NpgsqlTransaction tx, Guid bookingId, CancellationToken ct)
     {
-        var used = await connection.ExecuteScalarAsync<int>(new CommandDefinition("""
-            SELECT (SELECT count(*) FROM booking_payments WHERE booking_id = @id)
-                 + (SELECT count(*) FROM booking_executions WHERE booking_id = @id)
-                 + (SELECT count(*) FROM customer_account_settlements WHERE new_booking_id = @id)
-                 + (SELECT count(*) FROM customer_account_settlement_lines WHERE booking_id = @id)
-                 + (SELECT count(*) FROM booking_settlements
-                    WHERE booking_id = @id OR target_booking_id = @id)
-                 + (SELECT count(*) FROM commercial_documents WHERE booking_id = @id)
-                 + (SELECT count(*) FROM delivery_notes WHERE booking_id = @id)
-                 + (SELECT count(*) FROM bookings WHERE related_booking_id = @id)
-            """, new { id = bookingId }, tx, cancellationToken: ct));
-        if (used > 0)
-            throw new ValidationAppException("validation.shift_delete_document_in_use");
+        var links = (await connection.QueryAsync<DeleteLinkRow>(new CommandDefinition("""
+            SELECT 'مدفوعات' AS Label, count(*)::int AS Count,
+                   COALESCE(SUM(amount), 0)::numeric AS Amount
+            FROM booking_payments WHERE booking_id = @id
+            UNION ALL SELECT 'تنفيذات', count(*)::int, 0::numeric
+            FROM booking_executions WHERE booking_id = @id
+            UNION ALL SELECT 'تسويات حساب', count(*)::int, 0::numeric
+            FROM customer_account_settlements WHERE new_booking_id = @id
+            UNION ALL SELECT 'تسويات حساب', count(*)::int, 0::numeric
+            FROM customer_account_settlement_lines WHERE booking_id = @id
+            UNION ALL SELECT 'تسويات حجز', count(*)::int, 0::numeric
+            FROM booking_settlements WHERE booking_id = @id OR target_booking_id = @id
+            UNION ALL SELECT 'فواتير/مستندات', count(*)::int, 0::numeric
+            FROM commercial_documents WHERE booking_id = @id
+            UNION ALL SELECT 'أذون تسليم', count(*)::int, 0::numeric
+            FROM delivery_notes WHERE booking_id = @id
+            UNION ALL SELECT 'حجوزات مرتبطة', count(*)::int, 0::numeric
+            FROM bookings WHERE related_booking_id = @id
+            """, new { id = bookingId }, tx, cancellationToken: ct)))
+            .Where(r => r.Count > 0)
+            .Select(DeleteLinkRow.ToText)
+            .ToList();
+        if (links.Count > 0)
+            throw DeleteBlocked("validation.shift_delete_document_in_use", links);
     }
 
     /// <summary>سطر بند الحجز المطلوب حذفه (كمياته تحدد قيد «لا تنفيذ على السطر»).</summary>
@@ -217,19 +250,28 @@ public sealed partial class ShiftEditRepository
     private static async Task EnsureVoucherIsEmptyDeletableAsync(NpgsqlConnection connection,
         NpgsqlTransaction tx, Guid voucherId, Guid? entryId, CancellationToken ct)
     {
-        var used = await connection.ExecuteScalarAsync<int>(new CommandDefinition("""
-            SELECT (SELECT count(*) FROM booking_payments WHERE voucher_id = @id)
-                 + (SELECT count(*) FROM booking_settlements WHERE refund_voucher_id = @id)
-                 + (SELECT count(*) FROM customer_account_settlements WHERE voucher_id = @id)
-            """, new { id = voucherId }, tx, cancellationToken: ct));
-        if (used > 0)
-            throw new ValidationAppException("validation.shift_delete_document_in_use");
-        if (entryId is not { } journalId) return;
-        var status = await connection.ExecuteScalarAsync<string?>(new CommandDefinition(
-            "SELECT status FROM journal_entries WHERE id = @id", new { id = journalId }, tx,
-            cancellationToken: ct));
-        if (status is not (null or "draft"))
-            throw new ValidationAppException("validation.shift_delete_document_in_use");
+        var links = (await connection.QueryAsync<DeleteLinkRow>(new CommandDefinition("""
+            SELECT 'مدفوعات حجز' AS Label, count(*)::int AS Count,
+                   COALESCE(SUM(amount), 0)::numeric AS Amount
+            FROM booking_payments WHERE voucher_id = @id
+            UNION ALL SELECT 'تسويات حجز', count(*)::int, 0::numeric
+            FROM booking_settlements WHERE refund_voucher_id = @id
+            UNION ALL SELECT 'تسويات حساب', count(*)::int, 0::numeric
+            FROM customer_account_settlements WHERE voucher_id = @id
+            """, new { id = voucherId }, tx, cancellationToken: ct)))
+            .Where(r => r.Count > 0)
+            .Select(DeleteLinkRow.ToText)
+            .ToList();
+        if (entryId is { } journalId)
+        {
+            var status = await connection.ExecuteScalarAsync<string?>(new CommandDefinition(
+                "SELECT status FROM journal_entries WHERE id = @id", new { id = journalId }, tx,
+                cancellationToken: ct));
+            if (status is not (null or "draft"))
+                links.Add($"قيد محاسبي ({status})");
+        }
+        if (links.Count > 0)
+            throw DeleteBlocked("validation.shift_delete_document_in_use", links);
     }
 
     /// <summary>حذف القيد المسودة المرتبط بالإيصال المحذوف (المرحّل لا يُحذف).</summary>
@@ -321,12 +363,17 @@ public sealed partial class ShiftEditRepository
             """, new { line = lineId, doc = input.DocId }, tx, cancellationToken: ct));
         if (belongs == 0) throw new NotFoundAppException();
         // السطر مرتبط بمرتجع بيع/شراء: لا يُحذف.
-        var used = await connection.ExecuteScalarAsync<int>(new CommandDefinition("""
-            SELECT (SELECT count(*) FROM sales_return_links WHERE original_line_id = @line)
-                 + (SELECT count(*) FROM commercial_return_links WHERE original_line_id = @line)
-            """, new { line = lineId }, tx, cancellationToken: ct));
-        if (used > 0)
-            throw new ValidationAppException("validation.shift_delete_line_in_use");
+        var returnLinks = (await connection.QueryAsync<DeleteLinkRow>(new CommandDefinition("""
+            SELECT 'مرتجع بيع' AS Label, count(*)::int AS Count, 0::numeric AS Amount
+            FROM sales_return_links WHERE original_line_id = @line
+            UNION ALL SELECT 'مرتجع شراء', count(*)::int, 0::numeric
+            FROM commercial_return_links WHERE original_line_id = @line
+            """, new { line = lineId }, tx, cancellationToken: ct)))
+            .Where(r => r.Count > 0)
+            .Select(DeleteLinkRow.ToText)
+            .ToList();
+        if (returnLinks.Count > 0)
+            throw DeleteBlocked("validation.shift_delete_line_in_use", returnLinks);
 
         var remaining = await connection.ExecuteScalarAsync<int>(new CommandDefinition("""
             SELECT count(*)::int FROM commercial_document_lines
@@ -360,13 +407,31 @@ public sealed partial class ShiftEditRepository
     private static async Task EnsureCommercialIsEmptyDeletableAsync(NpgsqlConnection connection,
         NpgsqlTransaction tx, Guid documentId, CancellationToken ct)
     {
-        var used = await connection.ExecuteScalarAsync<int>(new CommandDefinition("""
-            SELECT (SELECT count(*) FROM delivery_notes WHERE invoice_id = @id)
-                 + (SELECT count(*) FROM document_allocations WHERE target_document_id = @id)
-                 + (SELECT count(*) FROM commercial_documents WHERE original_document_id = @id)
-            """, new { id = documentId }, tx, cancellationToken: ct));
-        if (used > 0)
-            throw new ValidationAppException("validation.shift_delete_document_in_use");
+        var links = (await connection.QueryAsync<DeleteLinkRow>(new CommandDefinition("""
+            SELECT 'أذون تسليم' AS Label, count(*)::int AS Count, 0::numeric AS Amount
+            FROM delivery_notes WHERE invoice_id = @id
+            UNION ALL SELECT 'تخصيصات مستندات', count(*)::int, 0::numeric
+            FROM document_allocations WHERE target_document_id = @id
+            UNION ALL SELECT 'مستندات مرتبطة', count(*)::int, 0::numeric
+            FROM commercial_documents WHERE original_document_id = @id
+            """, new { id = documentId }, tx, cancellationToken: ct)))
+            .Where(r => r.Count > 0)
+            .Select(DeleteLinkRow.ToText)
+            .ToList();
+        if (links.Count > 0)
+            throw DeleteBlocked("validation.shift_delete_document_in_use", links);
+    }
+
+    /// <summary>سطر مرتبط بعدد من المستندات: يُعرض النوع والعدد في رسالة الرفض.</summary>
+    private sealed class DeleteLinkRow
+    {
+        public string Label { get; set; } = "";
+        public int Count { get; set; }
+        public decimal Amount { get; set; }
+
+        public static string ToText(DeleteLinkRow row) => row.Amount > 0
+            ? $"{row.Label}: {row.Count} (بمبلغ {row.Amount:N2})"
+            : $"{row.Label}: {row.Count}";
     }
 
     private sealed class DocStatusRow
