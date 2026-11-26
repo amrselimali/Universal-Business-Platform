@@ -109,7 +109,9 @@ public static class PartnerOpeningBalanceRules
         if (quantity <= 0) return "validation.quantity_invalid";
         if (unitPrice < 0) return "validation.price_invalid";
         var total = Math.Round(quantity * unitPrice, 2, MidpointRounding.AwayFromZero);
-        if (paidAmount < 0 || paidAmount > total) return "validation.paid_exceeds_total";
+        // المسدد يُقارن بدقة قرشين: كسور سعر الوحدة (15 رقمًا) لا تمنع إدخال قيمة الإجمالي الظاهرة.
+        var paid = Math.Round(paidAmount, 2, MidpointRounding.AwayFromZero);
+        if (paid < 0 || paid > total) return "validation.paid_exceeds_total";
         return null;
     }
 }

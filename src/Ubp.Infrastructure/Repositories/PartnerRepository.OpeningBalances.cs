@@ -86,7 +86,9 @@ public sealed partial class PartnerRepository
             if (balance.UnitPrice < 0)
                 throw new ValidationAppException("validation.price_invalid");
             var total = balance.TotalAmount;
-            if (balance.PaidAmount < 0 || balance.PaidAmount > total)
+            // المسدد بدقة قرشين حتى لا تمنع كسور سعر الوحدة إدخال قيمة الإجمالي الظاهرة.
+            var paid = Math.Round(balance.PaidAmount, 2, MidpointRounding.AwayFromZero);
+            if (paid < 0 || paid > total)
                 throw new ValidationAppException("validation.paid_exceeds_total");
 
             var bookingId = Guid.CreateVersion7();
@@ -100,7 +102,7 @@ public sealed partial class PartnerRepository
                 VALUES (@bookingId, @branchId, @docNo, @docDate, 'confirmed', @customerId,
                         'opening', @total, @paid, @notes, true, @userId)
                 """, new { bookingId, branchId, docNo, docDate, customerId, total,
-                    paid = balance.PaidAmount, notes = OpeningBalanceNote, userId }, tx,
+                    paid, notes = OpeningBalanceNote, userId }, tx,
                 cancellationToken: ct));
 
             await connection.ExecuteAsync(new CommandDefinition("""

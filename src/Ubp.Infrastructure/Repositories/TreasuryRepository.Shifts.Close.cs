@@ -38,7 +38,7 @@ public sealed partial class TreasuryRepository
         foreach (var row in rows)
         {
             var movement = await TreasuryMovementAsync(connection, tx, row.TreasuryId,
-                shift.BranchId, shift.OpenedAt, null, ct);
+                shift.BranchId, shiftId, shift.OpenedAt, null, ct);
             // النقد المتوقع = أول المدة + حركة اليوم (محصَّل شامل عمولة العميل − عمولة المزود) (0079).
             var expected = Math.Round(row.OpeningCash + movement, 2,
                 MidpointRounding.AwayFromZero);
@@ -100,8 +100,8 @@ public sealed partial class TreasuryRepository
     /// هذه هي نفس الحركة المستخدمة في «النقد المتوقع» = أول المدة + حركة اليوم.
     /// </summary>
     private static async Task<decimal> TreasuryMovementAsync(NpgsqlConnection connection,
-        NpgsqlTransaction? tx, Guid treasuryId, Guid branchId, DateTimeOffset openedAt,
-        DateTimeOffset? until, CancellationToken ct) =>
+        NpgsqlTransaction? tx, Guid treasuryId, Guid branchId, Guid shiftId,
+        DateTimeOffset openedAt, DateTimeOffset? until, CancellationToken ct) =>
         await connection.ExecuteScalarAsync<decimal>(new CommandDefinition("""
             SELECT COALESCE(SUM(CASE
                        WHEN v.treasury_id = @treasuryId AND v.is_shift_settlement
@@ -146,19 +146,22 @@ public sealed partial class TreasuryRepository
                                  AND (@until::timestamptz IS NULL
                                       OR a.created_at <= @until::timestamptz)), 0)
                    -- تسوية حساب وسيط إلى الخزينة (بطاقة/محفظة/شيك): تزيد النقد أو تنقصه (0219).
+                   -- التسوية المربوطة بالشفت تُحسب دائمًا حتى لو أُنشئت بعد إغلاقه (تسوية شفت أمس).
                    + COALESCE((SELECT SUM(cs.amount) FROM treasury_clearing_settlements cs
                                WHERE cs.treasury_id = @treasuryId
                                  AND cs.branch_id = @branchId
-                                 AND cs.created_at >= @openedAt
-                                 AND (@until::timestamptz IS NULL
-                                      OR cs.created_at <= @until::timestamptz)), 0)
+                                 AND (cs.shift_id = @shiftId
+                                      OR (cs.shift_id IS NULL
+                                          AND cs.created_at >= @openedAt
+                                          AND (@until::timestamptz IS NULL
+                                               OR cs.created_at <= @until::timestamptz)))), 0)
             FROM vouchers v
             -- الخزينة قد تكون خزينة شركة مشتركة: تُحسب حركة فرع الشفت فقط — 0216.
             WHERE v.branch_id = @branchId AND v.status <> 'cancelled'
               AND v.created_at >= @openedAt
               AND (@until::timestamptz IS NULL OR v.created_at <= @until::timestamptz)
               AND (v.treasury_id = @treasuryId OR v.to_treasury_id = @treasuryId)
-            """, new { treasuryId, branchId, openedAt, until }, tx, cancellationToken: ct));
+            """, new { treasuryId, branchId, shiftId, openedAt, until }, tx, cancellationToken: ct));
 
 
     /// <summary>عدّ النقدية لكل خزينة في الشفت.</summary>
@@ -238,7 +241,7 @@ public sealed partial class TreasuryRepository
         // القيم تُحسب ديناميكيًا عند كل حفظ: أي إيصال/عمولة/تسليم جديد ينعكس فورًا
         // على حركة اليوم والنقد المتوقع والفرق بدون انتظار إغلاق الشفت.
         var movement = await TreasuryMovementAsync(connection, tx, treasuryId, shift.BranchId,
-            shift.OpenedAt, null, ct);
+            shiftId, shift.OpenedAt, null, ct);
         var expected = Math.Round(row.OpeningCash + movement, 2,
             MidpointRounding.AwayFromZero);
         var counted = Math.Round(countedCash, 2, MidpointRounding.AwayFromZero);

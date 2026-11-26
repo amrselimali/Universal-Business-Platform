@@ -145,6 +145,46 @@ public sealed class CustomerOpeningBalanceEditTests : IClassFixture<TestDb>
         Assert.Equal(1, audit);
     }
 
+    /// <summary>
+    /// سعر وحدة بكسر عشري طويل (15 رقمًا) لا يمنع إدخال المسدد بقيمة الإجمالي الظاهرة:
+    /// المقارنة والتخزين بدقة قرشين.
+    /// </summary>
+    [Fact]
+    public async Task Paid_edit_accepts_the_displayed_total_with_long_decimal_unit_price()
+    {
+        var suffix = Unique();
+        var actor = await _db.AdminActorAsync();
+        var (branch, category, service, _) = await SetupAsync(suffix);
+        var input = CustomerInput("عميل كسور " + suffix, category, branch, Phone("029"));
+        // 3 × 666.666666666667 = 1999.999999999999 ⇒ الإجمالي المعروض 2000.00
+        input.OpeningBalances.Add(new ServiceOpeningBalanceInput
+        {
+            ServiceId = service.Id, Quantity = 3, UnitPrice = 666.666666666667m, PaidAmount = 0
+        });
+        var customer = await _db.Partners().CreateAsync(actor, PartnerKind.Customer, input);
+
+        var line = Assert.Single(await _db.Partners().ListOpeningBalancesAsync(actor,
+            PartnerKind.Customer, customer.Id));
+        Assert.Equal(2000m, line.TotalAmount);
+        Assert.Equal(2000m, line.MaxPaidAmount);
+
+        var result = await _db.Partners().UpdateOpeningBalancesAsync(actor, PartnerKind.Customer,
+            customer.Id, new[]
+            {
+                new PartnerOpeningBalanceEditLine
+                {
+                    BookingLineId = line.BookingLineId, ServiceId = line.ServiceId,
+                    Quantity = line.Quantity, UnitPrice = line.UnitPrice, PaidAmount = 2000m
+                }
+            });
+
+        Assert.Equal(2000m, result.NewPaid);
+        Assert.Equal(0m, result.ValueDifference);
+        Assert.Equal(2000m, result.CashDifference);
+        Assert.Equal(2000m, await ScalarAsync<decimal>(
+            "SELECT deposit_amount FROM bookings WHERE id = @id", new { id = line.BookingId }));
+    }
+
     [Fact]
     public async Task Edit_is_locked_after_collection()
     {

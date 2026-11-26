@@ -157,6 +157,14 @@ public sealed class ClearingSettlementShiftTests : IClassFixture<TestDb>
 
         await SettleAsync(f, 300m, "SETTLE-3", f.ShiftId);
 
+        // تظهر في جدول عدّ النقدية: حركة اليوم والمتوقع رغم إن التسوية أُنشئت بعد الإغلاق.
+        var report = await _db.TreasuryService().GetShiftReportAsync(actor, f.ShiftId);
+        var count = Assert.Single(report.CashCounts);
+        Assert.Equal(300m, count.Movement);
+        Assert.Equal(count.OpeningCash + count.Movement, count.ExpectedCash);
+        Assert.Contains(report.Expenses, e =>
+            e.Description!.Contains("تسوية حساب وسيط") && e.Amount == -300m);
+
         var editable = Assert.Single((await _db.ShiftEdit().ListAsync(actor, f.ShiftId))
             .Where(l => l.EntityType == "clearing_settlement"));
         Assert.Equal(300m, editable.Amount);
@@ -171,6 +179,8 @@ public sealed class ClearingSettlementShiftTests : IClassFixture<TestDb>
         var edited = Assert.Single((await _db.ShiftEdit().ListAsync(actor, f.ShiftId))
             .Where(l => l.EntityType == "clearing_settlement"));
         Assert.Equal(350m, edited.Amount);
+        Assert.Equal(350m, Assert.Single((await _db.TreasuryService().GetShiftReportAsync(actor,
+            f.ShiftId)).CashCounts).Movement);
 
         // الحذف من نفس الشاشة.
         await _db.ShiftEdit().DeleteAsync(actor, new ShiftLineDeleteInput

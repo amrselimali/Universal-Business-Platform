@@ -99,9 +99,14 @@ public sealed partial class PartnerRepository
     private static bool OpeningBalancePaidEditable(OpeningBalanceRow row) =>
         row.Status is not ("cancelled" or "reversed" or "expired");
 
-    /// <summary>أقصى مسدد = إجمالي الحجز ناقص الإيصالات المسجلة (يشمل كل بنود الحجز).</summary>
+    /// <summary>
+    /// أقصى مسدد = إجمالي الحجز ناقص الإيصالات المسجلة (يشمل كل بنود الحجز)،
+    /// محسوبًا بدقة قرشين حتى لا تمنع بقايا كسور سعر الوحدة (15 رقمًا) إدخال المسدد.
+    /// لو إجمالي الحجز غير مسجّل يُستخدم إجمالي البند.
+    /// </summary>
     private static decimal OpeningBalanceMaxPaid(OpeningBalanceRow row) => Math.Max(
-        RoundAmount(row.BookingTotal) - row.ReceiptsAmount, 0);
+        RoundAmount((row.BookingTotal > 0 ? row.BookingTotal : row.Quantity * row.UnitPrice)
+                    - row.ReceiptsAmount), 0);
 
     private static PartnerOpeningBalanceLine MapOpeningBalance(OpeningBalanceRow row) => new()
     {
@@ -211,11 +216,13 @@ public sealed partial class PartnerRepository
                 throw new ValidationAppException("validation.item_not_found");
 
             var total = RoundAmount(line.Quantity * line.UnitPrice);
+            // المسدد يُحسب بدقة قرشين: كسور سعر الوحدة لا تمنع إدخال قيمة الإجمالي الظاهرة.
+            var paid = RoundAmount(line.PaidAmount);
             if (current is not null)
             {
                 var sameStructure = serviceId == current.ServiceId
                     && line.Quantity == current.Quantity && line.UnitPrice == current.UnitPrice;
-                var paidChanged = line.PaidAmount != current.PaidAmount;
+                var paidChanged = paid != RoundAmount(current.PaidAmount);
                 var structuralLock = OpeningBalanceLockReason(current);
 
                 // الكمية/السعر/الخدمة مقفولة بعد الاستخدام، أما المسدد فيبقى قابلًا للتعديل
@@ -224,7 +231,7 @@ public sealed partial class PartnerRepository
                     (paidChanged && !OpeningBalancePaidEditable(current)))
                     throw new ValidationAppException("validation.opening_balance_locked",
                         new Dictionary<string, string> { ["item"] = current.ServiceName });
-                if (line.PaidAmount < 0 || line.PaidAmount > OpeningBalanceMaxPaid(current))
+                if (paid < 0 || paid > OpeningBalanceMaxPaid(current))
                     throw new ValidationAppException("validation.paid_exceeds_total");
 
                 if (!sameStructure || paidChanged)
@@ -248,7 +255,7 @@ public sealed partial class PartnerRepository
                             UPDATE bookings
                                SET total_amount = @total, deposit_amount = @paid, updated_by = @userId
                              WHERE id = @bookingId
-                            """, new { total, paid = line.PaidAmount, userId, bookingId = current.BookingId },
+                            """, new { total, paid, userId, bookingId = current.BookingId },
                             tx, cancellationToken: ct));
                     }
                     else
@@ -258,7 +265,7 @@ public sealed partial class PartnerRepository
                             UPDATE bookings
                                SET deposit_amount = @paid, updated_by = @userId
                              WHERE id = @bookingId
-                            """, new { paid = line.PaidAmount, userId, bookingId = current.BookingId },
+                            """, new { paid, userId, bookingId = current.BookingId },
                             tx, cancellationToken: ct));
                     }
 
@@ -273,14 +280,14 @@ public sealed partial class PartnerRepository
                         NewValues = new
                         {
                             current.DocNo, ServiceId = serviceId, line.Quantity,
-                            line.UnitPrice, line.PaidAmount, Total = total
+                            line.UnitPrice, PaidAmount = paid, Total = total
                         }
                     });
                     result.Updated++;
                 }
 
                 result.NewTotal += total;
-                result.NewPaid += line.PaidAmount;
+                result.NewPaid += paid;
                 continue;
             }
             else
@@ -304,7 +311,7 @@ public sealed partial class PartnerRepository
                     VALUES (@bookingId, @branchId, @docNo, @docDate, 'confirmed', @customerId,
                             'opening', @total, @paid, @notes, true, @userId)
                     """, new { bookingId, branchId, docNo, docDate, customerId, total,
-                        paid = line.PaidAmount, notes = OpeningBalanceNote, userId },
+                        paid, notes = OpeningBalanceNote, userId },
                     tx, cancellationToken: ct));
                 await connection.ExecuteAsync(new CommandDefinition("""
                     INSERT INTO booking_lines (booking_id, line_no, item_id, unit_id, warehouse_id,
@@ -324,14 +331,14 @@ public sealed partial class PartnerRepository
                     NewValues = new
                     {
                         DocNo = docNo, ServiceId = serviceId, line.Quantity,
-                        line.UnitPrice, line.PaidAmount, Total = total
+                        line.UnitPrice, PaidAmount = paid, Total = total
                     }
                 });
                 result.Added++;
             }
 
             result.NewTotal += total;
-            result.NewPaid += line.PaidAmount;
+            result.NewPaid += paid;
         }
 
         foreach (var row in removedRows)

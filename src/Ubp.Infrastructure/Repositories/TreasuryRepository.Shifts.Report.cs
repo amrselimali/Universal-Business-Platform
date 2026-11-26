@@ -274,7 +274,7 @@ public sealed partial class TreasuryRepository
             // الشفت الإيصالات/المصروفات/السلف/التسليمات)، فيتحقق دائمًا:
             // النقد المتوقع = أول المدة + حركة اليوم — للشفت المفتوحة والمغلقة.
             var movement = await TreasuryMovementAsync(connection, null, count.TreasuryId,
-                shift.BranchId, shift.OpenedAt, shift.ClosedAt, ct);
+                shift.BranchId, shiftId, shift.OpenedAt, shift.ClosedAt, ct);
             count.Movement = Math.Round(movement, 2, MidpointRounding.AwayFromZero);
             count.ExpectedCash = Math.Round(count.OpeningCash + movement, 2,
                 MidpointRounding.AwayFromZero);
