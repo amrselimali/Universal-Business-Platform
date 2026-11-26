@@ -50,6 +50,12 @@ public sealed class AccountingReportService
             throw new ValidationAppException("validation.account_required");
         if (request.To < request.From) throw new ValidationAppException("validation.date_range");
 
+        // نطاق الفروع على الخادم (نفس قاعدة ميزان المراجعة): لا اختيار = كل فروع المستخدم.
+        request.BranchIds = Scope(actor, request.BranchIds is { Length: > 0 }
+            ? request.BranchIds
+            : request.BranchId is { } single ? new[] { single } : null);
+        request.BranchId = request.BranchIds.Length == 1 ? request.BranchIds[0] : null;
+
         // الأستاذ شهري: الرصيد الافتتاحي وإجماليات الفترة من الأرصدة الشهرية المجمّعة،
         // والحركات تُعرض داخل حدود الشهر نفسه حتى تتطابق الأرقام مع البنود.
         request.From = new DateTime(request.From.Year, request.From.Month, 1);

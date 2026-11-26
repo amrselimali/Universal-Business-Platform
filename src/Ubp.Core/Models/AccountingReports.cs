@@ -8,6 +8,8 @@ public sealed class TrialBalanceRow
     public string? NameEn { get; set; }
     public string AccountType { get; set; } = "";
     public short Level { get; set; }
+    /// <summary>حساب معطّل لكن ما زال له رصيد — يُعرض حتى لا يختل توازن الميزان.</summary>
+    public bool IsActive { get; set; } = true;
     public decimal OpeningDebit { get; set; }
     public decimal OpeningCredit { get; set; }
     public decimal Debit { get; set; }
@@ -35,6 +37,15 @@ public sealed class TrialBalanceReport
     public decimal TotalClosingDebit => Rows.Sum(r => r.ClosingDebit);
     public decimal TotalClosingCredit => Rows.Sum(r => r.ClosingCredit);
     public bool IsBalanced => TotalDebit == TotalCredit && TotalOpeningDebit == TotalOpeningCredit;
+
+    /// <summary>
+    /// قيود ما زالت مسودة داخل نطاق التقرير (مثل مسودات شفت بانتظار «اعتماد المراجعة»)
+    /// — لا تدخل `gl_balances` وبالتالي لا تظهر في الميزان قبل ترحيلها.
+    /// </summary>
+    public int DraftEntries { get; set; }
+    public decimal DraftDebit { get; set; }
+    public decimal DraftCredit { get; set; }
+    public bool HasDrafts => DraftEntries > 0;
 }
 
 public sealed class LedgerCursor
@@ -104,6 +115,12 @@ public sealed class LedgerPage
     public IReadOnlyList<LedgerRow> Rows { get; set; } = Array.Empty<LedgerRow>();
     public string? NextCursor { get; set; }
     public bool HasMore { get; set; }
+
+    /// <summary>قيود مسودة على نفس الحساب/الفروع/الفترة — غير مرحّلة فلا تظهر في الحركة.</summary>
+    public int DraftEntries { get; set; }
+    public decimal DraftDebit { get; set; }
+    public decimal DraftCredit { get; set; }
+    public bool HasDrafts => DraftEntries > 0;
 }
 
 public sealed class PartyStatementRow

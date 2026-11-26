@@ -9,11 +9,15 @@ public sealed partial class AccountingReportRepository
     /// <summary>
     /// كشف الأستاذ: رصيد سابق من gl_balances + حركات الفترة بـ keyset pagination
     /// على (entry_date, id) — لا OFFSET ولا إعادة حساب للأرصدة على كل صفحة.
+    /// يدعم عدة فروع (8ج) مع توافق خلفي مع <see cref="LedgerRequest.BranchId"/>.
     /// </summary>
     public async Task<LedgerPage> LedgerAsync(LedgerRequest request, CancellationToken ct = default)
     {
         var take = request.PageSize is < 1 or > 200 ? 50 : request.PageSize;
         var cursorId = request.Cursor?.LineId ?? Guid.Empty;
+        var branchIds = request.BranchIds is { Length: > 0 }
+            ? request.BranchIds
+            : request.BranchId is { } single ? new[] { single } : Array.Empty<Guid>();
 
         await using var connection = await _factory.OpenAsync(ct);
 
@@ -22,10 +26,18 @@ public sealed partial class AccountingReportRepository
             new { id = request.AccountId }, cancellationToken: ct));
         if (account is null) return new LedgerPage();
 
-        var opening = await connection.ExecuteScalarAsync<decimal>(new CommandDefinition(
-            "SELECT fn_gl_opening_balance(@accountId, @branchId, @from::date, @includeChildren)",
-            new { accountId = request.AccountId, branchId = request.BranchId, from = request.From,
-                  includeChildren = request.IncludeChildren }, cancellationToken: ct));
+        // الرصيد السابق: نفس منطق fn_gl_opening_balance لكن بمصفوفة فروع (8ج).
+        var opening = await connection.ExecuteScalarAsync<decimal>(new CommandDefinition("""
+            SELECT coalesce(sum(b.debit - b.credit), 0)
+            FROM gl_balances b
+            JOIN accounts a ON a.id = b.account_id
+            WHERE b.period_month < date_trunc('month', @from::date)::date
+              AND (CASE WHEN @includeChildren THEN a.path LIKE @path || '%'
+                        ELSE b.account_id = @accountId END)
+              AND (cardinality(@branchIds) = 0 OR b.branch_id = ANY(@branchIds))
+            """, new { accountId = request.AccountId, branchIds, from = request.From,
+                       includeChildren = request.IncludeChildren, path = account.Path },
+            cancellationToken: ct));
 
         var totals = await connection.QuerySingleAsync<LedgerTotals>(new CommandDefinition("""
             SELECT coalesce(sum(b.debit), 0) AS Debit,
@@ -36,12 +48,31 @@ public sealed partial class AccountingReportRepository
                                      AND date_trunc('month', @to::date)::date
               AND (CASE WHEN @includeChildren THEN a.path LIKE @path || '%'
                         ELSE b.account_id = @accountId END)
-              AND (@branchId::uuid IS NULL OR b.branch_id = @branchId::uuid)
+              AND (cardinality(@branchIds) = 0 OR b.branch_id = ANY(@branchIds))
             """, new
         {
             from = request.From, to = request.To, path = account.Path,
             accountId = request.AccountId, includeChildren = request.IncludeChildren,
-            branchId = request.BranchId
+            branchIds
+        }, cancellationToken: ct));
+
+        // قيود مسودة على نفس الحساب/الفروع/الفترة: لا تظهر في الحركة ولا في الميزان قبل الترحيل.
+        var drafts = await connection.QuerySingleAsync<(int Entries, decimal Debit, decimal Credit)>(
+            new CommandDefinition("""
+            SELECT count(DISTINCT l.entry_id) AS Entries,
+                   coalesce(sum(l.debit), 0) AS Debit,
+                   coalesce(sum(l.credit), 0) AS Credit
+            FROM journal_entry_lines l
+            JOIN journal_entries e ON e.id = l.entry_id AND e.status = 'draft'
+            JOIN accounts a ON a.id = l.account_id
+            WHERE l.entry_date BETWEEN @from::date AND @to::date
+              AND (CASE WHEN @includeChildren THEN a.path LIKE @path || '%'
+                        ELSE l.account_id = @accountId END)
+              AND (cardinality(@branchIds) = 0 OR l.branch_id = ANY(@branchIds))
+            """, new
+        {
+            from = request.From, to = request.To, path = account.Path,
+            accountId = request.AccountId, includeChildren = request.IncludeChildren, branchIds
         }, cancellationToken: ct));
 
         var rows = (await connection.QueryAsync<LedgerRow>(new CommandDefinition("""
@@ -62,7 +93,7 @@ public sealed partial class AccountingReportRepository
               AND l.entry_date BETWEEN @from::date AND @to::date
               AND (CASE WHEN @includeChildren THEN a.path LIKE @path || '%'
                         ELSE l.account_id = @accountId END)
-              AND (@branchId::uuid IS NULL OR l.branch_id = @branchId::uuid)
+              AND (cardinality(@branchIds) = 0 OR l.branch_id = ANY(@branchIds))
               AND (@cursorDate::date IS NULL
                    OR (l.entry_date, l.id) > (@cursorDate::date, @cursorId::uuid))
             ORDER BY l.entry_date, l.id
@@ -71,7 +102,7 @@ public sealed partial class AccountingReportRepository
         {
             from = request.From, to = request.To, path = account.Path,
             accountId = request.AccountId, includeChildren = request.IncludeChildren,
-            branchId = request.BranchId, cursorDate = request.Cursor?.EntryDate, cursorId,
+            branchIds, cursorDate = request.Cursor?.EntryDate, cursorId,
             take = take + 1
         }, cancellationToken: ct))).ToList();
 
@@ -97,6 +128,9 @@ public sealed partial class AccountingReportRepository
             PeriodCredit = totals.Credit,
             Rows = rows,
             HasMore = hasMore,
+            DraftEntries = drafts.Entries,
+            DraftDebit = drafts.Debit,
+            DraftCredit = drafts.Credit,
             NextCursor = rows.Count == 0
                 ? null
                 : new LedgerCursor

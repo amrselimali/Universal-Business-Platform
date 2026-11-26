@@ -19,6 +19,8 @@ public partial class TrialBalance
     private IReadOnlyList<Guid> _branchIds = Array.Empty<Guid>();
     private bool _busy;
     private bool IsEnglish => T.Language == "en";
+    private string DraftMessage => string.Format(T.T("accounting.draft_pending"),
+        _report?.DraftEntries ?? 0, (_report?.DraftDebit ?? 0).ToString("N2"));
 
     protected override string ScreenCode => ScreenCodes.TrialBalanceReport;
 

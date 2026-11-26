@@ -38,6 +38,9 @@ else
                            Margin="Margin.Dense" DateFormat="yyyy-MM-dd" Editable="true" />
             <MudDatePicker @bind-Date="_to" Label="@T.T("common.to")" Variant="Variant.Outlined"
                            Margin="Margin.Dense" DateFormat="yyyy-MM-dd" Editable="true" />
+            <BranchScopePicker Branches="_branches" Selected="_branchIds"
+                               SelectedChanged="OnBranchScope" Label="@T.T("common.branch")"
+                               AllText="@T.T("common.all")" />
             <MudSwitch T="bool" @bind-Value="_includeChildren" Label="@T.T("accounting.include_children")"
                        Color="Color.Primary" />
             <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SearchAsync"
@@ -46,6 +49,13 @@ else
 
         @if (_page is not null)
         {
+            @if (_page.HasDrafts)
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">
+                    @DraftMessage
+                </MudAlert>
+            }
+
             <div class="ubp-totals mb-3">
                 <span>@T.T("accounting.opening_balance"): <b>@_page.OpeningBalance.ToString("N2")</b></span>
                 <span>@T.T("accounting.period_debit"): <b>@_page.PeriodDebit.ToString("N2")</b></span>

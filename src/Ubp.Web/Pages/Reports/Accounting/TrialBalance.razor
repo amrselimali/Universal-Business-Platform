@@ -42,6 +42,13 @@ else
                 @(_report.IsBalanced ? T.T("accounting.balanced") : T.T("accounting.not_balanced"))
             </MudChip>
 
+            @if (_report.HasDrafts)
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">
+                    @DraftMessage
+                </MudAlert>
+            }
+
             <MudTable Items="_report.Rows" Dense="true" Hover="true" Striped="true" Elevation="0"
                       Class="ubp-table">
                 <HeaderContent>
@@ -56,7 +63,14 @@ else
                 </HeaderContent>
                 <RowTemplate>
                     <MudTd><span class="ubp-code">@context.Code</span></MudTd>
-                    <MudTd>@context.DisplayName(IsEnglish)</MudTd>
+                    <MudTd>
+                        @context.DisplayName(IsEnglish)
+                        @if (!context.IsActive)
+                        {
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Text"
+                                     Color="Color.Warning">@T.T("accounting.account_inactive")</MudChip>
+                        }
+                    </MudTd>
                     <MudTd Align="Right">@context.OpeningDebit.ToString("N2")</MudTd>
                     <MudTd Align="Right">@context.OpeningCredit.ToString("N2")</MudTd>
                     <MudTd Align="Right">@context.Debit.ToString("N2")</MudTd>

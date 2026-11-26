@@ -1,3 +1,4 @@
+using Ubp.Core.Models;
 using Ubp.Core.Security;
 using Xunit;
 
@@ -83,5 +84,85 @@ public sealed class MultiBranchReportsTests : IClassFixture<TestDb>
         Assert.NotNull(statement);
         Assert.False(string.IsNullOrWhiteSpace(statement.PartyName));
         Assert.NotNull(centers);
+    }
+
+    /// <summary>
+    /// المسودات (مثل شفت بانتظار «اعتماد المراجعة») لا تدخل الميزان ولا الأستاذ،
+    /// لكن التقريرين يعرضان عددها وإجماليها بدل أن يظهرا «بلا حركة».
+    /// </summary>
+    [Fact]
+    public async Task Draft_entries_are_reported_but_never_affect_trial_balance_or_ledger()
+    {
+        var actor = await _db.AdminActorAsync();
+        var chart = await _db.SeedAccountingAsync();
+        var branch = await _db.CreateBranchAsync("MB-B5", "فرع المسودات");
+        var today = DateTime.Today;
+
+        await _db.PostBalancedEntryAsync(branch, today, chart["1101"].Id, chart["4100"].Id, 100);
+        await _db.JournalEntryService().CreateAsync(actor, new JournalEntryInput
+        {
+            JournalId = await _db.JournalIdByCodeAsync("GEN"),
+            BranchId = branch,
+            EntryDate = today,
+            Description = "مسودة شفت بانتظار اعتماد المراجعة",
+            Lines =
+            {
+                new JournalEntryLineInput { AccountId = chart["1101"].Id, Debit = 70 },
+                new JournalEntryLineInput { AccountId = chart["4100"].Id, Credit = 70 }
+            }
+        });
+
+        var reports = _db.AccountingReports();
+        var trial = await reports.TrialBalanceAsync(actor, today, today, branch);
+
+        Assert.True(trial.HasDrafts);
+        Assert.Equal(1, trial.DraftEntries);
+        Assert.Equal(70m, trial.DraftDebit);
+        Assert.Equal(100m, trial.Rows.Single(r => r.Code == "1101").Debit);
+        Assert.True(trial.IsBalanced);
+
+        var ledger = await reports.LedgerAsync(actor, new LedgerRequest
+        {
+            AccountId = chart["1101"].Id, BranchIds = new[] { branch },
+            From = today, To = today, IncludeChildren = false
+        });
+        Assert.True(ledger.HasDrafts);
+        Assert.Equal(1, ledger.DraftEntries);
+        Assert.Equal(100m, ledger.PeriodDebit);
+        Assert.Single(ledger.Rows);
+    }
+
+    /// <summary>كشف الأستاذ يقبل مصفوفة فروع (8ج) ويطابق ميزان المراجعة على نفس النطاق.</summary>
+    [Fact]
+    public async Task Ledger_accepts_the_branch_array_like_the_trial_balance()
+    {
+        var actor = await _db.AdminActorAsync();
+        var chart = await _db.SeedAccountingAsync();
+        var first = await _db.CreateBranchAsync("MB-B6", "فرع أستاذ أول");
+        var second = await _db.CreateBranchAsync("MB-B7", "فرع أستاذ ثاني");
+        var day = new DateTime(2026, 3, 10);
+
+        await _db.PostBalancedEntryAsync(first, day, chart["1101"].Id, chart["4100"].Id, 120);
+        await _db.PostBalancedEntryAsync(second, day, chart["1101"].Id, chart["4100"].Id, 30);
+
+        var reports = _db.AccountingReports();
+        var both = await reports.LedgerAsync(actor, new LedgerRequest
+        {
+            AccountId = chart["1101"].Id, BranchIds = new[] { first, second },
+            From = day, To = day, IncludeChildren = false
+        });
+        var onlySecond = await reports.LedgerAsync(actor, new LedgerRequest
+        {
+            AccountId = chart["1101"].Id, BranchIds = new[] { second },
+            From = day, To = day, IncludeChildren = false
+        });
+        var trial = await reports.TrialBalanceForBranchesAsync(actor, day, day,
+            new[] { first, second });
+
+        Assert.Equal(2, both.Rows.Count);
+        Assert.Single(onlySecond.Rows);
+        Assert.Equal(150m, both.PeriodDebit);
+        Assert.Equal(30m, onlySecond.PeriodDebit);
+        Assert.Equal(trial.Rows.Single(r => r.Code == "1101").Debit, both.PeriodDebit);
     }
 }

@@ -45,24 +45,38 @@ public sealed partial class AccountingReportRepository : IAccountingReportReposi
                 GROUP BY b.account_id
             )
             SELECT a.id AS AccountId, a.code AS Code, a.name_ar AS NameAr, a.name_en AS NameEn,
-                   a.account_type AS AccountType, a.level AS Level,
+                   a.account_type AS AccountType, a.level AS Level, a.is_active AS IsActive,
                    coalesce(bal.opening_debit, 0)  AS OpeningDebit,
                    coalesce(bal.opening_credit, 0) AS OpeningCredit,
                    coalesce(bal.debit, 0)  AS Debit,
                    coalesce(bal.credit, 0) AS Credit
             FROM accounts a LEFT JOIN bal ON bal.account_id = a.id
-            WHERE a.is_active AND NOT a.is_group
+            -- الحساب المعطّل يُعرض أيضًا إن كان له رصيد؛ استثناؤه يخلّ بتوازن الميزان.
+            WHERE NOT a.is_group
               AND (coalesce(bal.opening_debit, 0) <> 0 OR coalesce(bal.opening_credit, 0) <> 0
                    OR coalesce(bal.debit, 0) <> 0 OR coalesce(bal.credit, 0) <> 0)
             ORDER BY a.code
             """;
 
+        const string draftsSql = """
+            SELECT count(*) AS Entries,
+                   coalesce(sum(e.total_debit), 0) AS Debit,
+                   coalesce(sum(e.total_credit), 0) AS Credit
+            FROM journal_entries e
+            WHERE e.status = 'draft'
+              AND e.entry_date <= @to::date
+              AND (cardinality(@branchIds) = 0 OR e.branch_id = ANY(@branchIds))
+            """;
+
         await using var connection = await _factory.OpenAsync(ct);
         var rows = await connection.QueryAsync<TrialBalanceRow>(new CommandDefinition(sql,
             new { from, to, branchIds }, cancellationToken: ct));
+        var drafts = await connection.QuerySingleAsync<(int Entries, decimal Debit, decimal Credit)>(
+            new CommandDefinition(draftsSql, new { to, branchIds }, cancellationToken: ct));
         return new TrialBalanceReport
         {
-            From = from, To = to, BranchIds = branchIds, Rows = rows.ToList()
+            From = from, To = to, BranchIds = branchIds, Rows = rows.ToList(),
+            DraftEntries = drafts.Entries, DraftDebit = drafts.Debit, DraftCredit = drafts.Credit
         };
     }
 }
