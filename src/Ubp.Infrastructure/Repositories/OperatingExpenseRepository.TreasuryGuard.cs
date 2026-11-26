@@ -53,15 +53,16 @@ public sealed partial class OperatingExpenseRepository
             """, new { treasuryId, excludeId = excludeExpenseId }, tx, cancellationToken: ct));
 
     /// <summary>
-    /// المتاح داخل **شفت مفتوح** = رصيد حساب الخزينة المُرحَّل لحظة فتح الشفت
-    /// + صافي **حركة الشفت الفعلية** (إيصالات/صرف/تحويلات/تسليمات/سلف/تسويات وسيط — مرحّلة أو مسودة)
-    /// − مصروفات تشغيلية مسودة لم تُرحَّل. يعيد null إذا لم يكن هناك شفت مفتوح لهذه الخزينة
-    /// (فتُستخدم معادلة الأستاذ + المسودات).
+    /// المتاح داخل **شفت مفتوح** = «أول المدة» + صافي **حركة الشفت الفعلية** (إيصالات/صرف/تحويلات/
+    /// تسليمات/سلف/تسويات وسيط — مرحّلة أو مسودة) − مصروفات تشغيلية مسودة لم تُرحَّل.
+    /// خزينة الشركة المشتركة قد تكون متابَعة في **عدة شفتات مفتوحة** (فرع لكل شفت) فتُجمع حركتها،
+    /// وإلا ظهر رصيدها صفرًا في فرع ويُرفض الصرف خطأً.
+    /// يعيد null إذا لا يوجد شفت مفتوح لهذه الخزينة (فتُستخدم معادلة الأستاذ + المسودات).
     /// </summary>
     private static async Task<decimal?> OpenShiftCashAvailableAsync(NpgsqlConnection connection,
         NpgsqlTransaction? tx, Guid treasuryId, Guid? excludeExpenseId, CancellationToken ct)
     {
-        var row = await connection.QuerySingleOrDefaultAsync<(Guid ShiftId, Guid BranchId,
+        var rows = (await connection.QueryAsync<(Guid ShiftId, Guid BranchId,
             DateTimeOffset OpenedAt, decimal OpeningBalance)>(new CommandDefinition("""
             SELECT s.id AS ShiftId, s.branch_id AS BranchId, s.opened_at AS OpenedAt,
                    -- «أول المدة» الفعلي (آخر نقد معدود) وإن لم يوجد صفّ عدّ: رصيد الأستاذ لحظة الفتح.
@@ -71,21 +72,20 @@ public sealed partial class OperatingExpenseRepository
                              JOIN journal_entries e ON e.id = l.entry_id
                              WHERE e.status = 'posted' AND l.account_id = t.account_id
                                AND e.created_at < s.opened_at
-                               AND e.branch_id = CASE WHEN t.is_company_wide
-                                                      THEN s.branch_id ELSE t.branch_id END),
+                               AND e.branch_id = s.branch_id),
                             0) AS OpeningBalance
             FROM cashier_shifts s
             JOIN treasuries t ON t.id = @treasuryId
                              AND (t.is_company_wide OR t.branch_id = s.branch_id)
             LEFT JOIN shift_cash_counts c ON c.shift_id = s.id AND c.treasury_id = t.id
             WHERE s.status = 'open'
-            ORDER BY s.opened_at DESC
-            LIMIT 1
-            """, new { treasuryId }, tx, cancellationToken: ct));
-        if (row.ShiftId == Guid.Empty) return null;
+            """, new { treasuryId }, tx, cancellationToken: ct))).ToList();
+        if (rows.Count == 0) return null;
 
-        var movement = await TreasuryRepository.TreasuryMovementAsync(connection, tx, treasuryId,
-            row.BranchId, row.ShiftId, row.OpenedAt, null, ct);
+        var total = 0m;
+        foreach (var row in rows)
+            total += row.OpeningBalance + await TreasuryRepository.TreasuryMovementAsync(connection,
+                tx, treasuryId, row.BranchId, row.ShiftId, row.OpenedAt, null, ct);
 
         var draftExpenses = await connection.ExecuteScalarAsync<decimal>(new CommandDefinition("""
             SELECT COALESCE(SUM(o.total_amount), 0) FROM operating_expenses o
@@ -93,8 +93,7 @@ public sealed partial class OperatingExpenseRepository
               AND (@excludeId::uuid IS NULL OR o.id <> @excludeId::uuid)
             """, new { treasuryId, excludeId = excludeExpenseId }, tx, cancellationToken: ct));
 
-        return Math.Round(row.OpeningBalance + movement - draftExpenses, 2,
-            MidpointRounding.AwayFromZero);
+        return Math.Round(total - draftExpenses, 2, MidpointRounding.AwayFromZero);
     }
 
     /// <summary>

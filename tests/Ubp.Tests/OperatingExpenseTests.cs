@@ -247,6 +247,67 @@ public sealed class OperatingExpenseTests : IClassFixture<TestDb>
     }
 
     /// <summary>
+    /// خزينة **شركة مشتركة** متابَعة في شفت مفتوح بفرع آخر: التحصيل النقدي فيها يجب أن يُحتسب
+    /// في المتاح (150) فيُقبل الصرف (100) — وهو الحالات الواقعية للخزائن العامة.
+    /// </summary>
+    [Fact]
+    public async Task Company_wide_treasury_cash_counts_even_when_collected_in_another_branch()
+    {
+        var actor = await _db.AdminActorAsync();
+        var chart = await _db.SeedAccountingAsync();
+        var expenseBranch = await _db.CreateBranchAsync("EXP-B-20", "فرع صرف 20");
+        var cashBranch = await _db.CreateBranchAsync("EXP-B-21", "فرع تحصيل 21");
+        var supplier = await _db.PartnerRepo.CreateAsync(PartnerKind.Supplier, new PartnerInput
+        { Code = "EXP-S-20", NameAr = "مورد صرف 20" });
+        var customer = await _db.PartnerRepo.CreateAsync(PartnerKind.Customer, new PartnerInput
+        { Code = "EXP-C-20", NameAr = "عميل تحصيل 20" });
+
+        // خزينة عامة (is_company_wide) على حساب 1101 بلا أي رصيد مُرحّل.
+        var treasuryId = Guid.CreateVersion7();
+        await _db.TreasuryRepo.CreateTreasuryAsync(treasuryId, new TreasuryInput
+        {
+            BranchId = expenseBranch, IsCompanyWide = true, Code = "EXP-T-20",
+            NameAr = "خزينة عامة 20", TreasuryType = TreasuryTypes.Cash,
+            AccountId = chart["1101"].Id, FollowInShift = true
+        }, actor.UserId);
+        var cash = Guid.CreateVersion7();
+        await _db.TreasuryRepo.CreateMethodAsync(cash, new TreasuryMethodInput
+        { TreasuryId = treasuryId, Code = "CASH", NameAr = "نقدي" }, actor.UserId);
+
+        // شفتان مفتوحتان: فرع الصرف وفرع التحصيل.
+        var shifts = _db.TreasuryService();
+        await shifts.OpenShiftAsync(actor, new ShiftInput { NormalShift = true, BranchId = expenseBranch });
+        await shifts.OpenShiftAsync(actor, new ShiftInput { NormalShift = true, BranchId = cashBranch });
+
+        // تحصيل نقدي 150 في فرع التحصيل (قيده مسودة داخل الشفت).
+        var receipt = await shifts.CreateVoucherAsync(actor, new VoucherInput
+        {
+            VoucherType = VoucherTypes.Receipt, BranchId = cashBranch, DocDate = DateTime.Today,
+            PartyType = "C", PartyId = customer.Id, PartyName = customer.NameAr,
+            TreasuryId = treasuryId,
+            Lines = { new VoucherLineInput { TreasuryMethodId = cash, Amount = 150 } }
+        });
+        await shifts.PostVoucherAsync(actor, receipt.Id);
+
+        var input = new OperatingExpenseInput
+        {
+            BranchId = expenseBranch, DocDate = DateTime.Today, SupplierId = supplier.Id,
+            TreasuryId = treasuryId, TreasuryMethodId = cash,
+            Lines = { ExpenseLine(chart["5300"], 1, 100) }
+        };
+
+        // 100 ≤ 150 ⇒ يُقبل رغم أن التحصيل في شفت فرع آخر وقيده مسودة.
+        var saved = await _db.OperatingExpenses().CreateAsync(actor, input);
+        Assert.Equal(100m, saved.TotalAmount);
+
+        // 100 جديد > المتبقي (50) ⇒ يُرفض.
+        input.Lines[0].UnitPrice = 100;
+        var blocked = await Assert.ThrowsAsync<ValidationAppException>(() =>
+            _db.OperatingExpenses().CreateAsync(actor, input));
+        Assert.Equal("validation.expense_treasury_balance", blocked.Code);
+    }
+
+    /// <summary>
     /// أثناء شفت مفتوح كل القيود مسودة (0220) — يجب أن يُحسب **صافي حركة اليوم** في رصيد
     /// الخزينة المتاح: تحصيل نقدي داخل الشفت يزيد المتاح فيُسمح بالصرف منه قبل اعتماد المراجعة.
     /// </summary>

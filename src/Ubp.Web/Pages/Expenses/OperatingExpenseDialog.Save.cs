@@ -1,6 +1,7 @@
 using MudBlazor;
 using Ubp.Core.Models;
 using Ubp.Core.Results;
+using Ubp.Web.Services;
 
 namespace Ubp.Web.Pages.Expenses;
 
@@ -69,7 +70,7 @@ public partial class OperatingExpenseDialog
                 catch (AppException ex)
                 {
                     // المستند محفوظ كمسودة؛ نُظهر سبب فشل الترحيل ونغلق الحوار لعرضه في القائمة.
-                    Snackbar.Add(T.T(ex.Code), Severity.Error);
+                    Snackbar.Add(ErrorText.Of(T, ex), Severity.Error);
                     MudDialog.Close(DialogResult.Ok(saved));
                     return;
                 }
@@ -79,7 +80,7 @@ public partial class OperatingExpenseDialog
         }
         catch (AppException ex)
         {
-            Snackbar.Add(T.T(ex.Code), Severity.Error);
+            Snackbar.Add(ErrorText.Of(T, ex), Severity.Error);
         }
         finally
         {
