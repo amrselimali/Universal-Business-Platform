@@ -38,6 +38,10 @@ public sealed class TreasuryCodingTests : IClassFixture<TestDb>
             TreasuryId = treasuryId, Code = "CASH", NameAr = "نقدي"
         }, actor.UserId);
 
+        // تمهيد رصيد الخزينة حتى يُسمح بالصرف منها في اختبارات المصروفات.
+        await _db.PostBalancedEntryAsync(branch, DateTime.Today, chart["1101"].Id,
+            chart["4100"].Id, 100000);
+
         return new Fixture(branch, treasuryId, methodId, chart);
     }
 

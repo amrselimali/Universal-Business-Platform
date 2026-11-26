@@ -197,17 +197,21 @@ public sealed class PartnerOpeningBalanceLine
     public decimal TotalAmount => Math.Round(Quantity * UnitPrice, 2, MidpointRounding.AwayFromZero);
     public decimal RemainingAmount => Math.Max(TotalAmount - PaidAmount, 0);
 
-    /// <summary>أقصى مسدد مسموح = قيمة الخدمة ناقص الإيصالات المسجلة.</summary>
-    public decimal MaxPaidAmount => Math.Max(
-        Math.Round(TotalAmount - ReceiptsAmount, 2, MidpointRounding.AwayFromZero), 0);
+    /// <summary>إجمالي الحجز كاملًا (كل بنوده) — حد المسدد في الحجز متعدد البنود.</summary>
+    public decimal BookingTotal { get; set; }
+
+    /// <summary>أقصى مسدد مسموح = إجمالي الحجز ناقص الإيصالات المسجلة.</summary>
+    public decimal MaxPaidAmount => Math.Max(Math.Round(
+        (BookingTotal > 0 ? BookingTotal : TotalAmount) - ReceiptsAmount, 2,
+        MidpointRounding.AwayFromZero), 0);
 
     /// <summary>مفتاح ترجمة سبب منع التعديل، أو null إذا كان البند قابلًا للتعديل.</summary>
     public string? LockReasonKey { get; set; }
     public bool IsEditable => LockReasonKey is null;
 
     /// <summary>
-    /// المسدد قابل للتعديل حتى بعد التنفيذ أو التحصيل (بحد أقصى قيمة الخدمة ناقص
-    /// الإيصالات)، ويُمنع فقط بعد التحويل أو التسوية لأنهما يغيّران اقتصاديات البند.
+    /// المسدد قابل للتعديل دائمًا (حتى بعد التنفيذ/التحصيل/التحويل/التسوية وفي الحجز متعدد
+    /// البنود) بحد أقصى «إجمالي الحجز ناقص الإيصالات»، ويُحدَّث deposit_amount فقط بلا قيود.
     /// </summary>
     public bool CanEditPaid { get; set; }
 }

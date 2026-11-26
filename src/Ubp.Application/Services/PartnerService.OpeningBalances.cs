@@ -93,9 +93,21 @@ public sealed partial class PartnerService
 
         foreach (var line in lines)
         {
-            var error = PartnerOpeningBalanceRules.ValidateLine(line.Quantity, line.UnitPrice,
-                line.PaidAmount);
-            if (error is not null) throw new ValidationAppException(error);
+            // البنود القائمة تُقاس بحد «إجمالي الحجز ناقص الإيصالات» في المستودع (يشمل
+            // الحجز متعدد البنود)، والبنود الجديدة بحد قيمتها هي.
+            if (line.BookingLineId is null)
+            {
+                var error = PartnerOpeningBalanceRules.ValidateLine(line.Quantity,
+                    line.UnitPrice, line.PaidAmount);
+                if (error is not null) throw new ValidationAppException(error);
+            }
+            else
+            {
+                if (line.Quantity <= 0) throw new ValidationAppException("validation.quantity_invalid");
+                if (line.UnitPrice < 0) throw new ValidationAppException("validation.price_invalid");
+                if (line.PaidAmount < 0)
+                    throw new ValidationAppException("validation.paid_exceeds_total");
+            }
             if (line.BookingLineId is null && line.ServiceId is null)
                 throw new ValidationAppException("validation.required_fields");
         }

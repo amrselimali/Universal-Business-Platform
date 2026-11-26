@@ -40,6 +40,10 @@ public sealed class OperatingExpenseTests : IClassFixture<TestDb>
         await _db.TreasuryRepo.CreateMethodAsync(cash, new TreasuryMethodInput
         { TreasuryId = treasuryId, Code = "CASH", NameAr = "نقدي" }, actor.UserId);
 
+        // تمهيد رصيد الخزينة: لا يُسمح بالصرف بدون رصيد يغطي قيمة المصروف.
+        await _db.PostBalancedEntryAsync(branch, DateTime.Today, chart["1101"].Id,
+            chart["4100"].Id, 100000);
+
         return new Fixture(branch, warehouse, item, supplier, chart["5300"], chart["2150"],
             treasuryId, cash);
     }
@@ -203,5 +207,42 @@ public sealed class OperatingExpenseTests : IClassFixture<TestDb>
         var supplierError = await Assert.ThrowsAsync<ValidationAppException>(() =>
             _db.OperatingExpenses().CreateAsync(actor, noSupplier));
         Assert.Equal("validation.required_fields", supplierError.Code);
+    }
+
+    /// <summary>
+    /// لا يُسمح بالصرف من خزينة لا يغطي رصيدها الحالي قيمة المصروف، والمصروفات المسودة
+    /// تُحجز من الرصيد المتاح — والرسالة تبيّن الخزينة والمتاح والمطلوب.
+    /// </summary>
+    [Fact]
+    public async Task Expense_exceeding_the_current_treasury_balance_is_rejected()
+    {
+        var actor = await _db.AdminActorAsync();
+        var f = await SetupAsync("6");
+
+        // رصيد الخزينة 100,000 — صرف 150,000 يُرفض.
+        var error = await Assert.ThrowsAsync<ValidationAppException>(() =>
+            _db.OperatingExpenses().CreateAsync(actor, Paid(f, 150000)));
+        Assert.Equal("validation.expense_treasury_balance", error.Code);
+        Assert.Equal("خزينة مصروفات 6", error.Args["treasury"]);
+        Assert.True(error.Args.ContainsKey("available"));
+        Assert.True(error.Args.ContainsKey("required"));
+
+        // صرف في حدود الرصيد يُقبل ويُحجز من المتاح.
+        var ok = await _db.OperatingExpenses().CreateAsync(actor, Paid(f, 100000));
+        Assert.Equal(100000m, ok.TotalAmount);
+
+        // لم يتبق رصيد: أي صرف جديد من نفس الخزينة يُرفض.
+        var blocked = await Assert.ThrowsAsync<ValidationAppException>(() =>
+            _db.OperatingExpenses().CreateAsync(actor, Paid(f, 1)));
+        Assert.Equal("validation.expense_treasury_balance", blocked.Code);
+    }
+
+    /// <summary>مصروف مدفوع من الخزينة (طريقة النقدي) بمبلغ محدد.</summary>
+    private OperatingExpenseInput Paid(Fixture f, decimal amount)
+    {
+        var input = Input(f, ExpenseLine(f.ExpenseAccount, 1, amount));
+        input.TreasuryId = f.TreasuryId;
+        input.TreasuryMethodId = f.CashMethod;
+        return input;
     }
 }

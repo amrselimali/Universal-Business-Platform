@@ -97,6 +97,8 @@ public sealed partial class OperatingExpenseRepository : IOperatingExpenseReposi
 
         await ResolveDefaultsAsync(connection, tx, input, ct);
         await ValidateAsync(connection, tx, input, ct);
+        // استبعاد إجمالي المستند الحالي من المصروفات المسودة قبل فحص الرصيد.
+        await EnsureTreasuryCoversAsync(connection, tx, input, id, ct);
 
         var totalAmount = input.Lines.Sum(l => l.Amount);
 

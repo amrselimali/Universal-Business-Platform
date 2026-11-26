@@ -60,7 +60,7 @@
                 }
             </MudTd>
             <MudTd>@context.ItemName</MudTd>
-            <MudTd>@TreasuryTypeText(context.TreasuryType)</MudTd>
+            <MudTd>@TreasuryLabel(context.TreasuryCode, context.TreasuryName, context.TreasuryType)</MudTd>
             <MudTd Align="Right">@context.Collected.ToString("N2")</MudTd>
             <MudTd Align="Right">@context.Revenue.ToString("N2")</MudTd>
             <MudTd Align="Right">@(context.UnitPrice == 0 ? "—" : context.UnitPrice.ToString("N2"))</MudTd>
@@ -88,7 +88,7 @@
             <MudTh>@T.T("common.notes")</MudTh>
         </HeaderContent>
         <RowTemplate>
-            <MudTd>@TreasuryTypeText(context.TreasuryType)</MudTd>
+            <MudTd>@TreasuryLabel(context.TreasuryCode, context.TreasuryName, context.TreasuryType)</MudTd>
             <MudTd>@context.ItemName</MudTd>
             <MudTd Align="Right">@(context.ItemName is null ? "—" : context.Quantity.ToString("N2"))</MudTd>
             <MudTd Align="Right">@(context.ItemName is null ? "—" : context.UnitPrice.ToString("N2"))</MudTd>

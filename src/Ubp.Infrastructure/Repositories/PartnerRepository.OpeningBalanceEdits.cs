@@ -26,6 +26,8 @@ public sealed partial class PartnerRepository
         public decimal Quantity { get; set; }
         public decimal UnitPrice { get; set; }
         public decimal PaidAmount { get; set; }
+        /// <summary>إجمالي الحجز كاملًا (كل بنوده) — أساس حد المسدد في الحجز متعدد البنود.</summary>
+        public decimal BookingTotal { get; set; }
         public decimal DeliveredQty { get; set; }
         public decimal InvoicedQty { get; set; }
         public decimal TransferredQty { get; set; }
@@ -51,7 +53,7 @@ public sealed partial class PartnerRepository
                b.doc_no AS DocNo, b.booking_date AS BookingDate, b.status AS Status,
                l.item_id AS ServiceId, i.code AS ServiceCode, i.name_ar AS ServiceName,
                l.quantity AS Quantity, l.unit_price AS UnitPrice,
-               b.deposit_amount AS PaidAmount,
+               b.deposit_amount AS PaidAmount, b.total_amount AS BookingTotal,
                l.delivered_qty AS DeliveredQty, l.invoiced_qty AS InvoicedQty,
                l.transferred_qty AS TransferredQty, l.settled_qty AS SettledQty,
                (SELECT count(*)::int FROM booking_payments p WHERE p.booking_id = b.id)
@@ -90,17 +92,16 @@ public sealed partial class PartnerRepository
     }
 
     /// <summary>
-    /// المسدد فقط يظل قابلًا للتعديل بعد التنفيذ أو التحصيل (بدون أي أثر محاسبي)،
-    /// ويُمنع بعد التحويل أو التسوية أو في الحجز متعدد البنود أو غير الصالح.
+    /// المسدد قابل للتعديل في كل الأحوال — حتى بعد التنفيذ أو التحصيل أو التحويل أو التسوية
+    /// وفي الحجز متعدد البنود — بنفس منطق الرصيد الافتتاحي: يحدّث deposit_amount فقط بلا أي
+    /// أثر محاسبي، ويُستثنى فقط الحجز الملغى/المعكوس/المنتهي.
     /// </summary>
     private static bool OpeningBalancePaidEditable(OpeningBalanceRow row) =>
-        row.LineCount == 1 &&
-        row.Status is "confirmed" or "partially_delivered" or "completed" &&
-        row.TransferredQty == 0 &&
-        row.SettledQty == 0 && row.SettlementCount == 0;
+        row.Status is not ("cancelled" or "reversed" or "expired");
 
+    /// <summary>أقصى مسدد = إجمالي الحجز ناقص الإيصالات المسجلة (يشمل كل بنود الحجز).</summary>
     private static decimal OpeningBalanceMaxPaid(OpeningBalanceRow row) => Math.Max(
-        RoundAmount(row.Quantity * row.UnitPrice) - row.ReceiptsAmount, 0);
+        RoundAmount(row.BookingTotal) - row.ReceiptsAmount, 0);
 
     private static PartnerOpeningBalanceLine MapOpeningBalance(OpeningBalanceRow row) => new()
     {
@@ -108,6 +109,7 @@ public sealed partial class PartnerRepository
         DocNo = row.DocNo, BookingDate = row.BookingDate, Status = row.Status,
         ServiceId = row.ServiceId, ServiceCode = row.ServiceCode, ServiceName = row.ServiceName,
         Quantity = row.Quantity, UnitPrice = row.UnitPrice, PaidAmount = row.PaidAmount,
+        BookingTotal = row.BookingTotal,
         DeliveredQty = row.DeliveredQty, InvoicedQty = row.InvoicedQty,
         TransferredQty = row.TransferredQty, SettledQty = row.SettledQty,
         PaymentCount = row.PaymentCount, SettlementCount = row.SettlementCount,

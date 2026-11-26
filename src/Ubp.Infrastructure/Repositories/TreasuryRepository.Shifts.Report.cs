@@ -26,6 +26,7 @@ public sealed partial class TreasuryRepository
             WITH receipts AS (
                 -- إيصال تسوية حساب العميل لا يُعرض هنا؛ يُجمَّع في سطر التسوية الواحد لكل عميل أدناه.
                 SELECT v.party_name AS CustomerName, t.treasury_type AS TreasuryType,
+                       t.code AS TreasuryCode, t.name_ar AS TreasuryName,
                        v.total_amount AS Collected,
                        0::numeric AS Revenue, 0::numeric AS Quantity, 0::numeric AS MeterUnits,
                        NULL::text AS EmployeeName,
@@ -49,6 +50,7 @@ public sealed partial class TreasuryRepository
                                   WHERE bs.voucher_id = v.id)
             ), revenues AS (
                 SELECT COALESCE(c.name_ar, d.party_name) AS CustomerName, NULL::varchar AS TreasuryType,
+                       NULL::varchar AS TreasuryCode, NULL::varchar AS TreasuryName,
                        0::numeric AS Collected,
                        d.total AS Revenue, 0::numeric AS Quantity, 0::numeric AS MeterUnits,
                        NULL::text AS EmployeeName, NULL::text AS ItemName, 0::numeric AS UnitPrice,
@@ -60,6 +62,7 @@ public sealed partial class TreasuryRepository
                   AND (@until::timestamptz IS NULL OR d.created_at <= @until::timestamptz)
             ), executions AS (
                 SELECT c.name_ar AS CustomerName, NULL::varchar AS TreasuryType,
+                       NULL::varchar AS TreasuryCode, NULL::varchar AS TreasuryName,
                        0::numeric AS Collected,
                        -- إيراد التنفيذ المحفوظ على السطر (سالب للعكس)، والهدية بلا إيراد.
                        CASE WHEN bl.operation_type = 'gift' THEN 0::numeric
@@ -88,6 +91,7 @@ public sealed partial class TreasuryRepository
             ), transfers AS (
                 -- المحوَّل منه: كمية وقيمة بالسالب (خصم) في سطر مستقل.
                 SELECT fc.name_ar AS CustomerName, NULL::varchar AS TreasuryType,
+                       NULL::varchar AS TreasuryCode, NULL::varchar AS TreasuryName,
                        0::numeric AS Collected, (-stl.amount) AS Revenue,
                        (-stl.quantity) AS Quantity, 0::numeric AS MeterUnits,
                        NULL::text AS EmployeeName, i.name_ar AS ItemName,
@@ -102,7 +106,7 @@ public sealed partial class TreasuryRepository
                   AND (@until::timestamptz IS NULL OR st.created_at <= @until::timestamptz)
                 UNION ALL
                 -- المحوَّل إليه: كمية وقيمة بالموجب (إضافة) في سطر مستقل — الصافي = صفر.
-                SELECT tc.name_ar, NULL::varchar, 0::numeric, stl.amount,
+                SELECT tc.name_ar, NULL::varchar, NULL::varchar, NULL::varchar, 0::numeric, stl.amount,
                        stl.quantity, 0::numeric, NULL::text, i.name_ar, stl.unit_price,
                        'خدمات محولة'::varchar, NULL::text
                 FROM service_transfers st
@@ -119,7 +123,8 @@ public sealed partial class TreasuryRepository
                                       WHEN cl.direction = 'refund' THEN -cl.amount
                                       WHEN v.id IS NOT NULL THEN -v.total_amount
                                       ELSE 0 END), 2) AS collected,
-                       MAX(t.treasury_type) AS treasury_type
+                       MAX(t.treasury_type) AS treasury_type,
+                       MAX(t.code) AS treasury_code, MAX(t.name_ar) AS treasury_name
                 FROM customer_account_settlements s
                 LEFT JOIN customer_account_settlement_cash_lines cl ON cl.settlement_id = s.id
                 LEFT JOIN vouchers v ON v.id = s.voucher_id
@@ -155,6 +160,7 @@ public sealed partial class TreasuryRepository
             ), settlements AS (
                 -- تسوية حساب العميل في سطر واحد لكل عميل: تُجمع حركات كل عمود ويظهر الصافي.
                 SELECT c.name_ar AS CustomerName, cash.treasury_type AS TreasuryType,
+                       cash.treasury_code AS TreasuryCode, cash.treasury_name AS TreasuryName,
                        cash.collected AS Collected, COALESCE(tot.revenue, 0) AS Revenue,
                        COALESCE(tot.quantity, 0) AS Quantity, 0::numeric AS MeterUnits,
                        NULL::text AS EmployeeName, items.item_name AS ItemName,
@@ -166,13 +172,15 @@ public sealed partial class TreasuryRepository
                 LEFT JOIN settlement_items items ON items.customer_id = cash.customer_id
             ), doctor_refunds AS (
                 -- تسوية دكتور خارجي سالبة: تُعرض كتحصيل سالب حتى يتساوى الإيراد والتحصيل.
-                SELECT v.party_name AS CustomerName, NULL::varchar AS TreasuryType,
+                SELECT v.party_name AS CustomerName, t.treasury_type AS TreasuryType,
+                       t.code AS TreasuryCode, t.name_ar AS TreasuryName,
                        (-v.total_amount) AS Collected, 0::numeric AS Revenue,
                        0::numeric AS Quantity, 0::numeric AS MeterUnits,
                        NULL::text AS EmployeeName, NULL::text AS ItemName,
                        0::numeric AS UnitPrice, 'تسوية دكتور خارجى'::varchar AS Source,
                        NULL::text AS ComplaintEmployeeName
                 FROM vouchers v
+                JOIN treasuries t ON t.id = v.treasury_id
                 WHERE v.branch_id = @branchId AND v.voucher_type = 'payment'
                   AND v.is_shift_settlement AND v.status <> 'cancelled'
                   AND v.created_at >= @openedAt
@@ -318,7 +326,7 @@ public sealed partial class TreasuryRepository
             """, args, cancellationToken: ct))).ToList();
 
         report.Expenses = (await connection.QueryAsync<ShiftExpenseRow>(new CommandDefinition("""
-            SELECT t.treasury_type AS TreasuryType, t.name_ar AS TreasuryName,
+            SELECT t.treasury_type AS TreasuryType, t.code AS TreasuryCode, t.name_ar AS TreasuryName,
                    el.amount AS Amount, i.name_ar AS ItemName, el.quantity AS Quantity,
                    el.unit_price AS UnitPrice, COALESCE(el.description, o.notes) AS Description,
                    o.status AS Status
@@ -333,7 +341,7 @@ public sealed partial class TreasuryRepository
 
         // مرتجعات المشتريات: تُطرح من مصروفات الشفت (قيمة سالبة) وتظهر مسودة/مرحّلة.
         report.Expenses.AddRange(await connection.QueryAsync<ShiftExpenseRow>(new CommandDefinition("""
-            SELECT t.treasury_type AS TreasuryType, t.name_ar AS TreasuryName,
+            SELECT t.treasury_type AS TreasuryType, t.code AS TreasuryCode, t.name_ar AS TreasuryName,
                    -prl.amount AS Amount, i.name_ar AS ItemName, prl.quantity AS Quantity,
                    prl.unit_price AS UnitPrice,
                    ('مرتجع مشتريات ' || COALESCE(pr.doc_no, '')) AS Description,
@@ -349,7 +357,7 @@ public sealed partial class TreasuryRepository
 
         // تسليمات النقدية للحساب الوسيط تظهر كمصروف في الشفت (0080).
         report.Expenses.AddRange(await connection.QueryAsync<ShiftExpenseRow>(new CommandDefinition("""
-            SELECT t.treasury_type AS TreasuryType, t.name_ar AS TreasuryName,
+            SELECT t.treasury_type AS TreasuryType, t.code AS TreasuryCode, t.name_ar AS TreasuryName,
                    h.amount AS Amount, NULL::text AS ItemName, 0::numeric AS Quantity,
                    0::numeric AS UnitPrice,
                    COALESCE(h.notes, 'تسليم نقدية إلى ' || a.name_ar) AS Description,
@@ -365,7 +373,7 @@ public sealed partial class TreasuryRepository
         // عمولتا التحصيل لخزينة واحدة في سطر واحد: المحمَّلة على العميل (تُضاف) مع المحمَّلة
         // من مزود الخدمة (تُخصم) — صافي الأثر يُحسب ديناميكيًا من السندات، ولا يظهر سطر عند صفر.
         report.Expenses.AddRange(await connection.QueryAsync<ShiftExpenseRow>(new CommandDefinition("""
-            SELECT t.treasury_type AS TreasuryType, t.name_ar AS TreasuryName,
+            SELECT t.treasury_type AS TreasuryType, t.code AS TreasuryCode, t.name_ar AS TreasuryName,
                    ROUND(SUM(v.provider_fee_total) - SUM(v.fee_total), 2) AS Amount,
                    NULL::text AS ItemName, 0::numeric AS Quantity, 0::numeric AS UnitPrice,
                    'عمولة التحصيل (عمولة العميل + عمولة مزود الخدمة)' AS Description,
@@ -385,7 +393,7 @@ public sealed partial class TreasuryRepository
 
         // عمولة تسليم النقدية (0082): مصروف إضافي في الشفت.
         report.Expenses.AddRange(await connection.QueryAsync<ShiftExpenseRow>(new CommandDefinition("""
-            SELECT t.treasury_type AS TreasuryType, t.name_ar AS TreasuryName,
+            SELECT t.treasury_type AS TreasuryType, t.code AS TreasuryCode, t.name_ar AS TreasuryName,
                    h.commission_amount AS Amount, NULL::text AS ItemName, 0::numeric AS Quantity,
                    0::numeric AS UnitPrice, 'عمولة تسليم نقدية' AS Description,
                    'POSTED'::varchar AS Status
@@ -398,7 +406,7 @@ public sealed partial class TreasuryRepository
 
         // سلف الموظفين المصروفة خلال الشفت تظهر كمصروف (0084).
         report.Expenses.AddRange(await connection.QueryAsync<ShiftExpenseRow>(new CommandDefinition("""
-            SELECT t.treasury_type AS TreasuryType, t.name_ar AS TreasuryName,
+            SELECT t.treasury_type AS TreasuryType, t.code AS TreasuryCode, t.name_ar AS TreasuryName,
                    a.amount AS Amount, NULL::text AS ItemName, 0::numeric AS Quantity,
                    0::numeric AS UnitPrice, 'سلفة موظف ' || e.name_ar AS Description,
                    'POSTED'::varchar AS Status

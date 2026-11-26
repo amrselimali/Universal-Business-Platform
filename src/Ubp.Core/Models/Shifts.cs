@@ -310,6 +310,8 @@ public sealed class ShiftCollectionRow
 {
     public string CustomerName { get; set; } = "";
     public string? TreasuryType { get; set; }
+    /// <summary>كود الخزينة واسمها بنفس صيغة جدول عدّ النقدية — 0220.</summary>
+    public string? TreasuryCode { get; set; }
     public string? TreasuryName { get; set; }
     public decimal Collected { get; set; }
     /// <summary>عمولة التحصيل المخصومة من الخزينة وتُضاف للمصروف — 0080.</summary>
@@ -333,6 +335,8 @@ public sealed class ShiftExpenseRow
 {
     public string? TreasuryType { get; set; }
     public string? TreasuryName { get; set; }
+    /// <summary>كود الخزينة — يُعرض «الكود — الاسم» كما في جدول عدّ النقدية.</summary>
+    public string? TreasuryCode { get; set; }
     public decimal Amount { get; set; }
     public string? ItemName { get; set; }
     public decimal Quantity { get; set; }

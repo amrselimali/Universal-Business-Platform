@@ -66,6 +66,10 @@ public sealed partial class OperatingExpenseRepository
             """, new { branchId = head.BranchId, date = head.DocDate.Date }, tx,
             cancellationToken: ct));
 
+        // فحص الرصيد عند الترحيل أيضًا: قد يكون الرصيد نقص بعد حفظ المسودة.
+        await EnsureTreasuryCoversAsync(connection, tx, head.TreasuryId,
+            lines.Sum(l => l.Amount), head.Id, ct);
+
         var stockDocumentId = await PostStockLinesAsync(connection, tx, head, lines, docNo,
             userId, ct);
 

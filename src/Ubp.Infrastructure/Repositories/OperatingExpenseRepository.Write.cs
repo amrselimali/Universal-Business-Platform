@@ -15,6 +15,8 @@ public sealed partial class OperatingExpenseRepository
 
         await ResolveDefaultsAsync(connection, tx, input, ct);
         await ValidateAsync(connection, tx, input, ct);
+        // لا صرف من خزينة لا يغطي رصيدها الحالي قيمة المصروف.
+        await EnsureTreasuryCoversAsync(connection, tx, input, null, ct);
 
         var total = input.Lines.Sum(l => l.Amount);
         await connection.ExecuteAsync(new CommandDefinition("""

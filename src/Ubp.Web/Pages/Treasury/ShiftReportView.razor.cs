@@ -142,6 +142,16 @@ public partial class ShiftReportView : IDisposable
         ? "—"
         : T.T("treasury.type_" + type);
 
+    /// <summary>
+    /// اسم الخزينة بنفس صيغة جدول عدّ النقدية: «الكود — الاسم»، وإلا نوع الخزينة
+    /// (للأسطر التي لا خزينة لها مثل فواتير البيع والتنفيذ) — 0220.
+    /// </summary>
+    private string TreasuryLabel(string? code, string? name, string? type)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return TreasuryTypeText(type);
+        return string.IsNullOrWhiteSpace(code) ? name! : $"{code} — {name}";
+    }
+
     private static Color SourceColor(string? source) => source switch
     {
         "خدمة علاجية" => Color.Error,

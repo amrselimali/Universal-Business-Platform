@@ -94,4 +94,72 @@ public sealed class ShiftReportSummaryTests : IClassFixture<TestDb>
         var second = await shifts.GetShiftReportAsync(actor, shift.Id);
         Assert.Equal(190m, Assert.Single(second.CashCounts).CountedCash);
     }
+
+    /// <summary>
+    /// اسم الخزينة في جدولي التحصيلات والمصروفات = نفسه في جدول عدّ النقدية «الكود — الاسم».
+    /// </summary>
+    [Fact]
+    public async Task Report_shows_the_treasury_code_and_name_like_the_cash_count_table()
+    {
+        var actor = await _db.AdminActorAsync();
+        var chart = await _db.SeedAccountingAsync();
+        var branch = await _db.CreateBranchAsync("SRS-B3", "فرع اسم الخزينة");
+        var treasuryId = Guid.CreateVersion7();
+        await _db.TreasuryRepo.CreateTreasuryAsync(treasuryId, new TreasuryInput
+        {
+            BranchId = branch, Code = "SRS-T3", NameAr = "خزينة اسم التقرير",
+            TreasuryType = TreasuryTypes.Cash, AccountId = chart["1101"].Id
+        }, actor.UserId);
+        var methodId = Guid.CreateVersion7();
+        await _db.TreasuryRepo.CreateMethodAsync(methodId, new TreasuryMethodInput
+        { TreasuryId = treasuryId, Code = "CASH", NameAr = "نقدي" }, actor.UserId);
+        var customer = await _db.PartnerRepo.CreateAsync(PartnerKind.Customer, new PartnerInput
+        { Code = "SRS-C3", NameAr = "عميل اسم الخزينة", ScopeType = "BRANCH", BranchId = branch });
+        var supplier = await _db.PartnerRepo.CreateAsync(PartnerKind.Supplier, new PartnerInput
+        { Code = "SRS-S3", NameAr = "مورد اسم الخزينة" });
+
+        var shifts = _db.TreasuryService();
+        var shift = await shifts.OpenShiftAsync(actor, new ShiftInput
+        { NormalShift = true, BranchId = branch });
+
+        // إيصال قبض من الخزينة.
+        await shifts.CreateVoucherAsync(actor, new VoucherInput
+        {
+            VoucherType = VoucherTypes.Receipt, BranchId = branch, DocDate = DateTime.Today,
+            PartyType = "C", PartyId = customer.Id, PartyName = customer.NameAr,
+            TreasuryId = treasuryId,
+            Lines = { new VoucherLineInput { TreasuryMethodId = methodId, Amount = 100 } }
+        });
+
+        // مصروف تشغيلي مسودة على نفس الخزينة.
+        var expenseId = Guid.CreateVersion7();
+        await using (var connection = new NpgsqlConnection(TestDb.AdminConnection))
+        {
+            await connection.OpenAsync();
+            await connection.ExecuteAsync("""
+                INSERT INTO operating_expenses
+                    (id, branch_id, doc_date, supplier_id, treasury_id, treasury_method_id,
+                     status, total_amount)
+                VALUES (@id, @branch, current_date, @supplier, @treasury, @method, 'DRAFT', 60)
+                """, new { id = expenseId, branch, supplier = supplier.Id, treasury = treasuryId,
+                    method = methodId });
+            await connection.ExecuteAsync("""
+                INSERT INTO operating_expense_lines
+                    (expense_id, line_no, account_id, description, quantity, unit_price, amount)
+                VALUES (@id, 1, @account, 'مصروف اختبار اسم الخزينة', 1, 60, 60)
+                """, new { id = expenseId, account = chart["5300"].Id });
+        }
+
+        var report = await shifts.GetShiftReportAsync(actor, shift.Id);
+        var cash = Assert.Single(report.CashCounts);
+        Assert.Equal("SRS-T3", cash.TreasuryCode);
+
+        var collected = Assert.Single(report.Lines, l => l.Source == "تحصيل/قبض");
+        Assert.Equal(cash.TreasuryCode, collected.TreasuryCode);
+        Assert.Equal(cash.TreasuryName, collected.TreasuryName);
+
+        var expense = Assert.Single(report.Expenses);
+        Assert.Equal(cash.TreasuryCode, expense.TreasuryCode);
+        Assert.Equal(cash.TreasuryName, expense.TreasuryName);
+    }
 }
