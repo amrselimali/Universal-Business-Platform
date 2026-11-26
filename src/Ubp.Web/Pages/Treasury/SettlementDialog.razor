@@ -103,7 +103,7 @@
         {
             var actor = await UserContext.RequireAsync();
             var entryId = await Treasury.SettleClearingAsync(actor, _treasuryId, Balance.AccountId,
-                _amount, _date ?? DateTime.Today, _reference);
+                _amount, _date ?? DateTime.Today, _reference, _branchId);
             MudDialog.Close(DialogResult.Ok(entryId));
         }
         catch (AppException ex) { Snackbar.Add(T.T(ex.Code), Severity.Error); }

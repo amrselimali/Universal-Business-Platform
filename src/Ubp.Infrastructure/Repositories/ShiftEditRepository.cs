@@ -238,6 +238,25 @@ public sealed partial class ShiftEditRepository : IShiftEditRepository
               AND (@until::timestamptz IS NULL OR h.created_at <= @until::timestamptz)
             """, args, cancellationToken: ct)));
 
+        // تسويات الحسابات الوسيطة إلى الخزينة: تُعدَّل قيمتها وتُحذف بعكس قيدها (0219).
+        rows.AddRange(await connection.QueryAsync<ShiftEditableLine>(new CommandDefinition("""
+            SELECT 'clearing_settlement' AS EntityType, cs.id AS DocId,
+                   'CS-' || left(cs.id::text, 8) AS DocNo, cs.doc_date AS DocDate,
+                   NULL::uuid AS LineId, a.name_ar AS PartyName, NULL::text AS ItemName,
+                   NULL::text AS EmployeeName, t.name_ar AS TreasuryName,
+                   0::numeric AS Quantity, 0::numeric AS UnitPrice, cs.amount AS Amount,
+                   cs.reference AS Description, 'amount,description' AS FieldsCsv,
+                   cs.treasury_id AS TreasuryId, cs.clearing_account_id AS AccountId,
+                   NULL::uuid AS EmployeeId, 'posted'::varchar AS DocStatus, true AS CanDelete
+            FROM treasury_clearing_settlements cs
+            JOIN treasuries t ON t.id = cs.treasury_id
+            JOIN accounts a ON a.id = cs.clearing_account_id
+            WHERE cs.branch_id = @branchId
+              AND (@until::timestamptz IS NULL OR cs.created_at <= @until::timestamptz)
+              AND (cs.created_at >= @openedAt OR cs.shift_id = @shiftId)
+            """, new { args.shiftId, args.branchId, args.openedAt, args.until },
+            cancellationToken: ct)));
+
         return rows;
     }
 }

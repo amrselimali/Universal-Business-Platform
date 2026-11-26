@@ -56,6 +56,10 @@ public sealed partial class ShiftEditRepository
                 debitCustomer, debitSupplier, creditCustomer, creditSupplier, branchId }, tx,
             cancellationToken: ct));
 
+        // أثناء شفت مفتوح: يبقى قيد الفرق مسودة مرتبطة بالشفت حتى اعتماد المراجعة — 0220.
+        if (await ShiftPostingGate.TryDeferAsync(connection, tx, branchId, entryId, ct))
+            return;
+
         await connection.ExecuteAsync(new CommandDefinition(
             "SELECT fn_gl_post_entry(@entryId, @userId)", new { entryId, userId }, tx,
             cancellationToken: ct));

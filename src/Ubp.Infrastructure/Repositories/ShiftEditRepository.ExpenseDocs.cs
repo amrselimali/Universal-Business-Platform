@@ -160,8 +160,16 @@ public sealed partial class ShiftEditRepository
             """, new { id = original }, tx, cancellationToken: ct));
         if (head is null) return;
         if (head.Status != "posted")
-            throw new ValidationAppException("validation.shift_delete_document_in_use",
-                new Dictionary<string, string> { ["links"] = "قيد المستند غير مُرحَّل" });
+        {
+            // القيد ما زال مسودة (مؤجّل على الشفت — 0220): يُحذف بدل عكسه فلا يصل للأستاذ إطلاقًا.
+            await connection.ExecuteAsync(new CommandDefinition(
+                "DELETE FROM journal_entry_lines WHERE entry_id = @id", new { id = original },
+                tx, cancellationToken: ct));
+            await connection.ExecuteAsync(new CommandDefinition(
+                "DELETE FROM journal_entries WHERE id = @id AND status = 'draft'",
+                new { id = original }, tx, cancellationToken: ct));
+            return;
+        }
 
         var reversalId = Guid.CreateVersion7();
         await connection.ExecuteAsync(new CommandDefinition("""
@@ -183,9 +191,47 @@ public sealed partial class ShiftEditRepository
             FROM journal_entry_lines WHERE entry_id = @original ORDER BY line_no
             """, new { newId = reversalId, description, original }, tx, cancellationToken: ct));
 
+        // أثناء شفت مفتوح: يبقى القيد العكسي مسودة مرتبطة بالشفت حتى اعتماد المراجعة — 0220.
+        if (await ShiftPostingGate.TryDeferAsync(connection, tx, branchId, reversalId, ct))
+            return;
+
         await connection.ExecuteAsync(new CommandDefinition(
             "SELECT fn_gl_post_entry(@id, @userId)", new { id = reversalId, userId }, tx,
             cancellationToken: ct));
+    }
+
+    /// <summary>
+    /// عكس كل القيود المُرحَّلة المرتبطة بمستند (القيد الأصلي + قيود الفرق الناتجة عن تعديله)
+    /// ثم حذف المستند — حتى لا يتبقى أثر محاسبي بعد الحذف.
+    /// </summary>
+    private static async Task ReverseSourceEntriesAsync(NpgsqlConnection connection,
+        NpgsqlTransaction tx, Guid sourceId, Guid branchId, string? reference,
+        string description, Guid userId, CancellationToken ct)
+    {
+        var entries = (await connection.QueryAsync<(Guid Id, string Status, string? Ref)>(
+            new CommandDefinition("""
+            SELECT e.id AS Id, e.status AS Status, e.reference AS Ref
+            FROM journal_entries e
+            WHERE e.source_id = @sourceId AND e.reversal_of_id IS NULL
+              AND NOT EXISTS (SELECT 1 FROM journal_entries r WHERE r.reversal_of_id = e.id)
+            ORDER BY e.created_at, e.id
+            """, new { sourceId }, tx, cancellationToken: ct))).ToList();
+        foreach (var entry in entries)
+        {
+            if (entry.Status == "draft")
+            {
+                // مسودة مؤجّلة على الشفت (0220) ⇒ تُحذف مباشرة بلا قيد عكسي.
+                await connection.ExecuteAsync(new CommandDefinition(
+                    "DELETE FROM journal_entry_lines WHERE entry_id = @id", new { id = entry.Id },
+                    tx, cancellationToken: ct));
+                await connection.ExecuteAsync(new CommandDefinition(
+                    "DELETE FROM journal_entries WHERE id = @id", new { id = entry.Id }, tx,
+                    cancellationToken: ct));
+                continue;
+            }
+            await ReversePostedEntryAsync(connection, tx, entry.Id, branchId,
+                entry.Ref ?? reference, description, sourceId, userId, ct);
+        }
     }
 
     /// <summary>حذف سلفة موظف: عكس قيدها المُرحَّل ثم حذف المستند فيختفي من الشفت.</summary>
@@ -205,6 +251,8 @@ public sealed partial class ShiftEditRepository
 
         await ReversePostedEntryAsync(connection, tx, doc.EntryId, doc.BranchId, doc.DocNo,
             "إلغاء سلفة موظف " + (doc.DocNo ?? ""), doc.Id, userId, ct);
+        await ReverseSourceEntriesAsync(connection, tx, doc.Id, doc.BranchId, doc.DocNo,
+            "إلغاء سلفة موظف " + (doc.DocNo ?? ""), userId, ct);
         await connection.ExecuteAsync(new CommandDefinition(
             "DELETE FROM employee_advances WHERE id = @id", new { id = doc.Id }, tx,
             cancellationToken: ct));
@@ -225,6 +273,8 @@ public sealed partial class ShiftEditRepository
 
         await ReversePostedEntryAsync(connection, tx, doc.EntryId, doc.BranchId,
             "CH-" + doc.Id.ToString("N")[..8], "إلغاء تسليم نقدية", doc.Id, userId, ct);
+        await ReverseSourceEntriesAsync(connection, tx, doc.Id, doc.BranchId,
+            "CH-" + doc.Id.ToString("N")[..8], "إلغاء تسليم نقدية", userId, ct);
         await connection.ExecuteAsync(new CommandDefinition(
             "DELETE FROM cash_handovers WHERE id = @id", new { id = doc.Id }, tx,
             cancellationToken: ct));

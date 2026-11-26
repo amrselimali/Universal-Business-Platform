@@ -35,6 +35,8 @@ public sealed partial class ShiftEditRepository
             "customer_settlement" => await DeleteSettlementAsync(connection, tx, input, ct),
             "employee_advance" => await DeleteEmployeeAdvanceAsync(connection, tx, input, userId, ct),
             "cash_handover" => await DeleteCashHandoverAsync(connection, tx, input, userId, ct),
+            "clearing_settlement" => await DeleteClearingSettlementAsync(connection, tx, input,
+                userId, ct),
             "booking_execution" => throw new ValidationAppException(
                 "validation.shift_delete_execution_line"),
             _ => throw new ValidationAppException("validation.review_field_not_editable")

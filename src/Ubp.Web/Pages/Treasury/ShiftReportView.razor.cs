@@ -157,6 +157,7 @@ public partial class ShiftReportView : IDisposable
         "تنفيذ خدمة محجوزة" => Color.Warning,
         "فاتورة بيع" => Color.Success,
         "تحصيل/قبض" => Color.Primary,
+        "تسوية حساب وسيط" => Color.Dark,
         _ => Color.Default
     };
 

@@ -9,6 +9,37 @@
             @T.T("treasury.review_hint")
         </MudAlert>
 
+        <MudText Typo="Typo.subtitle2">@T.T("treasury.draft_postings")</MudText>
+        <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-2">
+            @T.T("treasury.draft_postings_hint")
+        </MudAlert>
+        <MudTable Items="_drafts" Dense="true" Elevation="0" Class="ubp-table">
+            <HeaderContent>
+                <MudTh>@T.T("treasury.draft_source")</MudTh>
+                <MudTh>@T.T("treasury.doc_no")</MudTh>
+                <MudTh>@T.T("common.date")</MudTh>
+                <MudTh>@T.T("common.party")</MudTh>
+                <MudTh>@T.T("treasury.draft_description")</MudTh>
+                <MudTh Align="Right">@T.T("common.amount")</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>@context.SourceLabel</MudTd>
+                <MudTd>@(string.IsNullOrWhiteSpace(context.DocNo) ? "—" : context.DocNo)</MudTd>
+                <MudTd>@context.EntryDate.ToString("d")</MudTd>
+                <MudTd>@(string.IsNullOrWhiteSpace(context.PartyName) ? "—" : context.PartyName)</MudTd>
+                <MudTd>@context.Description</MudTd>
+                <MudTd Align="Right">@context.Amount.ToString("N2")</MudTd>
+            </RowTemplate>
+            <NoRecordsContent>
+                <MudText Typo="Typo.body2">@T.T("treasury.draft_none")</MudText>
+            </NoRecordsContent>
+        </MudTable>
+        <MudText Typo="Typo.body2" Class="mb-3">
+            @T.T("treasury.draft_total"): <b>@_draftTotal.ToString("N2")</b> —
+            @_drafts.Count
+        </MudText>
+
+        <MudText Typo="Typo.subtitle2">@T.T("treasury.review_status")</MudText>
         <MudTable Items="_items" Dense="true" Elevation="0" Class="ubp-table">
             <HeaderContent>
                 <MudTh>@T.T("common.screen")</MudTh>
@@ -70,6 +101,8 @@
     [Inject] private ISnackbar Snackbar { get; set; } = default!;
 
     private IReadOnlyList<ShiftReviewItem> _items = Array.Empty<ShiftReviewItem>();
+    private IReadOnlyList<ShiftDraftPosting> _drafts = Array.Empty<ShiftDraftPosting>();
+    private decimal _draftTotal;
     private readonly Dictionary<Guid, decimal> _amounts = new();
     private readonly Dictionary<Guid, decimal> _qtys = new();
     private readonly Dictionary<Guid, string> _notes = new();
@@ -88,6 +121,9 @@
         {
             var actor = await UserContext.RequireAsync();
             _items = await Treasury.ListReviewItemsAsync(actor, Shift.Id);
+            // الحركات المسودة التي ستُرحَّل عند تأكيد الاعتماد — 0220.
+            _drafts = await Treasury.ListDraftPostingsAsync(actor, Shift.Id);
+            _draftTotal = _drafts.Sum(d => d.Amount);
             foreach (var item in _items)
             {
                 _amounts[item.Id] = item.Amount;

@@ -27,7 +27,21 @@ public sealed partial class TreasuryService
         return await _treasury.ListReviewItemsAsync(shiftId, ct);
     }
 
-    /// <summary>ترحيل الشفت للحسابات: تصبح «تحت المراجعة» ويُفعَّل اعتماد المراجعة — 0079.</summary>
+    /// <summary>
+    /// الحركات المسودة المعلّقة على الشفت (تُعرض للمحاسب قبل تأكيد اعتماد المراجعة) — 0220.
+    /// </summary>
+    public async Task<IReadOnlyList<ShiftDraftPosting>> ListDraftPostingsAsync(ActorContext actor,
+        Guid shiftId, CancellationToken ct = default)
+    {
+        await _permissions.RequireAsync(actor, ScreenCodes.TreasuryShifts, ActionCodes.View, ct: ct);
+        var shift = await _treasury.GetShiftAsync(shiftId, ct) ?? throw new NotFoundAppException();
+        BranchScope.Ensure(actor, shift.BranchId);
+        return await _treasury.ListDraftPostingsAsync(shiftId, ct);
+    }
+
+    /// <summary>
+    /// إرسال الشفت للمراجعة بلا أي ترحيل محاسبي (0220): كل الحركات مسودات حتى «اعتماد المراجعة».
+    /// </summary>
     public async Task PostShiftToAccountsAsync(ActorContext actor, Guid shiftId,
         CancellationToken ct = default)
     {
@@ -35,15 +49,7 @@ public sealed partial class TreasuryService
             ct: ct);
         var shift = await _treasury.GetShiftAsync(shiftId, ct) ?? throw new NotFoundAppException();
         BranchScope.Ensure(actor, shift.BranchId);
-        // ترحيل مرتجعات المشتريات المسودة مع الشفت (مخزون + قيد + خصم مورد/خزينة).
-        await _purchaseReturns.PostDraftsForShiftAsync(actor, shiftId, ct);
-        // ترحيل إيصالات POS المسودة المعدّلة/المؤجلة مع الشفت؛ العكسي يُرحّل قبل المعدّل.
-        foreach (var voucherId in await _treasury.ListDraftReceiptIdsForShiftAsync(shiftId, ct))
-            await _treasury.PostVoucherAsync(voucherId, actor.UserId, ct);
-        // ترحيل دورة تنفيذ الخدمات المسودة (الأصلي/العكسي/المعدّل) مع الشفت.
-        var settings = await _settings.GetAsync(ct);
-        await _executions.PostDraftsForShiftAsync(shiftId, actor.UserId, settings.AllowNegativeStock,
-            ct);
+        // لا يُرحَّل شيء هنا: الترحيل الفعلي يتم عند اعتماد المراجعة بعد عرض المسودات — 0220.
         if (!await _treasury.PostShiftAsync(shiftId, actor.UserId, ct))
             throw new ValidationAppException("validation.shift_not_closed");
         await _audit.WriteAsync(actor, "cashier_shifts", shiftId.ToString(), "UPDATE", null,
@@ -52,7 +58,7 @@ public sealed partial class TreasuryService
 
     /// <summary>
     /// اعتماد مراجعة الشفت: يوزر محاسب يملك صلاحية APPROVE (تُمنح وقت تكويد المستخدم)
-    /// يغلق دورة المراجعة على كل تسجيلات الشفت.
+    /// يُرحّل كل الحركات المسودة المعلّقة على الشفت (0220) ثم يغلق دورة المراجعة.
     /// </summary>
     public async Task<Shift> ReviewShiftAsync(ActorContext actor, Guid shiftId,
         CancellationToken ct = default)
@@ -62,6 +68,15 @@ public sealed partial class TreasuryService
         var shift = await _treasury.GetShiftAsync(shiftId, ct) ?? throw new NotFoundAppException();
         BranchScope.Ensure(actor, shift.BranchId);
 
+        // 1) ترحيل المستندات المسودة المعلّقة على الشفت (مرتجعات مشتريات + إيصالات + تنفيذات).
+        await _purchaseReturns.PostDraftsForShiftAsync(actor, shiftId, ct);
+        foreach (var voucherId in await _treasury.ListDraftReceiptIdsForShiftAsync(shiftId, ct))
+            await _treasury.PostVoucherAsync(voucherId, actor.UserId, ct);
+        var settings = await _settings.GetAsync(ct);
+        await _executions.PostDraftsForShiftAsync(shiftId, actor.UserId,
+            settings.AllowNegativeStock, ct);
+
+        // 2) ترحيل باقي قيود الشفت المسودة (بيع POS/تكلفة، سلف، تسليمات، تسويات، فروق…) + قيد العجز.
         var reviewed = await _treasury.ReviewShiftAsync(shiftId, actor.UserId, ct);
         await _audit.WriteAsync(actor, "shift_review_items", shiftId.ToString(), "UPDATE",
             new { status = ShiftReviewStatuses.Pending },

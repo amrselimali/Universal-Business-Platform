@@ -47,11 +47,13 @@ public sealed partial class TreasuryRepository
     }
 
     /// <summary>
-    /// تسوية حساب وسيط: قيد واحد يُفرغ الرصيد إلى خزينة/بنك (أو العكس إذا كان دائناً).
+    /// تسوية حساب وسيط: قيد واحد يُفرغ الرصيد إلى خزينة/بنك (أو العكس إذا كان دائناً)،
+    /// ويُسجَّل صف في treasury_clearing_settlements مرتبطًا بالشفت المفتوح للفرع
+    /// حتى يظهر في تقرير الشفت وحركة النقد (0219).
     /// </summary>
     public async Task<Guid> SettleClearingAsync(Guid treasuryId, Guid clearingAccountId,
         decimal amount, DateTime docDate, string? reference, Guid userId,
-        CancellationToken ct = default)
+        Guid? branchId = null, CancellationToken ct = default)
     {
         amount = Math.Round(amount, 2, MidpointRounding.AwayFromZero);
         if (amount == 0)
@@ -63,6 +65,10 @@ public sealed partial class TreasuryRepository
         var treasury = await GetTreasuryRowAsync(connection, tx, treasuryId, ct)
             ?? throw new ValidationAppException("validation.treasury_not_found");
 
+        // الخزينة العامة تُحاسَب على فرع الشفت المختار، والخاصة تُحاسَب على فرعها.
+        var targetBranch = treasury.IsCompanyWide ? branchId ?? treasury.BranchId
+                                                  : treasury.BranchId;
+
         var account = await connection.QuerySingleOrDefaultAsync<(Guid Id, string Code)>(
             new CommandDefinition(
                 "SELECT id, code FROM accounts WHERE id = @clearingAccountId AND is_active " +
@@ -72,7 +78,7 @@ public sealed partial class TreasuryRepository
 
         await connection.ExecuteAsync(new CommandDefinition(
             "SELECT fn_assert_period_open(@docDate::date, @branchId, 'ACCOUNTING')",
-            new { docDate, branchId = treasury.BranchId }, tx, cancellationToken: ct));
+            new { docDate, branchId = targetBranch }, tx, cancellationToken: ct));
 
         var value = Math.Abs(amount);
         var gl = amount > 0
@@ -90,9 +96,29 @@ public sealed partial class TreasuryRepository
         var description = $"تسوية حساب وسيط {account.Code}" +
                           (string.IsNullOrWhiteSpace(reference) ? "" : $" — {reference.Trim()}");
         var entryId = Guid.CreateVersion7();
+        var settlementId = Guid.CreateVersion7();
         await CreateVoucherEntryAsync(connection, tx, entryId, treasury.TreasuryType,
-            treasury.BranchId, docDate, reference?.Trim() ?? account.Code, description, gl, userId,
-            null, ct);
+            targetBranch, docDate, reference?.Trim() ?? account.Code, description, gl, userId,
+            settlementId, ct, "clearing_settlement");
+
+        // ربط التسوية بالشفت المفتوح للفرع وقت التنفيذ (لتظهر في تقرير الشفت وحركة النقد).
+        var shiftId = await connection.ExecuteScalarAsync<Guid?>(new CommandDefinition("""
+            SELECT id FROM cashier_shifts
+            WHERE branch_id = @branchId AND status = 'open'
+            ORDER BY opened_at DESC LIMIT 1
+            """, new { branchId = targetBranch }, tx, cancellationToken: ct));
+
+        await connection.ExecuteAsync(new CommandDefinition("""
+            INSERT INTO treasury_clearing_settlements (id, branch_id, treasury_id,
+                clearing_account_id, amount, doc_date, reference, journal_entry_id, shift_id,
+                created_by)
+            VALUES (@settlementId, @branchId, @treasuryId, @clearingAccountId, @amount,
+                    @docDate, @reference, @entryId, @shiftId, @userId)
+            """, new
+        {
+            settlementId, branchId = targetBranch, treasuryId, clearingAccountId,
+            amount, docDate, reference = reference?.Trim(), entryId, shiftId, userId
+        }, tx, cancellationToken: ct));
 
         await tx.CommitAsync(ct);
         return entryId;

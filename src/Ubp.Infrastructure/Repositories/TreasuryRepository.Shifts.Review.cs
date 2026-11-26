@@ -54,6 +54,15 @@ public sealed partial class TreasuryRepository
                 JOIN customers tc ON tc.id = st.to_customer_id
                 WHERE st.branch_id = @branchId AND st.status = 'draft'
                   AND st.created_at >= @openedAt
+                UNION ALL
+                -- تسويات الحسابات الوسيطة إلى الخزينة: تُعرض للمحاسب رغم أنها مُرحَّلة (0219).
+                SELECT 'TREASURY_RECONCILIATION', 'clearing_settlement', cs.id,
+                       'CS-' || left(replace(cs.id::text, '-', ''), 8), cs.doc_date,
+                       a.name_ar, cs.amount, 'posted'
+                FROM treasury_clearing_settlements cs
+                JOIN accounts a ON a.id = cs.clearing_account_id
+                WHERE cs.branch_id = @branchId
+                  AND cs.created_at >= @openedAt
             ) x
             ON CONFLICT (shift_id, entity_type, entity_id) DO NOTHING
             """, new { shiftId = shift.Id, branchId = shift.BranchId, openedAt = shift.OpenedAt },

@@ -18,10 +18,13 @@ public sealed partial class TreasuryService
         return await _treasury.ListClearingBalancesAsync(branchId, includeAllAccounts, ct);
     }
 
-    /// <summary>تسوية رصيد وسيط بقيد واحد؛ موجب = من الوسيط إلى الخزينة، سالب = العكس.</summary>
+    /// <summary>
+    /// تسوية رصيد وسيط بقيد واحد؛ موجب = من الوسيط إلى الخزينة، سالب = العكس.
+    /// تُربط التسوية بالشفت المفتوح للفرع لتظهر في تقريره وحركة نقد النقد المتوقع (0219).
+    /// </summary>
     public async Task<Guid> SettleClearingAsync(ActorContext actor, Guid treasuryId,
         Guid clearingAccountId, decimal amount, DateTime docDate, string? reference,
-        CancellationToken ct = default)
+        Guid? branchId = null, CancellationToken ct = default)
     {
         await _permissions.RequireAsync(actor, ScreenCodes.TreasuryReconciliation,
             ActionCodes.Post, ct: ct);
@@ -34,12 +37,12 @@ public sealed partial class TreasuryService
         try
         {
             entryId = await _treasury.SettleClearingAsync(treasuryId, clearingAccountId, amount,
-                docDate, reference, actor.UserId, ct);
+                docDate, reference, actor.UserId, branchId, ct);
         }
         catch (PostgresException ex) { throw DbErrorMapper.Map(ex); }
 
         await _audit.WriteAsync(actor, "journal_entries", entryId.ToString(), "INSERT", null,
-            new { treasuryId, clearingAccountId, amount, docDate, reference }, ct);
+            new { treasuryId, clearingAccountId, amount, docDate, reference, branchId }, ct);
         return entryId;
     }
 }

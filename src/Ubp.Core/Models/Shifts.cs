@@ -180,8 +180,8 @@ public sealed class ShiftCashCount
     public string TreasuryType { get; set; } = TreasuryTypes.Cash;
     public decimal OpeningCash { get; set; }
     /// <summary>
-    /// حركة اليوم المعروضة في عدّ النقدية: إجمالي القيم المسددة من العملاء (شاملة عمولة التحصيل
-    /// المحمَّلة على العميل) − عمولة مزود الخدمة − سندات الصرف على الخزينة.
+    /// حركة اليوم المعروضة في عدّ النقدية = صافي الحركة النقدية الفعلي للخزينة
+    /// (تحصيلات − مصروفات − تحويلات − تسليم نقدية − سلف)، فهي نفس حركة «النقد المتوقع».
     /// </summary>
     public decimal Movement { get; set; }
     public decimal ExpectedCash { get; set; }
@@ -425,3 +425,20 @@ public sealed class ShiftMeterBalance
     public string NameAr { get; set; } = "";
     public decimal Value { get; set; }
 }
+
+/// <summary>
+/// حركة مسودة معلّقة على الشفت تُرحَّل عند «اعتماد المراجعة» — 0220:
+/// تُعرض للمحاسب قبل التأكيد (النوع/المستند/التاريخ/الطرف/المبلغ) ثم تُرحَّل كلها مرة واحدة.
+/// </summary>
+public sealed class ShiftDraftPosting
+{
+    public Guid EntryId { get; set; }
+    public string SourceType { get; set; } = "";
+    public string SourceLabel { get; set; } = "";
+    public string? DocNo { get; set; }
+    public DateTime EntryDate { get; set; }
+    public string Description { get; set; } = "";
+    public decimal Amount { get; set; }
+    public string? PartyName { get; set; }
+}
+

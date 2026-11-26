@@ -65,6 +65,10 @@ public sealed partial class OperatingExpenseRepository
             }, tx, cancellationToken: ct));
         }
 
+        // أثناء شفت مفتوح: يبقى القيد مسودة مرتبطة بالشفت ويُعتمد عند اعتماد المراجعة — 0220.
+        if (await ShiftPostingGate.TryDeferAsync(connection, tx, branchId, entryId, ct))
+            return entryId;
+
         await connection.ExecuteAsync(new CommandDefinition(
             "SELECT fn_gl_post_entry(@entryId, @userId)", new { entryId, userId }, tx,
             cancellationToken: ct));

@@ -17,7 +17,7 @@ public sealed partial class TreasuryRepository
         await using var connection = await _factory.OpenAsync(ct);
         var args = new
         {
-            branchId = shift.BranchId, openedAt = shift.OpenedAt, until = shift.ClosedAt
+            shiftId, branchId = shift.BranchId, openedAt = shift.OpenedAt, until = shift.ClosedAt
         };
 
         var report = new ShiftReport { Shift = shift, Notes = shift.Notes };
@@ -185,6 +185,24 @@ public sealed partial class TreasuryRepository
                   AND v.is_shift_settlement AND v.status <> 'cancelled'
                   AND v.created_at >= @openedAt
                   AND (@until::timestamptz IS NULL OR v.created_at <= @until::timestamptz)
+            ), clearing_settlements AS (
+                -- تسوية حساب وسيط (بطاقة/محفظة/شيك) إلى الخزينة: موجب دخول نقد، سالب خروج (0219).
+                SELECT NULL::text AS CustomerName, t.treasury_type AS TreasuryType,
+                       t.code AS TreasuryCode, t.name_ar AS TreasuryName,
+                       cs.amount AS Collected, 0::numeric AS Revenue,
+                       0::numeric AS Quantity, 0::numeric AS MeterUnits,
+                       NULL::text AS EmployeeName,
+                       a.name_ar || COALESCE(' — ' || cs.reference, '') AS ItemName,
+                       0::numeric AS UnitPrice, 'تسوية حساب وسيط'::varchar AS Source,
+                       NULL::text AS ComplaintEmployeeName
+                FROM treasury_clearing_settlements cs
+                JOIN accounts a ON a.id = cs.clearing_account_id
+                JOIN treasuries t ON t.id = cs.treasury_id
+                WHERE cs.branch_id = @branchId
+                  AND (cs.shift_id = @shiftId
+                       OR (cs.shift_id IS NULL AND cs.created_at >= @openedAt
+                           AND (@until::timestamptz IS NULL
+                                OR cs.created_at <= @until::timestamptz)))
             )
             SELECT * FROM receipts
             UNION ALL SELECT * FROM revenues
@@ -192,6 +210,7 @@ public sealed partial class TreasuryRepository
             UNION ALL SELECT * FROM transfers
             UNION ALL SELECT * FROM settlements
             UNION ALL SELECT * FROM doctor_refunds
+            UNION ALL SELECT * FROM clearing_settlements
             ORDER BY CustomerName
             """, args, cancellationToken: ct))).ToList();
 
@@ -270,16 +289,12 @@ public sealed partial class TreasuryRepository
         decimal expectedTotal = 0;
         foreach (var count in report.CashCounts)
         {
-            // «حركة اليوم» = تحصيلات العملاء (شاملة عمولة العميل) − عمولة مزود الخدمة فقط،
-            // بلا مصروفات/تحويلات/تسليم نقدية، وتُحسب ديناميكيًا حتى للشفت المغلق.
-            count.Movement = Math.Round(await CollectionsMovementAsync(connection, null,
-                count.TreasuryId, shift.BranchId, shift.OpenedAt, shift.ClosedAt, ct), 2,
-                MidpointRounding.AwayFromZero);
-            if (!shift.IsOpen) continue;
-
-            // النقد المتوقع = أول المدة + صافي الحركة النقدية (تحصيلات − مصروفات/تحويلات/تسليم).
+            // «حركة اليوم» هي نفس صافي الحركة المستخدم في «النقد المتوقع» (بعد كل تعديلات
+            // الشفت الإيصالات/المصروفات/السلف/التسليمات)، فيتحقق دائمًا:
+            // النقد المتوقع = أول المدة + حركة اليوم — للشفت المفتوحة والمغلقة.
             var movement = await TreasuryMovementAsync(connection, null, count.TreasuryId,
-                shift.BranchId, shift.OpenedAt, ct);
+                shift.BranchId, shift.OpenedAt, shift.ClosedAt, ct);
+            count.Movement = Math.Round(movement, 2, MidpointRounding.AwayFromZero);
             count.ExpectedCash = Math.Round(count.OpeningCash + movement, 2,
                 MidpointRounding.AwayFromZero);
             count.Variance = count.CountedCash is { } counted
@@ -287,15 +302,16 @@ public sealed partial class TreasuryRepository
                 : null;
             expectedTotal += count.ExpectedCash;
 
-            // تُحفظ القيم المحسوبة حتى يُبنى أي عدّ/فرق لاحق على المتوقع الحالي بعد أي تعديل.
+            // تُحفظ القيم المحسوبة للشفت المفتوحة حتى يُبنى أي عدّ/فرق لاحق على المتوقع
+            // الحالي؛ الشفت المغلقة سجل تاريخي يُعاد حساب عرضه فقط.
+            if (!shift.IsOpen) continue;
             await connection.ExecuteAsync(new CommandDefinition("""
                 UPDATE shift_cash_counts SET expected_cash = @expected, variance = @variance
                 WHERE id = @id
                 """, new { expected = count.ExpectedCash, variance = count.Variance,
                     id = count.Id }, cancellationToken: ct));
         }
-        if (shift.IsOpen)
-            shift.ExpectedCash = Math.Round(expectedTotal, 2, MidpointRounding.AwayFromZero);
+        shift.ExpectedCash = Math.Round(expectedTotal, 2, MidpointRounding.AwayFromZero);
 
         report.Meters = (await connection.QueryAsync<ShiftMeterMovementRow>(new CommandDefinition("""
             SELECT fa.id AS AssetId, fa.code AS Code, fa.name_ar AS NameAr,

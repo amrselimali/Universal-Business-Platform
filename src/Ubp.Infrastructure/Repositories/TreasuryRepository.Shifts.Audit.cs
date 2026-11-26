@@ -57,6 +57,56 @@ public sealed partial class TreasuryRepository
     }
 
     /// <summary>
+    /// الحركات المسودة المعلّقة على الشفت والتي ستُرحَّل عند «اعتماد المراجعة» (0220):
+    /// قيود مسودة + إيصالات/تنفيذات مسودة بلا قيد بعد — تُعرض للمحاسب قبل التأكيد.
+    /// </summary>
+    public async Task<IReadOnlyList<ShiftDraftPosting>> ListDraftPostingsAsync(Guid shiftId,
+        CancellationToken ct = default)
+    {
+        await using var connection = await _factory.OpenAsync(ct);
+        return (await connection.QueryAsync<ShiftDraftPosting>(new CommandDefinition("""
+            SELECT e.id AS EntryId, e.source_type AS SourceType,
+                   CASE e.source_type
+                       WHEN 'voucher' THEN 'سند/إيصال'
+                       WHEN 'execution' THEN 'تنفيذ خدمة'
+                       WHEN 'employee_advance' THEN 'سلفة موظف'
+                       WHEN 'operating_expense' THEN 'مصروف تشغيلي'
+                       WHEN 'clearing_settlement' THEN 'تسوية حساب وسيط'
+                       WHEN 'cash_handover' THEN 'تسليم نقدية'
+                       WHEN 'purchase_return' THEN 'مرتجع مشتريات'
+                       WHEN 'invoice' THEN 'فاتورة'
+                       WHEN 'service_transfer' THEN 'تحويل خدمات'
+                       WHEN 'stock_document' THEN 'حركة مخزون'
+                       WHEN 'cash_shift' THEN 'فرق شفت'
+                       ELSE e.source_type END AS SourceLabel,
+                   e.reference AS DocNo, e.entry_date AS EntryDate,
+                   e.description AS Description, e.total_debit AS Amount,
+                   NULL::text AS PartyName
+            FROM journal_entries e
+            WHERE e.shift_id = @shiftId AND e.status = 'draft'
+            UNION ALL
+            SELECT v.id, 'voucher', 'سند/إيصال', v.doc_no, v.doc_date,
+                   COALESCE(v.notes, 'إيصال مسودة يُرحَّل مع الاعتماد'), v.total_amount,
+                   v.party_name
+            FROM vouchers v
+            WHERE v.shift_id = @shiftId AND v.status = 'draft'
+              AND NOT EXISTS (SELECT 1 FROM journal_entries e
+                              WHERE e.source_type = 'voucher' AND e.source_id = v.id)
+            UNION ALL
+            SELECT be.id, 'execution', 'تنفيذ خدمة', be.doc_no, be.execution_date,
+                   'تنفيذ خدمات مسودة يُرحَّل مع الاعتماد',
+                   COALESCE((SELECT SUM(el.total_amount) FROM booking_execution_lines el
+                             WHERE el.execution_id = be.id), 0),
+                   c.name_ar
+            FROM booking_executions be
+            LEFT JOIN bookings b ON b.id = be.booking_id
+            LEFT JOIN customers c ON c.id = b.customer_id
+            WHERE be.shift_id = @shiftId AND be.status = 'draft'
+            ORDER BY 4, 2
+            """, new { shiftId }, cancellationToken: ct))).ToList();
+    }
+
+    /// <summary>
     /// اعتماد مراجعة الشفت بواسطة يوزر محاسب (صلاحية APPROVE على شاشة الشفتات):
     /// يُرحّل فرق كل خزينة (زيادة/عجز) على حساب الخزينة المخصص أو الافتراضي، ويحوّل
     /// مسودات عدّ النقدية إلى «posted»، ثم يغلق المراجعة — 0076.
@@ -71,6 +121,9 @@ public sealed partial class TreasuryRepository
             cancellationToken: ct)) ?? throw new NotFoundAppException();
         if (shift.Status == ShiftStatuses.Open)
             throw new ValidationAppException("validation.shift_not_closed");
+
+        // الترحيل الفعلي لكل قيود الشفت المسودة (0220): لا يصل أي قيد للأستاذ قبل الاعتماد.
+        await ShiftPostingGate.PostDeferredAsync(connection, tx, shiftId, userId, ct);
 
         var defaults = (await connection.QueryAsync<(string Key, Guid? AccountId)>(
             new CommandDefinition("SELECT setting_key, account_id FROM posting_defaults",

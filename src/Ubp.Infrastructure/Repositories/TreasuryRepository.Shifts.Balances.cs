@@ -72,7 +72,7 @@ public sealed partial class TreasuryRepository
             """, new { branchId }, tx, cancellationToken: ct));
 
         var review = await connection.QuerySingleAsync<(decimal Total, int Count)>(new CommandDefinition("""
-            SELECT COALESCE(SUM(i.amount), 0) AS Total,
+            SELECT COALESCE(SUM(i.amount) FILTER (WHERE i.doc_status <> 'posted'), 0) AS Total,
                    count(DISTINCT i.shift_id)::int AS Count
             FROM shift_review_items i
             JOIN cashier_shifts s ON s.id = i.shift_id

@@ -103,6 +103,9 @@ public partial interface ITreasuryRepository : IShiftGate
     Task<ShiftReport> GetShiftReportAsync(Guid shiftId, CancellationToken ct = default);
     Task<IReadOnlyList<ShiftReviewItem>> ListReviewItemsAsync(Guid shiftId,
         CancellationToken ct = default);
+    /// <summary>الحركات المسودة المعلّقة على الشفت والتي تُرحَّل عند اعتماد المراجعة — 0220.</summary>
+    Task<IReadOnlyList<ShiftDraftPosting>> ListDraftPostingsAsync(Guid shiftId,
+        CancellationToken ct = default);
     Task<Shift> ReviewShiftAsync(Guid shiftId, Guid userId, CancellationToken ct = default);
     /// <summary>الشفتات المفتوحة التي تجاوزت موعد الإغلاق الآلي (5 صباحاً).</summary>
     Task<IReadOnlyList<Shift>> ListShiftsDueForAutoCloseAsync(DateTimeOffset cutoff,
@@ -119,7 +122,8 @@ public partial interface ITreasuryRepository : IShiftGate
     Task<IReadOnlyList<ClearingBalance>> ListClearingBalancesAsync(Guid? branchId,
         bool includeAllAccounts = false, CancellationToken ct = default);
     Task<Guid> SettleClearingAsync(Guid treasuryId, Guid clearingAccountId, decimal amount,
-        DateTime docDate, string? reference, Guid userId, CancellationToken ct = default);
+        DateTime docDate, string? reference, Guid userId, Guid? branchId = null,
+        CancellationToken ct = default);
 }
 
 public sealed partial class TreasuryRepository : ITreasuryRepository

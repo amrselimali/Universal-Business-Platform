@@ -158,7 +158,11 @@ public sealed class ShiftEditExpenseDocsTests : IClassFixture<TestDb>
         Assert.True(result.DocumentDeleted);
         Assert.Equal(0, await ScalarAsync<int>(
             "SELECT count(*)::int FROM employee_advances WHERE id = @id", new { id = advanceId }));
-        Assert.Equal(1, await ScalarAsync<int>("""
+        // القيد كان مسودة مؤجّلة على الشفت ⇒ يُحذف بلا قيد عكسي (0220).
+        Assert.Equal(0, await ScalarAsync<int>(
+            "SELECT count(*)::int FROM journal_entries WHERE source_id = @id",
+            new { id = advanceId }));
+        Assert.Equal(0, await ScalarAsync<int>("""
             SELECT count(*)::int FROM journal_entries
             WHERE source_id = @id AND reversal_of_id IS NOT NULL
             """, new { id = advanceId }));

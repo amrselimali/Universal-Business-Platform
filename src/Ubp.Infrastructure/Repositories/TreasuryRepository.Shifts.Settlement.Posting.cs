@@ -67,9 +67,11 @@ public sealed partial class TreasuryRepository
                 customer = item.Customer, branchId = shift.BranchId
             }, tx, cancellationToken: ct));
         }
-        await connection.ExecuteAsync(new CommandDefinition(
-            "SELECT fn_gl_post_entry(@entryId, @userId)", new { entryId, userId }, tx,
-            cancellationToken: ct));
+        // أثناء الشفت (وقت الإغلاق) يبقى القيد مسودة حتى اعتماد المراجعة — 0220.
+        if (!await ShiftPostingGate.TryDeferAsync(connection, tx, shift.BranchId, entryId, ct))
+            await connection.ExecuteAsync(new CommandDefinition(
+                "SELECT fn_gl_post_entry(@entryId, @userId)", new { entryId, userId }, tx,
+                cancellationToken: ct));
         return entryId;
     }
 

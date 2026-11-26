@@ -108,9 +108,11 @@ public sealed class EmployeeAdvanceRepository : IEmployeeAdvanceRepository
                 amount = input.Amount, branchId = input.BranchId, date = input.DocDate.Date }, tx,
             cancellationToken: ct));
 
-        await connection.ExecuteAsync(new CommandDefinition(
-            "SELECT fn_gl_post_entry(@entryId, @userId)", new { entryId, userId }, tx,
-            cancellationToken: ct));
+        // أثناء شفت مفتوح: يبقى القيد مسودة مرتبطة بالشفت ويُعتمد عند اعتماد المراجعة — 0220.
+        if (!await ShiftPostingGate.TryDeferAsync(connection, tx, input.BranchId, entryId, ct))
+            await connection.ExecuteAsync(new CommandDefinition(
+                "SELECT fn_gl_post_entry(@entryId, @userId)", new { entryId, userId }, tx,
+                cancellationToken: ct));
 
         await connection.ExecuteAsync(new CommandDefinition("""
             INSERT INTO employee_advances
