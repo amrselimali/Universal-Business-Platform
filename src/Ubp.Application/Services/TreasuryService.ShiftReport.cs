@@ -70,7 +70,8 @@ public sealed partial class TreasuryService
 
         // 1) ترحيل المستندات المسودة المعلّقة على الشفت (مرتجعات مشتريات + إيصالات + تنفيذات).
         await _purchaseReturns.PostDraftsForShiftAsync(actor, shiftId, ct);
-        foreach (var voucherId in await _treasury.ListDraftReceiptIdsForShiftAsync(shiftId, ct))
+        foreach (var voucherId in await _treasury.AdoptAndListDraftReceiptIdsForShiftAsync(
+                     shiftId, ct))
             await _treasury.PostVoucherAsync(voucherId, actor.UserId, ct);
         var settings = await _settings.GetAsync(ct);
         await _executions.PostDraftsForShiftAsync(shiftId, actor.UserId,

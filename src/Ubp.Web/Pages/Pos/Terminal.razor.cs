@@ -66,7 +66,7 @@ public partial class Terminal : SecurePageBase
     private string? _customerSearch;
     private Guid _warehouseId;
     private Guid _treasuryId;
-    private DateTime? _expiryDate = DateTime.Today.AddMonths(6);
+    private DateTime? _expiryDate;
     private string? _bookingNotes;
     private string? _search;
     private IReadOnlyList<Branch> _branches = Array.Empty<Branch>();
@@ -134,6 +134,8 @@ public partial class Terminal : SecurePageBase
 
     protected override async Task OnLoadAsync()
     {
+        // التواريخ بتوقيت الإعدادات (الحاوية UTC) — لا DateTime.Today.
+        _expiryDate ??= Fmt.Today.AddMonths(6);
         _branches = await Branches.OptionsAsync(Actor!);
         _branchId = Actor!.CurrentBranchId ?? _branches.FirstOrDefault()?.Id ?? Guid.Empty;
         _employees = await MasterData.EmployeeOptionsAsync(Actor!);
@@ -409,8 +411,8 @@ public partial class Terminal : SecurePageBase
             _receipt = await Pos.CheckoutAsync(Actor!, new PosCheckoutInput
             {
                 BranchId = _branchId, CustomerId = _customerId, WarehouseId = _warehouseId,
-                DocDate = DateTime.Today, DraftOnly = draftOnly,
-                ExpiresAt = new DateTimeOffset(_expiryDate.Value.Date),
+                DocDate = Fmt.Today, DraftOnly = draftOnly,
+                ExpiresAt = Fmt.StartOfDay(_expiryDate.Value),
                 Notes = string.IsNullOrWhiteSpace(_bookingNotes) ? null : _bookingNotes.Trim(),
                 Lines = _cart.Select(l => new PosLineInput
                 {

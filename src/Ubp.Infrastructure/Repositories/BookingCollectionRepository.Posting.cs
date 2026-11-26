@@ -57,8 +57,9 @@ public sealed partial class BookingCollectionRepository
             }, tx, cancellationToken: ct));
         }
 
-        // أثناء شفت مفتوح: يبقى القيد مسودة مرتبطة بالشفت ويُعتمد عند اعتماد المراجعة — 0220.
-        if (await ShiftPostingGate.TryDeferAsync(connection, tx, branchId, entryId, ct))
+        // أثناء شفت مفتوح (أو مغلق بانتظار اعتماد المراجعة): يبقى القيد مسودة مرتبطة بالشفت — 0220.
+        if (await ShiftPostingGate.TryDeferAsync(connection, tx, branchId, entryId, ct,
+                includeAwaitingReview: true))
             return entryId;
 
         await connection.ExecuteAsync(new CommandDefinition(

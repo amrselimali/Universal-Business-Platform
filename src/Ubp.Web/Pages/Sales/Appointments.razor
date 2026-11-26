@@ -97,13 +97,14 @@ else
 @code {
     private IReadOnlyList<Appointment> _items = Array.Empty<Appointment>();
     private IReadOnlyList<Branch> _branches = Array.Empty<Branch>();
-    private DateTime? _date = DateTime.Today;
+    private DateTime? _date;
     private Guid? _branchId;
 
     protected override string ScreenCode => ScreenCodes.SalesAppointments;
 
     protected override async Task OnLoadAsync()
     {
+        _date ??= Fmt.Today;
         _branches = await Branches.OptionsAsync(Actor!);
         // الافتراضي فرع محدد (فرع المستخدم الحالي أو أول فرع مربوط) — لا فراغ.
         _branchId = Actor!.CurrentBranchId
@@ -114,7 +115,7 @@ else
 
     private async Task ReloadAsync() =>
         _items = await Fulfillment.ListAppointmentsAsync(Actor!, _branchId,
-            _date ?? DateTime.Today);
+            _date ?? Fmt.Today);
 
     private Task OnDateChanged(DateTime? value) { _date = value; return RunAsync(ReloadAsync); }
     private Task OnBranchChanged(Guid? value) { _branchId = value; return RunAsync(ReloadAsync); }
@@ -125,7 +126,7 @@ else
             new DialogParameters
             {
                 ["Branches"] = _branches, ["DefaultBranchId"] = _branchId,
-                ["DefaultDate"] = _date ?? DateTime.Today
+                ["DefaultDate"] = _date ?? Fmt.Today
             });
         if ((await dialog.Result) is { Canceled: false })
         {

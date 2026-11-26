@@ -129,13 +129,16 @@ else
     private List<Column> _treasuryColumns = new();
     private List<Column> _meterColumns = new();
     private Guid? _branchId;
-    private DateTime? _from = DateTime.Today.AddDays(-30);
-    private DateTime? _to = DateTime.Today;
+    private DateTime? _from;
+    private DateTime? _to;
 
     protected override string ScreenCode => ScreenCodes.TreasuryShifts;
 
     protected override async Task OnLoadAsync()
     {
+        // تواريخ الفلتر بتوقيت الإعدادات (الحاوية UTC) — وإلا اختفى شفت اليوم بعد منتصف الليل.
+        _from ??= Fmt.Today.AddDays(-30);
+        _to ??= Fmt.Today;
         _branches = await Branches.OptionsAsync(Actor!);
         _branchId = Actor!.CurrentBranchId ?? _branches.FirstOrDefault()?.Id;
         await ReloadAsync();

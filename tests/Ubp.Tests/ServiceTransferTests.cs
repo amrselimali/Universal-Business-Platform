@@ -125,6 +125,13 @@ public sealed class ServiceTransferTests : IClassFixture<TestDb>
         Assert.Equal(ServiceTransferStatuses.Posted, posted.Status);
         // الترحيل لا يعيد نقل الكميات (نُقلت عند المسودة) بل يُنشئ القيد المالي فقط.
         Assert.Equal(3m, await ReservedQtyAsync(f.BookingLineId));
+
+        // 0220: القيد يبقى مسودة معلّقة على الشفت، ولا أثر في الأستاذ قبل «اعتماد المراجعة».
+        Assert.Equal(0m, await PartyBalanceAsync(f.To.Id));
+        await _db.TreasuryService().CloseShiftAsync(actor, f.ShiftId,
+            new List<ShiftCashCountInput>());
+        await _db.TreasuryService().ReviewShiftAsync(actor, f.ShiftId);
+
         Assert.Equal(200m, await PartyBalanceAsync(f.To.Id));
         Assert.Equal(-200m, await PartyBalanceAsync(f.From.Id));
     }

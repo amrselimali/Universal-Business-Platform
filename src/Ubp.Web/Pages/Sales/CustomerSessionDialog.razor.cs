@@ -15,7 +15,7 @@ public partial class CustomerSessionDialog : ComponentBase
     [Parameter] public Guid? DefaultBranchId { get; set; }
     [Parameter] public Guid? DefaultCustomerId { get; set; }
     [Parameter] public string? DefaultCustomerName { get; set; }
-    [Parameter] public DateTime DefaultDate { get; set; } = DateTime.Today;
+    [Parameter] public DateTime DefaultDate { get; set; }
 
     [Inject] private BookingService Bookings { get; set; } = default!;
     [Inject] private PartnerService Partners { get; set; } = default!;
@@ -23,6 +23,7 @@ public partial class CustomerSessionDialog : ComponentBase
     [Inject] private UserContext UserContext { get; set; } = default!;
     [Inject] private UiCulture T { get; set; } = default!;
     [Inject] private ISnackbar Snackbar { get; set; } = default!;
+    [Inject] private IDisplayFormatter Fmt { get; set; } = default!;
 
     private MudForm _form = default!;
     private Guid _branchId;
@@ -39,7 +40,7 @@ public partial class CustomerSessionDialog : ComponentBase
     protected override async Task OnInitializedAsync()
     {
         _branchId = DefaultBranchId ?? Branches.FirstOrDefault()?.Id ?? Guid.Empty;
-        _date = DefaultDate;
+        _date = DefaultDate == default ? Fmt.Today : DefaultDate;
         _customerId = DefaultCustomerId ?? Guid.Empty;
 
         var actor = await UserContext.GetAsync();
@@ -84,8 +85,8 @@ public partial class CustomerSessionDialog : ComponentBase
             var booking = await Bookings.CreateSessionAsync(actor, new BookingInput
             {
                 BranchId = _branchId, CustomerId = _customerId, BookingDate = _date.Value.Date,
-                StartsAt = new DateTimeOffset(_date.Value.Date + _start.Value),
-                EndsAt = new DateTimeOffset(_date.Value.Date + _end.Value),
+                StartsAt = Fmt.At(_date.Value, _start.Value),
+                EndsAt = Fmt.At(_date.Value, _end.Value),
                 AssignedEmployeeId = _employeeId,
                 Notes = string.IsNullOrWhiteSpace(_notes) ? null : _notes.Trim()
             });

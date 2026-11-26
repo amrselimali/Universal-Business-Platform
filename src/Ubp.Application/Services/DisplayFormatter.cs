@@ -9,7 +9,15 @@ namespace Ubp.Application.Services;
 public interface IDisplayFormatter
 {
     TimeZoneInfo Zone { get; }
+    /// <summary>الآن بتوقيت الإعدادات (لا توقيت السيرفر/الحاوية).</summary>
+    DateTime Now { get; }
+    /// <summary>تاريخ اليوم بتوقيت الإعدادات.</summary>
+    DateTime Today { get; }
     DateTimeOffset ToUserTime(DateTimeOffset value);
+    /// <summary>يكوِّن لحظة من (تاريخ + وقت) بالمنطقة الزمنية للإعدادات — بدل <c>new DateTimeOffset(DateTime)</c>.</summary>
+    DateTimeOffset At(DateTime date, TimeSpan time);
+    /// <summary>بداية اليوم (00:00) بتوقيت الإعدادات.</summary>
+    DateTimeOffset StartOfDay(DateTime date);
     string Date(DateTimeOffset? value);
     string DateOnly(DateOnly? value);
     string DateTime(DateTimeOffset? value);
@@ -43,8 +51,28 @@ public sealed class DisplayFormatter : IDisplayFormatter
         }
     }
 
+    /// <summary>
+    /// «الآن» بالمنطقة الزمنية للإعدادات — لأن التطبيق Blazor Server ويعمل داخل حاوية UTC،
+    /// فأي <c>DateTime.Today/Now</c> في الواجهة يعطي توقيت السيرفر لا توقيت المستخدم.
+    /// </summary>
+    public DateTime Now => TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, Zone).DateTime;
+
+    public DateTime Today => Now.Date;
+
     public DateTimeOffset ToUserTime(DateTimeOffset value) =>
         TimeZoneInfo.ConvertTime(value.ToUniversalTime(), Zone);
+
+    /// <summary>
+    /// يكوِّن لحظة من تاريخ + وقت بالمنطقة الزمنية للإعدادات (بدل <c>new DateTimeOffset(DateTime)</c>
+    /// الذي يستخدم إزاحة السيرفر فينتج فرق ساعتين في مصر).
+    /// </summary>
+    public DateTimeOffset At(DateTime date, TimeSpan time)
+    {
+        var local = System.DateTime.SpecifyKind(date.Date + time, DateTimeKind.Unspecified);
+        return new DateTimeOffset(local, Zone.GetUtcOffset(local));
+    }
+
+    public DateTimeOffset StartOfDay(DateTime date) => At(date, TimeSpan.Zero);
 
     public string Date(DateTimeOffset? value) =>
         value.HasValue ? ToUserTime(value.Value).ToString(Current.DateFormat) : "—";

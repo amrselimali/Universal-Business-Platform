@@ -79,10 +79,14 @@ public sealed partial class TreasuryRepository
         await connection.ExecuteAsync(new CommandDefinition("""
             INSERT INTO vouchers (id, branch_id, doc_date, status, voucher_type, party_type, party_id,
                 party_name, treasury_id, to_treasury_id, total_amount, fee_total, receipt_type,
-                notes, created_by)
+                shift_id, notes, created_by)
             VALUES (@id, @BranchId, @docDate, 'draft', @VoucherType, @partyType, @PartyId,
                     @PartyName, @TreasuryId, @ToTreasuryId, @total, @feeTotal,
-                    COALESCE(@ReceiptType::varchar, 'ORIGINAL'), @Notes, @userId)
+                    COALESCE(@ReceiptType::varchar, 'ORIGINAL'),
+                    (SELECT id FROM cashier_shifts
+                     WHERE branch_id = @BranchId AND status = 'open'
+                     ORDER BY opened_at DESC LIMIT 1),
+                    @Notes, @userId)
             """, new
         {
             id, input.BranchId, docDate = input.DocDate.Date, input.VoucherType, partyType,

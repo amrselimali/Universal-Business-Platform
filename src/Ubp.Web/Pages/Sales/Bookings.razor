@@ -139,13 +139,16 @@ else
     };
     // شاشة الحجوزات = مواعيد عملاء فقط؛ لا مصدر لنقطة البيع ولا فلتر مصدر.
     private const string ScreenSource = BookingSources.Manual;
-    private DateTime? _from = DateTime.Today;
-    private DateTime? _to = DateTime.Today;
+    private DateTime? _from;
+    private DateTime? _to;
 
     protected override string ScreenCode => ScreenCodes.SalesBookings;
 
     protected override async Task OnLoadAsync()
     {
+        // توقيت الإعدادات لا السيرفر (الحاوية UTC) وإلا اختلف يوم الفلتر حول منتصف الليل.
+        _from ??= Fmt.Today;
+        _to ??= Fmt.Today;
         _branches = await Branches.OptionsAsync(Actor!);
         // الافتراضي = كل فروع المستخدم (حد أدنى فرع واحد كما يفرضه الخادم).
         _branchIds = _branches.Select(b => b.Id).ToHashSet();
@@ -168,8 +171,8 @@ else
     {
         var branches = string.Join(",", _branchIds);
         var statuses = string.Join(",", _statuses);
-        var from = (_from ?? DateTime.Today).ToString("yyyy-MM-dd");
-        var to = (_to ?? DateTime.Today).ToString("yyyy-MM-dd");
+        var from = (_from ?? Fmt.Today).ToString("yyyy-MM-dd");
+        var to = (_to ?? Fmt.Today).ToString("yyyy-MM-dd");
         var url = $"/sales/bookings/print?branches={branches}&statuses={statuses}" +
                   $"&from={from}&to={to}" +
                   (string.IsNullOrWhiteSpace(_search) ? "" : $"&search={Uri.EscapeDataString(_search)}");

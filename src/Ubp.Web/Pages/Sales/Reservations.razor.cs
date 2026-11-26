@@ -95,7 +95,7 @@ public partial class Reservations
         try
         {
             await ReservationsApi.ExtendAsync(Actor!, row.BookingId,
-                new DateTimeOffset(_extendTo.Value.Date));
+                Fmt.StartOfDay(_extendTo.Value));
             Snackbar.Add(T.T("reservations.extended"), Severity.Success);
             await RefreshAsync();
         }

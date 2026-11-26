@@ -143,10 +143,16 @@ public sealed partial class BookingCollectionRepository
             await connection.ExecuteAsync(new CommandDefinition("""
                 INSERT INTO vouchers (id, branch_id, doc_date, doc_no, status, voucher_type,
                     party_type, party_id, party_name, treasury_id, total_amount, fee_total,
-                    provider_fee_total, notes, created_by)
+                    provider_fee_total, shift_id, notes, created_by)
                 VALUES (@id, @branchId, @docDate, @no, 'draft', 'receipt', 'C', @customerId,
                         (SELECT name_ar FROM customers WHERE id = @customerId), @treasuryId,
-                        @groupGross, @groupFee, @groupProviderFee, @notes, @userId)
+                        @groupGross, @groupFee, @groupProviderFee,
+                        (SELECT id FROM cashier_shifts
+                         WHERE branch_id = @branchId
+                           AND (status = 'open'
+                                OR (status = 'closed' AND review_status = 'pending'))
+                         ORDER BY (status = 'open') DESC, opened_at DESC LIMIT 1),
+                        @notes, @userId)
                 """, new { id, branchId = input.BranchId, docDate, no,
                     customerId = input.CustomerId, treasuryId = group.Key, groupGross,
                     groupFee, groupProviderFee, notes = input.Notes, userId }, tx,

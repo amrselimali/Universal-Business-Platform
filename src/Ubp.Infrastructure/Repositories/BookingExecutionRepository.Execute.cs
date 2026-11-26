@@ -116,11 +116,8 @@ public sealed partial class BookingExecutionRepository
                                         'EX'::varchar, 6::smallint)
             """, new { branchId = line.BranchId, date = DateTime.UtcNow.Date }, tx,
             cancellationToken: ct));
-        var shiftId = await connection.ExecuteScalarAsync<Guid?>(new CommandDefinition("""
-            SELECT id FROM cashier_shifts
-            WHERE branch_id = @branchId AND status = 'open'
-            ORDER BY opened_at DESC LIMIT 1
-            """, new { branchId = line.BranchId }, tx, cancellationToken: ct));
+        var shiftId = await ShiftPostingGate.DeferralShiftIdAsync(connection, tx,
+            line.BranchId, ct, includeAwaitingReview: true);
 
         // دورة التنفيذ أصبحت مسودة كاملة (مخزون + عدّاد + إيراد/تكلفة) وتُرحَّل مع الشفت.
         // القيم تُحفظ بنسبة الكمية المنفذة حتى لا تتأثر بتعديل بند الحجز لاحقًا.

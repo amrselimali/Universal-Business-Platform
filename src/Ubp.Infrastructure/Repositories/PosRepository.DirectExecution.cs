@@ -104,20 +104,20 @@ public sealed partial class PosRepository
         var revenueEntryId = await PostRevenueAsync(connection, tx, input, line, docNo,
             executionLineId, userId, ct);
 
+        var shiftId = await ShiftPostingGate.DeferralShiftIdAsync(connection, tx,
+            input.BranchId, ct, includeAwaitingReview: true);
         await connection.ExecuteAsync(new CommandDefinition("""
             INSERT INTO booking_executions
                 (id, branch_id, doc_no, execution_date, booking_id, status, execution_type,
                  shift_id, stock_document_id, journal_entry_id, notes, created_by)
             VALUES (@id, @branchId, @docNo, @date, @bookingId, 'posted', 'ORIGINAL',
-                    (SELECT id FROM cashier_shifts
-                     WHERE branch_id = @branchId AND status = 'open'
-                     ORDER BY opened_at DESC LIMIT 1),
+                    @shiftId,
                     (SELECT document_id FROM stock_document_lines WHERE id = @stockLineId),
                     @journalEntryId, 'تنفيذ مباشر من نقطة البيع', @userId)
             """, new
         {
             id = executionId, branchId = input.BranchId, docNo, date = input.DocDate.Date,
-            bookingId, stockLineId = stockDocumentLineId,
+            bookingId, shiftId, stockLineId = stockDocumentLineId,
             journalEntryId = revenueEntryId ?? journalEntryId, userId
         }, tx, cancellationToken: ct));
 

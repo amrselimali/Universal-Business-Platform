@@ -129,6 +129,10 @@ public sealed class BookingExecutionEmployeeTests : IClassFixture<TestDb>
         var preview = await _db.Executions().GetPreviewAsync(actor, line.Id);
         Assert.Equal("موظف ربط الدوام", preview.EmployeeName);
 
+        // شفت مفتوح (سياسة 0220): التنفيذ يبقى مسودة تُرحَّل مع اعتماد المراجعة.
+        await _db.TreasuryService().OpenShiftAsync(actor,
+            new ShiftInput { NormalShift = true, BranchId = branch });
+
         var result = await _db.Executions().ExecuteAsync(actor, new BookingExecutionInput
         { BookingLineId = line.Id, Quantity = 1 });
         Assert.Equal(1m, result.Quantity);

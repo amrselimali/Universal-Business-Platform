@@ -7,7 +7,10 @@ namespace Ubp.Infrastructure.Repositories;
 
 public partial interface ITreasuryRepository
 {
-    /// <summary>إيصالات قبض مسودة لعملية تعديل/بيع داخل شفت (لا تشمل العكسي).</summary>
-    Task<IReadOnlyList<Guid>> ListDraftReceiptIdsForShiftAsync(Guid shiftId,
+    /// <summary>
+    /// إيصالات القبض المسودة التي تُرحَّل عند «اعتماد المراجعة»، مع اعتماد السندات المسودة
+    /// التي أُنشئت خلال الشفت بدون ربط (`shift_id = NULL`).
+    /// </summary>
+    Task<IReadOnlyList<Guid>> AdoptAndListDraftReceiptIdsForShiftAsync(Guid shiftId,
         CancellationToken ct = default);
 }

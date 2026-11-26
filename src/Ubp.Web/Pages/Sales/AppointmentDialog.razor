@@ -70,7 +70,7 @@
     [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
     [Parameter] public IReadOnlyList<Branch> Branches { get; set; } = Array.Empty<Branch>();
     [Parameter] public Guid? DefaultBranchId { get; set; }
-    [Parameter] public DateTime DefaultDate { get; set; } = DateTime.Today;
+    [Parameter] public DateTime DefaultDate { get; set; }
     /// <summary>الدوام المُراد تعديله؛ NULL = إضافة دوام جديد.</summary>
     [Parameter] public Appointment? Existing { get; set; }
 
@@ -122,7 +122,7 @@
         }
 
         _branchId = DefaultBranchId ?? Branches.FirstOrDefault()?.Id ?? Guid.Empty;
-        _date = DefaultDate;
+        _date = DefaultDate == default ? Fmt.Today : DefaultDate;
         await LoadEmployeesAsync();
     }
 
@@ -155,7 +155,7 @@
 
         // تاريخ الدوام الجديد لا يسبق تاريخ اليوم (نفس القاعدة مفروضة على الخادم).
         if (!AppointmentEditRules.IsDateAllowed(DateOnly.FromDateTime(_date.Value.Date),
-                DateOnly.FromDateTime(DateTime.Today)))
+                DateOnly.FromDateTime(Fmt.Today)))
         {
             Snackbar.Add(T.T(AppointmentEditRules.DateInPastCode), Severity.Warning);
             return;
@@ -223,12 +223,13 @@
     {
         var day = _date!.Value.Date;
         // الإجازة تُسجَّل ليوم كامل بلا موعد محدد، ويُكتب في الملاحظات «إجازة + الملاحظة».
+        // التكوين بتوقيت الإعدادات (Fmt.At) لا بتوقيت السيرفر — وإلا ظهر الموعد متأخرًا بساعتين.
         var starts = _isLeave
-            ? new DateTimeOffset(day)
-            : new DateTimeOffset(day + _start!.Value);
+            ? Fmt.StartOfDay(day)
+            : Fmt.At(day, _start!.Value);
         var ends = _isLeave
-            ? starts.AddDays(1).AddTicks(-1)
-            : new DateTimeOffset(day + _end!.Value);
+            ? Fmt.StartOfDay(day).AddDays(1).AddTicks(-1)
+            : Fmt.At(day, _end!.Value);
         var notes = _isLeave
             ? $"{T.T("sales.leave")}{(string.IsNullOrWhiteSpace(_notes) ? "" : " + " + _notes.Trim())}"
             : _notes;

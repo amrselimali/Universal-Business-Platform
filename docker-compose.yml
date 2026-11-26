@@ -30,6 +30,9 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:8080
+      # منطقة وقت الحاوية = منطقة المستخدم (شبكة أمان لأي DateTime.Today في الشاشات)؛
+      # المرجع الرسمي للعرض/التكوين هو app_settings.time_zone.
+      TZ: ${TZ:-Africa/Cairo}
       Database__ConnectionString: "Host=postgres;Port=5432;Database=ubp;Username=ubp_app;Password=ubp_app_dev_password"
       Database__MigrationConnectionString: "Host=postgres;Port=5432;Database=ubp;Username=postgres;Password=${POSTGRES_PASSWORD:-postgres}"
       Database__QaConnectionString: "Host=postgres;Port=5432;Database=ubp_qa;Username=postgres;Password=${POSTGRES_PASSWORD:-postgres}"

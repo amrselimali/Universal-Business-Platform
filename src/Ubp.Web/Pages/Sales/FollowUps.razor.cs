@@ -21,8 +21,8 @@ public partial class FollowUps
     private IReadOnlyList<Branch> _branches = Array.Empty<Branch>();
     private FollowUpInput _input = new();
     private DateTime? _dueDate;
-    private DateTime? _from = DateTime.Today;
-    private DateTime? _to = DateTime.Today;
+    private DateTime? _from;
+    private DateTime? _to;
     private string? _status = FollowUpStatuses.Pending;
     private string? _customerSearch;
     /// <summary>فروع فلتر شاشة المتابعات — الافتراضي الفروع المصرح بها (المربوطة) للمستخدم.</summary>
@@ -33,6 +33,8 @@ public partial class FollowUps
 
     protected override async Task OnLoadAsync()
     {
+        _from ??= Fmt.Today;
+        _to ??= Fmt.Today;
         _customers = (await Partners.ListAsync(Actor!, PartnerKind.Customer,
             new PageRequest { Page = 1, PageSize = 50 }, null)).Items;
         // نموذج الإضافة يبدأ فارغًا بالكامل (العميل والتاريخ والملاحظة).
@@ -77,7 +79,7 @@ public partial class FollowUps
         _busy = true;
         try
         {
-            _input.DueAt = new DateTimeOffset((_dueDate ?? DateTime.Today).Date.AddHours(10));
+            _input.DueAt = Fmt.At(_dueDate ?? Fmt.Today, TimeSpan.FromHours(10));
             await FollowUpApi.CreateAsync(Actor!, _input);
 
             // بعد التسجيل: تفريغ النموذج بالكامل إلى القيم الافتراضية.

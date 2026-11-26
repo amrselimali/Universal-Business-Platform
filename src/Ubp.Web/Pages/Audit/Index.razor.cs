@@ -66,8 +66,9 @@ public partial class Index
         _loadingMore = true;
         var filter = new AuditFilter
         {
-            From = _from is null ? null : new DateTimeOffset(_from.Value, TimeSpan.Zero),
-            To = _to is null ? null : new DateTimeOffset(_to.Value.Date.AddDays(1), TimeSpan.Zero),
+            // نشاط اليوم بتوقيت الإعدادات (الحاوية UTC) — لا TimeSpan.Zero.
+            From = _from is null ? null : Fmt.StartOfDay(_from.Value),
+            To = _to is null ? null : Fmt.StartOfDay(_to.Value.Date.AddDays(1)),
             UserId = _userId,
             BranchId = _branchId,
             TableName = _tableName,

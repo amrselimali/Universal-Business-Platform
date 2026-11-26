@@ -15,6 +15,8 @@ public abstract class SecurePageBase : ComponentBase
     [Inject] protected UiCulture T { get; set; } = default!;
     [Inject] protected NavigationManager Navigation { get; set; } = default!;
     [Inject] protected ISnackbar Snackbar { get; set; } = default!;
+    /// <summary>عرض/تكوين التواريخ بتوقيت الإعدادات (الحاوية تعمل UTC) — لا تستخدم DateTime.Today.</summary>
+    [Inject] protected IDisplayFormatter Fmt { get; set; } = default!;
 
     protected ActorContext? Actor { get; private set; }
     protected bool Denied { get; private set; }

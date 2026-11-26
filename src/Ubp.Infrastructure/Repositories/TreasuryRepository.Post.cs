@@ -52,14 +52,37 @@ public sealed partial class TreasuryRepository
     /// صرف = Dr دفعات الموردين + Dr مصاريف / Cr خزينة/وسيط،
     /// تحويل = Dr الوجهة / Cr المصدر (وبين الفروع عبر حساب التسوية).
     /// </summary>
-    public async Task<IReadOnlyList<Guid>> ListDraftReceiptIdsForShiftAsync(Guid shiftId,
-        CancellationToken ct = default)
+    /// <summary>
+    /// إيصالات القبض المسودة التي تُرحَّل عند «اعتماد المراجعة»:
+    /// (١) تُعتمد أولًا السندات المسودة التي أُنشئت **خلال** الشفت بدون ربط (`shift_id IS NULL`)
+    ///     — إيصالات POS/التحصيل المسجَّلة قبل إصلاح ربط السند بالشفت،
+    /// (٢) ثم كل مسودات الشفت نفسها (ولا تشمل العكسي).
+    /// </summary>
+    public async Task<IReadOnlyList<Guid>> AdoptAndListDraftReceiptIdsForShiftAsync(
+        Guid shiftId, CancellationToken ct = default)
     {
         await using var connection = await _factory.OpenAsync(ct);
         var ids = await connection.QueryAsync<Guid>(new CommandDefinition("""
+            WITH adopted AS (
+                UPDATE vouchers v
+                   SET shift_id = s.id
+                  FROM cashier_shifts s
+                 WHERE s.id = @shiftId
+                   AND v.shift_id IS NULL
+                   AND v.status = 'draft'
+                   AND v.journal_entry_id IS NULL
+                   AND NOT v.is_shift_settlement
+                   AND v.voucher_type = 'receipt'
+                   AND v.branch_id = s.branch_id
+                   AND v.created_at >= s.opened_at
+                   AND (s.closed_at IS NULL OR v.created_at <= s.closed_at)
+                RETURNING v.id
+            )
+            SELECT id FROM adopted
+            UNION
             SELECT id FROM vouchers
             WHERE voucher_type = 'receipt' AND status = 'draft' AND shift_id = @shiftId
-            ORDER BY CASE WHEN receipt_type = 'REVERSAL' THEN 0 ELSE 1 END, created_at, id
+            ORDER BY 1
             """, new { shiftId }, cancellationToken: ct));
         return ids.ToList();
     }

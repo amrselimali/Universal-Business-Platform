@@ -22,6 +22,7 @@ ORDER BY e.entry_date DESC, e.created_at DESC
 LIMIT 50;
 
 \echo '=== 3) فروق بين القيود المرحّلة والأرصدة الشهرية لكل حساب/فرع/شهر ==='
+
 \echo '(أي صف هنا = قيد «مرحّل» لم يدخل gl_balances، أو تجميع قديم يحتاج إعادة بناء)'
 WITH lines AS (
     SELECT l.branch_id, date_trunc('month', l.entry_date)::date AS period_month,
@@ -51,3 +52,24 @@ JOIN accounts a ON a.id = coalesce(l.account_id, b.account_id)
 WHERE coalesce(l.debit, 0) <> coalesce(b.debit, 0)
    OR coalesce(l.credit, 0) <> coalesce(b.credit, 0)
 ORDER BY 2 DESC, a.code;
+
+\echo '=== 4) سندات قبض بلا أي قيد (مسودة عالقة أو «مرحّلة بلا قيد») ==='
+\echo '(shift_id = NULL + journal_entry_id = NULL أسفل صف = إيصال لن يُرحَّل في أي اعتماد مراجعة)'
+SELECT v.doc_no, v.doc_date, v.status, v.receipt_type,
+       (v.is_shift_settlement) AS is_settlement,
+       v.shift_id,
+       (SELECT s.code FROM cashier_shifts s WHERE s.id = v.shift_id) AS shift_code,
+       (s_closed.code) AS shift_by_window,
+       v.total_amount, v.created_at
+FROM vouchers v
+LEFT JOIN LATERAL (
+    SELECT s.code FROM cashier_shifts s
+    WHERE s.branch_id = v.branch_id
+      AND v.created_at >= s.opened_at
+      AND (s.closed_at IS NULL OR v.created_at <= s.closed_at)
+    ORDER BY s.opened_at DESC LIMIT 1
+) s_closed ON true
+WHERE v.voucher_type = 'receipt' AND v.party_type = 'C'
+  AND v.journal_entry_id IS NULL
+ORDER BY v.created_at DESC
+LIMIT 100;

@@ -95,10 +95,11 @@
     [Inject] private UserContext UserContext { get; set; } = default!;
     [Inject] private UiCulture T { get; set; } = default!;
     [Inject] private ISnackbar Snackbar { get; set; } = default!;
+    [Inject] private IDisplayFormatter Fmt { get; set; } = default!;
 
     private MudForm _form = default!;
     private BookingInput _input = new();
-    private DateTime? _date = DateTime.Today;
+    private DateTime? _date;
     private TimeSpan? _startTime = new(10, 0, 0);
     private TimeSpan? _endTime = new(10, 30, 0);
     private List<LineModel> _lines = new();
@@ -127,14 +128,16 @@
             _input.AssignedEmployeeId = Model.AssignedEmployeeId;
             _input.Notes = Model.Notes;
             _date = Model.BookingDate;
-            if (Model.StartsAt is { } s) _startTime = s.ToLocalTime().TimeOfDay;
-            if (Model.EndsAt is { } e) _endTime = e.ToLocalTime().TimeOfDay;
+            // القراءة بتوقيت الإعدادات (لا توقيت السيرفر) حتى لا يظهر الوقت متأخرًا ساعتين.
+            if (Model.StartsAt is { } s) _startTime = Fmt.ToUserTime(s).TimeOfDay;
+            if (Model.EndsAt is { } e) _endTime = Fmt.ToUserTime(e).TimeOfDay;
             _lines = Model.Lines.Select(l => new LineModel
             {
                 ItemId = l.ItemId, BaseUnitId = l.UnitId, WarehouseId = l.WarehouseId,
                 Quantity = l.Quantity <= 0 ? 1 : l.Quantity, UnitPrice = l.UnitPrice
             }).ToList();
         }
+        _date ??= Fmt.Today;
         if (_input.CustomerId != Guid.Empty)
             _selectedCustomer = _customers.FirstOrDefault(c => c.Id == _input.CustomerId)
                 ?? new Partner
@@ -218,8 +221,9 @@
         {
             var actor = await UserContext.RequireAsync();
             _input.BookingDate = _date.Value.Date;
-            _input.StartsAt = new DateTimeOffset(_date.Value.Date + _startTime.Value);
-            _input.EndsAt = new DateTimeOffset(_date.Value.Date + _endTime.Value);
+            // التكوين بتوقيت الإعدادات: بدونها كان الوقت يُحفظ كـ UTC فيظهر متأخرًا ساعتين.
+            _input.StartsAt = Fmt.At(_date.Value, _startTime.Value);
+            _input.EndsAt = Fmt.At(_date.Value, _endTime.Value);
             _input.Lines = _lines.Select(l => new BookingLineInput
             {
                 ItemId = l.ItemId, UnitId = l.BaseUnitId,

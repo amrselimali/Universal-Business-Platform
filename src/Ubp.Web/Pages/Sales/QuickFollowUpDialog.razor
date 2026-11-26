@@ -32,12 +32,13 @@
     [Parameter] public Guid CustomerId { get; set; }
     [Parameter] public string? CustomerName { get; set; }
     [Parameter] public Guid? BookingId { get; set; }
-    [Parameter] public DateTime DefaultDate { get; set; } = DateTime.Today;
+    [Parameter] public DateTime DefaultDate { get; set; }
 
     [Inject] private FollowUpService FollowUps { get; set; } = default!;
     [Inject] private UserContext UserContext { get; set; } = default!;
     [Inject] private UiCulture T { get; set; } = default!;
     [Inject] private ISnackbar Snackbar { get; set; } = default!;
+    [Inject] private IDisplayFormatter Fmt { get; set; } = default!;
 
     private string _channel = FollowUpChannels.Call;
     private DateTime? _date;
@@ -65,7 +66,7 @@
                 CustomerId = CustomerId,
                 BookingId = BookingId,
                 Channel = _channel,
-                DueAt = new DateTimeOffset(_date.Value.Date.AddHours(10)),
+                DueAt = Fmt.At(_date.Value, TimeSpan.FromHours(10)),
                 Note = string.IsNullOrWhiteSpace(_note) ? null : _note.Trim()
             });
             MudDialog.Close(DialogResult.Ok(followUp));
