@@ -39,7 +39,7 @@
                         @foreach (var treasury in _treasuries)
                         {
                             <MudSelectItem T="Guid?" Value="@((Guid?)treasury.Id)">
-                                @treasury.Code — @treasury.DisplayName(_english)
+                                @treasury.DisplayName(_english)
                             </MudSelectItem>
                         }
                     </MudSelect>

@@ -201,6 +201,43 @@ public sealed partial class ShiftEditRepository : IShiftEditRepository
               AND (@until::timestamptz IS NULL OR s.created_at <= @until::timestamptz)
             """, args, cancellationToken: ct)));
 
+        // سلف الموظفين المصروفة من شاشة المصروفات: تُعدَّل قيمتها وتُحذف بعكس قيدها.
+        rows.AddRange(await connection.QueryAsync<ShiftEditableLine>(new CommandDefinition("""
+            SELECT 'employee_advance' AS EntityType, a.id AS DocId, a.doc_no AS DocNo,
+                   a.doc_date AS DocDate, NULL::uuid AS LineId, e.name_ar AS PartyName,
+                   NULL::text AS ItemName, e.name_ar AS EmployeeName, t.name_ar AS TreasuryName,
+                   0::numeric AS Quantity, 0::numeric AS UnitPrice, a.amount AS Amount,
+                   a.notes AS Description, 'amount,description' AS FieldsCsv,
+                   a.treasury_id AS TreasuryId, a.charge_account_id AS AccountId,
+                   a.employee_id AS EmployeeId, a.status AS DocStatus, true AS CanDelete
+            FROM employee_advances a
+            JOIN employees e ON e.id = a.employee_id
+            JOIN treasuries t ON t.id = a.treasury_id
+            WHERE a.branch_id = @branchId AND a.created_at >= @openedAt
+              AND (@until::timestamptz IS NULL OR a.created_at <= @until::timestamptz)
+            """, args, cancellationToken: ct)));
+
+        // تسليمات النقدية للوسيط: تُعدَّل قيمتها وتُحذف بعكس قيدها.
+        rows.AddRange(await connection.QueryAsync<ShiftEditableLine>(new CommandDefinition("""
+            SELECT 'cash_handover' AS EntityType, h.id AS DocId,
+                   'CH-' || left(h.id::text, 8) AS DocNo, h.doc_date AS DocDate,
+                   NULL::uuid AS LineId, a.name_ar AS PartyName, NULL::text AS ItemName,
+                   NULL::text AS EmployeeName, t.name_ar AS TreasuryName,
+                   0::numeric AS Quantity, 0::numeric AS UnitPrice, h.amount AS Amount,
+                   CASE WHEN h.commission_amount > 0
+                        THEN COALESCE(h.notes || ' — ', '') || 'عمولة تسليم: ' ||
+                             to_char(h.commission_amount, 'FM999,999,990.00')
+                        ELSE h.notes END AS Description,
+                   'amount,description' AS FieldsCsv, h.treasury_id AS TreasuryId,
+                   h.clearing_account_id AS AccountId, NULL::uuid AS EmployeeId,
+                   'posted'::varchar AS DocStatus, true AS CanDelete
+            FROM cash_handovers h
+            JOIN treasuries t ON t.id = h.treasury_id
+            JOIN accounts a ON a.id = h.clearing_account_id
+            WHERE h.branch_id = @branchId AND h.created_at >= @openedAt
+              AND (@until::timestamptz IS NULL OR h.created_at <= @until::timestamptz)
+            """, args, cancellationToken: ct)));
+
         return rows;
     }
 }

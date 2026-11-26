@@ -34,6 +34,8 @@ public sealed partial class ShiftEditRepository
         {
             "voucher" => await ApplyVoucherAsync(connection, tx, input, userId, ct),
             "operating_expense" => await ApplyExpenseAsync(connection, tx, input, userId, ct),
+            "employee_advance" => await ApplyEmployeeAdvanceAsync(connection, tx, input, userId, ct),
+            "cash_handover" => await ApplyCashHandoverAsync(connection, tx, input, userId, ct),
             "commercial_document" => await ApplyCommercialAsync(connection, tx, input, ct),
             "booking" => await ApplyBookingAsync(connection, tx, input, ct),
             "booking_execution" => await ApplyExecutionAsync(connection, tx, input, userId, ct),

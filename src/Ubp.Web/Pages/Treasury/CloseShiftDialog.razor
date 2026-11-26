@@ -51,7 +51,7 @@
                         @foreach (var treasury in _settlementTreasuries)
                         {
                             <MudSelectItem T="Guid?" Value="@((Guid?)treasury.Id)">
-                                @treasury.Code — @treasury.NameAr
+                                @treasury.NameAr
                             </MudSelectItem>
                         }
                     </MudSelect>

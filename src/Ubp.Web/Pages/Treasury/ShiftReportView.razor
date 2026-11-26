@@ -150,7 +150,7 @@
             <MudTh Align="Right">@T.T("treasury.variance")</MudTh>
         </HeaderContent>
         <RowTemplate>
-            <MudTd>@context.TreasuryCode — @context.TreasuryName</MudTd>
+            <MudTd>@context.TreasuryName</MudTd>
             <MudTd>@TreasuryTypeText(context.TreasuryType)</MudTd>
             <MudTd Align="Right">@context.OpeningCash.ToString("N2")</MudTd>
             <MudTd Align="Right">@context.Movement.ToString("N2")</MudTd>

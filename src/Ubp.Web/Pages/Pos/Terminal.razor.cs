@@ -182,7 +182,7 @@ public partial class Terminal : SecurePageBase
     private string TreasuryLabel(Guid id)
     {
         var treasury = _treasuries.FirstOrDefault(t => t.Id == id);
-        return treasury is null ? "—" : $"{treasury.Code} — {treasury.NameAr}";
+        return treasury is null ? "—" : treasury.NameAr;
     }
 
     private async Task SearchAsync()

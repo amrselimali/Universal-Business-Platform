@@ -115,7 +115,7 @@
                             @foreach (var treasury in Treasuries)
                             {
                                 <MudSelectItem T="Guid" Value="@treasury.Id">
-                                    @treasury.Code — @treasury.NameAr
+                                    @treasury.NameAr
                                     (@treasury.CollectionFeePercent.ToString("N2")%)
                                 </MudSelectItem>
                             }

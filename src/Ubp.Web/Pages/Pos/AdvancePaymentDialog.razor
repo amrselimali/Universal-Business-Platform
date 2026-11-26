@@ -21,7 +21,7 @@
                 @foreach (var treasury in Treasuries)
                 {
                     <MudSelectItem T="Guid?" Value="@((Guid?)treasury.Id)">
-                        @treasury.Code — @treasury.NameAr
+                        @treasury.NameAr
                         (@treasury.CollectionFeePercent.ToString("N2")%)
                     </MudSelectItem>
                 }
@@ -42,7 +42,7 @@
                 <div class="pos-receipt-head">
                     <div><b>@T.T("pos.receipt_no"): —</b></div>
                     <div>@T.T("sales.customer"): <b>@CustomerName</b></div>
-                    <div>@T.T("treasury.treasury"): @preview.Code — @preview.NameAr</div>
+                    <div>@T.T("treasury.treasury"): @preview.NameAr</div>
                 </div>
                 <div class="pos-receipt-totals">
                     <div><span>مبلغ الدفعة</span><span>@(_amount - _fee).ToString("N2")</span></div>

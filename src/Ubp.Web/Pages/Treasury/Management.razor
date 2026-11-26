@@ -185,7 +185,7 @@ else
     private async Task ArchiveAsync(Treasury treasury)
     {
         var confirmed = await Dialogs.ShowMessageBoxAsync(T.T("treasury.archive_confirm"),
-            $"{treasury.Code} — {treasury.DisplayName(IsEnglish)}",
+            $"{treasury.DisplayName(IsEnglish)}",
             yesText: T.T("treasury.archive"), cancelText: T.T("common.cancel"));
         if (confirmed != true) return;
 

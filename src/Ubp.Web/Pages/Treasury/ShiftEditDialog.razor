@@ -225,6 +225,7 @@
         "voucher" => "إيصال/سند", "operating_expense" => "مصروف", "commercial_document" => "مستند",
         "booking" => "حجز", "booking_execution" => "خدمة منفذة",
         "service_transfer" => "تحويل خدمات", "customer_settlement" => "تسوية حساب عميل",
+        "employee_advance" => "سلفة موظف", "cash_handover" => "تسليم نقدية",
         _ => t
     };
 
@@ -243,7 +244,7 @@
             _accounts = accounts.Select(a => new Opt(a.Id, $"{a.Code} — {a.NameAr}")).ToList();
             foreach (var a in accounts) _accountNames[a.Id] = $"{a.Code} — {a.NameAr}";
             _treasuries = (await Lookup.TreasuriesAsync(actor, BranchId))
-                .Select(t => new Opt(t.Id, $"{t.Code} — {t.NameAr}")).ToList();
+                .Select(t => new Opt(t.Id, t.NameAr)).ToList();
             _employees = (await MasterData.EmployeeOptionsAsync(actor))
                 .Select(e => new Opt(e.Id, e.NameAr)).ToList();
             await ReloadAsync(actor);
