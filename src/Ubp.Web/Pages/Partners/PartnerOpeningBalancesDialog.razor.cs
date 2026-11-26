@@ -37,7 +37,7 @@ public partial class PartnerOpeningBalancesDialog
         public string? ServiceName { get; init; }
         public bool IsLocked { get; init; }
         public string? LockReasonKey { get; init; }
-        public bool CanEditPaid { get; init; }
+        public bool CanEditPaid { get; init; } = true;
         public decimal MaxPaidAmount { get; init; }
         public ItemOption? Service { get; set; }
         public decimal Quantity { get; set; } = 1;
@@ -46,7 +46,9 @@ public partial class PartnerOpeningBalancesDialog
         public decimal Total => Math.Round(Quantity * UnitPrice, 2, MidpointRounding.AwayFromZero);
         public decimal Remaining => Math.Max(Total - PaidAmount, 0);
         /// <summary>أقصى مسدد مسموح للصف: قيمة الخدمة، أو قيمتها ناقص الإيصالات للبند المقفل.</summary>
-        public decimal MaxPaid => IsLocked ? MaxPaidAmount : Total;
+        public decimal MaxPaid => IsLocked
+            ? MaxPaidAmount
+            : Total > 0 ? Total : decimal.MaxValue;
     }
 
     protected override async Task OnInitializedAsync()
@@ -84,7 +86,8 @@ public partial class PartnerOpeningBalancesDialog
         finally { _loading = false; }
     }
 
-    private void AddRow() => _rows.Add(new Row { Quantity = 1 });
+    /// <summary>سطر جديد: المسدد مفتوح افتراضيًا (المسدد متاح دائمًا في التعديل).</summary>
+    private void AddRow() => _rows.Add(new Row { Quantity = 1, CanEditPaid = true });
 
     private void RemoveRow(Row row)
     {
