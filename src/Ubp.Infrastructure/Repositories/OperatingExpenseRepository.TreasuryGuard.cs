@@ -7,7 +7,8 @@ namespace Ubp.Infrastructure.Repositories;
 
 /// <summary>
 /// رصيد الخزينة الحالي ومنع الصرف بدون رصيد: المتاح = الرصيد المُرحَّل على حساب الخزينة
-/// + حركة السندات المسودة (قبض/صرف/تحويل) − مصروفات تشغيلية مسودة لم تُرحَّل من نفس الخزينة.
+/// + صافي حركات اليوم/الشفت من القيود **المسودة** (مصروف/قبض/صرف/تحويل لم يُعتمد بعد — 0220)
+/// + حركة السندات المسودة التي لم يُنشأ لها قيد بعد − مصروفات تشغيلية مسودة لم تُرحَّل.
 /// </summary>
 public sealed partial class OperatingExpenseRepository
 {
@@ -15,25 +16,38 @@ public sealed partial class OperatingExpenseRepository
         NpgsqlTransaction? tx, Guid treasuryId, Guid? excludeExpenseId, CancellationToken ct) =>
         await connection.ExecuteScalarAsync<decimal>(new CommandDefinition("""
             SELECT ROUND(
+                -- (١) الرصيد المُرحَّل على حساب الخزينة (قيود مرحّلة فقط)
                 COALESCE((SELECT SUM(l.debit - l.credit)
                           FROM journal_entry_lines l
                           JOIN journal_entries e ON e.id = l.entry_id
                           WHERE e.status = 'posted' AND l.account_id = t.account_id
                             AND (t.is_company_wide OR e.branch_id = t.branch_id)), 0)
-              + COALESCE((SELECT SUM(CASE
-                          WHEN v.voucher_type = 'receipt' THEN v.total_amount - v.provider_fee_total
-                          WHEN v.voucher_type = 'payment' THEN -v.total_amount
-                          WHEN v.voucher_type = 'transfer' AND v.treasury_id = t.id
-                               THEN -(v.total_amount + v.fee_total)
-                          WHEN v.voucher_type = 'transfer' AND v.to_treasury_id = t.id
-                               THEN v.total_amount
-                          ELSE 0 END)
-                    FROM vouchers v
-                    WHERE v.status = 'draft'
-                      AND (v.treasury_id = t.id OR v.to_treasury_id = t.id)), 0)
-              - COALESCE((SELECT SUM(o.total_amount) FROM operating_expenses o
-                          WHERE o.treasury_id = t.id AND o.status = 'DRAFT'
-                            AND (@excludeId::uuid IS NULL OR o.id <> @excludeId::uuid)), 0)
+                -- (٢) صافي حركات اليوم/الشفت المعلّقة كمسودة (شفت مفتوح أو بانتظار اعتماد المراجعة)
+                + COALESCE((SELECT SUM(l.debit - l.credit)
+                            FROM journal_entry_lines l
+                            JOIN journal_entries e ON e.id = l.entry_id
+                            WHERE e.status = 'draft' AND l.account_id = t.account_id
+                              AND (t.is_company_wide OR e.branch_id = t.branch_id)
+                              AND (e.shift_id IS NOT NULL OR e.entry_date >= CURRENT_DATE)
+                              AND (@excludeId::uuid IS NULL
+                                   OR e.source_type <> 'operating_expense'
+                                   OR e.source_id IS DISTINCT FROM @excludeId::uuid)), 0)
+                -- (٣) سندات مسودة لم يُنشأ لها قيد بعد (حتى لا تُحسب مرتين مع البند ٢)
+                + COALESCE((SELECT SUM(CASE
+                            WHEN v.voucher_type = 'receipt' THEN v.total_amount - v.provider_fee_total
+                            WHEN v.voucher_type = 'payment' THEN -v.total_amount
+                            WHEN v.voucher_type = 'transfer' AND v.treasury_id = t.id
+                                 THEN -(v.total_amount + v.fee_total)
+                            WHEN v.voucher_type = 'transfer' AND v.to_treasury_id = t.id
+                                 THEN v.total_amount
+                            ELSE 0 END)
+                      FROM vouchers v
+                      WHERE v.status = 'draft' AND v.journal_entry_id IS NULL
+                        AND (v.treasury_id = t.id OR v.to_treasury_id = t.id)), 0)
+                -- (٤) مصروفات تشغيلية مسودة لم تُرحَّل بعد (بلا قيد)
+                - COALESCE((SELECT SUM(o.total_amount) FROM operating_expenses o
+                            WHERE o.treasury_id = t.id AND o.status = 'DRAFT'
+                              AND (@excludeId::uuid IS NULL OR o.id <> @excludeId::uuid)), 0)
             , 2)
             FROM treasuries t WHERE t.id = @treasuryId
             """, new { treasuryId, excludeId = excludeExpenseId }, tx, cancellationToken: ct));

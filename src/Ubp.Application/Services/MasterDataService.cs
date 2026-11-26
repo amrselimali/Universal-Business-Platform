@@ -92,11 +92,18 @@ public sealed partial class MasterDataService
     public async Task<IReadOnlyList<Employee>> EmployeeOptionsForBranchesAsync(ActorContext actor,
         IReadOnlyCollection<Guid>? branchIds, CancellationToken ct = default)
     {
-        if (actor.IsSuperAdmin && branchIds is not { Count: > 0 })
-            return await _employees.ListOptionsAsync(ct);
+        // المدير الأعلى: الفروع المطلوبة كما هي (أو كل الموظفين عند عدم تحديد فرع).
+        if (actor.IsSuperAdmin)
+            return branchIds is { Count: > 0 }
+                ? await _employees.ListOptionsAsync(branchIds.Distinct().ToArray(), false, ct)
+                : await _employees.ListOptionsAsync(ct);
+
         var scope = branchIds is { Count: > 0 }
-            ? branchIds.Where(actor.AllowedBranchIds.Contains).Distinct().ToArray()
-            : actor.AllowedBranchIds;
+            ? branchIds.Where(actor.CanAccessBranch).Distinct().ToArray()
+            : actor.AllowedBranchIds.ToArray();
+        // لا تقاطع مع فروع المستخدم ⇒ نستخدم فرعه الحالي بدل إسقاط كل موظفي الفروع
+        // (الاستعلام يضم موظفي الشركة بلا فرع دائمًا).
+        if (scope.Length == 0 && actor.CurrentBranchId is { } current) scope = new[] { current };
         return await _employees.ListOptionsAsync(scope, false, ct);
     }
 

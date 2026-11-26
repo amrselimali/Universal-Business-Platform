@@ -245,4 +245,40 @@ public sealed class OperatingExpenseTests : IClassFixture<TestDb>
         input.TreasuryMethodId = f.CashMethod;
         return input;
     }
+
+    /// <summary>
+    /// أثناء شفت مفتوح كل القيود مسودة (0220) — يجب أن يُحسب **صافي حركة اليوم** في رصيد
+    /// الخزينة المتاح: تحصيل نقدي داخل الشفت يزيد المتاح فيُسمح بالصرف منه قبل اعتماد المراجعة.
+    /// </summary>
+    [Fact]
+    public async Task Draft_collection_inside_open_shift_increases_the_available_balance()
+    {
+        var actor = await _db.AdminActorAsync();
+        var f = await SetupAsync("7");
+
+        // استهلاك الرصيد المرحّل بالكامل بمصروف مسودة ⇒ المتاح صفر.
+        await _db.OperatingExpenses().CreateAsync(actor, Paid(f, 100000));
+        var blockedBefore = await Assert.ThrowsAsync<ValidationAppException>(() =>
+            _db.OperatingExpenses().CreateAsync(actor, Paid(f, 5000)));
+        Assert.Equal("validation.expense_treasury_balance", blockedBefore.Code);
+
+        // شفت مفتوح + سند قبض 5,000: قيده مسودة غير مرحّل إلى الأستاذ.
+        await _db.TreasuryService().OpenShiftAsync(actor,
+            new ShiftInput { NormalShift = true, BranchId = f.Branch });
+        var customer = await _db.PartnerRepo.CreateAsync(PartnerKind.Customer,
+            new PartnerInput { Code = "EXP-C-7", NameAr = "عميل تحصيل 7" });
+        var receipt = await _db.TreasuryService().CreateVoucherAsync(actor, new VoucherInput
+        {
+            VoucherType = VoucherTypes.Receipt, BranchId = f.Branch, DocDate = DateTime.Today,
+            PartyType = "C", PartyId = customer.Id, PartyName = customer.NameAr,
+            TreasuryId = f.TreasuryId,
+            Lines = { new VoucherLineInput { TreasuryMethodId = f.CashMethod, Amount = 5000 } }
+        });
+        await _db.TreasuryService().PostVoucherAsync(actor, receipt.Id);
+
+        // لم يُعتمد الشفت بعد: الأستاذ لا يعرف التحصيل، لكن المتاح يجب أن يشمل حركة اليوم.
+        var ok = await _db.OperatingExpenses().CreateAsync(actor, Paid(f, 5000));
+
+        Assert.Equal(5000m, ok.TotalAmount);
+    }
 }

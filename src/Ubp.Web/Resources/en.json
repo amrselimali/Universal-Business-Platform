@@ -547,6 +547,7 @@
   "execution.meter_asset": "Asset / device",
   "execution.meter_required": "Asset selection and a units count greater than zero are mandatory for this metered item.",
   "execution.no_employee": "No employee registered",
+  "execution.no_executor_in_branch": "No active employee is enabled as a service executor for this booking's branch — enable the flag in the Employees screen (or leave the employee's branch empty to be company-wide).",
   "execution.no_meter_assets": "No active metered assets are available for this branch; a metered item cannot be executed without an asset.",
   "execution.no_remaining": "No remaining quantity to execute.",
   "execution.quantity": "Executed quantity",

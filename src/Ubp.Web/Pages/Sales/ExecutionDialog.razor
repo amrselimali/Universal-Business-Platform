@@ -29,6 +29,12 @@
                         </MudSelectItem>
                     }
                 </MudSelect>
+                @if (_employees.Count == 0)
+                {
+                    <MudAlert Severity="Severity.Warning" Dense="true" Class="ubp-span-2">
+                        @T.T("execution.no_executor_in_branch")
+                    </MudAlert>
+                }
                 @if (ItemExecutionModes.IsDirect(_preview.ExecutionMode))
                 {
                     <MudChip T="string" Size="Size.Small" Color="Color.Warning"
