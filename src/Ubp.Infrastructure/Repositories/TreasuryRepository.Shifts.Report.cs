@@ -17,7 +17,10 @@ public sealed partial class TreasuryRepository
         await using var connection = await _factory.OpenAsync(ct);
         var args = new
         {
-            shiftId, branchId = shift.BranchId, openedAt = shift.OpenedAt, until = shift.ClosedAt
+            shiftId, branchId = shift.BranchId, openedAt = shift.OpenedAt, until = shift.ClosedAt,
+            // يوم الشفت: تُربط به ملاحظات التقرير (عملاء بلا متابعة/حجوزات الغد/مواعيد الغد)
+            // بدلًا من تاريخ فتح التقرير، فلا تتغير ملاحظات الشفتات المقفولة — 0220.
+            shiftDate = shift.OpenedAt.Date
         };
 
         var report = new ShiftReport { Shift = shift, Notes = shift.Notes };
@@ -415,6 +418,7 @@ public sealed partial class TreasuryRepository
             """, args, cancellationToken: ct)));
 
         // عملاء بلا متابعة أو حجز مستقبلي: يُعرض العدد فقط (بلا بيان تفصيلي) — 0094.
+        // عملاء بلا متابعة أو حجز مستقبلي — مربوطة بيوم الشفت نفسه لا بتاريخ فتح التقرير.
         report.IdleCustomersCount = await connection.ExecuteScalarAsync<int>(new CommandDefinition("""
             SELECT count(*)::int
             FROM customers c
@@ -422,29 +426,29 @@ public sealed partial class TreasuryRepository
               AND NOT EXISTS (
                   SELECT 1 FROM bookings b
                   WHERE b.customer_id = c.id AND b.status NOT IN ('cancelled', 'reversed')
-                    AND COALESCE(b.starts_at::date, b.booking_date) > current_date)
+                    AND COALESCE(b.starts_at::date, b.booking_date) > @shiftDate::date)
               AND NOT EXISTS (
                   SELECT 1 FROM follow_ups f
                   WHERE f.customer_id = c.id AND f.status = 'pending'
-                    AND f.due_at::date > current_date)
-            """, new { branchId = shift.BranchId }, cancellationToken: ct));
+                    AND f.due_at::date > @shiftDate::date)
+            """, args, cancellationToken: ct));
 
-        // حجوزات الغد: الحالات المؤكدة فقط، ويُعرض العدد فقط — 0094.
+        // حجوزات اليوم التالي للشفت: الحالات المؤكدة فقط، ويُعرض العدد فقط — 0094.
         report.TomorrowBookingsCount = await connection.ExecuteScalarAsync<int>(new CommandDefinition("""
             SELECT count(*)::int
             FROM bookings b
-            WHERE b.branch_id = @branchId AND b.booking_date = current_date + 1
+            WHERE b.branch_id = @branchId AND b.booking_date = @shiftDate::date + 1
               AND b.status = 'confirmed'
-            """, new { branchId = shift.BranchId }, cancellationToken: ct));
+            """, args, cancellationToken: ct));
 
-        // حجوزات الغد غير المؤكدة (باستثناء الملغى والمنتهي) بجانب المؤكدة — 0095.
+        // حجوزات اليوم التالي غير المؤكدة (باستثناء الملغى والمنتهي) — 0095.
         report.TomorrowBookingsUnconfirmedCount = await connection.ExecuteScalarAsync<int>(
             new CommandDefinition("""
             SELECT count(*)::int
             FROM bookings b
-            WHERE b.branch_id = @branchId AND b.booking_date = current_date + 1
+            WHERE b.branch_id = @branchId AND b.booking_date = @shiftDate::date + 1
               AND b.status NOT IN ('confirmed', 'cancelled', 'expired')
-            """, new { branchId = shift.BranchId }, cancellationToken: ct));
+            """, args, cancellationToken: ct));
 
         report.TomorrowAppointments = (await connection.QueryAsync<ShiftAppointmentRow>(new CommandDefinition("""
             SELECT a.id AS Id, e.name_ar AS EmployeeName, c.name_ar AS CustomerName,
@@ -452,7 +456,7 @@ public sealed partial class TreasuryRepository
             FROM appointments a
             JOIN employees e ON e.id = a.employee_id
             LEFT JOIN customers c ON c.id = a.customer_id
-            WHERE a.branch_id = @branchId AND a.starts_at::date = current_date + 1
+            WHERE a.branch_id = @branchId AND a.starts_at::date = @shiftDate::date + 1
               AND a.status <> 'cancelled'
             ORDER BY a.starts_at
             """, args, cancellationToken: ct))).ToList();

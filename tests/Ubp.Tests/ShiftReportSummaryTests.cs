@@ -67,6 +67,48 @@ public sealed class ShiftReportSummaryTests : IClassFixture<TestDb>
         Assert.NotNull(closed.Shift.ClosedAt);
     }
 
+    /// <summary>
+    /// ملاحظات التقرير (حجوزات اليوم التالي والمواعيد) مربوطة **بيوم الشفت** لا بتاريخ فتح
+    /// التقرير: إرجاع يوم الشفت للخلف يجعل «يوم الشفت + 1» = اليوم ⇒ لا حجوزات غد — 0220.
+    /// </summary>
+    [Fact]
+    public async Task Tomorrow_counts_follow_the_shift_day_not_the_view_date()
+    {
+        var actor = await _db.AdminActorAsync();
+        await _db.SeedAccountingAsync();
+        var branch = await _db.CreateBranchAsync("SRS-D", "فرع يوم الشفت");
+        var customer = await _db.PartnerRepo.CreateAsync(PartnerKind.Customer, new PartnerInput
+        { Code = "SRS-D-C", NameAr = "عميل يوم الشفت", ScopeType = "BRANCH", BranchId = branch });
+
+        await using (var connection = new NpgsqlConnection(TestDb.AdminConnection))
+        {
+            await connection.OpenAsync();
+            await connection.ExecuteAsync("""
+                INSERT INTO bookings (id, branch_id, doc_no, booking_date, status, customer_id,
+                    source, total_amount)
+                VALUES (@id, @branch, 'SRS-D-BK', current_date + 1, 'confirmed', @customerId,
+                        'manual', 100)
+                """, new { id = Guid.CreateVersion7(), branch, customerId = customer.Id });
+        }
+
+        var shifts = _db.TreasuryService();
+        var shift = await shifts.OpenShiftAsync(actor,
+            new ShiftInput { NormalShift = true, BranchId = branch });
+        Assert.Equal(1, (await shifts.GetShiftReportAsync(actor, shift.Id)).TomorrowBookingsCount);
+
+        await using (var connection = new NpgsqlConnection(TestDb.AdminConnection))
+        {
+            await connection.OpenAsync();
+            await connection.ExecuteAsync(
+                "UPDATE cashier_shifts SET opened_at = opened_at - interval '1 day' " +
+                "WHERE id = @id", new { id = shift.Id });
+        }
+
+        var backdated = await shifts.GetShiftReportAsync(actor, shift.Id);
+        Assert.Equal(0, backdated.TomorrowBookingsCount);
+        Assert.Equal(0, backdated.TomorrowAppointments.Count);
+    }
+
     [Fact]
     public async Task Counted_cash_is_saved_while_the_shift_is_open()
     {
