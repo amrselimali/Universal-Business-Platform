@@ -62,4 +62,32 @@ public sealed class ShiftEditService
             new { input.EntityType, input.LineId, input.Field, input.NewValue, input.Note }, ct);
         return outcome;
     }
+
+    /// <summary>
+    /// حذف سطر من مستندات الشفت (وليس تعديله): يُشترط عدم وجود تنفيذ أو حركة على السطر،
+    /// وسطور المستندات تُحذف في المسودة فقط. السطر يُحذف من المصدر فيختفي من كل الشاشات.
+    /// </summary>
+    public async Task<ShiftLineDeleteResult> DeleteAsync(ActorContext actor,
+        ShiftLineDeleteInput input, CancellationToken ct = default)
+    {
+        await _permissions.RequireAsync(actor, ScreenCodes.TreasuryShifts, ActionCodes.Edit,
+            ct: ct);
+        var shift = await _treasury.GetShiftAsync(input.ShiftId, ct)
+                    ?? throw new NotFoundAppException();
+        BranchScope.Ensure(actor, shift.BranchId);
+
+        if (!shift.IsOpen)
+        {
+            await _permissions.RequireAsync(actor, ScreenCodes.TreasuryShifts, ActionCodes.Approve,
+                ct: ct);
+            if (!shift.IsPendingReview)
+                throw new ValidationAppException("validation.shift_edit_locked");
+        }
+
+        var result = await _repo.DeleteLineAsync(input, actor.UserId, ct);
+        await _audit.WriteAsync(actor, "shift_edits", input.DocId.ToString(), "DELETE",
+            new { input.EntityType, input.LineId, input.Note },
+            new { result.DocumentDeleted }, ct);
+        return result;
+    }
 }

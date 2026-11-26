@@ -2,6 +2,7 @@
 @inject LookupService Lookup
 @inject MasterDataService MasterData
 @inject UserContext UserContext
+@inject IDialogService Dialogs
 @inject UiCulture T
 @inject ISnackbar Snackbar
 
@@ -12,6 +13,8 @@
             اضغط ✏️ بجانب السطر لتحويل خلاياه القابلة للتعديل إلى حقول ثم «حفظ». يعدّل المستند
             الأصلي وكل آثاره. الإيصالات تُعدّل بصلاحية مستقلة بعد الترحيل، والخدمات المنفذة
             تُعكس وتُضاف كمستند معدّل يُرحَّل مع الشفت — دون اشتراط مسودة أو شفت مفتوح.
+            🗑️ يحذف السطر نهائيًا (لا يُحذف سطر عليه تنفيذ أو حركة، ولا سطر مستند مُرحَّل)،
+            ويختفي من باقي الشاشات والتقارير.
         </MudAlert>
         @if (_rows.Count == 0)
         {
@@ -141,6 +144,12 @@
                         {
                             <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
                                            Color="Color.Primary" OnClick="@(() => StartEdit(context))" />
+                            <MudTooltip Text="@DeleteHint(context)">
+                                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small"
+                                               Color="Color.Error"
+                                               Disabled="@(!context.L.CanDelete || _busy)"
+                                               OnClick="@(() => DeleteRowAsync(context))" />
+                            </MudTooltip>
                         }
                         else
                         {
@@ -286,6 +295,48 @@
             Snackbar.Add(T.T("common.saved"), Severity.Success);
         }
         catch (AppException ex) { Snackbar.Add(T.T(ex.Code), Severity.Error); }
+        finally { _busy = false; }
+    }
+
+    /// <summary>نص توضيحي لزر الحذف: يوضح سبب منع حذف السطر قبل الضغط.</summary>
+    private string DeleteHint(Row row)
+    {
+        if (!row.L.CanDelete) return T.T("shift_edit.delete_blocked");
+        if (!string.IsNullOrWhiteSpace(row.L.ItemName) || !string.IsNullOrWhiteSpace(row.L.DocNo))
+            return $"{T.T("shift_edit.delete")} — {row.L.ItemName ?? row.L.PartyName}";
+        return T.T("shift_edit.delete");
+    }
+
+    /// <summary>
+    /// حذف السطر نهائيًا من المصدر: يمنعه الخادم إذا كان على السطر تنفيذ أو حركة،
+    /// ويُحذف السطر من كل الشاشات والتقارير لأن الحذف على المصدر لا على العرض.
+    /// </summary>
+    private async Task DeleteRowAsync(Row row)
+    {
+        if (_busy || !row.L.CanDelete) return;
+        var confirmed = await Dialogs.ShowMessageBoxAsync(
+            T.T("shift_edit.delete"),
+            $"{EntityLabel(row.L.EntityType)} {row.L.DocNo} — {row.L.ItemName ?? row.L.PartyName}: " +
+            T.T("shift_edit.delete_confirm"),
+            yesText: T.T("shift_edit.delete"), cancelText: T.T("common.cancel"));
+        if (confirmed != true) return;
+
+        _busy = true;
+        try
+        {
+            var actor = await UserContext.RequireAsync();
+            var result = await ShiftEdit.DeleteAsync(actor, new ShiftLineDeleteInput
+            {
+                ShiftId = ShiftId, EntityType = row.L.EntityType, DocId = row.L.DocId,
+                LineId = row.L.LineId
+            });
+            await ReloadAsync(actor);
+            Snackbar.Add(T.T(result.DocumentDeleted
+                ? "shift_edit.deleted_with_document"
+                : "shift_edit.deleted"), Severity.Success);
+        }
+        catch (AppException ex) { Snackbar.Add(T.T(ex.Code), Severity.Error); }
+        catch (Exception) { Snackbar.Add(T.T("error.generic"), Severity.Error); }
         finally { _busy = false; }
     }
 }

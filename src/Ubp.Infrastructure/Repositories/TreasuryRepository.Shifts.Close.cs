@@ -110,7 +110,13 @@ public sealed partial class TreasuryRepository
                        WHEN v.treasury_id = @treasuryId AND v.voucher_type = 'receipt'
                             AND EXISTS (SELECT 1 FROM customer_account_settlements bs
                                         WHERE bs.voucher_id = v.id)
-                           THEN -v.total_amount
+                           -- الاسترداد للعميل يخفض النقد والتحصيل يرفعه (صافي حركة التسوية).
+                           THEN COALESCE((SELECT SUM(CASE WHEN cl.direction = 'collect'
+                                                         THEN cl.amount ELSE -cl.amount END)
+                                          FROM customer_account_settlements bs
+                                          JOIN customer_account_settlement_cash_lines cl
+                                            ON cl.settlement_id = bs.id
+                                          WHERE bs.voucher_id = v.id), -v.total_amount)
                        WHEN v.treasury_id = @treasuryId AND v.voucher_type = 'receipt'
                            THEN v.total_amount - v.provider_fee_total
                        WHEN v.treasury_id = @treasuryId AND v.voucher_type = 'payment'
@@ -145,7 +151,13 @@ public sealed partial class TreasuryRepository
                        WHEN v.voucher_type = 'receipt' AND EXISTS (
                                 SELECT 1 FROM customer_account_settlements bs
                                 WHERE bs.voucher_id = v.id)
-                         THEN -v.total_amount
+                         -- الاسترداد للعميل يخفض النقد والتحصيل يرفعه (صافي حركة التسوية).
+                         THEN COALESCE((SELECT SUM(CASE WHEN cl.direction = 'collect'
+                                                       THEN cl.amount ELSE -cl.amount END)
+                                        FROM customer_account_settlements bs
+                                        JOIN customer_account_settlement_cash_lines cl
+                                          ON cl.settlement_id = bs.id
+                                        WHERE bs.voucher_id = v.id), -v.total_amount)
                        WHEN v.voucher_type = 'receipt'
                          THEN v.total_amount - v.provider_fee_total
                        WHEN v.voucher_type = 'payment'

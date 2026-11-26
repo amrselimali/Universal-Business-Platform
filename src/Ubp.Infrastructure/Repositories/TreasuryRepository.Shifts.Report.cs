@@ -24,31 +24,20 @@ public sealed partial class TreasuryRepository
 
         report.Lines = (await connection.QueryAsync<ShiftCollectionRow>(new CommandDefinition("""
             WITH receipts AS (
+                -- إيصال تسوية حساب العميل لا يُعرض هنا؛ يُجمَّع في سطر التسوية الواحد لكل عميل أدناه.
                 SELECT v.party_name AS CustomerName, t.treasury_type AS TreasuryType,
-                       CASE WHEN EXISTS (SELECT 1 FROM customer_account_settlements bs
-                                         WHERE bs.voucher_id = v.id)
-                            THEN -v.total_amount ELSE v.total_amount END AS Collected,
+                       v.total_amount AS Collected,
                        0::numeric AS Revenue, 0::numeric AS Quantity, 0::numeric AS MeterUnits,
                        NULL::text AS EmployeeName,
-                       COALESCE(
-                         (SELECT string_agg(i.name_ar || ' × ' ||
-                                  trim(to_char(bsl.settled_qty, 'FM999999990.##')), ' • ')
-                          FROM customer_account_settlements bs
-                          JOIN customer_account_settlement_lines bsl ON bsl.settlement_id = bs.id
-                          JOIN items i ON i.id = bsl.item_id
-                          WHERE bs.voucher_id = v.id),
-                         (SELECT string_agg(i.name_ar || ' × ' ||
-                                  trim(to_char(bl.quantity, 'FM999999990.##')), ' • ')
-                          FROM booking_payments bp
-                          JOIN booking_lines bl ON bl.booking_id = bp.booking_id
-                          JOIN items i ON i.id = bl.item_id
-                          WHERE bp.voucher_id = v.id)) AS ItemName,
+                       (SELECT string_agg(i.name_ar || ' × ' ||
+                                   trim(to_char(bl.quantity, 'FM999999990.##')), ' • ')
+                        FROM booking_payments bp
+                        JOIN booking_lines bl ON bl.booking_id = bp.booking_id
+                        JOIN items i ON i.id = bl.item_id
+                        WHERE bp.voucher_id = v.id) AS ItemName,
                        0::numeric AS UnitPrice,
                        CASE WHEN v.is_shift_settlement THEN 'تسوية دكتور خارجى'::varchar
                             WHEN v.receipt_type = 'ADVANCE' THEN 'دفعة مقدمة'::varchar
-                            WHEN EXISTS (SELECT 1 FROM customer_account_settlements bs
-                                         WHERE bs.voucher_id = v.id)
-                            THEN 'تسوية حساب عميل'::varchar
                             ELSE 'تحصيل/قبض'::varchar END AS Source,
                        NULL::text AS ComplaintEmployeeName
                 FROM vouchers v
@@ -56,6 +45,8 @@ public sealed partial class TreasuryRepository
                 WHERE v.branch_id = @branchId AND v.voucher_type = 'receipt'
                   AND v.status <> 'cancelled' AND v.created_at >= @openedAt
                   AND (@until::timestamptz IS NULL OR v.created_at <= @until::timestamptz)
+                  AND NOT EXISTS (SELECT 1 FROM customer_account_settlements bs
+                                  WHERE bs.voucher_id = v.id)
             ), revenues AS (
                 SELECT COALESCE(c.name_ar, d.party_name) AS CustomerName, NULL::varchar AS TreasuryType,
                        0::numeric AS Collected,
@@ -121,24 +112,58 @@ public sealed partial class TreasuryRepository
                 WHERE st.branch_id = @branchId AND st.status IN ('draft', 'posted')
                   AND st.created_at >= @openedAt
                   AND (@until::timestamptz IS NULL OR st.created_at <= @until::timestamptz)
+            ), settlement_cash AS (
+                -- كل تسويات العميل في الشفت: صافي المبلغ (استرداد سالب/تحصيل موجب) مع خزينتها.
+                SELECT s.customer_id,
+                       ROUND(SUM(CASE WHEN cl.direction = 'collect' THEN cl.amount
+                                      WHEN cl.direction = 'refund' THEN -cl.amount
+                                      WHEN v.id IS NOT NULL THEN -v.total_amount
+                                      ELSE 0 END), 2) AS collected,
+                       MAX(t.treasury_type) AS treasury_type
+                FROM customer_account_settlements s
+                LEFT JOIN customer_account_settlement_cash_lines cl ON cl.settlement_id = s.id
+                LEFT JOIN vouchers v ON v.id = s.voucher_id
+                LEFT JOIN treasuries t ON t.id = s.treasury_id
+                WHERE s.branch_id = @branchId AND s.created_at >= @openedAt
+                  AND (@until::timestamptz IS NULL OR s.created_at <= @until::timestamptz)
+                GROUP BY s.customer_id
+            ), settlement_totals AS (
+                -- صافي الإيراد (فروق أسعار التسوية) ومجموع الكميات المسوّاة لكل عميل.
+                SELECT s.customer_id,
+                       COALESCE(SUM(l.settled_qty), 0) AS quantity,
+                       ROUND(COALESCE(SUM(l.revenue_adjustment), 0), 2) AS revenue
+                FROM customer_account_settlements s
+                LEFT JOIN customer_account_settlement_lines l ON l.settlement_id = s.id
+                WHERE s.branch_id = @branchId AND s.created_at >= @openedAt
+                  AND (@until::timestamptz IS NULL OR s.created_at <= @until::timestamptz)
+                GROUP BY s.customer_id
+            ), settlement_items AS (
+                -- الخدمات المسوّاة مجمّعة لكل عميل مرة واحدة: «الصنف × مجموع الكمية».
+                SELECT g.customer_id, string_agg(g.label, ' • ' ORDER BY g.label) AS item_name
+                FROM (
+                    SELECT s.customer_id,
+                           i.name_ar || ' × ' ||
+                           trim(to_char(SUM(l.settled_qty), 'FM999999990.##')) AS label
+                    FROM customer_account_settlements s
+                    JOIN customer_account_settlement_lines l ON l.settlement_id = s.id
+                    JOIN items i ON i.id = l.item_id
+                    WHERE s.branch_id = @branchId AND s.created_at >= @openedAt
+                      AND (@until::timestamptz IS NULL OR s.created_at <= @until::timestamptz)
+                    GROUP BY s.customer_id, i.id, i.name_ar
+                ) g
+                GROUP BY g.customer_id
             ), settlements AS (
-                -- تسوية بحجز عرض جديد: تظهر كحركة صفرية في تقرير الشفت مع الخدمات المسواة — 0096.
-                SELECT c.name_ar AS CustomerName, NULL::varchar AS TreasuryType,
-                       0::numeric AS Collected, 0::numeric AS Revenue,
-                       SUM(l.settled_qty) AS Quantity, 0::numeric AS MeterUnits,
-                       NULL::text AS EmployeeName,
-                       string_agg(i.name_ar || ' × ' ||
-                                  trim(to_char(l.settled_qty, 'FM999999990.##')), ' • ') AS ItemName,
+                -- تسوية حساب العميل في سطر واحد لكل عميل: تُجمع حركات كل عمود ويظهر الصافي.
+                SELECT c.name_ar AS CustomerName, cash.treasury_type AS TreasuryType,
+                       cash.collected AS Collected, COALESCE(tot.revenue, 0) AS Revenue,
+                       COALESCE(tot.quantity, 0) AS Quantity, 0::numeric AS MeterUnits,
+                       NULL::text AS EmployeeName, items.item_name AS ItemName,
                        0::numeric AS UnitPrice, 'تسوية حساب عميل'::varchar AS Source,
                        NULL::text AS ComplaintEmployeeName
-                FROM customer_account_settlements s
-                JOIN customers c ON c.id = s.customer_id
-                JOIN customer_account_settlement_lines l ON l.settlement_id = s.id
-                JOIN items i ON i.id = l.item_id
-                WHERE s.branch_id = @branchId AND s.settlement_type = 'new_booking'
-                  AND s.created_at >= @openedAt
-                  AND (@until::timestamptz IS NULL OR s.created_at <= @until::timestamptz)
-                GROUP BY c.name_ar
+                FROM settlement_cash cash
+                JOIN customers c ON c.id = cash.customer_id
+                LEFT JOIN settlement_totals tot ON tot.customer_id = cash.customer_id
+                LEFT JOIN settlement_items items ON items.customer_id = cash.customer_id
             ), doctor_refunds AS (
                 -- تسوية دكتور خارجي سالبة: تُعرض كتحصيل سالب حتى يتساوى الإيراد والتحصيل.
                 SELECT v.party_name AS CustomerName, NULL::varchar AS TreasuryType,
