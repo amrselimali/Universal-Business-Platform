@@ -54,13 +54,15 @@
                                     <MudNumericField T="decimal" Value="row.Quantity"
                                                      ValueChanged="@(v => row.Quantity = v)"
                                                      Min="0.0001m" Format="N2" Variant="Variant.Outlined"
-                                                     Margin="Margin.Dense" Disabled="row.IsLocked" />
+                                                     Margin="Margin.Dense" Disabled="row.IsLocked"
+                                                     Immediate="true" />
                                 </td>
                                 <td style="max-width:140px">
                                     <MudNumericField T="decimal" Value="row.UnitPrice"
                                                      ValueChanged="@(v => row.UnitPrice = v)"
                                                      Min="0m" Format="N2" Variant="Variant.Outlined"
-                                                     Margin="Margin.Dense" Disabled="row.IsLocked" />
+                                                     Margin="Margin.Dense" Disabled="row.IsLocked"
+                                                     Immediate="true" />
                                 </td>
                                 <td style="max-width:140px">@row.Total.ToString("N2")</td>
                                 <td style="max-width:140px">
@@ -68,7 +70,7 @@
                                                      ValueChanged="@(v => row.PaidAmount = v)"
                                                      Min="0m" Max="@row.MaxPaid" Format="N2"
                                                      Variant="Variant.Outlined" Margin="Margin.Dense"
-                                                     Disabled="@(!row.CanEditPaid)" />
+                                                     Disabled="@(!row.CanEditPaid)" Immediate="true" />
                                 </td>
                                 <td style="max-width:140px"><b>@Money(row.Remaining)</b></td>
                                 <td>

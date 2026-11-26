@@ -214,36 +214,40 @@ public sealed partial class PartnerRepository
             if (service.BranchId is { } itemBranch && itemBranch != bookingBranch)
                 throw new ValidationAppException("validation.item_not_found");
 
-            // السعر المستخدم في الحساب: لو الفرق عن السعر الأصلي مجرد تقريب (≤ 0.001)
-            // يُعتمد **السعر الأصلي بكامل علاماته العشرية** ولا تُفقد دقته — 0220.
+            // السعر يُعتمد كما أدخله المستخدم (بأي دقة)، والإجمالي = الكمية × هذا السعر.
+            // التحقق من المسدد يستخدم الإجمالي الأصلي والجديد معًا (انظر maxPaid أدناه) — 0220.
             var unitPrice = line.UnitPrice;
-            if (current is not null && line.Quantity == current.Quantity &&
-                Math.Abs(line.UnitPrice - current.UnitPrice)
-                    <= PartnerOpeningBalanceRules.PriceTolerance)
-                unitPrice = current.UnitPrice;
 
             var total = RoundAmount(line.Quantity * unitPrice);
             // المسدد يُحسب بدقة قرشين: كسور سعر الوحدة لا تمنع إدخال قيمة الإجمالي الظاهرة.
             var paid = RoundAmount(line.PaidAmount);
             if (current is not null)
             {
-                var sameStructure = serviceId == current.ServiceId
-                    && line.Quantity == current.Quantity && unitPrice == current.UnitPrice;
+                var quantityChanged = line.Quantity != current.Quantity;
+                var priceChanged = unitPrice != current.UnitPrice;
+                var totalChanged = total != RoundAmount(current.Quantity * current.UnitPrice);
+                var structureChanged = quantityChanged || priceChanged || totalChanged;
                 var paidChanged = paid != current.PaidAmount;
                 var structuralLock = OpeningBalanceLockReason(current);
 
                 // الكمية/السعر/الخدمة مقفولة بعد الاستخدام، أما المسدد فيبقى قابلًا للتعديل
                 // بعد التنفيذ/التحصيل بحد أقصى قيمة الخدمة ناقص الإيصالات المسجلة،
                 // مع التسامح مع فروق الكسور ≤ 0.001 (3 علامات عشرية).
-                if ((structuralLock is not null && !sameStructure) ||
+                if ((structuralLock is not null && (quantityChanged || priceChanged)) ||
                     (paidChanged && !OpeningBalancePaidEditable(current)))
                     throw new ValidationAppException("validation.opening_balance_locked",
                         new Dictionary<string, string> { ["item"] = current.ServiceName });
-                if (paid < 0 ||
-                    paid - OpeningBalanceMaxPaid(current) > PartnerOpeningBalanceRules.Tolerance)
+                // حد المسدد: يُحسب من الإجمالي **بعد** تطبيق تعديل الكمية/السعر في نفس الحفظ
+                // (الإجمالي القديم − إجمالي البند القديم + إجمالي البند الجديد − الإيصالات)،
+                // فلا يُرفض رفع الإجمالي والمسدد معًا — 0220.
+                var newBookingTotal = current.BookingTotal
+                    - RoundAmount(current.Quantity * current.UnitPrice) + total;
+                var maxPaid = Math.Max(OpeningBalanceMaxPaid(current),
+                    newBookingTotal - current.ReceiptsAmount);
+                if (paid < 0 || paid - maxPaid > PartnerOpeningBalanceRules.Tolerance)
                     throw new ValidationAppException("validation.paid_exceeds_total");
 
-                if (!sameStructure || paidChanged)
+                if (structureChanged || paidChanged)
                 {
                     if (structuralLock is null)
                     {

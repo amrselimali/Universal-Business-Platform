@@ -132,6 +132,7 @@ public partial class PartnerOpeningBalancesDialog
     {
         var inputs = new List<PartnerOpeningBalanceEditLine>();
         var index = 0;
+        // لو المستخدم لسه واقف في الخانة: القيم محدَّثة فورًا (Immediate) ولا حاجة لمزامنة إضافية.
         foreach (var row in _rows.Where(r => !r.IsLocked || r.CanEditPaid))
         {
             index++;

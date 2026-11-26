@@ -204,12 +204,6 @@ public sealed class CustomerOpeningBalanceEditTests : IClassFixture<TestDb>
         var line = Assert.Single(await _db.Partners().ListOpeningBalancesAsync(actor,
             PartnerKind.Customer, customer.Id));
 
-        // السعر الفعلي المخزَّن (بكل علاماته) هو المرجع — لا السعر المقرَّب للعرض.
-        await using var connection = await _db.Factory.OpenAsync();
-        var originalPrice = await connection.ExecuteScalarAsync<decimal>(
-            "SELECT unit_price FROM booking_lines WHERE id = @id",
-            new { id = line.BookingLineId });
-
         // (1) السعر الأصلي بكامل علاماته + مسدد = الإجمالي الظاهر.
         var result = await _db.Partners().UpdateOpeningBalancesAsync(actor, PartnerKind.Customer,
             customer.Id, new[]
@@ -222,7 +216,7 @@ public sealed class CustomerOpeningBalanceEditTests : IClassFixture<TestDb>
             });
         Assert.Equal(2000m, result.NewPaid);
 
-        // (2) السعر المقرَّب للعرض (666.67) لا يُفقد السعر الأصلي دقته ولا يرفض المسدد.
+        // (2) تعديل السعر للسعر المقرَّب للعرض يُعتمد كما هو (تغيير حقيقي)، والمسدد داخل التسامح.
         var edited = await _db.Partners().UpdateOpeningBalancesAsync(actor, PartnerKind.Customer,
             customer.Id, new[]
             {
@@ -233,14 +227,15 @@ public sealed class CustomerOpeningBalanceEditTests : IClassFixture<TestDb>
                 }
             });
         Assert.Equal(2000.00m, edited.NewPaid);
-        Assert.Equal(0m, edited.ValueDifference);
+        Assert.Equal(0.01m, edited.ValueDifference);
 
+        await using var connection = await _db.Factory.OpenAsync();
         var stored = await connection.QuerySingleAsync<(decimal Price, decimal Total)>(
             "SELECT l.unit_price, b.total_amount FROM booking_lines l " +
             "JOIN bookings b ON b.id = l.booking_id WHERE l.id = @id",
             new { id = line.BookingLineId });
-        Assert.Equal(originalPrice, stored.Price);
-        Assert.Equal(2000m, stored.Total);
+        Assert.Equal(666.67m, stored.Price);
+        Assert.Equal(2000.01m, stored.Total);
     }
 
     /// <summary>
@@ -283,6 +278,91 @@ public sealed class CustomerOpeningBalanceEditTests : IClassFixture<TestDb>
             new { id = line.BookingId });
         Assert.Equal(2000m, booking.Total);
         Assert.Equal(2000m, booking.Deposit);
+    }
+
+    /// <summary>
+    /// حالة الشاشة الحقيقية: رفع **الإجمالي** و**المسدد** في نفس الحفظ
+    /// (4600 × 0.43 = 1978 ثم تعديل السعر ليصبح 2000 والمسدد 2000) — الحد الأقصى
+    /// يُحسب من الإجمالي الجديد فلا يُرفض.
+    /// </summary>
+    [Fact]
+    public async Task Raising_the_total_and_the_paid_in_the_same_save_is_accepted()
+    {
+        var suffix = Unique();
+        var actor = await _db.AdminActorAsync();
+        var (branch, category, service, _) = await SetupAsync(suffix);
+        var input = CustomerInput("عميل رفع الإجمالي " + suffix, category, branch, Phone("032"));
+        input.OpeningBalances.Add(new ServiceOpeningBalanceInput
+        { ServiceId = service.Id, Quantity = 4600, UnitPrice = 0.43m, PaidAmount = 0 });
+        var customer = await _db.Partners().CreateAsync(actor, PartnerKind.Customer, input);
+        var line = Assert.Single(await _db.Partners().ListOpeningBalancesAsync(actor,
+            PartnerKind.Customer, customer.Id));
+        Assert.Equal(1978m, line.TotalAmount);
+
+        // تعديل السعر ليصبح الإجمالي 2000 ورفع المسدد إلى 2000 في نفس الحفظ.
+        var result = await _db.Partners().UpdateOpeningBalancesAsync(actor, PartnerKind.Customer,
+            customer.Id, new[]
+            {
+                new PartnerOpeningBalanceEditLine
+                {
+                    BookingLineId = line.BookingLineId, ServiceId = line.ServiceId,
+                    Quantity = 4600, UnitPrice = 0.4347826086956522m, PaidAmount = 2000m
+                }
+            });
+
+        Assert.Equal(2000m, result.NewTotal);
+        Assert.Equal(2000m, result.NewPaid);
+        Assert.Equal(22m, result.ValueDifference);
+        Assert.Equal(2000m, result.CashDifference);
+
+        await using var connection = await _db.Factory.OpenAsync();
+        var booking = await connection.QuerySingleAsync<(decimal Total, decimal Deposit)>(
+            "SELECT total_amount, deposit_amount FROM bookings WHERE id = @id",
+            new { id = line.BookingId });
+        Assert.Equal(2000m, booking.Total);
+        Assert.Equal(2000m, booking.Deposit);
+    }
+
+    /// <summary>
+    /// تعديل سعر الوحدة إلى القيمة الظاهرة يُسجَّل كتغيير فعلي (Updated = 1)
+    /// ولا يُعيده النظام للسعر الأصلي فيحفظ «بتغير 0».
+    /// </summary>
+    [Fact]
+    public async Task Editing_the_price_is_saved_and_never_reported_as_zero_changes()
+    {
+        var suffix = Unique();
+        var actor = await _db.AdminActorAsync();
+        var (branch, category, service, _) = await SetupAsync(suffix);
+        var input = CustomerInput("عميل تغيير السعر " + suffix, category, branch, Phone("033"));
+        input.OpeningBalances.Add(new ServiceOpeningBalanceInput
+        { ServiceId = service.Id, Quantity = 3, UnitPrice = 666.666666666667m, PaidAmount = 0 });
+        var customer = await _db.Partners().CreateAsync(actor, PartnerKind.Customer, input);
+        var line = Assert.Single(await _db.Partners().ListOpeningBalancesAsync(actor,
+            PartnerKind.Customer, customer.Id));
+        Assert.Equal(2000m, line.TotalAmount);
+
+        var edited = await _db.Partners().UpdateOpeningBalancesAsync(actor, PartnerKind.Customer,
+            customer.Id, new[]
+            {
+                new PartnerOpeningBalanceEditLine
+                {
+                    BookingLineId = line.BookingLineId, ServiceId = line.ServiceId,
+                    Quantity = line.Quantity, UnitPrice = 666.67m, PaidAmount = line.PaidAmount
+                }
+            });
+
+        Assert.Equal(1, edited.Updated);
+        Assert.Equal(0, edited.Added);
+        Assert.Equal(2000.01m, edited.NewTotal);
+        Assert.Equal(0.01m, edited.ValueDifference);
+
+        await using var connection = await _db.Factory.OpenAsync();
+        var stored = await connection.QuerySingleAsync<(decimal Price, decimal Total)>(
+            "SELECT l.unit_price, b.total_amount FROM booking_lines l " +
+            "JOIN bookings b ON b.id = l.booking_id WHERE l.id = @id",
+            new { id = line.BookingLineId });
+        Assert.Equal(666.67m, stored.Price);
+        Assert.Equal(2000.01m, stored.Total);
     }
 
     [Fact]
