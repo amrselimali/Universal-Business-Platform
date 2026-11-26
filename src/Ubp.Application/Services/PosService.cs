@@ -100,6 +100,36 @@ public sealed class PosService
                ?? throw new NotFoundAppException();
     }
 
+    /// <summary>
+    /// حذف إيصال قبض من شاشة إيصالات POS: المسودة تُحذف فعليًا، والمُرحّل يُعكس بإيصال
+    /// عكسي سالب (ويُرحَّل فورًا إن لم يوجد شفت) مع إزالة مدفوعات الحجز.
+    /// </summary>
+    public async Task<MutationOutcome> DeleteReceiptAsync(ActorContext actor, Guid voucherId,
+        CancellationToken ct = default)
+    {
+        var allowed = await _permissions.HasAsync(actor, ScreenCodes.PosReceipts,
+                          ActionCodes.Delete, ct)
+                      || await _permissions.HasAsync(actor, ScreenCodes.PosReceipts,
+                          ActionCodes.EditReceipt, ct);
+        if (!allowed) throw new ForbiddenException();
+
+        var head = await _pos.GetReceiptHeaderAsync(voucherId, ct);
+        if (head.CustomerId is null) throw new NotFoundAppException();
+        BranchScope.Ensure(actor, head.BranchId);
+
+        ReceiptDeleteResult result;
+        try { result = await _pos.DeleteReceiptAsync(voucherId, actor.UserId, ct); }
+        catch (PostgresException ex) { throw DbErrorMapper.Map(ex); }
+
+        if (result.ReversalId is { } reversalId && result.NeedsImmediatePosting)
+            await _treasury.PostVoucherAsync(reversalId, actor.UserId, ct);
+
+        await _audit.WriteAsync(actor, "vouchers", voucherId.ToString(), "DELETE",
+            new { head.DocNo, head.Total }, new { result.Deleted, result.ReversalId }, ct);
+        return new MutationOutcome(result.Deleted, false,
+            result.Deleted ? "pos.receipt_deleted" : "pos.receipt_reversed");
+    }
+
     /// <summary>إعادة إرسال إيصال قبض إلى العميل عبر واتساب (من شاشة إيصالات POS).</summary>
     public async Task<bool> SendReceiptWhatsAppAsync(ActorContext actor, Guid voucherId,
         CancellationToken ct = default)

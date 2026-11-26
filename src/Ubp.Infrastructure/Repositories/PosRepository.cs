@@ -24,6 +24,9 @@ public interface IPosRepository
     /// <summary>تعديل إيصال (مسودة أو مُرحّل) بإيصال عكسي + معدّل — صلاحية مستقلة.</summary>
     Task<ReceiptEditResult> EditReceiptAsync(Guid id, ReceiptEditInput input, Guid userId,
         CancellationToken ct = default);
+    /// <summary>حذف إيصال: المسودة تُحذف فعليًا، والمُرحّل يُعكس بإيصال عكسي سالب.</summary>
+    Task<ReceiptDeleteResult> DeleteReceiptAsync(Guid id, Guid userId,
+        CancellationToken ct = default);
 }
 
 /// <summary>

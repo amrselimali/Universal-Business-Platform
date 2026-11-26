@@ -32,6 +32,7 @@ public sealed partial class ShiftEditRepository
             "operating_expense" => await DeleteExpenseLineAsync(connection, tx, input, ct),
             "commercial_document" => await DeleteCommercialLineAsync(connection, tx, input, ct),
             "service_transfer" => await DeleteTransferLineAsync(connection, tx, input, ct),
+            "customer_settlement" => await DeleteSettlementAsync(connection, tx, input, ct),
             "booking_execution" => throw new ValidationAppException(
                 "validation.shift_delete_execution_line"),
             _ => throw new ValidationAppException("validation.review_field_not_editable")
@@ -420,6 +421,105 @@ public sealed partial class ShiftEditRepository
             .ToList();
         if (links.Count > 0)
             throw DeleteBlocked("validation.shift_delete_document_in_use", links);
+    }
+
+    /// <summary>
+    /// حذف تسوية حساب عميل (مسودة): يرجّع الكميات المسوّاة إلى بنود الحجز، ويحذف إيصال
+    /// التسوية وقيده المسودة، ويحذف حجز العرض الجديد الناتج عنها إن لم يُستخدم.
+    /// </summary>
+    private static async Task<ShiftLineDeleteResult> DeleteSettlementAsync(
+        NpgsqlConnection connection, NpgsqlTransaction tx, ShiftLineDeleteInput input,
+        CancellationToken ct)
+    {
+        var s = await connection.QuerySingleOrDefaultAsync<SettlementDeleteRow>(
+            new CommandDefinition("""
+            SELECT s.id AS Id, s.voucher_id AS VoucherId, s.new_booking_id AS NewBookingId,
+                   s.journal_entry_id AS JournalEntryId, s.status AS Status,
+                   v.status AS VoucherStatus
+            FROM customer_account_settlements s
+            LEFT JOIN vouchers v ON v.id = s.voucher_id
+            WHERE s.id = @id FOR UPDATE OF s
+            """, new { id = input.DocId }, tx, cancellationToken: ct));
+        if (s is null) throw new NotFoundAppException();
+        // التسوية المُرحَّلة لها قيود/إيصالات مُرحَّلة: تُعكس محاسبيًا ولا تُحذف.
+        var links = new List<string>();
+        if (s.Status != "draft") links.Add($"حالة التسوية: {s.Status}");
+        if (s.VoucherStatus is not null and not "draft")
+            links.Add($"إيصال التسوية: {s.VoucherStatus}");
+        if (links.Count > 0)
+            throw DeleteBlocked("validation.shift_delete_settlement_posted", links);
+
+        // فصل مراجع التسوية عن مستنداتها أولًا (الإيصال والحجز الجديد) حتى تُحذف بلا قيود FK.
+        await connection.ExecuteAsync(new CommandDefinition("""
+            UPDATE customer_account_settlements SET new_booking_id = NULL, voucher_id = NULL
+            WHERE id = @id
+            """, new { id = s.Id }, tx, cancellationToken: ct));
+
+        // حجز العرض الجديد: يُحذف مع التسوية فقط إن لم تكن عليه مدفوعات/تنفيذ/فواتير.
+        if (s.NewBookingId is { } newBooking)
+        {
+            await EnsureBookingIsEmptyDeletableAsync(connection, tx, newBooking, ct);
+            await connection.ExecuteAsync(new CommandDefinition("""
+                UPDATE stock_balances sb
+                SET reserved_qty = GREATEST(sb.reserved_qty - l.reserved_qty, 0), updated_at = now()
+                FROM booking_lines l
+                WHERE l.booking_id = @id AND l.reserved_qty > 0
+                  AND sb.item_id = l.item_id AND sb.warehouse_id = l.warehouse_id
+                """, new { id = newBooking }, tx, cancellationToken: ct));
+            await connection.ExecuteAsync(new CommandDefinition(
+                "DELETE FROM bookings WHERE id = @id", new { id = newBooking }, tx,
+                cancellationToken: ct));
+        }
+
+        // إرجاع الكميات المسوّاة إلى بنود الحجز (عكس أثر التسوية تمامًا).
+        await connection.ExecuteAsync(new CommandDefinition("""
+            UPDATE booking_lines l
+            SET reserved_qty = l.reserved_qty + x.qty,
+                settled_qty = GREATEST(l.settled_qty - x.qty, 0)
+            FROM (SELECT booking_line_id, SUM(settled_qty) AS qty
+                  FROM customer_account_settlement_lines WHERE settlement_id = @id
+                  GROUP BY booking_line_id) x
+            WHERE l.id = x.booking_line_id
+            """, new { id = s.Id }, tx, cancellationToken: ct));
+        await connection.ExecuteAsync(new CommandDefinition("""
+            UPDATE bookings b
+            SET settled_amount = GREATEST(b.settled_amount - x.amount, 0)
+            FROM (SELECT booking_id, SUM(settled_qty * booked_unit_price) AS amount
+                  FROM customer_account_settlement_lines WHERE settlement_id = @id
+                  GROUP BY booking_id) x
+            WHERE b.id = x.booking_id
+            """, new { id = s.Id }, tx, cancellationToken: ct));
+
+        // سجلات تعديل الحجز الخاصة بهذه التسوية تُحذف معها.
+        await connection.ExecuteAsync(new CommandDefinition("""
+            DELETE FROM reservation_adjustments a
+            USING customer_account_settlement_lines l
+            WHERE l.settlement_id = @id AND a.booking_line_id = l.booking_line_id
+              AND a.kind = 'SETTLEMENT'
+              AND (a.voucher_id IS NULL OR a.voucher_id = @voucher)
+            """, new { id = s.Id, voucher = s.VoucherId }, tx, cancellationToken: ct));
+
+        // إيصال التسوية وقيده (المسودة فقط — المُرحّل مُنِع أعلاه).
+        if (s.VoucherId is { } voucherId)
+            await connection.ExecuteAsync(new CommandDefinition(
+                "DELETE FROM vouchers WHERE id = @id AND status = 'draft'",
+                new { id = voucherId }, tx, cancellationToken: ct));
+        await DeleteDraftEntryAsync(connection, tx, s.JournalEntryId, ct);
+
+        await connection.ExecuteAsync(new CommandDefinition(
+            "DELETE FROM customer_account_settlements WHERE id = @id", new { id = s.Id }, tx,
+            cancellationToken: ct));
+        return new ShiftLineDeleteResult { Deleted = true, DocumentDeleted = true };
+    }
+
+    private sealed class SettlementDeleteRow
+    {
+        public Guid Id { get; set; }
+        public Guid? VoucherId { get; set; }
+        public Guid? NewBookingId { get; set; }
+        public Guid? JournalEntryId { get; set; }
+        public string Status { get; set; } = "";
+        public string? VoucherStatus { get; set; }
     }
 
     /// <summary>سطر مرتبط بعدد من المستندات: يُعرض النوع والعدد في رسالة الرفض.</summary>

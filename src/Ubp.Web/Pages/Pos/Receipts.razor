@@ -74,6 +74,14 @@ else
                                        Title="تعديل الإيصال" Color="Color.Warning"
                                        OnClick="@(() => EditAsync(context))" />
                     }
+                    @if (_canDelete && !context.IsReversed &&
+                         context.ReceiptType != VoucherReceiptTypes.Reversal &&
+                         !context.IsSettlementReceipt && context.Status != "cancelled")
+                    {
+                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small"
+                                       Title="@T.T("pos.delete_receipt")" Color="Color.Error"
+                                       OnClick="@(() => DeleteAsync(context))" />
+                    }
                 </MudTd>
             </RowTemplate>
             <NoRecordsContent>
@@ -99,6 +107,7 @@ else
     private DateTime? _from = DateTime.Today;
     private DateTime? _to = DateTime.Today;
     private bool _canEdit;
+    private bool _canDelete;
 
     protected override string ScreenCode => ScreenCodes.PosReceipts;
 
@@ -108,6 +117,8 @@ else
         _branchId = Actor!.CurrentBranchId ?? _branches.FirstOrDefault()?.Id;
         _canEdit = await Permissions.HasAsync(Actor!, ScreenCodes.PosReceipts,
             ActionCodes.EditReceipt);
+        _canDelete = await Permissions.HasAsync(Actor!, ScreenCodes.PosReceipts,
+            ActionCodes.Delete) || _canEdit;
         await ReloadAsync();
     }
 
@@ -147,4 +158,23 @@ else
         Snackbar.Add(T.T(sent ? "pos.whatsapp_queued" : "pos.whatsapp_unavailable"),
             sent ? Severity.Success : Severity.Warning);
     });
+
+    /// <summary>
+    /// حذف الإيصال: المسودة تُحذف فعليًا، والمُرحّل يُعكس بإيصال عكسي (تبقى القيود سليمة)
+    /// وتُرجع مدفوعات الحجز فيظهر المبلغ غير المسدد من جديد.
+    /// </summary>
+    private async Task DeleteAsync(CommercialDocument doc)
+    {
+        var confirmed = await Dialogs.ShowMessageBoxAsync(T.T("pos.delete_receipt"),
+            $"{doc.PartyName} — {doc.Total:N2}: {T.T("pos.delete_receipt_confirm")}",
+            yesText: T.T("pos.delete_receipt"), cancelText: T.T("common.cancel"));
+        if (confirmed != true) return;
+
+        await RunAsync(async () =>
+        {
+            var outcome = await Pos.DeleteReceiptAsync(Actor!, doc.Id);
+            await ReloadAsync();
+            Snackbar.Add(T.T(outcome.MessageKey), Severity.Success);
+        });
+    }
 }

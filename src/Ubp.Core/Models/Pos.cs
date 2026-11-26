@@ -96,6 +96,17 @@ public sealed class ReceiptEditResult
     public bool ReversalCreated { get; set; }
 }
 
+/// <summary>نتيجة حذف الإيصال: حذف فعلي للمسودة، أو إيصال عكسي للمُرحّل (بلا مساس بالقيود).</summary>
+public sealed class ReceiptDeleteResult
+{
+    /// <summary>حُذف الإيصال فعليًا (كان مسودة).</summary>
+    public bool Deleted { get; set; }
+    /// <summary>الإيصال العكسي المُنشأ عند حذف إيصال مُرحّل.</summary>
+    public Guid? ReversalId { get; set; }
+    /// <summary>لا يوجد شفت لتُرحَّل معه المستندات؛ تُرحَّل فورًا.</summary>
+    public bool NeedsImmediatePosting { get; set; }
+}
+
 public sealed class PosReceipt
 {
     public Guid BookingId { get; set; }

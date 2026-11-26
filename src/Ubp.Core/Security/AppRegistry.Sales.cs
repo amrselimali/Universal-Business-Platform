@@ -22,6 +22,6 @@ public static partial class AppRegistry
                     SA(CompleteCollection), SA(TransferService) }, "pos.terminal"),
 
         new(PosReceipts, "/pos/receipts", "ReceiptLong", "screen.pos_receipts", GroupSales,
-            new[] { SA(View), SA(Print), SA(EditReceipt) }, "pos.receipts")
+            new[] { SA(View), SA(Print), SA(EditReceipt), SA(Delete) }, "pos.receipts")
     };
 }

@@ -174,6 +174,33 @@ public sealed partial class ShiftEditRepository : IShiftEditRepository
               AND (@until::timestamptz IS NULL OR st.created_at <= @until::timestamptz)
             """, args, cancellationToken: ct)));
 
+        rows.AddRange(await connection.QueryAsync<ShiftEditableLine>(new CommandDefinition("""
+            SELECT 'customer_settlement' AS EntityType, s.id AS DocId,
+                   COALESCE(v.doc_no, left(s.id::text, 8)) AS DocNo, s.doc_date AS DocDate,
+                   NULL::uuid AS LineId, c.name_ar AS PartyName,
+                   (SELECT string_agg(g.label, ' • ' ORDER BY g.label)
+                    FROM (SELECT i.name_ar || ' × ' ||
+                                 trim(to_char(SUM(l.settled_qty), 'FM999999990.##')) AS label
+                          FROM customer_account_settlement_lines l
+                          JOIN items i ON i.id = l.item_id
+                          WHERE l.settlement_id = s.id
+                          GROUP BY i.id, i.name_ar) g) AS ItemName,
+                   NULL::text AS EmployeeName, t.name_ar AS TreasuryName,
+                   s.total_settled_qty AS Quantity, 0::numeric AS UnitPrice,
+                   s.total_refund AS Amount,
+                   CASE WHEN s.settlement_type = 'new_booking' THEN 'تسوية بحجز عرض جديد'
+                        ELSE 'تسوية واسترداد نقدي' END AS Description,
+                   '' AS FieldsCsv, s.treasury_id AS TreasuryId, NULL::uuid AS AccountId,
+                   NULL::uuid AS EmployeeId, s.status AS DocStatus,
+                   (s.status = 'draft' AND (v.id IS NULL OR v.status = 'draft')) AS CanDelete
+            FROM customer_account_settlements s
+            JOIN customers c ON c.id = s.customer_id
+            LEFT JOIN treasuries t ON t.id = s.treasury_id
+            LEFT JOIN vouchers v ON v.id = s.voucher_id
+            WHERE s.branch_id = @branchId AND s.created_at >= @openedAt
+              AND (@until::timestamptz IS NULL OR s.created_at <= @until::timestamptz)
+            """, args, cancellationToken: ct)));
+
         return rows;
     }
 }

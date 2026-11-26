@@ -121,6 +121,8 @@ public sealed partial class PosRepository
         public string Status { get; set; } = "";
         public bool IsReversed { get; set; }
         public string ReceiptType { get; set; } = VoucherReceiptTypes.Original;
+        /// <summary>إيصال تسوية شفت الدكتور الخارجي (يُنشأ عند الإقفال ولا يُحذف يدويًا).</summary>
+        public bool IsShiftSettlement { get; set; }
         public string ShiftReviewStatus { get; set; } = "";
     }
 }

@@ -142,8 +142,11 @@
                     <MudTd>
                         @if (!context.Editing)
                         {
-                            <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
-                                           Color="Color.Primary" OnClick="@(() => StartEdit(context))" />
+                            @if (context.CanEdit)
+                            {
+                                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
+                                               Color="Color.Primary" OnClick="@(() => StartEdit(context))" />
+                            }
                             <MudTooltip Text="@DeleteHint(context)">
                                 <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small"
                                                Color="Color.Error"
@@ -204,6 +207,8 @@
         }
 
         public bool Can(string f) => _fields.Contains(f);
+        /// <summary>هل للسطر حقول قابلة للتعديل؟ (تسوية الحساب تُحذف فقط).</summary>
+        public bool CanEdit => _fields.Count > 0;
     }
 
     private sealed record Opt(Guid Id, string Name);
@@ -219,7 +224,8 @@
     {
         "voucher" => "إيصال/سند", "operating_expense" => "مصروف", "commercial_document" => "مستند",
         "booking" => "حجز", "booking_execution" => "خدمة منفذة",
-        "service_transfer" => "تحويل خدمات", _ => t
+        "service_transfer" => "تحويل خدمات", "customer_settlement" => "تسوية حساب عميل",
+        _ => t
     };
 
     private string? AccountName(Row r) =>
